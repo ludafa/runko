@@ -1,0 +1,44 @@
+name: CI
+
+# 占位：仅串起 install → build → typecheck → test 四步；矩阵/缓存优化/发布流程留待后续阶段。
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # 顺序为 build → typecheck → test（P4-2 施工回填）：@nimbo/core 的测试
+      # devDep 了 @nimbo/virtual-fs（集成测试），跨包 `exports` 都指向各自的
+      # `dist`——typecheck/test 若先于 build 跑，core 对 "@nimbo/virtual-fs"
+      # 的类型/模块解析会先于 virtual-fs 产出 dist 而失败。build 先行使三步
+      # 都能在干净 checkout 上稳定通过。
+      - run: pnpm -r build
+
+      - run: pnpm -r typecheck
+
+      - run: pnpm -r test
+
+      # examples 不是 workspace 成员（演练发布后消费姿态，见 examples/README.md）；
+      # typecheck 纯静态零网络零 key，防 README/examples 随 API 演进腐烂（docs/03 P8-1 裁定）。
+      # examples 与 L3 动态加载需 Node ≥ 22.18 原生 TS，此步单独用 Node 24。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - run: node examples/setup-node-modules.mjs
+
+      - run: node examples/typecheck.mjs

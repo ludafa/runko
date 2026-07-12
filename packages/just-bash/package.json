@@ -1,0 +1,46 @@
+{
+  "name": "@nimbo/just-bash",
+  "version": "0.0.0",
+  "description": "NimboExec 实现：适配 vercel-labs/just-bash 的全语法档 bash（if/for/while/case/函数），跑在任意 NimboFS 上",
+  "type": "module",
+  "license": "ISC",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nimbo/core": "workspace:*",
+    "just-bash": "catalog:"
+  },
+  "devDependencies": {
+    "@nimbo/virtual-fs": "workspace:*",
+    "@types/node": "catalog:",
+    "ai": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

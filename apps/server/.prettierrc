@@ -1,0 +1,14 @@
+{
+  "singleQuote": true,
+  "arrowParens": "always",
+  "bracketSpacing": true,
+  "printWidth": 80,
+  "semi": true,
+  "experimentalTernaries": true,
+  "overrides": [
+    {
+      "files": ["*.yml", "*.yaml"],
+      "options": { "proseWrap": "always", "singleQuote": false }
+    }
+  ]
+}

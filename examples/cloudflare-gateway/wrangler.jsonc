@@ -1,0 +1,36 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "nimbo-sandbox-gateway",
+  "main": "src/index.ts",
+  // nodejs_compat + a recent date: matches the assembly of the official
+  // @cloudflare/sandbox minimal example (examples/minimal in cloudflare/sandbox-sdk).
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  // The Sandbox Durable Object + its container. The Docker image tag in
+  // ./Dockerfile must match the installed @cloudflare/sandbox version.
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "./Dockerfile",
+      "instance_type": "lite",
+      "max_instances": 1
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "Sandbox",
+        "name": "Sandbox"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "new_sqlite_classes": ["Sandbox"],
+      "tag": "v1"
+    }
+  ]
+}

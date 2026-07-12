@@ -1,0 +1,26 @@
+{
+  "name": "nimbo",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Embeddable lightweight agent SDK for Node.js",
+  "type": "module",
+  "license": "ISC",
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@11.11.0",
+  "scripts": {
+    "build": "pnpm --filter './packages/*' run build",
+    "typecheck": "pnpm --filter './packages/*' run typecheck",
+    "test": "pnpm --filter './packages/*' run test",
+    "coverage": "vitest run --coverage",
+    "chat:bootstrap": "pnpm --filter @nimbo-chat/server run db:generate && pnpm --filter @nimbo-chat/server run db:migrate && pnpm --filter @nimbo-chat/server run generate:openapi && pnpm --filter @nimbo-chat/web run generate:api",
+    "chat:server": "pnpm --filter @nimbo-chat/server run dev",
+    "chat:web": "pnpm --filter @nimbo-chat/web run dev"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "nimbo-sandbox-gateway",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Deployable Cloudflare Worker gateway exposing a Cloudflare Sandbox to nimbo's @nimbo/sandbox-cloudflare client (docs/06 §8.3 protocol)",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "cf-typegen": "wrangler types",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cloudflare/sandbox": "^0.12.3",
+    "@nimbo/sandbox-cloudflare": "file:../../packages/sandbox-cloudflare"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "wrangler": "^4.102.0"
+  }
+}

@@ -1,0 +1,16 @@
+node_modules
+dist
+
+# env files (commit only the example)
+.env
+.env.local
+.env.production
+
+# sqlite runtime
+*.db
+*.db-shm
+*.db-wal
+
+# `openapi.yml` is committed — it's the contract that the client's Kubb
+# codegen consumes. Regenerate with `pnpm --filter @nimbo-chat/server
+# run generate:openapi`.

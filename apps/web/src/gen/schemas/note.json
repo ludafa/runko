@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "id": { "type": "string" },
+    "title": { "type": "string" },
+    "body": { "type": "string" },
+    "createdAt": { "type": "string" }
+  },
+  "required": ["id", "title", "body", "createdAt"],
+  "x-readme-ref-name": "Note"
+}

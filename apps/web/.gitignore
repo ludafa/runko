@@ -1,0 +1,36 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# env files (commit only the example)
+.env
+.env.local
+.env.production
+
+# TanStack Router plugin cache
+.tanstack
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Generated client (Kubb) and route tree (TanStack Router) are committed —
+# they're checked in so a fresh clone can typecheck and build without first
+# running codegen. Regenerate with `pnpm generate:api` and `vite dev` (the
+# router plugin rewrites routeTree.gen.ts on dev start).

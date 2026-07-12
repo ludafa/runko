@@ -1,0 +1,7 @@
+{
+  "model": "test-provider/fixture-model",
+  "maxTurnsPerRun": 7,
+  "maxOutputTokens": 512,
+  "maxContextTokens": 8000,
+  "builtinTools": ["read_file", "grep"]
+}

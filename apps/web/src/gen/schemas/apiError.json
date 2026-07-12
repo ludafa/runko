@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "properties": {
+    "error": {
+      "type": "string",
+      "description": "Error message",
+      "examples": ["Not found"]
+    }
+  },
+  "required": ["error"],
+  "x-readme-ref-name": "ApiError"
+}

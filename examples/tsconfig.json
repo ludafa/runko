@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./.tsc-out",
+    "noEmit": true,
+    // The examples run directly under `node` (>= 22.18 native type stripping),
+    // which does NOT rewrite `.js` -> `.ts` in relative specifiers — imports
+    // must name the real on-disk file: `./shared/model.ts`. This flag makes
+    // tsc accept those `.ts`-suffixed imports (legal because noEmit is on).
+    "allowImportingTsExtensions": true,
+    // examples/ is intentionally not a pnpm workspace member (see README.md
+    // "why examples/ isn't a workspace package") — it has no devDependency on
+    // `@types/node` of its own, so typeRoots points at a sibling package's
+    // copy (read-only; @nimbo/core already depends on it). Any package under
+    // packages/*/node_modules/@types would work equally well here.
+    "typeRoots": ["../packages/core/node_modules/@types"],
+    "types": ["node"]
+  },
+  "include": ["**/*.ts"],
+  // examples/cloudflare-gateway/ (P10-4) is a separate deployable `wrangler`
+  // project with its own package.json/tsconfig.json/node_modules (`npm
+  // install` + `npm run typecheck` inside that directory, per its README) —
+  // it depends on `@cloudflare/sandbox`, which this examples/ workspace
+  // deliberately never links (that package can only load inside workerd,
+  // see setup-node-modules.mjs's comment on the omission). Without this
+  // exclude, the bare `**/*.ts` include above would sweep its `src/index.ts`
+  // into this tsconfig and fail to resolve that import.
+  "exclude": ["cloudflare-gateway"]
+}

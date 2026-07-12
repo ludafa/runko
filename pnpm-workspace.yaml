@@ -1,0 +1,50 @@
+packages:
+  - "packages/*"
+  # P12（docs/08 §2.1）：chat agent web 应用。并入根 workspace 是因为 apps/server
+  # 依赖 @nimbo/* 的 workspace:* 协议（独立子 workspace 无法解析）；根管线不受
+  # 影响——根脚本 filter 收窄到 ./packages/*，root vitest projects 本就只收 packages。
+  - "apps/*"
+
+# just-bash 的可选依赖（zstd/xz 压缩格式的原生绑定，tar/gzip 之外的小众格式）：
+# 不批准构建脚本——保持"零二进制依赖"（tech-spec §1 原则 1），未安装原生绑定时
+# 这两种压缩格式在 just-bash 里会优雅降级为不可用，不影响本包其余全部功能。
+allowBuilds:
+  '@mongodb-js/zstd': false
+  node-liblzma: false
+  # P12 apps 侧（docs/08 §2.1）：零二进制原则约束的是发布的 @nimbo/* 包；
+  # apps 是消费侧产品代码，seed 技术栈（drizzle+better-sqlite3 等）按需放行。
+  better-sqlite3: true
+  esbuild: true
+  msw: true
+  es5-ext: true
+
+# P12：seed 项目的 vite 版本钉子（apps/web 用 rolldown-vite；packages/* 无 vite 依赖，不受影响）
+overrides:
+  vite: npm:rolldown-vite@7.2.5
+
+catalog:
+  typescript: ^7.0.2
+  vitest: ^4.1.10
+  tsdown: ^0.22.4
+  ai: ^7.0.20
+  zod: ^4.4.3
+  # 非工单点名的第三方目录，但与 vitest 主版本绑定，随 vitest 一并管理
+  "@vitest/coverage-v8": ^4.1.10
+  # P1-1 引入：spec §4.1/§4.5a 的 AbortSignal 等 Node 全局环境类型需要它才能
+  # typecheck 通过（此前 P0 脚手架未涉及任何 Node 全局类型，故未装）。
+  "@types/node": ^24.12.2
+  # P9-1 引入：@nimbo/just-bash 的 NimboExec 全语法档实现（tech-spec §4.5b）。
+  just-bash: ^3.1.0
+  # P10 引入（docs/06 §8.1）：三个云沙盒 provider SDK 均为 devDependencies——
+  # 适配器仅 `import type`（结构化子集接口），运行时零 provider import；
+  # 版本以 docs/06 调研核对过的 d.ts 为基线。
+  e2b: ^2.32.0
+  "@vercel/sandbox": ^2.5.0
+  "@cloudflare/sandbox": ^0.12.3
+
+minimumReleaseAgeExclude:
+  - ai@7.0.20
+  - just-bash@3.1.0
+  - e2b@2.32.0
+  - "@vercel/sandbox@2.5.0"
+  - "@cloudflare/sandbox@0.12.3"

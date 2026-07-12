@@ -1,0 +1,51 @@
+{
+  "name": "@nimbo/sdk",
+  "version": "0.0.0",
+  "description": "nimbo 主包（门面）：re-export core + virtual-fs（+ mini-bash），batteries-included",
+  "type": "module",
+  "license": "ISC",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nimbo/core": "workspace:*",
+    "@nimbo/mini-bash": "workspace:*",
+    "@nimbo/virtual-fs": "workspace:*"
+  },
+  "peerDependencies": {
+    "ai": "^7"
+  },
+  "devDependencies": {
+    "@ai-sdk/deepseek": "^3.0.7",
+    "@types/node": "catalog:",
+    "ai": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "zod": "catalog:"
+  }
+}

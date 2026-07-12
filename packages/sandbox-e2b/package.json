@@ -1,0 +1,46 @@
+{
+  "name": "@nimbo/sandbox-e2b",
+  "version": "0.0.0",
+  "description": "NimboFS & NimboExec 同源工作区：适配 E2B 云沙盒（e2b SDK 仅类型依赖，BYO sandbox 实例）",
+  "type": "module",
+  "license": "ISC",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nimbo/core": "workspace:*",
+    "@nimbo/virtual-fs": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "ai": "catalog:",
+    "e2b": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
