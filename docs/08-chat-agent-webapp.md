@@ -45,6 +45,7 @@
 - **契约细化（P12-2 施工回填，两端定案）**：
   1. **`agent_events` 落库的是"信封事件"而非仅 nimbo `SessionEvent`**——信封 union 在 `SessionEvent` 之上扩展两个成员：`{ type: "user.message", text }`（用户发言，POST messages 一进来就以下一个 seq 入库并随流推送）与 `{ type: "turn.result", finalResponse, usage }`（哨兵，**同样入库**）。理由：`GET events` 回放必须能重建完整对话（用户发言 + agent 时间线 + 每轮收尾），只存 SessionEvent 是 P12-2 发现的真实缺口；nimbo 的 `SessionEvent` 联合保持纯净，扩展只存在于 webapp 的 wire 层。
   2. JSON 字段一律 **camelCase**（seed 既有先例）；`GET /api/chat/sessions` 返回 `ChatSession[]` 裸数组；`POST /api/chat/sessions` 与 `GET /api/chat/sessions/:id` 返回单个 `ChatSession`；`GET /api/chat/sessions/:id/events?after=<seq>` 返回 `{ events: Array<{ seq, event }> }`，前端以 `after=lastSeq` 循环拉到空批为止（不约定页大小字段）。
+  3. **`steer`（turn 进行中追加消息，STEER-3B）**：`POST .../messages` 若目标 session 已有进行中 turn，先尝试 `session.steer(text)` 而非新起一轮；202 body 扩展为 `{ ok: true, mode: "started" | "steered" }` 区分两种落地方式。**steered 消息不会再产生一条独立的 `user.message` echo**——nimbo core 的 loop 会在真实的注入点（下一个 step checkpoint）产出一条 `user_message` 类型的 `item.completed`，经既有的落库+推流通路正常持久化，这就是它在事件流/回放里的唯一记录（位置=真实注入点，回放语义正确；双发会在时间线上出现两条相同的用户气泡）。`steer` 失败（无进行中 turn，或极窄竞态——turn 恰好在这次请求落地前收尾）时透明回退到 acquire+build+`startTurn` 起新一轮；两者都失败（新一轮又与另一个并发请求撞车）时才保留 409。
 
 ### 2.2b 断线可续的实时流（P12-4 重构，修复刷新/HMR 后进行中 turn 不再更新）
 
@@ -53,7 +54,7 @@
 **修法：turn 执行与连接解耦 + 可续传 live-tail。**
 
 - **server 端 turn registry**（`agent/turn-runner.ts`）：进程内 `Map<sessionId, ActiveTurn>`；`ActiveTurn` 持一个 `EventEmitter`。`startTurn()` 若该 session 已有进行中 turn 则拒绝（409），否则**后台异步驱动** `session.stream()`（不绑定任何 HTTP 请求生命周期）：每个事件先落库（seq 单调）再 `emit('event', envelope)`；首事件仍是 `user.message`；收尾落 `nimbo_state` + `emit('turn.result')` + `emit('done')` 并从 Map 摘除；异常落 `emit('turn.failed')`（wire union 新增成员，镜像 nimbo 的 `turn.failed`）+ done。turn 全程与订阅者存在与否无关。
-- **`POST /api/chat/sessions/:id/messages`**：改为 acquire+build+`startTurn` 后返回 **202 `{ ok: true }`**（不再在此驱动 SSE）；配置/沙盒错误仍走 500，已有 turn 冲突走 409。
+- **`POST /api/chat/sessions/:id/messages`**：改为 acquire+build+`startTurn` 后返回 **202 `{ ok: true, mode: "started" }`**（不再在此驱动 SSE）；若目标 session 已有进行中 turn，则先经 `steerTurn` 走 `session.steer(text)`，成功即 202 `{ ok: true, mode: "steered" }`（STEER-3B，契约细化第 3 点）；配置/沙盒错误仍走 500，`steer` 与新起一轮都失败时才走 409。
 - **`GET /api/chat/sessions/:id/stream?after=<seq>`**（新增，SSE 可续传 tail）：先订阅 emitter 到缓冲、再回放 DB 中 `seq > after` 的事件（记 `maxSentSeq`）、再 flush 缓冲里 `seq > maxSentSeq` 的实时事件、随后持续转发直至 `done` 才关闭；若无进行中 turn 则回放完即关闭。订阅先于回放是为了不漏「回放查询与订阅之间」产生的事件。
 - **客户端**（`use-chat-messages.ts` 重构为「命令/订阅分离」）：`sendMessage` = 乐观插入 + `POST messages`（起 turn）+ 打开 tail；**组件挂载时总是打开 tail**（`after=lastSeq`）以续接刷新前遗留的进行中 turn；tail 断开时，若本轮尚未见 `turn.result`/`turn.failed` 就带 `after=lastSeq` 重开（指数退避、限次）。`GET events` 一次性补齐路径删除（被可续传 tail 取代）。
 - **边界**：进程重启会丢失内存态 turn（沙盒仍在跑但 nimbo loop 停）——DB 事件保留至崩溃点，重启后 tail 回放发现无进行中 turn 即静默收尾；这是 v1 内存态 runner 的已知取舍。

@@ -15,7 +15,7 @@ export type PostApiChatSessionsIdMessagesPathParams = {
 };
 
 /**
- * @description Turn started; poll/stream `GET .../stream` for its events
+ * @description Accepted — see `mode` (\"started\" | \"steered\"); poll/stream `GET .../stream` for its events
  */
 export type PostApiChatSessionsIdMessages202 = StartTurnAck;
 
@@ -30,7 +30,7 @@ export type PostApiChatSessionsIdMessages401 = ApiError;
 export type PostApiChatSessionsIdMessages404 = ApiError;
 
 /**
- * @description A turn is already in progress for this session
+ * @description A turn is already in progress for this session and could not be steered either (narrow race — the turn ended between the steer attempt and the fallback start)
  */
 export type PostApiChatSessionsIdMessages409 = ApiError;
 

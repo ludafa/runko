@@ -105,5 +105,5 @@ pnpm chat:web                 # web 开发服务器
 ## 更多
 
 - **可运行示例**：[examples/](../examples/README.md)——内存 diff、目录挂载、skills、mini-bash、自定义 exec 注入、结构化输出、流式消费、全语法档 just-bash、E2B/Vercel/Cloudflare 三个云沙盒工作区适配、真实项目端到端设计优化 + Git 工作流，十二个脚本均可无 API key/云凭证试跑（缺 env/凭证只跑确定性段并干净退出；最后一个脚本的真机段一旦配齐凭证会真实修改目标 GitHub 仓库，运行前见其文件头/examples/README 的须知）。
-- **设计文档**：[产品设计](./01-product-design.md) · [技术实现](./02-tech-spec.md) · [施工计划](./03-construction-plan.md) · [内置工具规格](./04-builtin-tools.md) · [验证方案](./05-verification.md) · [沙盒调研](./06-sandbox-workspace-research.md) · [端到端设计示例](./07-sandbox-e2e-design-example.md) · [chat webapp](./08-chat-agent-webapp.md)
+- **设计文档**：[产品设计](./01-product-design.md) · [技术实现](./02-tech-spec.md) · [施工计划](./03-construction-plan.md) · [内置工具规格](./04-builtin-tools.md) · [验证方案](./05-verification.md) · [沙盒调研](./06-sandbox-workspace-research.md) · [端到端设计示例](./07-sandbox-e2e-design-example.md) · [chat webapp](./08-chat-agent-webapp.md) · [沙盒规范](./nimbo-sandbox-spec.md)
 - **开发**：`corepack pnpm install && corepack pnpm build && corepack pnpm typecheck && corepack pnpm test`（顺序 build 先行——workspace 循环 devDep 下跨包类型解析指向 dist）。Node ≥ 20（examples 与 L3 `tools/*.ts` 动态加载需 ≥ 22.18 原生 TS）。根 build/typecheck/test 脚本只作用于 `./packages/*`；apps 有自己的 `chat:*` 脚本。

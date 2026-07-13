@@ -122,7 +122,6 @@ function ChatSessionTimeline({
 
       <MessageComposer
         onSend={chat.sendMessage}
-        disabled={chat.status === 'streaming'}
         streaming={chat.status === 'streaming'}
       />
     </div>

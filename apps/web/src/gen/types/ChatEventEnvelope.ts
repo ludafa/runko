@@ -44,11 +44,18 @@ export type ItemTypeEnum2Key =
   (typeof itemTypeEnum2)[keyof typeof itemTypeEnum2];
 
 export const itemTypeEnum3 = {
-  tool_call: 'tool_call',
+  user_message: 'user_message',
 } as const;
 
 export type ItemTypeEnum3Key =
   (typeof itemTypeEnum3)[keyof typeof itemTypeEnum3];
+
+export const itemTypeEnum4 = {
+  tool_call: 'tool_call',
+} as const;
+
+export type ItemTypeEnum4Key =
+  (typeof itemTypeEnum4)[keyof typeof itemTypeEnum4];
 
 export const itemStatusEnum = {
   in_progress: 'in_progress',
@@ -60,12 +67,12 @@ export const itemStatusEnum = {
 export type ItemStatusEnumKey =
   (typeof itemStatusEnum)[keyof typeof itemStatusEnum];
 
-export const itemTypeEnum4 = {
+export const itemTypeEnum5 = {
   file_change: 'file_change',
 } as const;
 
-export type ItemTypeEnum4Key =
-  (typeof itemTypeEnum4)[keyof typeof itemTypeEnum4];
+export type ItemTypeEnum5Key =
+  (typeof itemTypeEnum5)[keyof typeof itemTypeEnum5];
 
 export const changesKindEnum = {
   add: 'add',
@@ -76,19 +83,19 @@ export const changesKindEnum = {
 export type ChangesKindEnumKey =
   (typeof changesKindEnum)[keyof typeof changesKindEnum];
 
-export const itemTypeEnum5 = {
-  plan_update: 'plan_update',
-} as const;
-
-export type ItemTypeEnum5Key =
-  (typeof itemTypeEnum5)[keyof typeof itemTypeEnum5];
-
 export const itemTypeEnum6 = {
-  error: 'error',
+  plan_update: 'plan_update',
 } as const;
 
 export type ItemTypeEnum6Key =
   (typeof itemTypeEnum6)[keyof typeof itemTypeEnum6];
+
+export const itemTypeEnum7 = {
+  error: 'error',
+} as const;
+
+export type ItemTypeEnum7Key =
+  (typeof itemTypeEnum7)[keyof typeof itemTypeEnum7];
 
 export const eventTypeEnum4 = {
   'item.updated': 'item.updated',
@@ -190,6 +197,20 @@ export type ChatEventEnvelope = {
               /**
                * @type string
                */
+              text: string;
+            }
+          | {
+              /**
+               * @type string
+               */
+              id: string;
+              /**
+               * @type string
+               */
+              type: ItemTypeEnum4Key;
+              /**
+               * @type string
+               */
               toolName: string;
               input?: any;
               output?: string | any | null;
@@ -206,7 +227,7 @@ export type ChatEventEnvelope = {
               /**
                * @type string
                */
-              type: ItemTypeEnum4Key;
+              type: ItemTypeEnum5Key;
               /**
                * @type array
                */
@@ -229,7 +250,7 @@ export type ChatEventEnvelope = {
               /**
                * @type string
                */
-              type: ItemTypeEnum5Key;
+              type: ItemTypeEnum6Key;
               /**
                * @type array
                */
@@ -252,7 +273,7 @@ export type ChatEventEnvelope = {
               /**
                * @type string
                */
-              type: ItemTypeEnum6Key;
+              type: ItemTypeEnum7Key;
               /**
                * @type string
                */
@@ -305,6 +326,20 @@ export type ChatEventEnvelope = {
               /**
                * @type string
                */
+              text: string;
+            }
+          | {
+              /**
+               * @type string
+               */
+              id: string;
+              /**
+               * @type string
+               */
+              type: ItemTypeEnum4Key;
+              /**
+               * @type string
+               */
               toolName: string;
               input?: any;
               output?: string | any | null;
@@ -321,7 +356,7 @@ export type ChatEventEnvelope = {
               /**
                * @type string
                */
-              type: ItemTypeEnum4Key;
+              type: ItemTypeEnum5Key;
               /**
                * @type array
                */
@@ -344,7 +379,7 @@ export type ChatEventEnvelope = {
               /**
                * @type string
                */
-              type: ItemTypeEnum5Key;
+              type: ItemTypeEnum6Key;
               /**
                * @type array
                */
@@ -367,7 +402,7 @@ export type ChatEventEnvelope = {
               /**
                * @type string
                */
-              type: ItemTypeEnum6Key;
+              type: ItemTypeEnum7Key;
               /**
                * @type string
                */
@@ -420,6 +455,20 @@ export type ChatEventEnvelope = {
               /**
                * @type string
                */
+              text: string;
+            }
+          | {
+              /**
+               * @type string
+               */
+              id: string;
+              /**
+               * @type string
+               */
+              type: ItemTypeEnum4Key;
+              /**
+               * @type string
+               */
               toolName: string;
               input?: any;
               output?: string | any | null;
@@ -436,7 +485,7 @@ export type ChatEventEnvelope = {
               /**
                * @type string
                */
-              type: ItemTypeEnum4Key;
+              type: ItemTypeEnum5Key;
               /**
                * @type array
                */
@@ -459,7 +508,7 @@ export type ChatEventEnvelope = {
               /**
                * @type string
                */
-              type: ItemTypeEnum5Key;
+              type: ItemTypeEnum6Key;
               /**
                * @type array
                */
@@ -482,7 +531,7 @@ export type ChatEventEnvelope = {
               /**
                * @type string
                */
-              type: ItemTypeEnum6Key;
+              type: ItemTypeEnum7Key;
               /**
                * @type string
                */

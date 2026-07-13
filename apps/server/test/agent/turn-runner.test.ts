@@ -9,9 +9,13 @@ import {
 import {
   isTurnActive,
   startTurn,
+  steerTurn,
   subscribeTurn,
 } from '../../src/agent/turn-runner.js';
-import { createControllableSession } from '../helpers/controllable-session.js';
+import {
+  createControllableSession,
+  createSteerableControllableSession,
+} from '../helpers/controllable-session.js';
 import { createTestDb, seedUser } from '../helpers/test-db.js';
 
 // `createControllableSession`'s internal wake/queue is driven purely by
@@ -264,5 +268,66 @@ describe('agent/turn-runner', () => {
 
     expect(a).toEqual(['turn.started']); // unsubscribed before turn.completed/turn.result
     expect(b).toEqual(['turn.started', 'turn.completed', 'turn.result']);
+  });
+
+  // ---------------------------------------------------------------------------
+  // steerTurn (STEER-3B, this module's header comment) — the four states
+  // `routes/chat.ts`'s `POST .../messages` branches on.
+  // ---------------------------------------------------------------------------
+
+  describe('steerTurn', () => {
+    it('returns false when there is no active turn for the session at all', () => {
+      expect(isTurnActive('sess-1')).toBe(false);
+      expect(steerTurn('sess-1', 'hello')).toBe(false);
+    });
+
+    it('returns true and forwards the text to session.steer() when a turn is active and steer() reports success', () => {
+      const steerable = createSteerableControllableSession();
+      const { started } = startTurn({
+        db,
+        sessionId: 'sess-1',
+        session: steerable,
+        text: 'first',
+      });
+      expect(started).toBe(true);
+
+      expect(steerTurn('sess-1', 'also check the tests')).toBe(true);
+      expect(steerable.steerCalls).toEqual(['also check the tests']);
+
+      steerable.finish({ items: [], finalResponse: 'ok', usage: {} });
+    });
+
+    it('returns false when the active turn’s session has no steer() method at all (e.g. a plain createControllableSession fixture)', () => {
+      const plain = createControllableSession();
+      const { started } = startTurn({
+        db,
+        sessionId: 'sess-1',
+        session: plain,
+        text: 'first',
+      });
+      expect(started).toBe(true);
+
+      expect(steerTurn('sess-1', 'hello')).toBe(false);
+
+      plain.finish({ items: [], finalResponse: 'ok', usage: {} });
+    });
+
+    it('returns false when session.steer() itself reports failure (the narrow race: the turn finished between steerTurn finding it active and steer() checking its own in-flight state)', () => {
+      const steerable = createSteerableControllableSession();
+      steerable.setSteerResult(false);
+      const { started } = startTurn({
+        db,
+        sessionId: 'sess-1',
+        session: steerable,
+        text: 'first',
+      });
+      expect(started).toBe(true);
+
+      expect(steerTurn('sess-1', 'too late')).toBe(false);
+      // steer() was still actually called — it's the *result* that's false, not a short-circuit.
+      expect(steerable.steerCalls).toEqual(['too late']);
+
+      steerable.finish({ items: [], finalResponse: 'ok', usage: {} });
+    });
   });
 });

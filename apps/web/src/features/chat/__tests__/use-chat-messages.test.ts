@@ -370,4 +370,63 @@ describe('useChatMessages', () => {
     expect(result.current.optimisticMessages).toHaveLength(0);
     expect(result.current.error).toBe('turn already in progress');
   });
+
+  // -------------------------------------------------------------------------
+  // STEER-3B: sendMessage's other branch, taken while turnInProgressRef is
+  // true (composer is no longer disabled during 'streaming' — file header).
+  // -------------------------------------------------------------------------
+
+  it('sendMessage steers an in-progress turn instead of starting a new one: no optimistic bubble, no new tail opened, but postChatMessage is still called', async () => {
+    const { calls } = createStreamSessionTailRecorder();
+    postChatMessageMock.mockResolvedValue(undefined);
+
+    const { result } = renderHook(() =>
+      useChatMessages('sess_1', [
+        { seq: 1, event: { type: 'user.message', text: '第一条' } },
+        { seq: 2, event: { type: 'turn.started', turn: 1 } }, // no terminal event yet — turn already in progress
+      ]),
+    );
+    expect(result.current.status).toBe('streaming');
+    expect(calls).toHaveLength(1); // mount tail only, seeded from the in-progress history
+
+    act(() => {
+      result.current.sendMessage('补充一句');
+    });
+
+    // no optimistic bubble for a steered message — see file header ("nothing
+    // to reconcile it against, a steered message never gets a user.message
+    // echo") — and no new tail: the one already open for this turn keeps
+    // delivering, including the resulting user_message item.
+    expect(result.current.optimisticMessages).toHaveLength(0);
+    expect(calls).toHaveLength(1);
+
+    await flush();
+    expect(postChatMessageMock).toHaveBeenCalledWith('sess_1', '补充一句');
+  });
+
+  it('a failed steer POST only sets error, leaving status/turnInProgress alone — the turn itself is still running regardless of whether this particular steer landed', async () => {
+    const { calls } = createStreamSessionTailRecorder();
+    postChatMessageMock.mockRejectedValue(new Error('network blip'));
+
+    const { result } = renderHook(() =>
+      useChatMessages('sess_1', [
+        { seq: 1, event: { type: 'user.message', text: '第一条' } },
+        { seq: 2, event: { type: 'turn.started', turn: 1 } },
+      ]),
+    );
+    expect(result.current.status).toBe('streaming');
+
+    act(() => {
+      result.current.sendMessage('补充一句');
+    });
+    await flush();
+
+    // status is *not* flipped to 'error' (unlike the new-turn-start failure
+    // path above) — only `error` is set, per the hook's own comment on this
+    // branch ("a failure here doesn't touch status/turnInProgressRef").
+    expect(result.current.status).toBe('streaming');
+    expect(result.current.error).toBe('network blip');
+    expect(result.current.optimisticMessages).toHaveLength(0);
+    expect(calls).toHaveLength(1); // still no new tail opened by the failed attempt
+  });
 });

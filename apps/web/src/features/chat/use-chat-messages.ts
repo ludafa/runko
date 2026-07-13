@@ -17,24 +17,36 @@
  * (true iff the last persisted envelope isn't a terminal `turn.result`/
  * `turn.failed`, i.e. the turn was still going when the page was last torn
  * down) and flipped by `applyEnvelope` the moment either terminal event
- * arrives. It gates: (a) whether `sendMessage` is allowed to fire a new turn,
- * (b) whether a tail that just ended (cleanly or via error) should reconnect
- * (docs/08 §2.2b: "tail 断开时，若本轮尚未见 turn.result/turn.failed 就带
+ * arrives. It gates: (a) which of the two `sendMessage` branches below runs
+ * (start a new turn vs. steer the in-progress one — STEER-3B), (b) whether a
+ * tail that just ended (cleanly or via error) should reconnect (docs/08
+ * §2.2b: "tail 断开时，若本轮尚未见 turn.result/turn.failed 就带
  * after=lastSeq 重开（指数退避、限次）").
  *
- * Optimistic user echo + dedup (docs/08 §2.2 "契约细化" #1): the server
- * echoes the user's own text back as a real `user.message` envelope (first
- * event of the turn it kicks off, replayable from `GET events`/the tail's
- * replay), but a network round-trip before the user's own message appears
- * reads as laggy. `sendMessage` still inserts a local, client-only
- * `optimisticMessages` entry the instant it's called (zero latency);
- * `applyEnvelope` dequeues the oldest one — FIFO, since only one turn is
- * ever in flight at a time (the composer is disabled while streaming) — the
- * moment the matching server `user.message` envelope arrives, in the very
- * same state update that adds the confirmed envelope to `envelopes`. React
- * batches both `setState` calls from one `applyEnvelope` call into a single
- * re-render, so the optimistic bubble is never visibly duplicated with the
- * confirmed one.
+ * Optimistic user echo + dedup (docs/08 §2.2 "契约细化" #1), new-turn path
+ * only: the server echoes the user's own text back as a real `user.message`
+ * envelope (first event of the turn it kicks off, replayable from `GET
+ * events`/the tail's replay), but a network round-trip before the user's own
+ * message appears reads as laggy. `sendMessage` still inserts a local,
+ * client-only `optimisticMessages` entry the instant it's called (zero
+ * latency); `applyEnvelope` dequeues the oldest one — FIFO, since only one
+ * turn is ever started this way at a time (`turnInProgressRef` blocks a
+ * second new-turn send while one is in flight) — the moment the matching
+ * server `user.message` envelope arrives, in the very same state update that
+ * adds the confirmed envelope to `envelopes`. React batches both `setState`
+ * calls from one `applyEnvelope` call into a single re-render, so the
+ * optimistic bubble is never visibly duplicated with the confirmed one.
+ *
+ * Steering an in-progress turn (STEER-3B, docs/08 §2.2 "契约细化" #3): the
+ * composer is no longer disabled while `status === 'streaming'` — a send in
+ * that state takes the *other* `sendMessage` branch, which is just the same
+ * `POST .../messages` (the server tells `'started'` and `'steered'` apart
+ * itself, injecting into the in-progress turn via `Session.steer()`) with no
+ * optimistic bubble and no new tail to open: there's nothing to reconcile
+ * against, because a steered message never gets a `user.message` echo — its
+ * one persisted, rendered record is the `user_message` `SessionItem` nimbo's
+ * loop produces at its real injection point, which arrives over the tail
+ * that's already open for this turn like any other item.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -220,7 +232,21 @@ export function useChatMessages(
   const sendMessage = useCallback(
     (text: string) => {
       const trimmed = text.trim();
-      if (trimmed.length === 0 || turnInProgressRef.current) return;
+      if (trimmed.length === 0) return;
+
+      if (turnInProgressRef.current) {
+        // Steer the in-progress turn (STEER-3B) — see file header. No
+        // optimistic bubble (nothing to reconcile it against — a steered
+        // message never gets a `user.message` echo) and no tail to (re)open
+        // (the one already open for this turn keeps delivering, including
+        // the `user_message` item this produces). A failure here doesn't
+        // touch `status`/`turnInProgressRef`: the turn itself is still
+        // running fine regardless of whether this particular steer landed.
+        postChatMessage(sessionId, trimmed).catch((postError: unknown) => {
+          setError(describeError(postError));
+        });
+        return;
+      }
 
       nextOptimisticIdRef.current += 1;
       const optimisticId = nextOptimisticIdRef.current;

@@ -30,6 +30,7 @@ import {
 import {
   isTurnActive,
   startTurn,
+  steerTurn,
   subscribeTurn,
 } from '../agent/turn-runner.js';
 import { db as defaultDb } from '../db/instance.js';
@@ -294,7 +295,7 @@ export function createChatApp(deps: ChatRouteDeps) {
     path: '/api/chat/sessions/{id}/messages',
     tags: ['Chat'],
     summary:
-      'Start a turn for this message (docs/08 §2.2b): acquires the sandbox, builds the session, and hands off to the in-process turn runner — the turn’s events arrive over `GET .../stream`, not this response',
+      'Start a turn for this message, or steer an in-progress one (STEER-3B): if the session has a turn running, `text` is injected into it via `Session.steer()` (mode "steered"); otherwise this acquires the sandbox, builds the session, and hands off to the in-process turn runner (mode "started"). Either way, events arrive over `GET .../stream`, not this response',
     request: {
       params: ChatSessionParamsSchema,
       body: {
@@ -306,7 +307,7 @@ export function createChatApp(deps: ChatRouteDeps) {
       202: {
         content: { 'application/json': { schema: StartTurnAckSchema } },
         description:
-          'Turn started; poll/stream `GET .../stream` for its events',
+          'Accepted — see `mode` ("started" | "steered"); poll/stream `GET .../stream` for its events',
       },
       401: {
         content: { 'application/json': { schema: ErrorSchema } },
@@ -318,7 +319,8 @@ export function createChatApp(deps: ChatRouteDeps) {
       },
       409: {
         content: { 'application/json': { schema: ErrorSchema } },
-        description: 'A turn is already in progress for this session',
+        description:
+          'A turn is already in progress for this session and could not be steered either (narrow race — the turn ended between the steer attempt and the fallback start)',
       },
       500: {
         content: { 'application/json': { schema: ErrorSchema } },
@@ -334,6 +336,23 @@ export function createChatApp(deps: ChatRouteDeps) {
 
     const row = getChatSession(deps.db, id, userId);
     if (row === undefined) return c.json({ error: 'Not found' }, 404);
+
+    // STEER-3B: try steering an in-progress turn first — cheap (no sandbox
+    // acquisition/session rebuild needed, `Session.steer()` just queues into
+    // the already-running turn). `false` covers both "no turn is active" and
+    // the narrow race where the turn just ended; either way, falling through
+    // to the normal start-a-new-turn flow below is correct. No `user.message`
+    // echo is emitted for a steered message — see docs/08 §2.2 "契约细化" #3:
+    // the injected `user_message` item nimbo's loop produces at the real
+    // injection point is its one persisted record.
+    if (steerTurn(id, text)) {
+      try {
+        await deps.sandboxManager.touch(id); // still rolls the sandbox's idle timeout forward, same as a fresh turn
+      } catch (error) {
+        return c.json({ error: describeError(error) }, 500);
+      }
+      return c.json({ ok: true as const, mode: 'steered' as const }, 202);
+    }
 
     let model: LanguageModel;
     let repoRef: GitHubRepoRef;
@@ -386,7 +405,7 @@ export function createChatApp(deps: ChatRouteDeps) {
     if (!started) {
       return c.json({ error: 'turn already in progress' }, 409);
     }
-    return c.json({ ok: true as const }, 202);
+    return c.json({ ok: true as const, mode: 'started' as const }, 202);
   });
 
   // ---- GET /api/chat/sessions/{id}/stream?after=<seq> (resumable live tail, docs/08 §2.2b) ----

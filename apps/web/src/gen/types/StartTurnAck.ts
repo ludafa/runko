@@ -10,9 +10,21 @@ export const startTurnAckOkEnum = {
 export type StartTurnAckOkEnumKey =
   (typeof startTurnAckOkEnum)[keyof typeof startTurnAckOkEnum];
 
+export const startTurnAckModeEnum = {
+  started: 'started',
+  steered: 'steered',
+} as const;
+
+export type StartTurnAckModeEnumKey =
+  (typeof startTurnAckModeEnum)[keyof typeof startTurnAckModeEnum];
+
 export type StartTurnAck = {
   /**
    * @type boolean
    */
   ok: StartTurnAckOkEnumKey;
+  /**
+   * @type string
+   */
+  mode: StartTurnAckModeEnumKey;
 };

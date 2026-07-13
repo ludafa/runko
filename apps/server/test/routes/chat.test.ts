@@ -1,7 +1,14 @@
+import type { NimboExec, NimboFS } from '@nimbo/core';
+import { MemoryFS } from '@nimbo/sdk';
 import type { MiddlewareHandler } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type {
+  AcquiredSandbox,
+  AcquireInput,
+  SandboxManager,
+} from '../../src/agent/sandbox-manager.js';
 import type { Db } from '../../src/agent/store.js';
 import { getChatSession, listAgentEvents } from '../../src/agent/store.js';
 import { startTurn } from '../../src/agent/turn-runner.js';
@@ -121,6 +128,85 @@ function createIncrementalReader(response: Response) {
         await sleep(5);
       }
       throw new Error(`stream never closed; buffer so far: ${buffer}`);
+    },
+  };
+}
+
+const FRONTEND_DESIGN_SKILL_STUB = `---
+description: Make one focused, non-generic visual/interaction improvement to an existing web UI without rewriting it.
+---
+# frontend-design (test stub)
+`;
+
+/**
+ * Same fake workspace shape as helpers/fake-sandbox-manager.ts's
+ * `buildFakeWorkspace()` (a `MemoryFS` pre-seeded with the frontend-design
+ * skill stub, plus a trivial `NimboExec`), except `writeFile` pauses on a
+ * manually-released gate — this is what lets the STEER-3B integration test
+ * below hold a *real* `write_file` tool_call step open long enough to send a
+ * second `POST .../messages` mid-turn, deterministically (no sleep/race).
+ * Needed because that test exercises the real `@nimbo/core`/`@nimbo/sdk`
+ * `Session.steer()` wiring (not a `ControllableSession` fake) — only a real
+ * in-flight tool execution actually produces a real `user_message` item.
+ */
+function buildHoldableWorkspace(): {
+  workspacePromise: Promise<NimboFS & NimboExec>;
+  writeCalled: Promise<void>;
+  releaseWrite: () => void;
+} {
+  let releaseWrite: () => void = () => undefined;
+  const holdGate = new Promise<void>((resolve) => {
+    releaseWrite = resolve;
+  });
+  let notifyWriteCalled: () => void = () => undefined;
+  const writeCalled = new Promise<void>((resolve) => {
+    notifyWriteCalled = resolve;
+  });
+
+  const workspacePromise = (async (): Promise<NimboFS & NimboExec> => {
+    const fs = new MemoryFS();
+    await fs.writeFile(
+      '/.agents/skills/frontend-design/SKILL.md',
+      FRONTEND_DESIGN_SKILL_STUB,
+    );
+    const originalWriteFile = fs.writeFile.bind(fs);
+    const exec: NimboExec = {
+      async exec() {
+        return { exitCode: 0, stdout: '', stderr: '', durationMs: 0 };
+      },
+    };
+    return Object.assign(fs, exec, {
+      async writeFile(path: string, data: Uint8Array | string): Promise<void> {
+        notifyWriteCalled();
+        await holdGate;
+        return originalWriteFile(path, data);
+      },
+    });
+  })();
+
+  return { workspacePromise, writeCalled, releaseWrite };
+}
+
+function createHoldableSandboxManager(): SandboxManager & {
+  writeCalled: Promise<void>;
+  releaseWrite: () => void;
+  readonly touchCalls: string[];
+} {
+  const { workspacePromise, writeCalled, releaseWrite } =
+    buildHoldableWorkspace();
+  const touchCalls: string[] = [];
+  return {
+    writeCalled,
+    releaseWrite,
+    touchCalls,
+    async acquire(_input: AcquireInput): Promise<AcquiredSandbox> {
+      return { workspace: await workspacePromise, defaultBranch: 'main' };
+    },
+    async touch(sessionId: string): Promise<void> {
+      touchCalls.push(sessionId);
+    },
+    release(): void {
+      // no-op — this fake only cares about acquire()'s workspace and touch()'s call log.
     },
   };
 }
@@ -253,7 +339,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
   // POST .../messages (docs/08 §2.2b: starts a turn, 202, doesn't stream)
   // -------------------------------------------------------------------------
 
-  it('POST .../messages starts a turn and returns 202 { ok: true } immediately (no SSE body)', async () => {
+  it('POST .../messages starts a turn and returns 202 { ok: true, mode: "started" } immediately (no SSE body) when no turn is already in progress', async () => {
     const app = buildApp(() => stopOnlyModel('Hello there!'));
     const created = await createSession(app);
 
@@ -266,7 +352,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       },
     );
     expect(response.status).toBe(202);
-    expect(await response.json()).toEqual({ ok: true });
+    expect(await response.json()).toEqual({ ok: true, mode: 'started' });
   });
 
   it('POST .../messages 404s for an unknown session id', async () => {
@@ -618,5 +704,100 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
         (e.event as { item?: { type?: string } }).item?.type === 'file_change',
     );
     expect(fileChangeCompleted).toBeDefined();
+  });
+
+  // -------------------------------------------------------------------------
+  // STEER-3B: POST .../messages while a turn is in progress steers it
+  // instead of starting a new one. Real mock model + real @nimbo/sdk
+  // session (not a ControllableSession fake) — a real `write_file` tool_call
+  // step is held open (buildHoldableWorkspace) so the second POST lands
+  // squarely mid-turn, exercising the actual Session.steer() wiring that
+  // produces a real `user_message` item (packages/core/test/steer.test.ts
+  // already covers that wiring in isolation; this is the end-to-end route
+  // regression for it).
+  // -------------------------------------------------------------------------
+
+  it('a second POST while a turn is in progress steers it (202 mode "steered"): no extra user.message echo, and a real user_message item.completed appears in the stream', async () => {
+    const holdableSandboxManager = createHoldableSandboxManager();
+    const app = createChatApp({
+      db,
+      sandboxManager: holdableSandboxManager,
+      resolveModel: () =>
+        toolCallThenStopModel(
+          'write_file',
+          { path: '/notes.txt', content: 'hi' },
+          'call_1',
+          'wrote it and replied',
+        ),
+      authMiddleware: fakeAuthMiddleware(USER_ID),
+    });
+    const created = await createSession(app);
+
+    const firstResponse = await app.request(
+      `/api/chat/sessions/${created.id}/messages`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'explore the repo' }),
+      },
+    );
+    expect(firstResponse.status).toBe(202);
+    expect(await firstResponse.json()).toEqual({
+      ok: true,
+      mode: 'started',
+    });
+
+    // Deterministic hold point: the real write_file tool call is now paused
+    // inside fs.writeFile() — nothing time-based, no sleep/race.
+    await holdableSandboxManager.writeCalled;
+
+    const secondResponse = await app.request(
+      `/api/chat/sessions/${created.id}/messages`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'also check the API timeout' }),
+      },
+    );
+    expect(secondResponse.status).toBe(202);
+    expect(await secondResponse.json()).toEqual({
+      ok: true,
+      mode: 'steered',
+    });
+
+    holdableSandboxManager.releaseWrite();
+
+    const body = await (
+      await app.request(`/api/chat/sessions/${created.id}/stream`)
+    ).text();
+    const envelopes = parseEnvelopes(body);
+
+    // exactly one user.message echo (the turn-starting message) — the
+    // steered message is never echoed (docs/08 §2.2 "契约细化" #3: its one
+    // persisted record is the user_message item nimbo's own loop produces).
+    const userMessageEchoes = envelopes.filter(
+      (e) => e.event.type === 'user.message',
+    );
+    expect(userMessageEchoes).toHaveLength(1);
+    expect(userMessageEchoes[0]?.event.text).toBe('explore the repo');
+
+    const steeredItem = envelopes.find(
+      (e) =>
+        e.event.type === 'item.completed' &&
+        (e.event as { item?: { type?: string } }).item?.type ===
+          'user_message',
+    );
+    expect(steeredItem).toBeDefined();
+    expect(
+      (steeredItem?.event as { item?: { text?: string } }).item?.text,
+    ).toBe('also check the API timeout');
+
+    // both requests still rolled the sandbox's idle timeout forward — the
+    // steered branch calls touch() too (routes/chat.ts), not just the
+    // normal-start branch.
+    expect(holdableSandboxManager.touchCalls).toEqual([
+      created.id,
+      created.id,
+    ]);
   });
 });

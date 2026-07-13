@@ -13,7 +13,7 @@ export const postApiChatSessionsIdMessagesPathParamsSchema = z.object({
 });
 
 /**
- * @description Turn started; poll/stream `GET .../stream` for its events
+ * @description Accepted — see `mode` (\"started\" | \"steered\"); poll/stream `GET .../stream` for its events
  */
 export const postApiChatSessionsIdMessages202Schema = z.lazy(
   () => startTurnAckSchema,
@@ -34,7 +34,7 @@ export const postApiChatSessionsIdMessages404Schema = z.lazy(
 );
 
 /**
- * @description A turn is already in progress for this session
+ * @description A turn is already in progress for this session and could not be steered either (narrow race — the turn ended between the steer attempt and the fallback start)
  */
 export const postApiChatSessionsIdMessages409Schema = z.lazy(
   () => apiErrorSchema,

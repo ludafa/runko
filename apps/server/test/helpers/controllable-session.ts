@@ -81,3 +81,42 @@ export function createControllableSession(
     },
   };
 }
+
+/**
+ * `createControllableSession()` deliberately has no `steer` method at all —
+ * that's what covers `turn-runner.ts`'s "session can't be steered" case
+ * (`TurnDrivenSession.steer` is optional; `steerTurn` treats a missing one
+ * as `false`, same as a `false` return). This variant is for the other two
+ * `steerTurn` cases that need an actual `steer()` to control: `steerCalls`
+ * records every `input` it was invoked with (call-order assertions), and
+ * `setSteerResult` controls what the *next* call returns — default `true`
+ * ("queued"), settable to `false` to simulate the narrow race
+ * `turn-runner.ts`'s own header comment documents (the turn finished between
+ * `steerTurn` finding it in `activeTurns` and `session.steer()` itself
+ * checking its in-flight state).
+ */
+export interface SteerableControllableSession extends ControllableSession {
+  steer(input: string): boolean;
+  readonly steerCalls: string[];
+  setSteerResult(result: boolean): void;
+}
+
+export function createSteerableControllableSession(
+  state: SessionState = DEFAULT_STATE,
+): SteerableControllableSession {
+  const base = createControllableSession(state);
+  const steerCalls: string[] = [];
+  let steerResult = true;
+
+  return {
+    ...base,
+    steerCalls,
+    setSteerResult(result: boolean): void {
+      steerResult = result;
+    },
+    steer(input: string): boolean {
+      steerCalls.push(input);
+      return steerResult;
+    },
+  };
+}

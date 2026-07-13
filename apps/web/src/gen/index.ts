@@ -15,6 +15,7 @@ export type {
   ItemTypeEnum4Key,
   ItemTypeEnum5Key,
   ItemTypeEnum6Key,
+  ItemTypeEnum7Key,
   ItemTypeEnumKey,
 } from './types/ChatEventEnvelope.ts';
 export type { ChatEventsList } from './types/ChatEventsList.ts';
@@ -105,6 +106,7 @@ export type {
 export type { PostChatMessageInput } from './types/PostChatMessageInput.ts';
 export type {
   StartTurnAck,
+  StartTurnAckModeEnumKey,
   StartTurnAckOkEnumKey,
 } from './types/StartTurnAck.ts';
 export type { Usage } from './types/Usage.ts';
@@ -131,11 +133,13 @@ export { itemTypeEnum3 } from './types/ChatEventEnvelope.ts';
 export { itemTypeEnum4 } from './types/ChatEventEnvelope.ts';
 export { itemTypeEnum5 } from './types/ChatEventEnvelope.ts';
 export { itemTypeEnum6 } from './types/ChatEventEnvelope.ts';
+export { itemTypeEnum7 } from './types/ChatEventEnvelope.ts';
 export { chatSessionStatusEnum } from './types/ChatSession.ts';
 export { chatTurnFailedTypeEnum } from './types/ChatTurnFailed.ts';
 export { chatTurnResultTypeEnum } from './types/ChatTurnResult.ts';
 export { chatUserMessageTypeEnum } from './types/ChatUserMessage.ts';
 export { nimboErrorCodeEnum } from './types/NimboError.ts';
+export { startTurnAckModeEnum } from './types/StartTurnAck.ts';
 export { startTurnAckOkEnum } from './types/StartTurnAck.ts';
 export { apiErrorSchema } from './zod/apiErrorSchema.ts';
 export { chatEventEnvelopeSchema } from './zod/chatEventEnvelopeSchema.ts';

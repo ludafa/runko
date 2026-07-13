@@ -39,21 +39,48 @@ import {
  * The one thing `startTurn` needs from a `@nimbo/sdk` `Session<F>` — deliberately
  * narrower than the real type (no `id`/`fs`/`send`/etc.) so tests can hand in a
  * bare fake instead of assembling a real session.
+ *
+ * `steer` is **optional** here even though every real `@nimbo/sdk` `Session`
+ * always has one (STEER-1) — narrowed the same way `stream`/`toJSON` already
+ * are, so a test fake that only cares about the base turn-driving contract
+ * (`test/helpers/controllable-session.ts`) doesn't also have to implement
+ * steering just to satisfy this interface. `steerTurn` below treats a missing
+ * `steer` as "this session can't be steered", i.e. `false` — never a runtime
+ * error — via `ActiveTurn.steer`'s capture in `startTurn`.
  */
 export interface TurnDrivenSession {
   stream(input: string): AsyncGenerator<SessionEvent, TurnResult>;
   toJSON(): SessionState;
+  steer?(input: string): boolean;
 }
 
 interface ActiveTurn {
   emitter: EventEmitter;
   done: boolean;
+  /** Bound to this turn's own `session.steer` at registration time (STEER-3B) — see `steerTurn`. */
+  steer: (input: string) => boolean;
 }
 
 const activeTurns = new Map<string, ActiveTurn>();
 
 export function isTurnActive(sessionId: string): boolean {
   return activeTurns.has(sessionId);
+}
+
+/**
+ * `POST .../messages` (routes/chat.ts) calls this first: if `sessionId` has
+ * a turn in progress, forward `text` into it via the session's own
+ * `steer()` instead of starting a new turn — returns whatever `steer()`
+ * reported (`true` = queued, injected at the next step checkpoint;
+ * `false` = the turn's `steer` doesn't support it, or (rare race) the turn
+ * finished between this call landing and `steer()` checking its own
+ * in-flight state). No active turn at all also returns `false`. Either way,
+ * a `false` here is the route's cue to fall back to `startTurn` instead.
+ */
+export function steerTurn(sessionId: string, text: string): boolean {
+  const activeTurn = activeTurns.get(sessionId);
+  if (activeTurn === undefined) return false;
+  return activeTurn.steer(text);
 }
 
 function describeError(error: unknown): string {
@@ -153,7 +180,13 @@ export function startTurn(params: StartTurnParams): StartTurnResult {
   // listener pair to the same turn's emitter for its lifetime — that's
   // expected fan-out, not a leak, so the default-10 warning is disabled.
   emitter.setMaxListeners(0);
-  const activeTurn: ActiveTurn = { emitter, done: false };
+  const activeTurn: ActiveTurn = {
+    emitter,
+    done: false,
+    // Captured once, bound to *this* turn's `session` — `steerTurn` never
+    // sees `session` directly, only this closure (STEER-3B).
+    steer: (input) => session.steer?.(input) ?? false,
+  };
   activeTurns.set(sessionId, activeTurn);
 
   void driveTurn(db, sessionId, session, text, emitter).finally(() => {

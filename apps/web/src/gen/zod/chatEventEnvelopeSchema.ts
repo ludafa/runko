@@ -40,6 +40,11 @@ export const chatEventEnvelopeSchema = z.object({
           }),
           z.object({
             id: z.string(),
+            type: z.enum(['user_message']),
+            text: z.string(),
+          }),
+          z.object({
+            id: z.string(),
             type: z.enum(['tool_call']),
             toolName: z.string(),
             input: z.optional(z.any()),
@@ -88,6 +93,11 @@ export const chatEventEnvelopeSchema = z.object({
           }),
           z.object({
             id: z.string(),
+            type: z.enum(['user_message']),
+            text: z.string(),
+          }),
+          z.object({
+            id: z.string(),
             type: z.enum(['tool_call']),
             toolName: z.string(),
             input: z.optional(z.any()),
@@ -132,6 +142,11 @@ export const chatEventEnvelopeSchema = z.object({
           z.object({
             id: z.string(),
             type: z.enum(['reasoning']),
+            text: z.string(),
+          }),
+          z.object({
+            id: z.string(),
+            type: z.enum(['user_message']),
             text: z.string(),
           }),
           z.object({

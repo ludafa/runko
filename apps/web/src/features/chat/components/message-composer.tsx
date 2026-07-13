@@ -3,20 +3,27 @@ import { useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 
+/**
+ * `streaming` no longer disables the composer (STEER-3B, docs/08 §2.2
+ * "契约细化" #3): a send while a turn is already in progress steers it
+ * instead of starting a new one (`use-chat-messages.ts`'s `sendMessage`
+ * picks the branch — this component doesn't need to know which). The
+ * placeholder is the one piece of UI that still reacts to `streaming`,
+ * following the icon swap that already existed — signaling "this inserts
+ * into the current turn" rather than adding a new, separate hint element.
+ */
 export function MessageComposer({
   onSend,
-  disabled,
   streaming,
 }: {
   onSend: (text: string) => void;
-  disabled: boolean;
   streaming: boolean;
 }) {
   const [text, setText] = useState('');
 
   function submit() {
     const trimmed = text.trim();
-    if (trimmed.length === 0 || disabled) return;
+    if (trimmed.length === 0) return;
     onSend(trimmed);
     setText('');
   }
@@ -42,15 +49,18 @@ export function MessageComposer({
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
-        disabled={disabled}
         rows={2}
-        placeholder="给 agent 发消息…（Enter 发送，Shift+Enter 换行）"
-        className="placeholder:text-muted-foreground w-full flex-1 resize-none border-0 bg-transparent py-1.5 text-sm leading-relaxed focus:ring-0 focus:outline-none disabled:opacity-50"
+        placeholder={
+          streaming ?
+            '插入到当前回合…（Enter 发送，Shift+Enter 换行）'
+          : '给 agent 发消息…（Enter 发送，Shift+Enter 换行）'
+        }
+        className="placeholder:text-muted-foreground w-full flex-1 resize-none border-0 bg-transparent py-1.5 text-sm leading-relaxed focus:ring-0 focus:outline-none"
       />
       <Button
         type="submit"
         size="icon"
-        disabled={disabled || text.trim().length === 0}
+        disabled={text.trim().length === 0}
         aria-label="发送"
       >
         {streaming ?

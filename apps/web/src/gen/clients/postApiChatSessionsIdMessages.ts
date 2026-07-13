@@ -30,7 +30,7 @@ function getPostApiChatSessionsIdMessagesUrl(
 }
 
 /**
- * @summary Start a turn for this message (docs/08 §2.2b): acquires the sandbox, builds the session, and hands off to the in-process turn runner — the turn’s events arrive over `GET .../stream`, not this response
+ * @summary Start a turn for this message, or steer an in-progress one (STEER-3B): if the session has a turn running, `text` is injected into it via `Session.steer()` (mode "steered"); otherwise this acquires the sandbox, builds the session, and hands off to the in-process turn runner (mode "started"). Either way, events arrive over `GET .../stream`, not this response
  * {@link /api/chat/sessions/:id/messages}
  */
 export async function postApiChatSessionsIdMessages(

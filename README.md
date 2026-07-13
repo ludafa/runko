@@ -171,7 +171,8 @@ pnpm chat:web                 # web dev server
   [verification](./docs/05-verification.md) ·
   [sandbox research](./docs/06-sandbox-workspace-research.md) ·
   [e2e design example](./docs/07-sandbox-e2e-design-example.md) ·
-  [chat webapp](./docs/08-chat-agent-webapp.md)
+  [chat webapp](./docs/08-chat-agent-webapp.md) ·
+  [sandbox spec](./docs/nimbo-sandbox-spec.md)
 - **Development**: `corepack pnpm install && corepack pnpm build && corepack pnpm
   typecheck && corepack pnpm test` (build first — cross-package type resolution
   points at `dist` under the workspace's circular devDeps). Node ≥ 20 (examples and

@@ -272,9 +272,18 @@ export const PostChatMessageInputSchema = z
   })
   .openapi('PostChatMessageInput');
 
-/** `POST .../messages`'s 202 body (docs/08 §2.2b): the turn only *starts* here — its events arrive over `GET .../stream`, not this response. */
+/**
+ * `POST .../messages`'s 202 body (docs/08 §2.2b): the turn only starts or
+ * the steer only lands here — events arrive over `GET .../stream`, not this
+ * response. `mode` (STEER-3B) distinguishes the two ways this request could
+ * have been handled: `'started'` — no turn was active for this session, so
+ * this kicked off a new one; `'steered'` — a turn was already in progress
+ * and `text` was injected into it (`Session.steer`) instead of starting
+ * another. See docs/08 §2.2 "契约细化" #3 for the wire-level consequence
+ * (`'steered'` never gets its own `user.message` echo).
+ */
 export const StartTurnAckSchema = z
-  .object({ ok: z.literal(true) })
+  .object({ ok: z.literal(true), mode: z.enum(['started', 'steered']) })
   .openapi('StartTurnAck');
 
 export type StartTurnAck = z.infer<typeof StartTurnAckSchema>;
