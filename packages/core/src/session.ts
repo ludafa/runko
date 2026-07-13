@@ -217,6 +217,14 @@ export interface Session {
   /** 结构化输出（§4.8；实现见本文件头"结构化输出"一节 / `structured.ts`）。 */
   send<T>(input: Input, opts: TurnOptions & { outputSchema: z.ZodType<T> }): Promise<TurnResult & { structuredOutput: T }>;
   stream(input: Input, opts?: TurnOptions): AsyncGenerator<SessionEvent, TurnResult>;
+  /**
+   * 软 steer（STEER-1，tech-spec §4.2）：turn 进行中调用则把 `input` 排队、在
+   * 下一个 step checkpoint 注入为一条 user 消息（不打断进行中的模型流式输出
+   * 或工具执行）并返回 `true`；没有进行中的 turn（尚未 `send`/`stream`，或上
+   * 一个 turn 已经收尾）返回 `false`——调用方此时应改用 `send`/`stream` 发起
+   * 新的一轮。队列是 turn 作用域：turn 结束（正常收尾或抛错）时清空残留。
+   */
+  steer(input: Input): boolean;
   /** 会话恢复用的可序列化快照（§4.2/§4.8；`includeFs` 见本文件头"结构化输出 + 序列化/恢复"一节）。 */
   toJSON(opts?: { includeFs?: boolean }): SessionState;
 }
@@ -460,34 +468,89 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
    */
   let hasStarted = resumedState !== undefined;
 
+  /**
+   * STEER-1：turn 作用域的 steer 队列 + 活动标志。`stream()` 生成器体开头置
+   * `turnActive = true`，`try/finally` 保证无论 `runTurn` 正常收尾还是抛错都
+   * 复位标志并清空队列——队列绝不跨 turn 存活。`steer()` 只在 `turnActive` 为
+   * 真时接受新条目；实际的排空/注入发生在 `loop.ts` 的两个 drain checkpoint
+   * （经下面 `drainSteers` 回调传入）。
+   */
+  let turnActive = false;
+  let pendingSteers: UserModelMessage[] = [];
+
+  /**
+   * `steer()`'s known gap (STEER-1 §4.2 / STEER-1F): a `turn.failed` raised
+   * by the model or tool-execution error paths (`aborted`/`provider_error`
+   * catches in `loop.ts`) doesn't drain the queue first — content queued
+   * during that in-flight model call/tool execution is dropped when the turn
+   * fails that way, not injected. Not fixed by this method; see loop.ts's
+   * `runTurn` header and docs/02 §4.2 for the up-to-date list of which
+   * termination paths do drain.
+   */
+  function steer(input: Input): boolean {
+    if (!turnActive) return false;
+    pendingSteers.push(toUserModelMessage(input));
+    return true;
+  }
+
   async function* stream(input: Input, turnOpts: TurnOptions = {}): AsyncGenerator<SessionEvent, TurnResult> {
-    await skillFilesMounted;
+    turnActive = true;
+    try {
+      await skillFilesMounted;
 
-    turn += 1;
-    if (!hasStarted) {
-      hasStarted = true;
-      yield { type: "session.started", sessionId: id };
+      turn += 1;
+      if (!hasStarted) {
+        hasStarted = true;
+        yield { type: "session.started", sessionId: id };
+      }
+      yield { type: "turn.started", turn };
+
+      messages.push(toUserModelMessage(input));
+
+      const turnGen = runTurn({
+        model,
+        system,
+        messages,
+        tools,
+        maxTurnsPerRun,
+        maxContextTokens,
+        maxOutputTokens,
+        fs,
+        session: { id, turn },
+        signal: turnOpts.signal,
+        onApproval: opts.onApproval,
+        onceMemory,
+        derivedData,
+        getSkill,
+        drainSteers: () => pendingSteers.splice(0, pendingSteers.length),
+      });
+
+      /**
+       * STEER-3A Finding 4 (§4.2): manual delegation instead of a bare
+       * `yield* turnGen` — `turn.completed`/`turn.failed` are the terminal
+       * events `runTurn` ends on, but a plain `yield*` only lets the
+       * consumer observe one *after* it's already been produced, at which
+       * point `steer()` would still (incorrectly) report an in-flight turn.
+       * Flipping `turnActive = false` the instant one of those two arrives —
+       * strictly *before* yielding it onward — makes a `steer()` call made
+       * in reaction to seeing the terminal event honestly return `false`,
+       * instead of `true` immediately followed by the content being
+       * silently dropped by the `finally` block below.
+       */
+      let next = await turnGen.next();
+      while (!next.done) {
+        const event = next.value;
+        if (event.type === "turn.completed" || event.type === "turn.failed") {
+          turnActive = false;
+        }
+        yield event;
+        next = await turnGen.next();
+      }
+      return next.value;
+    } finally {
+      turnActive = false;
+      pendingSteers = [];
     }
-    yield { type: "turn.started", turn };
-
-    messages.push(toUserModelMessage(input));
-
-    return yield* runTurn({
-      model,
-      system,
-      messages,
-      tools,
-      maxTurnsPerRun,
-      maxContextTokens,
-      maxOutputTokens,
-      fs,
-      session: { id, turn },
-      signal: turnOpts.signal,
-      onApproval: opts.onApproval,
-      onceMemory,
-      derivedData,
-      getSkill,
-    });
   }
 
   async function send(input: Input, turnOpts?: TurnOptions): Promise<TurnResult>;
@@ -531,5 +594,5 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
     return state;
   }
 
-  return { id, fs, readState, derivedData, send, stream, toJSON };
+  return { id, fs, readState, derivedData, send, stream, steer, toJSON };
 }

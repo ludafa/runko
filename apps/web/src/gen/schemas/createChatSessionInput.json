@@ -1,0 +1,7 @@
+{
+  "type": "object",
+  "properties": {
+    "title": { "type": "string", "minLength": 1, "maxLength": 255 }
+  },
+  "x-readme-ref-name": "CreateChatSessionInput"
+}

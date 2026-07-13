@@ -5,12 +5,19 @@
  * schema to import, so this file re-declares the same shapes at the wire
  * boundary and validates every JSON payload against them with
  * `.parse()`/`.safeParse()` before it ever touches app state (project rule:
- * no `any`/`as` at network boundaries). Every exported type here is written
- * so it stays structurally assignable to the corresponding `@nimbo/core`
- * type — the schema shapes are kept in lockstep with `packages/core/src/{types,events}.ts`
- * by hand since the two packages don't share a runtime dependency (§2.3:
- * apps/web imports `@nimbo/core` for types only).
+ * no `any`/`as` at network boundaries).
+ *
+ * `sessionItemSchema`/`sessionEventSchema` are kept assignable to
+ * `@nimbo/core`'s `SessionItem`/`SessionEvent` — not just "by hand", but
+ * compiler-checked: `z.infer<...>`'s output position is covariant, so a
+ * schema *missing* a variant would otherwise still type-check silently (this
+ * bit `apps/server`'s mirror of the same union once already — `user_message`
+ * went missing without `tsc` catching it). The `_...CoversAllVariants`
+ * identity functions right after each schema are the actual enforcement:
+ * every real variant must be assignable to the schema's inferred output,
+ * which fails to compile the moment a variant is missing or narrower.
  */
+import type { SessionEvent, SessionItem } from '@nimbo/core';
 import { z } from 'zod';
 
 // ---- JsonValue (packages/core/src/types.ts) ----
@@ -55,6 +62,11 @@ export const sessionItemSchema = z.discriminatedUnion('type', [
   z.object({ id: z.string(), type: z.literal('reasoning'), text: z.string() }),
   z.object({
     id: z.string(),
+    type: z.literal('user_message'),
+    text: z.string(),
+  }),
+  z.object({
+    id: z.string(),
     type: z.literal('tool_call'),
     toolName: z.string(),
     input: jsonValueSchema,
@@ -76,6 +88,20 @@ export const sessionItemSchema = z.discriminatedUnion('type', [
   z.object({ id: z.string(), type: z.literal('error'), message: z.string() }),
 ]);
 
+/**
+ * Coverage enforcement (see file header): every `SessionItem` variant must
+ * be assignable to `z.infer<typeof sessionItemSchema>` — this identity
+ * function *is* that assignment, so a schema missing a variant (or narrower
+ * than the real one) fails to compile here instead of silently type-checking.
+ */
+const _sessionItemSchemaCoversAllVariants: (
+  item: SessionItem,
+) => z.infer<typeof sessionItemSchema> = (item) => item;
+// `noUnusedLocals` (tsconfig.app.json) doesn't exempt underscore-prefixed
+// locals the way `noUnusedParameters` exempts underscore-prefixed params —
+// this `void` is what keeps the check itself from being flagged as dead code.
+void _sessionItemSchemaCoversAllVariants;
+
 // ---- SessionEvent (packages/core/src/events.ts) ----
 //
 // Core groups item.started/item.updated/item.completed into one union arm
@@ -94,6 +120,19 @@ export const sessionEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('turn.completed'), usage: usageSchema }),
   z.object({ type: z.literal('turn.failed'), error: nimboErrorSchema }),
 ]);
+
+/**
+ * Coverage enforcement (see file header), same pattern as
+ * `_sessionItemSchemaCoversAllVariants` — every `SessionEvent` variant must
+ * be assignable to `z.infer<typeof sessionEventSchema>`. TypeScript
+ * distributes a union-valued discriminant property (`item.*`'s combined
+ * `type: "item.started" | "item.updated" | "item.completed"` arm above) over
+ * the three split branches here, so the split doesn't need a workaround.
+ */
+const _sessionEventSchemaCoversAllVariants: (
+  event: SessionEvent,
+) => z.infer<typeof sessionEventSchema> = (event) => event;
+void _sessionEventSchemaCoversAllVariants;
 
 // ---- turn.result sentinel (docs/08 §2.2: not a core SessionEvent — it's the
 // synthesized wrapper around the stream's TurnResult return value, pushed as

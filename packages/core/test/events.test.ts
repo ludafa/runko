@@ -35,6 +35,8 @@ function describeSessionItem(item: SessionItem): string {
       return `agent_message:${item.text}`;
     case "reasoning":
       return `reasoning:${item.text}`;
+    case "user_message":
+      return `user_message:${item.text}`;
     case "tool_call":
       return `tool_call:${item.toolName}:${item.status}`;
     case "file_change":
@@ -73,19 +75,21 @@ describe("SessionEvent", () => {
 });
 
 describe("SessionItem", () => {
-  it("covers all six item variants exhaustively", () => {
+  it("covers all seven item variants exhaustively", () => {
     const items: SessionItem[] = [
       { id: "1", type: "agent_message", text: "hello" },
       { id: "2", type: "reasoning", text: "thinking..." },
-      { id: "3", type: "tool_call", toolName: "read_file", input: { path: "a.txt" }, status: "completed" },
-      { id: "4", type: "file_change", changes: [{ path: "a.txt", kind: "update" }] },
-      { id: "5", type: "plan_update", items: [{ text: "step 1", completed: true }] },
-      { id: "6", type: "error", message: "boom" },
+      { id: "3", type: "user_message", text: "steered input" },
+      { id: "4", type: "tool_call", toolName: "read_file", input: { path: "a.txt" }, status: "completed" },
+      { id: "5", type: "file_change", changes: [{ path: "a.txt", kind: "update" }] },
+      { id: "6", type: "plan_update", items: [{ text: "step 1", completed: true }] },
+      { id: "7", type: "error", message: "boom" },
     ];
 
     expect(items.map(describeSessionItem)).toEqual([
       "agent_message:hello",
       "reasoning:thinking...",
+      "user_message:steered input",
       "tool_call:read_file:completed",
       "file_change:1",
       "plan_update:1",

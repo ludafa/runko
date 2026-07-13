@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "inputTokens": { "type": "number" },
+    "outputTokens": { "type": "number" },
+    "totalTokens": { "type": "number" },
+    "cachedInputTokens": { "type": "number" }
+  },
+  "x-readme-ref-name": "Usage"
+}

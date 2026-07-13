@@ -171,6 +171,7 @@ interface Session {
   send(input: Input, opts?: TurnOptions): Promise<TurnResult>;
   send<T>(input: Input, opts: TurnOptions & { outputSchema: z.ZodType<T> }): Promise<TurnResult & { structuredOutput: T }>;
   stream(input: Input, opts?: TurnOptions): AsyncGenerator<SessionEvent, TurnResult>;
+  steer(input: Input): boolean;                  // 软 steer（STEER-1 施工回填），见下方说明
   toJSON(opts?: { includeFs?: boolean }): SessionState;
 }
 
@@ -182,6 +183,8 @@ interface TurnResult { items: SessionItem[]; finalResponse: string; usage: Usage
 ```
 
 **SessionOptions 施工补充（P4-2 回填）**：新增 `readState?: SessionReadState`、`derivedData?: DerivedDataCollector` 两个可选注入位，`Session` 相应暴露 `readonly readState` 与 `readonly derivedData`（后者为去掉 `drain` 的窄上报接口）。理由：`agent.tools` 在 `createSession` 时冻结，而依赖 session 存储的外部工具（如 `@nimbo/virtual-fs` 的 `createFileTools`，需要 readState 与 file_change 上报通道）必须在那之前构造——先有鸡后有蛋。修法是宿主可预先构造这两个 store（`createSessionReadState()`/`createDerivedDataCollector()`）、拼进工具后经此注入，session 使用同一实例；未注入时 session 自建，行为不变（纯新增、向后兼容）。`@nimbo/sdk`（P7）的默认装配即走这条通路。core 与 virtual-fs 之间仅靠结构类型兼容，无跨包类型引用。
+
+**`Session.steer`（软 steer，STEER-1 施工回填 / STEER-1F 修复 / STEER-3A Finding 4）**：turn 进行中调用 `steer(input)` 把它排队，在下一个 step checkpoint（两次模型调用之间，不打断进行中的模型流式输出或工具执行）注入为一条 user 消息并返回 `true`；没有进行中的 turn 返回 `false`，调用方应改用 `send`/`stream`。队列是 turn 作用域，turn 结束（正常收尾或抛错）即清空残留。drain 覆盖的落幕路径：`finishReason` 非 tool-calls 的正常收尾、tool-calls 触达 `maxTurnsPerRun` 预算上限、以及预算 `<= 0` 的兜底分支——三处均在 yield 终止事件之前先 drain 一次（连同循环顶部的常规 checkpoint），保证已排队的 steer 不被静默吞掉：仍有步数预算时收尾让位给多跑一步，让模型看到；已无预算（`max_turns` 路径）时 drain 到的内容仍会进 `messages`（跨 turn 持久）与 `items`，只是这个 turn 本身仍以 `turn.failed`/`max_turns` 收场。**已知缺口**：模型调用/工具执行本身抛错触发的 `turn.failed`（`aborted`/`provider_error`）尚不在这几个 drain 点之内，那期间排队的 steer 目前仍会被静默丢弃——留作后续工单。**`turnActive` 的复位时机**：`stream()` 在 `turn.completed`/`turn.failed` 被 yield 给消费者*之前*就复位 `turnActive`（不是等生成器整体收尾的 `finally`）——消费者一旦观察到终止事件，同一 tick 里再调 `steer()` 会诚实返回 `false`，不会出现"返回 `true` 但内容其实已经进不去、被静默丢弃"的假阳性。
 
 **事件模型**：session/turn 生命周期命名靠 eve，item 粒度沿 codex-sdk（eve 的 HTTP 事件 `actions.requested/action.result` 对 SDK 消费太粗，拿不到文本增量与工具中间进度）：
 
@@ -196,6 +199,7 @@ type SessionEvent =
 type SessionItem =
   | { id: string; type: "agent_message"; text: string }
   | { id: string; type: "reasoning"; text: string }
+  | { id: string; type: "user_message"; text: string }     // steer() 注入的用户消息（STEER-1）；发起 turn 的输入本身不产生 item
   | { id: string; type: "tool_call"; toolName: string; input: JsonValue; output?: ToolOutput;
       status: "in_progress" | "completed" | "failed" | "denied" }
   | { id: string; type: "file_change"; changes: { path: string; kind: "add" | "update" | "delete" }[] }

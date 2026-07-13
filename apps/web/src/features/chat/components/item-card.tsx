@@ -42,6 +42,15 @@ export function ItemCard({
       );
     case 'reasoning':
       return <ReasoningBlock text={item.text} streaming={streaming} />;
+    case 'user_message':
+      // steer()-injected mid-turn message — same bubble as the turn-initiating
+      // 'user-message' timeline entry (timeline-view.tsx), since both are just
+      // user text from the host's point of view.
+      return (
+        <Message from="user">
+          <MessageContent from="user">{item.text}</MessageContent>
+        </Message>
+      );
     case 'tool_call':
       return <ToolCallCard item={item} />;
     case 'file_change':

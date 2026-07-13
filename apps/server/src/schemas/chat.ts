@@ -4,9 +4,22 @@ import type { JsonValue, SessionEvent, SessionItem } from '@nimbo/core';
 // ---------------------------------------------------------------------------
 // Wire mirror of @nimbo/core's `SessionEvent`/`SessionItem` discriminated
 // unions (docs/08-chat-agent-webapp.md §2.2's `{ seq, event }` SSE envelope).
+//
 // `z.ZodType<T>` annotations (same technique as @nimbo/core's own
-// `state.ts`/`types.ts`) make the compiler enforce that this schema stays a
-// structural match for the real type — a drift either way fails `tsc`.
+// `state.ts`/`types.ts`) only constrain a schema's *input* position — its
+// *output* (`z.infer<...>`) is covariant, so a schema that's missing a
+// variant still satisfies `z.ZodType<T>` and silently compiles (this bit the
+// repo once already: `sessionItemSchema` drifted out of sync with
+// `SessionItem` and `tsc` said nothing). Worse: `z.infer<typeof exported>`
+// where `exported` is *itself* annotated `z.ZodType<T>` just reads back the
+// annotation `T` — the annotation erases the schema's real, narrower
+// inferred shape, so a naive coverage check against the annotated export is
+// circular and always "passes". Each `*Schema` below is therefore built as
+// an **unannotated** `z.union([...])` first (its `z.infer` reflects the true
+// structural shape of the branches actually listed) and only wrapped in a
+// `z.ZodType<T>`-annotated export afterwards; the `_...CoversAllVariants`
+// identity function right after each one checks against the *unannotated*
+// value — that's what actually fails to compile when a variant goes missing.
 // ---------------------------------------------------------------------------
 
 /**
@@ -71,13 +84,18 @@ const nimboErrorSchema = z
   })
   .openapi('NimboError');
 
-export const sessionItemSchema: z.ZodType<SessionItem> = z.union([
+const sessionItemUnion = z.union([
   z.object({
     id: z.string(),
     type: z.literal('agent_message'),
     text: z.string(),
   }),
   z.object({ id: z.string(), type: z.literal('reasoning'), text: z.string() }),
+  z.object({
+    id: z.string(),
+    type: z.literal('user_message'),
+    text: z.string(),
+  }),
   z.object({
     id: z.string(),
     type: z.literal('tool_call'),
@@ -101,7 +119,20 @@ export const sessionItemSchema: z.ZodType<SessionItem> = z.union([
   z.object({ id: z.string(), type: z.literal('error'), message: z.string() }),
 ]);
 
-export const sessionEventSchema: z.ZodType<SessionEvent> = z.union([
+/**
+ * Coverage enforcement (see file header): every `SessionItem` variant must
+ * be assignable to `z.infer<typeof sessionItemUnion>` (the *unannotated*
+ * union, not the annotated `sessionItemSchema` export below) — this identity
+ * function *is* that assignment, so a schema missing a variant (or narrower
+ * than the real one) fails to compile here instead of silently type-checking.
+ */
+const _sessionItemSchemaCoversAllVariants: (
+  item: SessionItem,
+) => z.infer<typeof sessionItemUnion> = (item) => item;
+
+export const sessionItemSchema: z.ZodType<SessionItem> = sessionItemUnion;
+
+const sessionEventUnion = z.union([
   z.object({ type: z.literal('session.started'), sessionId: z.string() }),
   z.object({ type: z.literal('turn.started'), turn: z.number() }),
   z.object({ type: z.literal('item.started'), item: sessionItemSchema }),
@@ -110,6 +141,13 @@ export const sessionEventSchema: z.ZodType<SessionEvent> = z.union([
   z.object({ type: z.literal('turn.completed'), usage: usageSchema }),
   z.object({ type: z.literal('turn.failed'), error: nimboErrorSchema }),
 ]);
+
+/** Same coverage enforcement as `_sessionItemSchemaCoversAllVariants`, against the unannotated `sessionEventUnion`, for `SessionEvent`. */
+const _sessionEventSchemaCoversAllVariants: (
+  event: SessionEvent,
+) => z.infer<typeof sessionEventUnion> = (event) => event;
+
+export const sessionEventSchema: z.ZodType<SessionEvent> = sessionEventUnion;
 
 /**
  * Two wire-only members on top of `@nimbo/core`'s `SessionEvent` (docs/08
@@ -172,12 +210,20 @@ export type TurnFailedSentinel = z.infer<typeof turnFailedSentinelSchema>;
 export type ChatStreamEvent =
   SessionEvent | UserMessageEvent | TurnResultSentinel | TurnFailedSentinel;
 
-export const chatStreamEventSchema: z.ZodType<ChatStreamEvent> = z.union([
+const chatStreamEventUnion = z.union([
   sessionEventSchema,
   userMessageEventSchema,
   turnResultSentinelSchema,
   turnFailedSentinelSchema,
 ]);
+
+/** Same coverage enforcement as `_sessionEventSchemaCoversAllVariants`, against the unannotated `chatStreamEventUnion`, for `ChatStreamEvent`. */
+const _chatStreamEventSchemaCoversAllVariants: (
+  event: ChatStreamEvent,
+) => z.infer<typeof chatStreamEventUnion> = (event) => event;
+
+export const chatStreamEventSchema: z.ZodType<ChatStreamEvent> =
+  chatStreamEventUnion;
 
 export const chatEventEnvelopeSchema = z
   .object({

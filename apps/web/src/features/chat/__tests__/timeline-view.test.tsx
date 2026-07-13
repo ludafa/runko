@@ -80,6 +80,47 @@ describe('TimelineView', () => {
     expect(screen.getAllByText(SAMPLE_USER_MESSAGE_TEXT)).toHaveLength(1);
   });
 
+  it('renders a steer()-injected user_message item through the same from="user" bubble as the turn-initiating user.message (local-review Finding 1 / STEER §4.2)', () => {
+    const steeredText = '补充：也顺便检查一下登录页的 API 超时时间';
+    const envelopes: ChatStreamEnvelope[] = [
+      { seq: 1, event: { type: 'session.started', sessionId: 'sess_steer' } },
+      { seq: 2, event: { type: 'user.message', text: '先看看登录页面' } },
+      { seq: 3, event: { type: 'turn.started', turn: 1 } },
+      {
+        seq: 4,
+        event: {
+          type: 'item.completed',
+          item: { id: 'u1', type: 'user_message', text: steeredText },
+        },
+      },
+      {
+        seq: 5,
+        event: {
+          type: 'item.completed',
+          item: { id: 'a1', type: 'agent_message', text: '好的，都检查一下。' },
+        },
+      },
+      { seq: 6, event: { type: 'turn.completed', usage: {} } },
+      {
+        seq: 7,
+        event: {
+          type: 'turn.result',
+          finalResponse: '好的，都检查一下。',
+          usage: {},
+        },
+      },
+    ];
+
+    render(<TimelineView envelopes={envelopes} />);
+
+    const steeredBubble = screen.getByText(steeredText);
+    expect(steeredBubble).toBeInTheDocument();
+    // `bg-secondary` is `MessageContent`'s `from="user"`-only styling (message.tsx) — its
+    // presence is what actually distinguishes "rendered via the user bubble branch" from,
+    // say, an assistant/plain-text rendering that happens to contain the same string.
+    expect(steeredBubble.closest('.bg-secondary')).not.toBeNull();
+  });
+
   it('does not duplicate the user bubble once optimisticMessages no longer holds the confirmed entry', () => {
     // Mirrors what useChatMessages does the instant the real `user.message`
     // envelope arrives: it's already in `envelopes` (confirmed) and has been

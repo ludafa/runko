@@ -52,6 +52,8 @@ export type SessionEvent =
 export type SessionItem =
   | { id: string; type: "agent_message"; text: string }
   | { id: string; type: "reasoning"; text: string }
+  /** turn 进行中经 `Session.steer()` 注入的用户消息（STEER-1）——发起 turn 的输入本身不产生 item。 */
+  | { id: string; type: "user_message"; text: string }
   | {
       id: string;
       type: "tool_call";

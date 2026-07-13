@@ -64,7 +64,7 @@
  *   `maxContextTokens` 时完全跳过这项检查（opt-in）。
  */
 import { randomUUID } from "node:crypto";
-import type { LanguageModel, ModelMessage, ToolResultPart } from "ai";
+import type { LanguageModel, ModelMessage, ToolResultPart, UserModelMessage } from "ai";
 import type { NimboError, SessionEvent, SessionItem, Usage } from "./events.js";
 import type { ApprovalPolicy, NimboFS, SkillHandle, Tool, ToolReturn } from "./types.js";
 import { runStep } from "./model/step.js";
@@ -137,6 +137,48 @@ function toToolResultOutput(status: ToolCallStatus, output: ToolReturn): ToolRes
   if (status === "completed") return { type: "text", value: text };
   if (status === "denied") return { type: "execution-denied", reason: text };
   return { type: "error-text", value: text };
+}
+
+// ---- steer（STEER-1）：turn 进行中经 `Session.steer()` 排队的 user 消息 ----
+
+/**
+ * `SessionItem.user_message` 展示用的纯文本摘要，不是回填给模型的那份——后者
+ * 是 `UserModelMessage` 本身，原样 push 进 `opts.messages`。`content` 为字符串
+ * 直用；为数组时拼接全部 `text` part，非文本 part（image/file）以 `"[image]"`
+ * 占位——裁量：宿主 UI 的摘要不需要完整还原多模态输入，模型看到的完整内容
+ * 不受这份摘要影响。
+ */
+function steerMessageText(message: UserModelMessage): string {
+  if (typeof message.content === "string") return message.content;
+  return message.content.map((part) => (part.type === "text" ? part.text : "[image]")).join("");
+}
+
+/**
+ * `opts.drainSteers` 排空到 `messages`/`allItems`，并为每条 yield 一个
+ * `item.completed`（`user_message`）。**危险窗口不变量**：Anthropic 与
+ * OpenAI 兼容（含 DeepSeek）两家 provider 都要求 tool-call 与其 tool-result
+ * 严格相邻配对——本文件下方 `opts.messages.push(...stepOutcome.stepResult
+ * .responseMessages)`（assistant，含 tool-call parts）与紧接着的
+ * `opts.messages.push({ role: "tool", ... })` 之间是一段绝不能被别的消息打断
+ * 的窗口，否则 provider 直接 400。这个函数只在 `runTurn` 的两个安全 checkpoint
+ * 被调用（for 循环顶部、finishReason 非 tool-calls 的收尾分支），两处都严格落
+ * 在一对 assistant/tool 消息完整 push 完之后、下一次 `streamText` 之前，因此
+ * 永远不会落进那个窗口。
+ */
+async function* drainSteerMessages(
+  drainSteers: (() => UserModelMessage[]) | undefined,
+  messages: ModelMessage[],
+  allItems: SessionItem[],
+): AsyncGenerator<SessionEvent, UserModelMessage[]> {
+  if (drainSteers === undefined) return [];
+  const drained = drainSteers();
+  for (const message of drained) {
+    messages.push(message);
+    const item: SessionItem = { id: newItemId(), type: "user_message", text: steerMessageText(message) };
+    allItems.push(item);
+    yield { type: "item.completed", item };
+  }
+  return drained;
 }
 
 // ---- 单步的事件翻译（text/reasoning 增量聚合 + tool-call 识别） ----
@@ -368,6 +410,13 @@ export interface RunTurnOptions {
    * `executeToolCall` 退回它自己的占位实现，行为不变。
    */
   getSkill?: (name: string) => SkillHandle;
+  /**
+   * STEER-1：`session.ts` 持有的 turn 作用域 steer 队列排空器——调用即返回
+   * 队列当前全部条目并清空。可选，未提供时两个 drain checkpoint 都是
+   * no-op（`drainSteerMessages` 的 `undefined` 分支），行为与本工单之前完全
+   * 一致。
+   */
+  drainSteers?: () => UserModelMessage[];
 }
 
 export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<SessionEvent, TurnResult> {
@@ -378,6 +427,9 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<SessionEven
   let contextCalibration = 1;
 
   for (let stepIndex = 1; stepIndex <= opts.maxTurnsPerRun; stepIndex++) {
+    // Checkpoint A：先 drain steer 队列再估算上下文，保证注入的消息计入预算。
+    yield* drainSteerMessages(opts.drainSteers, opts.messages, allItems);
+
     if (opts.maxContextTokens !== undefined) {
       const estimated = estimateMessagesTokens(opts.messages, opts.system) * contextCalibration;
       if (estimated > opts.maxContextTokens) {
@@ -423,8 +475,24 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<SessionEven
     opts.messages.push(...stepOutcome.stepResult.responseMessages);
 
     if (stepOutcome.stepResult.finishReason !== "tool-calls") {
-      yield { type: "turn.completed", usage };
-      return { items: allItems, finalResponse, usage };
+      // Checkpoint B：turn 即将收尾——先 drain，保证排队中的 steer 不被吞掉。
+      const drainedAtFinish = yield* drainSteerMessages(opts.drainSteers, opts.messages, allItems);
+      if (drainedAtFinish.length === 0) {
+        yield { type: "turn.completed", usage };
+        return { items: allItems, finalResponse, usage };
+      }
+      if (stepIndex === opts.maxTurnsPerRun) {
+        const error: NimboError = {
+          code: "max_turns",
+          message:
+            `Reached maxTurnsPerRun (${opts.maxTurnsPerRun}) — steer() queued a message after the model ` +
+            "finished responding and it needs one more step to see it, but no steps remain.",
+        };
+        yield { type: "turn.failed", error };
+        return { items: allItems, finalResponse, usage };
+      }
+      // 队列非空且还有步数预算——不发 turn.completed，让模型在下一步看到 steer 内容。
+      continue;
     }
 
     let toolOutcome: ToolExecutionResult;
@@ -453,6 +521,12 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<SessionEven
     opts.messages.push({ role: "tool", content: toolOutcome.toolResultParts });
 
     if (stepIndex === opts.maxTurnsPerRun) {
+      // STEER-1F：预算耗尽、即将 turn.failed 之前也要 drain 一次——工具执行
+      // 期间（`executeStepToolCalls` 运行时）调用的 steer() 不能被这里静默吞
+      // 掉。这个 turn 已经没有预算再多跑一步，drain 到的内容仍然进
+      // messages（跨 turn 持久，下一个 turn 的模型能看到）与 allItems，即便
+      // 这个 turn 本身仍以 max_turns 收场。
+      yield* drainSteerMessages(opts.drainSteers, opts.messages, allItems);
       const error: NimboError = {
         code: "max_turns",
         message: `Reached maxTurnsPerRun (${opts.maxTurnsPerRun}) — the model still requested tool calls with no steps left.`,
@@ -462,7 +536,12 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<SessionEven
     }
   }
 
-  // 只在 `maxTurnsPerRun <= 0`（零/负预算，连第一步都不允许）时到达此处。
+  // 只在 `maxTurnsPerRun <= 0`（零/负预算，连第一步都不允许）时到达此处——循环体
+  // （含 Checkpoint A）从未执行过一次，队列里只可能是 turn 刚开始、`runTurn`
+  // 被调用前那个极窄的 await 窗口里排队的内容（见 session.ts `stream()` 的
+  // `turnActive = true` 早于 `await skillFilesMounted`）。同样先 drain 一次，
+  // 不让这种边界竞态下的 steer 被静默吞掉。
+  yield* drainSteerMessages(opts.drainSteers, opts.messages, allItems);
   const error: NimboError = {
     code: "max_turns",
     message: `maxTurnsPerRun (${opts.maxTurnsPerRun}) leaves no steps to run.`,

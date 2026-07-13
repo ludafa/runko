@@ -162,6 +162,20 @@ components:
                         type:
                           type: string
                           enum:
+                            - user_message
+                        text:
+                          type: string
+                      required:
+                        - id
+                        - type
+                        - text
+                    - type: object
+                      properties:
+                        id:
+                          type: string
+                        type:
+                          type: string
+                          enum:
                             - tool_call
                         toolName:
                           type: string
@@ -295,6 +309,20 @@ components:
                         type:
                           type: string
                           enum:
+                            - user_message
+                        text:
+                          type: string
+                      required:
+                        - id
+                        - type
+                        - text
+                    - type: object
+                      properties:
+                        id:
+                          type: string
+                        type:
+                          type: string
+                          enum:
                             - tool_call
                         toolName:
                           type: string
@@ -415,6 +443,20 @@ components:
                           type: string
                           enum:
                             - reasoning
+                        text:
+                          type: string
+                      required:
+                        - id
+                        - type
+                        - text
+                    - type: object
+                      properties:
+                        id:
+                          type: string
+                        type:
+                          type: string
+                          enum:
+                            - user_message
                         text:
                           type: string
                       required:
