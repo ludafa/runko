@@ -14,3 +14,6 @@ apps/server/data.db
 # lantai 本地工具数据（判断日志 + 上传游标）—— 由本地 lantai dev server 存储，不入库
 .lantie_history
 .lantie_state.json
+
+# Claude Code 临时产物
+.tmp/
