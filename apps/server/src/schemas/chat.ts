@@ -327,16 +327,36 @@ const _chatStreamEventSchemaCoversAllVariants: (
 export const chatStreamEventSchema: z.ZodType<ChatStreamEvent> =
   chatStreamEventUnion;
 
+/**
+ * `seq` is a two-layer signal (docs/08 §2.2d, "transcript 减量：durable/
+ * ephemeral 分层"): **present ⇔ this envelope was persisted and is replayable**
+ * (`agent_events`, `GET .../stream?after=<seq>`'s continuation cursor);
+ * **absent ⇔ an ephemeral live-only frame** — today exactly `item.updated`'s
+ * per-tick "accumulated text so far" (`createEmitWire` in turn-runner.ts
+ * broadcasts it straight to subscribers without persisting or consuming a
+ * seq number). A reconnecting client only ever needs the seq'd envelopes to
+ * pick its `after=` cursor and dedupe overlap; ephemeral frames exist purely
+ * for the live typewriter effect and vanish on reconnect (the next
+ * `item.completed` — always seq'd — resettles the item's final text).
+ */
 export const chatEventEnvelopeSchema = z
   .object({
-    seq: z.number().int(),
+    seq: z.number().int().optional(),
     event: chatStreamEventSchema,
   })
   .openapi('ChatEventEnvelope');
 
 export type ChatEventEnvelope = z.infer<typeof chatEventEnvelopeSchema>;
 
-/** `GET .../events` response shape (docs/08 §2.2 "契约细化", front-end-consumed contract — NOT a bare array). */
+/**
+ * `GET .../events` response shape (docs/08 §2.2 "契约细化", front-end-consumed
+ * contract — NOT a bare array). Reuses `chatEventEnvelopeSchema` as-is rather
+ * than a seq-required variant: this route only ever reads back persisted
+ * `agent_events` rows (docs/08 §2.2d), so every envelope it returns carries a
+ * `seq` in practice — the shared schema's `seq` being *typed* optional is
+ * just the envelope shape's general contract, not a claim that this
+ * particular endpoint ever omits one.
+ */
 export const ChatEventsListSchema = z
   .object({ events: z.array(chatEventEnvelopeSchema) })
   .openapi('ChatEventsList');

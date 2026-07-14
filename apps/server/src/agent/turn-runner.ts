@@ -5,8 +5,9 @@
  * `POST .../messages` (`routes/chat.ts`) only *starts* it (`startTurn`),
  * `GET .../stream` only *observes* it (`subscribeTurn`/`isTurnActive`). A
  * client disconnecting (page refresh, HMR, network blip) never interrupts
- * the turn: every event is persisted (`agent_events`, monotonic `seq`)
- * before it's ever handed to a subscriber, so a fresh
+ * the turn: every event — except `item.updated`'s ephemeral typewriter ticks
+ * (docs/08 §2.2d, see `createEmitWire`) — is persisted (`agent_events`,
+ * monotonic `seq`) before it's ever handed to a subscriber, so a fresh
  * `GET .../stream?after=<seq>` on reconnect replays whatever was missed and
  * then keeps forwarding live events until the turn ends.
  *
@@ -144,6 +145,24 @@ function describeError(error: unknown): string {
  * turn — `session.stream()`'s own, the terminal sentinels, and the approval
  * pair — on one single monotonic `seq`. `getMaxEventSeq` runs synchronously
  * here at `startTurn`-time, same as it always did at the top of `driveTurn`.
+ *
+ * Durable/ephemeral split (docs/08 §2.2d, P13-1): `item.updated` is the one
+ * event type this closure treats differently. `loop.ts` re-yields it once per
+ * appended delta with the item's *entire accumulated text so far*, so
+ * persisting every tick the way every other event is persisted makes storage
+ * grow quadratically with message length (measured: one real turn produced
+ * 9861 events, 9682 of them — 98% — `item.updated` ticks). `item.completed`
+ * already carries the authoritative final text and *is* persisted, so a
+ * replay never needs the intermediate ticks to reconstruct the final
+ * timeline (`buildTimeline` on the web side folds `item.*` by id anyway).
+ * `item.updated` therefore skips both `seq += 1` and `appendAgentEvent` —
+ * straight broadcast, envelope carries no `seq` at all (see
+ * `chatEventEnvelopeSchema`'s doc comment). This is the load-bearing
+ * invariant the rest of the split leans on: because ephemeral frames never
+ * consume a seq number, the persisted stream has no gaps and a process
+ * restart's `getMaxEventSeq`-continuation never has to account for skipped
+ * numbers — `seq` monotonicity among *persisted* events is exactly as simple
+ * as it was before this split.
  */
 function createEmitWire(
   db: Db,
@@ -152,6 +171,10 @@ function createEmitWire(
 ): EmitWire {
   let seq = getMaxEventSeq(db, sessionId);
   return function emit(event: ChatStreamEvent): void {
+    if (event.type === 'item.updated') {
+      emitter.emit('event', { event } satisfies ChatEventEnvelope);
+      return;
+    }
     seq += 1;
     appendAgentEvent(db, {
       sessionId,

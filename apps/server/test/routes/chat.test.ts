@@ -11,9 +11,10 @@ import type {
 } from '../../src/agent/sandbox-manager.js';
 import type { Db } from '../../src/agent/store.js';
 import { getChatSession, listAgentEvents } from '../../src/agent/store.js';
-import { startTurn } from '../../src/agent/turn-runner.js';
+import { isTurnActive, startTurn } from '../../src/agent/turn-runner.js';
 import { createChatApp } from '../../src/routes/chat.js';
 import type { ChatSessionDto } from '../../src/schemas/chat.js';
+import { chatEventEnvelopeSchema } from '../../src/schemas/chat.js';
 import { createControllableSession } from '../helpers/controllable-session.js';
 import type { FakeSandboxManager } from '../helpers/fake-sandbox-manager.js';
 import { createFakeSandboxManager } from '../helpers/fake-sandbox-manager.js';
@@ -57,7 +58,13 @@ function parseSseFrames(body: string): SseFrame[] {
 }
 
 interface ParsedEnvelope {
-  seq: number;
+  // Optional (docs/08 §2.2d): present ⇔ persisted; absent ⇔ an ephemeral
+  // `item.updated` tick (`createEmitWire` in turn-runner.ts never assigns one
+  // to those envelopes at all — see the "durable/ephemeral split" tests
+  // below, which assert `'seq' in envelope === false` rather than
+  // `=== undefined`, since `JSON.parse`/`JSON.stringify` genuinely omits the
+  // key, it isn't merely `undefined`-valued).
+  seq?: number;
   event: { type: string; [key: string]: unknown };
 }
 
@@ -70,6 +77,18 @@ function parseEnvelopes(body: string): ParsedEnvelope[] {
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
+  });
+}
+
+/**
+ * Same role as turn-runner.test.ts's own `flushMicrotasks` — draining a
+ * `ControllableSession`'s wake/queue dance (promise-resolution-driven, no
+ * timers) after a `pushEvent`, so a subsequent synchronous assertion (or DB
+ * read) sees its effects landed.
+ */
+function flushMicrotasks(): Promise<void> {
+  return new Promise((resolve) => {
+    setImmediate(resolve);
   });
 }
 
@@ -598,6 +617,214 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
 
     const row = getChatSession(db, created.id, USER_ID);
     expect(row?.nimboStateJson).toBeNull();
+  });
+
+  // -------------------------------------------------------------------------
+  // Durable/ephemeral split (docs/08 §2.2d, P13-1) — the stream route's own
+  // half of `createEmitWire`'s split: the `replayDone` guard in
+  // `subscribeTurn`'s callback (drop an ephemeral tick that arrives before
+  // the replay has finished flushing) and `flushBuffered`'s no-`maxSentSeq`
+  // forwarding for ephemeral frames once it has.
+  // -------------------------------------------------------------------------
+
+  describe('durable/ephemeral split (docs/08 §2.2d) — GET .../stream', () => {
+    it('an ephemeral item.updated that arrives before the replay has finished flushing is dropped — it never reaches this connection’s SSE output', async () => {
+      const app = buildApp(() => stopOnlyModel('unused'));
+      const created = await createSession(app);
+
+      const fake = createControllableSession();
+      startTurn({ db, sessionId: created.id, session: fake, text: 'hi' }); // seq 1, persisted synchronously
+      fake.pushEvent({ type: 'session.started', sessionId: created.id }); // seq 2
+      await flushMicrotasks();
+      expect(listAgentEvents(db, created.id).map((row) => row.type)).toEqual([
+        'user.message',
+        'session.started',
+      ]);
+
+      // Open the stream but deliberately don't read its body yet. The route's
+      // replay loop writes each persisted row via `stream.writeSSE()`, which
+      // is backed by a `TransformStream` whose default queuing strategy means
+      // a `write()` doesn't resolve until *some* `read()` has been issued on
+      // the consumer side (verified empirically for this exact helper stack —
+      // see `createIncrementalReader`'s own doc comment above). So at this
+      // point `subscribeTurn` has already registered (it runs synchronously,
+      // before the replay loop's first `await`), but the replay loop itself —
+      // and therefore `replayDone` — is still stuck on its very first write.
+      const response = await app.request(
+        `/api/chat/sessions/${created.id}/stream`,
+      );
+
+      // This lands squarely in that window: the route's subscribeTurn
+      // callback runs synchronously off this emit, sees `replayDone` still
+      // false, and drops it before it's ever buffered.
+      fake.pushEvent({
+        type: 'item.updated',
+        item: {
+          id: 'm1',
+          type: 'agent_message',
+          text: 'stale half-typed text',
+        },
+      });
+      await flushMicrotasks();
+
+      // Now actually drain the response — this is what relieves the
+      // backpressure and lets the replay (and then the live tail) proceed.
+      const reader = createIncrementalReader(response);
+      fake.finish({ items: [], finalResponse: 'done', usage: {} });
+      const envelopes = await reader.drainToClose();
+
+      expect(envelopes.some((e) => e.event.type === 'item.updated')).toBe(
+        false,
+      );
+      expect(envelopes.map((e) => e.event.type)).toEqual([
+        'user.message',
+        'session.started',
+        'turn.result',
+      ]);
+      expect(envelopes.map((e) => e.seq)).toEqual([1, 2, 3]);
+    });
+
+    it('a live-phase ephemeral item.updated (after the replay has fully flushed) is forwarded with no `seq` field, and the surrounding persisted events still dedupe correctly — the ephemeral frame never bumps maxSentSeq', async () => {
+      const app = buildApp(() => stopOnlyModel('unused'));
+      const created = await createSession(app);
+
+      const fake = createControllableSession();
+      startTurn({ db, sessionId: created.id, session: fake, text: 'hi' }); // seq 1
+
+      const response = await app.request(
+        `/api/chat/sessions/${created.id}/stream`,
+      );
+      const reader = createIncrementalReader(response);
+      await reader.readUntil((envs) =>
+        envs.some((e) => e.event.type === 'user.message'),
+      );
+      // The single persisted row has now been flushed and acknowledged by the
+      // reader above — `replayDone` is true and the route is in its live-wait
+      // loop from here on.
+
+      fake.pushEvent({
+        type: 'item.updated',
+        item: { id: 'm1', type: 'agent_message', text: 'typing...' },
+      });
+      const afterUpdate = await reader.readUntil((envs) =>
+        envs.some((e) => e.event.type === 'item.updated'),
+      );
+      const updatedEnvelope = afterUpdate.find(
+        (e) => e.event.type === 'item.updated',
+      );
+      expect(updatedEnvelope).toBeDefined();
+      expect(updatedEnvelope !== undefined && 'seq' in updatedEnvelope).toBe(
+        false,
+      );
+
+      fake.pushEvent({
+        type: 'item.completed',
+        item: { id: 'm1', type: 'agent_message', text: 'typed' },
+      }); // seq 2
+      await reader.readUntil((envs) =>
+        envs.some((e) => e.event.type === 'item.completed'),
+      );
+
+      fake.finish({ items: [], finalResponse: 'done', usage: {} }); // seq 3
+      const envelopes = await reader.drainToClose();
+
+      expect(envelopes.map((e) => e.event.type)).toEqual([
+        'user.message',
+        'item.updated',
+        'item.completed',
+        'turn.result',
+      ]);
+      const persistedEnvelopes = envelopes.filter(
+        (e) => e.event.type !== 'item.updated',
+      );
+      expect(persistedEnvelopes.map((e) => e.seq)).toEqual([1, 2, 3]); // no gaps/dups — the ephemeral frame never touched maxSentSeq bookkeeping
+    });
+
+    it('a fully-replayed turn with no live turn active never surfaces an item.updated (it was never persisted) and the stream closes right after replay, same as before this split', async () => {
+      const app = buildApp(() => stopOnlyModel('unused'));
+      const created = await createSession(app);
+
+      const fake = createControllableSession();
+      startTurn({ db, sessionId: created.id, session: fake, text: 'hi' }); // seq 1
+      fake.pushEvent({
+        type: 'item.started',
+        item: { id: 'm1', type: 'agent_message', text: '' },
+      }); // seq 2
+      await flushMicrotasks();
+      fake.pushEvent({
+        type: 'item.updated',
+        item: { id: 'm1', type: 'agent_message', text: 'partial' },
+      }); // ephemeral — never persisted
+      await flushMicrotasks();
+      fake.pushEvent({
+        type: 'item.completed',
+        item: { id: 'm1', type: 'agent_message', text: 'final' },
+      }); // seq 3
+      await flushMicrotasks();
+      fake.finish({ items: [], finalResponse: 'final', usage: {} }); // seq 4
+      await flushMicrotasks();
+      expect(isTurnActive(created.id)).toBe(false);
+
+      const response = await app.request(
+        `/api/chat/sessions/${created.id}/stream`,
+      );
+      const envelopes = parseEnvelopes(await response.text());
+      expect(envelopes.map((e) => e.event.type)).toEqual([
+        'user.message',
+        'item.started',
+        'item.completed',
+        'turn.result',
+      ]);
+      expect(envelopes.every((e) => e.event.type !== 'item.updated')).toBe(
+        true,
+      );
+      expect(envelopes.map((e) => e.seq)).toEqual([1, 2, 3, 4]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // schemas/chat: chatEventEnvelopeSchema (docs/08 §2.2d — seq is optional)
+  // -------------------------------------------------------------------------
+
+  describe('schemas/chat: chatEventEnvelopeSchema (docs/08 §2.2d)', () => {
+    const sampleEvent = {
+      type: 'session.started' as const,
+      sessionId: 'sess-1',
+    };
+
+    it('parses an envelope with no `seq` key at all — the ephemeral shape', () => {
+      const result = chatEventEnvelopeSchema.safeParse({ event: sampleEvent });
+      expect(result.success).toBe(true);
+    });
+
+    it('parses an envelope carrying an integer `seq` — the persisted shape', () => {
+      const result = chatEventEnvelopeSchema.safeParse({
+        seq: 1,
+        event: sampleEvent,
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects a non-integer seq (e.g. 1.5)', () => {
+      const result = chatEventEnvelopeSchema.safeParse({
+        seq: 1.5,
+        event: sampleEvent,
+      });
+      expect(result.success).toBe(false);
+    });
+
+    // Documents actual behavior, not a claim this should be relied on: the
+    // schema only constrains `seq` with `.int()`, not `.nonnegative()` — a
+    // negative value round-trips fine here even though the server itself
+    // never produces one (`createEmitWire`'s seq only ever counts up from
+    // `getMaxEventSeq`). See this work order's own report for a note on this.
+    it('does NOT reject a negative seq — the schema has no .nonnegative() constraint', () => {
+      const result = chatEventEnvelopeSchema.safeParse({
+        seq: -1,
+        event: sampleEvent,
+      });
+      expect(result.success).toBe(true);
+    });
   });
 
   // -------------------------------------------------------------------------

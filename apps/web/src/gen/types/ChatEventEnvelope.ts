@@ -131,9 +131,9 @@ export type EventTypeEnum7Key =
 
 export type ChatEventEnvelope = {
   /**
-   * @type integer
+   * @type integer | undefined
    */
-  seq: number;
+  seq?: number;
   event:
     | {
         /**

@@ -590,7 +590,6 @@ components:
             - $ref: "#/components/schemas/ChatQuestionAsked"
             - $ref: "#/components/schemas/ChatQuestionAnswered"
       required:
-        - seq
         - event
     Usage:
       type: object
@@ -1037,7 +1036,9 @@ paths:
         "200":
           description: "SSE stream of `{ seq, event }` frames: replay, then live tail
             (closes once the turn ends, or immediately after replay if no turn
-            is in progress)"
+            is in progress). Some frames omit `seq` (docs/08 §2.2d) — those are
+            ephemeral `item.updated` typewriter ticks, never persisted and never
+            replayed; every other frame always carries one"
           content:
             text/event-stream:
               schema:

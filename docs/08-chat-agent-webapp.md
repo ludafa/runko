@@ -72,6 +72,15 @@
 - **web**：`use-chat-messages` 折叠四个事件为 approval/question 时间线条目（pending/resolved/expired 三态；terminal 哨兵或 tail 无活跃 turn 收尾时过期）；`approval-card`（工具 + 命令预览 + Allow/Deny）、`question-card`（问题 + options 快捷按钮 + 自由文本作答）；ask_user 的 tool_call 卡片仅 failed/denied 时渲染（避免与 question 卡片双显）。
 - **边界**：进程重启丢内存态 pending（与 `activeTurns` 同款 v1 取舍，web 端"已失效"兜底）；`"once"` 审批记忆不跨轮（chat 每轮重建 session，onceMemory 不进 SessionState）——策略里不用 `"once"`；审批/提问挂起期间 steer 照常排队，无冲突。
 
+### 2.2d transcript 减量：durable/ephemeral 分层（P13-1，2026-07-14 用户确认）
+
+**动机**：`item.updated` 每 tick 携带**累积全文**（loop.ts 的 `existing.text += delta` 后整段 yield），server 逐 tick 原样落库 → 存储量是消息长度的平方级（实证：P11-2 一轮 9861 事件中 9682 条是 updated tick，占 98%）。updated 是过程态、completed 才是权威——回放本来就不需要打字机 tick（web 的 `buildTimeline` 按 item id upsert 折叠，started+completed 足以重建终态时间线）。
+
+- **分层规则**：`emitWire` 内分两档——`item.updated` 走 **ephemeral**（只广播、不落库、**不占 seq**），其余全部事件照旧（seq 递增 + 落库 + 广播）。信封 `seq` 改为可选：**有 seq ⇔ 已持久化、回放可见；无 seq ⇔ 仅存在于 live 流的过程帧**。ephemeral 不消耗 seq 号 → 持久流无空洞，`after=` 续传语义与「进程崩溃后内存 seq 从 DB max 续起」的一致性都不需要任何特判。
+- **tail 的回归竞态**：`GET /stream` 订阅先于回放，缓冲里可能出现「比回放已送出的 `item.completed` 更旧的 ephemeral tick」——转发它会把该 item 打回半截文本且不再有 completed 收尾（completed 已在回放里送过）。规则：**回放阶段结束前到达的 ephemeral 一律丢弃**（对该连接而言 tick 只有 live 价值，丢弃无损）；回放结束后的 ephemeral 照常转发——此后到达的 tick 必属仍在进行的 item（completed 总在其全部 tick 之后产生），不可能回归。
+- **客户端**：seq 去重/`lastSeq` 推进/断线重连的 `after=` 只看有 seq 的信封；ephemeral 信封照常喂给 `buildTimeline`（live 打字机不变），不进 seq 记账。回放流里天然不含 ephemeral，重连后由 completed 事件收敛终态。
+- **接受的取舍**：turn 中途进程崩溃后，回放只剩 started 存根（首个 delta）+ 已 completed 的 item——半截打字机内容不再可回放（P13-3 的中断哨兵会把这个状态显性化）。不做抽稀持久（每 N 秒落一条 updated）——收益仅限崩溃窗口的回放美观，不值多一套机制。
+
 ### 2.3 前端（apps/web，在 seed 骨架上叠加）
 
 - 路由：`/_app/` 下 `chat`（会话列表 + 时间线）——替换 seed 的 dashboard 示例位。

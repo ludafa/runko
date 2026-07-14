@@ -236,10 +236,18 @@ export const chatTimelineEventSchema = z.union([
 
 export type ChatTimelineEvent = z.infer<typeof chatTimelineEventSchema>;
 
-// ---- `{ seq, event }` envelope (docs/08 §2.2/§2.3) ----
+// ---- `{ seq, event }` envelope (docs/08 §2.2/§2.3, §2.2d) ----
+//
+// `seq` is optional (docs/08 §2.2d, "transcript 减量：durable/ephemeral
+// 分层"): present ⇔ persisted and replayable; absent ⇔ an ephemeral
+// live-only frame (today exactly `item.updated`'s per-tick typewriter text).
+// `use-chat-messages.ts`'s seq dedup/`lastSeqRef`/reconnect `after=` cursor
+// only ever look at envelopes that have one — an ephemeral envelope still
+// flows straight into `buildTimeline` for the live typewriter effect, it
+// just never participates in that bookkeeping.
 
 export const chatStreamEnvelopeSchema = z.object({
-  seq: z.number(),
+  seq: z.number().optional(),
   event: chatTimelineEventSchema,
 });
 

@@ -394,6 +394,98 @@ describe('useChatMessages', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Ephemeral envelopes (docs/08 §2.2d — durable/ephemeral split): an
+  // `item.updated` tick arrives with no `seq` key at all — it still drives
+  // the live timeline, but never participates in the seq dedup set or the
+  // reconnect cursor (`maxSeq`/`lastSeqRef`).
+  // -------------------------------------------------------------------------
+
+  describe('ephemeral envelopes (docs/08 §2.2d)', () => {
+    it('an ephemeral item.updated envelope (no seq) is appended for the live typewriter effect, but a subsequent reconnect still uses after=<last *seq’d* envelope>, not perturbed by it', async () => {
+      vi.useFakeTimers();
+      const { calls } = createStreamSessionTailRecorder();
+      postChatMessageMock.mockResolvedValue(undefined);
+
+      const { result } = renderHook(() => useChatMessages('sess_1', []));
+      expect(calls).toHaveLength(1); // mount tail, after=0
+
+      act(() => {
+        result.current.sendMessage('写个组件');
+      });
+      await flush();
+      expect(calls).toHaveLength(2); // send's own tail, after=0
+
+      act(() => {
+        calls[1]?.handlers.onEnvelope({
+          seq: 1,
+          event: { type: 'user.message', text: '写个组件' },
+        });
+        calls[1]?.handlers.onEnvelope({
+          event: {
+            type: 'item.updated',
+            item: { id: 'm1', type: 'agent_message', text: 'partial' },
+          },
+        }); // ephemeral — no seq key at all
+      });
+
+      expect(
+        result.current.envelopes.map((envelope) => envelope.event.type),
+      ).toEqual(['user.message', 'item.updated']);
+
+      await act(async () => {
+        calls[1]?.reject(new Error('network dropped'));
+        await Promise.resolve();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+      expect(calls).toHaveLength(3);
+      // still seq 1 — the ephemeral tick never advanced lastSeqRef/maxSeq.
+      expect(calls[2]?.after).toBe(1);
+    });
+
+    it('ephemeral envelopes are never added to the seq dedup set — two back-to-back ephemeral ticks both apply (neither looks like a duplicate of the other), and a later seq’d envelope still lands normally', () => {
+      createStreamSessionTailRecorder();
+      const { result } = renderHook(() => useChatMessages('sess_1', []));
+
+      act(() => {
+        streamSessionTailMock.mock.calls[0]?.[2].onEnvelope({
+          seq: 5,
+          event: { type: 'turn.started', turn: 1 },
+        });
+        streamSessionTailMock.mock.calls[0]?.[2].onEnvelope({
+          event: {
+            type: 'item.updated',
+            item: { id: 'm1', type: 'agent_message', text: 'a' },
+          },
+        });
+        // A second ephemeral tick for the same item — must not be dropped as
+        // a "duplicate" of the first (seenSeqs only ever tracks numbers, so
+        // an `undefined` seq is never added to it, and never matches one).
+        streamSessionTailMock.mock.calls[0]?.[2].onEnvelope({
+          event: {
+            type: 'item.updated',
+            item: { id: 'm1', type: 'agent_message', text: 'ab' },
+          },
+        });
+        streamSessionTailMock.mock.calls[0]?.[2].onEnvelope({
+          seq: 6,
+          event: { type: 'turn.completed', usage: {} },
+        });
+      });
+
+      expect(
+        result.current.envelopes.map((envelope) => envelope.event.type),
+      ).toEqual([
+        'turn.started',
+        'item.updated',
+        'item.updated',
+        'turn.completed',
+      ]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // STEER-3B: sendMessage's other branch, taken while turnInProgressRef is
   // true (composer is no longer disabled during 'streaming' — file header).
   // -------------------------------------------------------------------------

@@ -22,8 +22,11 @@ describe('TimelineView', () => {
   it('aggregates agent_message increments into the final full text, with no duplicated fragments', () => {
     const { rerender } = render(<TimelineView envelopes={[]} />);
 
+    // `seq` is `number | undefined` on the envelope type (docs/08 §2.2d) —
+    // every fixture envelope here is persisted (has a real seq), so this
+    // guard is only to satisfy the narrower type.
     const withDeltas: ChatStreamEnvelope[] = sampleChatEnvelopes.filter(
-      (envelope) => envelope.seq <= 18,
+      (envelope) => envelope.seq !== undefined && envelope.seq <= 18,
     );
     rerender(<TimelineView envelopes={withDeltas} />);
     expect(

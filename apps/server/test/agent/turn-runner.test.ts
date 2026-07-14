@@ -71,7 +71,11 @@ describe('agent/turn-runner', () => {
     // `GET .../stream` covers exactly this gap with a DB replay before it
     // ever calls `subscribeTurn`; that's this module's contract, not a bug
     // here).
-    const received: { seq: number; type: string }[] = [];
+    // `seq` is `number | undefined` on the envelope type (docs/08 §2.2d: only
+    // ephemeral `item.updated` frames omit it) — none of the events pushed
+    // below are ephemeral, so the assertion further down still expects
+    // concrete numbers.
+    const received: { seq: number | undefined; type: string }[] = [];
     let doneCalls = 0;
     const unsubscribe = subscribeTurn(
       'sess-1',
@@ -833,6 +837,208 @@ describe('agent/turn-runner', () => {
         false,
       );
       expect(resolveUserAnswer('sess-1', 'call_2', 'too late')).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Durable/ephemeral split (docs/08 §2.2d, P13-1) — `createEmitWire`'s
+  // `item.updated` branch: broadcast-only, never persisted, never consumes a
+  // seq number.
+  // ---------------------------------------------------------------------------
+
+  describe('durable/ephemeral split (docs/08 §2.2d) — createEmitWire', () => {
+    it('an item.updated envelope carries no `seq` key at all (not merely `undefined`), and no item.updated row is ever appended to agent_events', async () => {
+      const fake = createControllableSession();
+      startTurn({ db, sessionId: 'sess-1', session: fake, text: 'hi' });
+
+      const received: ChatEventEnvelope[] = [];
+      subscribeTurn(
+        'sess-1',
+        (envelope) => received.push(envelope),
+        () => undefined,
+      );
+
+      fake.pushEvent({
+        type: 'item.updated',
+        item: { id: 'm1', type: 'agent_message', text: 'partial text' },
+      });
+      await flushMicrotasks();
+
+      const updatedEnvelope = received.find(
+        (envelope) => envelope.event.type === 'item.updated',
+      );
+      expect(updatedEnvelope).toBeDefined();
+      // The load-bearing assertion (docs/08 §2.2d): the key is *absent*, this
+      // is not the same thing as `envelope.seq === undefined` on a key that's
+      // present-but-unset — `'in'` is what actually distinguishes the two.
+      expect(updatedEnvelope !== undefined && 'seq' in updatedEnvelope).toBe(
+        false,
+      );
+
+      fake.finish({ items: [], finalResponse: 'done', usage: {} });
+      await flushMicrotasks();
+
+      const persisted = listAgentEvents(db, 'sess-1');
+      expect(persisted.some((row) => row.type === 'item.updated')).toBe(false);
+      expect(persisted.map((row) => row.type)).toEqual([
+        'user.message',
+        'turn.result',
+      ]);
+    });
+
+    it('seq stays gap-free across item.updated ticks: started → several ephemeral updated ticks → completed → turn.result — persisted seq climbs by exactly 1 each time, the ticks consuming none of it', async () => {
+      const fake = createControllableSession();
+      startTurn({ db, sessionId: 'sess-1', session: fake, text: 'hi' }); // seq 1: user.message
+
+      const received: ChatEventEnvelope[] = [];
+      subscribeTurn(
+        'sess-1',
+        (envelope) => received.push(envelope),
+        () => undefined,
+      );
+
+      fake.pushEvent({
+        type: 'item.started',
+        item: { id: 'm1', type: 'agent_message', text: '' },
+      }); // seq 2
+      await flushMicrotasks();
+      fake.pushEvent({
+        type: 'item.updated',
+        item: { id: 'm1', type: 'agent_message', text: 'p' },
+      }); // ephemeral
+      await flushMicrotasks();
+      fake.pushEvent({
+        type: 'item.updated',
+        item: { id: 'm1', type: 'agent_message', text: 'pa' },
+      }); // ephemeral
+      await flushMicrotasks();
+      fake.pushEvent({
+        type: 'item.updated',
+        item: { id: 'm1', type: 'agent_message', text: 'par' },
+      }); // ephemeral
+      await flushMicrotasks();
+      fake.pushEvent({
+        type: 'item.completed',
+        item: { id: 'm1', type: 'agent_message', text: 'part' },
+      }); // seq 3
+      await flushMicrotasks();
+      fake.finish({ items: [], finalResponse: 'part', usage: {} }); // seq 4
+      await flushMicrotasks();
+
+      const persisted = listAgentEvents(db, 'sess-1');
+      expect(persisted.map((row) => row.seq)).toEqual([1, 2, 3, 4]);
+      expect(persisted.map((row) => row.type)).toEqual([
+        'user.message',
+        'item.started',
+        'item.completed',
+        'turn.result',
+      ]);
+      // strictly consecutive — no holes left by the three skipped ticks.
+      for (let i = 1; i < persisted.length; i += 1) {
+        expect(persisted[i]?.seq).toBe((persisted[i - 1]?.seq ?? 0) + 1);
+      }
+
+      const updatedEnvelopes = received.filter(
+        (envelope) => envelope.event.type === 'item.updated',
+      );
+      expect(updatedEnvelopes).toHaveLength(3);
+      expect(updatedEnvelopes.every((envelope) => !('seq' in envelope))).toBe(
+        true,
+      );
+    });
+
+    it('cross-turn seq continuation: a turn whose tail is an ephemeral item.updated tick still hands the next turn a seq that continues from the prior turn’s last *persisted* event, not the ephemeral tick', async () => {
+      const first = createControllableSession();
+      startTurn({ db, sessionId: 'sess-1', session: first, text: 'a' }); // seq 1: user.message
+      first.pushEvent({
+        type: 'item.started',
+        item: { id: 'm1', type: 'agent_message', text: '' },
+      }); // seq 2
+      await flushMicrotasks();
+      first.pushEvent({
+        type: 'item.updated',
+        item: { id: 'm1', type: 'agent_message', text: 'partial' },
+      }); // ephemeral — the very last thing emitted before this turn ends
+      await flushMicrotasks();
+      first.finish({ items: [], finalResponse: 'first', usage: {} }); // seq 3
+      await flushMicrotasks();
+
+      const persistedAfterFirst = listAgentEvents(db, 'sess-1');
+      expect(persistedAfterFirst.map((row) => row.seq)).toEqual([1, 2, 3]);
+
+      const second = createControllableSession();
+      startTurn({ db, sessionId: 'sess-1', session: second, text: 'b' }); // must be seq 4, not seq 5
+      second.finish({ items: [], finalResponse: 'second', usage: {} }); // seq 5
+      await flushMicrotasks();
+
+      const persisted = listAgentEvents(db, 'sess-1');
+      expect(persisted.map((row) => row.seq)).toEqual([1, 2, 3, 4, 5]);
+      expect(persisted.map((row) => row.type)).toEqual([
+        'user.message',
+        'item.started',
+        'turn.result',
+        'user.message',
+        'turn.result',
+      ]);
+    });
+
+    it('approval/question bridge events stay persisted + seq’d even with ephemeral item.updated ticks interleaved between them', async () => {
+      const fake = createControllableSession();
+      startTurn({ db, sessionId: 'sess-1', session: fake, text: 'hi' }); // seq 1
+
+      const received: ChatEventEnvelope[] = [];
+      subscribeTurn(
+        'sess-1',
+        (envelope) => received.push(envelope),
+        () => undefined,
+      );
+
+      const approvalPromise = requestApproval('sess-1', {
+        callId: 'c1',
+        toolName: 'bash',
+        input: {},
+      }); // seq 2: approval.requested
+      fake.pushEvent({
+        type: 'item.updated',
+        item: { id: 'm1', type: 'agent_message', text: 'thinking' },
+      }); // ephemeral
+      await flushMicrotasks();
+      resolveApproval('sess-1', 'c1', { behavior: 'allow' }); // seq 3: approval.resolved
+      await approvalPromise;
+
+      const questionPromise = requestUserAnswer('sess-1', {
+        callId: 'c2',
+        question: 'ok?',
+      }); // seq 4: question.asked
+      fake.pushEvent({
+        type: 'item.updated',
+        item: { id: 'm1', type: 'agent_message', text: 'thinking more' },
+      }); // ephemeral
+      await flushMicrotasks();
+      resolveUserAnswer('sess-1', 'c2', 'yes'); // seq 5: question.answered
+      await questionPromise;
+
+      fake.finish({ items: [], finalResponse: 'done', usage: {} }); // seq 6
+      await flushMicrotasks();
+
+      const persisted = listAgentEvents(db, 'sess-1');
+      expect(persisted.map((row) => row.seq)).toEqual([1, 2, 3, 4, 5, 6]);
+      expect(persisted.map((row) => row.type)).toEqual([
+        'user.message',
+        'approval.requested',
+        'approval.resolved',
+        'question.asked',
+        'question.answered',
+        'turn.result',
+      ]);
+
+      const updatedEnvelopes = received.filter(
+        (envelope) => envelope.event.type === 'item.updated',
+      );
+      expect(updatedEnvelopes).toHaveLength(2);
+      expect(updatedEnvelopes.every((envelope) => !('seq' in envelope))).toBe(
+        true,
+      );
     });
   });
 });

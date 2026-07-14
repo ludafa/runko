@@ -47,13 +47,24 @@ import type { ChatStreamEnvelope, JsonValue } from './schema';
 
 export type ItemLifecycle = 'started' | 'updated' | 'completed';
 
+/**
+ * `firstSeq`/`lastSeq` are `number | undefined` (docs/08 §2.2d): the only
+ * envelope that can lack a `seq` is an ephemeral `item.updated` tick, and
+ * `item` is the one entry kind those ticks fold into. `firstSeq` in practice
+ * is always a real number the moment an item has an `item.started` behind it
+ * (the entry's first-ever sighting), and `lastSeq` is `undefined` exactly
+ * when the most recently folded event for this id was an ephemeral tick —
+ * neither field drives ordering (`slotOrder`, below, does) or is read
+ * outside this module, so the looser type costs nothing at the call sites
+ * that actually render a `TimelineEntry`.
+ */
 export interface ItemTimelineEntry {
   kind: 'item';
   id: string;
   item: SessionItem;
   lifecycle: ItemLifecycle;
-  firstSeq: number;
-  lastSeq: number;
+  firstSeq: number | undefined;
+  lastSeq: number | undefined;
 }
 
 export interface SessionStartedEntry {
@@ -155,6 +166,24 @@ function lifecycleOf(
   return 'completed';
 }
 
+/**
+ * Every `ChatStreamEvent` other than `item.updated` is always persisted
+ * (docs/08 §2.2d) — its envelope's `seq` is never `undefined`. This narrows
+ * that contract at each non-`item.*` branch below instead of widening every
+ * other `TimelineEntry`'s `seq` field to match `item`'s looser one: a thrown
+ * error here is louder (and more honest) than silently falling back to a
+ * fake `seq`, and it only ever fires if an upstream envelope broke the
+ * contract this reducer relies on.
+ */
+function persistedSeq(seq: number | undefined): number {
+  if (seq === undefined) {
+    throw new Error(
+      'buildTimeline: expected a persisted envelope (seq) for a non-ephemeral event',
+    );
+  }
+  return seq;
+}
+
 /** `chat-agent.ts`'s literal registration name (docs/08 §2.2c（审批链）) — the one tool whose `tool_call` item is suppressed in favor of its `question` card, see the `item.*` branch below. */
 const ASK_USER_TOOL_NAME = 'ask_user';
 
@@ -198,32 +227,40 @@ export function buildTimeline(
     }
   }
 
-  for (const { seq, event } of envelopes) {
+  for (const envelope of envelopes) {
+    const { event } = envelope;
     switch (event.type) {
-      case 'session.started':
+      case 'session.started': {
+        const seq = persistedSeq(envelope.seq);
         upsert(`marker:${String(seq)}`, {
           kind: 'session-started',
           sessionId: event.sessionId,
           seq,
         });
         break;
-      case 'user.message':
+      }
+      case 'user.message': {
+        const seq = persistedSeq(envelope.seq);
         upsert(`marker:${String(seq)}`, {
           kind: 'user-message',
           text: event.text,
           seq,
         });
         break;
-      case 'turn.started':
+      }
+      case 'turn.started': {
+        const seq = persistedSeq(envelope.seq);
         upsert(`marker:${String(seq)}`, {
           kind: 'turn-started',
           turn: event.turn,
           seq,
         });
         break;
+      }
       case 'turn.completed':
         break; // folded into the turn.result sentinel, see file header
       case 'turn.failed': {
+        const seq = persistedSeq(envelope.seq);
         // Two structurally different wire shapes share this `type` literal
         // (see schema.ts) — `'error' in event` tells apart the graceful
         // mid-stream `SessionEvent` (nested `error: NimboError`, turn still
@@ -242,7 +279,8 @@ export function buildTimeline(
         if (isTurnRunnerSentinel) expirePending(() => true);
         break;
       }
-      case 'turn.result':
+      case 'turn.result': {
+        const seq = persistedSeq(envelope.seq);
         upsert(`marker:${String(seq)}`, {
           kind: 'turn-result',
           finalResponse: event.finalResponse,
@@ -251,7 +289,9 @@ export function buildTimeline(
         });
         expirePending(() => true);
         break;
-      case 'approval.requested':
+      }
+      case 'approval.requested': {
+        const seq = persistedSeq(envelope.seq);
         upsert(`approval:${event.callId}`, {
           kind: 'approval',
           callId: event.callId,
@@ -261,7 +301,9 @@ export function buildTimeline(
           seq,
         });
         break;
+      }
       case 'approval.resolved': {
+        const seq = persistedSeq(envelope.seq);
         const key = `approval:${event.callId}`;
         const existing = slots.get(key);
         // `approval.requested` always precedes `approval.resolved` for the
@@ -289,7 +331,8 @@ export function buildTimeline(
         });
         break;
       }
-      case 'question.asked':
+      case 'question.asked': {
+        const seq = persistedSeq(envelope.seq);
         upsert(`question:${event.callId}`, {
           kind: 'question',
           callId: event.callId,
@@ -299,7 +342,9 @@ export function buildTimeline(
           seq,
         });
         break;
+      }
       case 'question.answered': {
+        const seq = persistedSeq(envelope.seq);
         const key = `question:${event.callId}`;
         const existing = slots.get(key);
         const question =
@@ -324,6 +369,10 @@ export function buildTimeline(
       case 'item.started':
       case 'item.updated':
       case 'item.completed': {
+        // `envelope.seq` is `undefined` exactly for an ephemeral
+        // `item.updated` tick (docs/08 §2.2d) — `item.started`/
+        // `item.completed` are always persisted and always carry one.
+        const seq = envelope.seq;
         const item = event.item;
         // ask_user's own question card (above) is its normal rendering —
         // the underlying tool_call item is only surfaced when it ended

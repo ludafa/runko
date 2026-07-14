@@ -120,9 +120,12 @@ function isTerminalEnvelope(envelope: ChatStreamEnvelope): boolean {
   );
 }
 
+/** Only counts envelopes that actually carry a `seq` (docs/08 §2.2d) — an ephemeral `item.updated` tick never advances the reconnect cursor. */
 function maxSeq(envelopes: readonly ChatStreamEnvelope[]): number {
   let max = 0;
-  for (const envelope of envelopes) max = Math.max(max, envelope.seq);
+  for (const envelope of envelopes) {
+    if (envelope.seq !== undefined) max = Math.max(max, envelope.seq);
+  }
   return max;
 }
 
@@ -157,8 +160,16 @@ export function useChatMessages(
     ReadonlySet<string>
   >(new Set());
 
+  // Only seq'd (persisted) envelopes are dedup-tracked (docs/08 §2.2d) — an
+  // ephemeral `item.updated` tick has no `seq` to dedupe by, and doesn't need
+  // one (it's never redelivered by a replay/reconnect the way a persisted
+  // envelope can be).
   const seenSeqs = useRef(
-    new Set(initialEnvelopes.map((envelope) => envelope.seq)),
+    new Set(
+      initialEnvelopes
+        .map((envelope) => envelope.seq)
+        .filter((seq): seq is number => seq !== undefined),
+    ),
   );
   const lastSeqRef = useRef(maxSeq(initialEnvelopes));
   const turnInProgressRef = useRef(initialTurnInProgress);
@@ -170,9 +181,15 @@ export function useChatMessages(
   );
 
   const applyEnvelope = useCallback((envelope: ChatStreamEnvelope) => {
-    if (seenSeqs.current.has(envelope.seq)) return; // dedupe: tail reconnect overlap / re-delivery safety net
-    seenSeqs.current.add(envelope.seq);
-    lastSeqRef.current = Math.max(lastSeqRef.current, envelope.seq);
+    // Ephemeral envelopes (docs/08 §2.2d: no `seq`) skip the dedupe/cursor
+    // bookkeeping entirely — there's nothing to dedupe by, and they never
+    // reach here via a replay/reconnect overlap the way a persisted envelope
+    // can.
+    if (envelope.seq !== undefined) {
+      if (seenSeqs.current.has(envelope.seq)) return; // dedupe: tail reconnect overlap / re-delivery safety net
+      seenSeqs.current.add(envelope.seq);
+      lastSeqRef.current = Math.max(lastSeqRef.current, envelope.seq);
+    }
     setAwaitingFirstEvent(false);
 
     if (envelope.event.type === 'user.message') {
@@ -192,7 +209,15 @@ export function useChatMessages(
       setError(envelope.event.message);
     }
 
-    setEnvelopes((prev) => [...prev, envelope].sort((a, b) => a.seq - b.seq));
+    // Arrival order, not a `seq` sort (docs/08 §2.2d — ephemeral envelopes
+    // have no `seq` to sort by): the tail already delivers persisted
+    // envelopes in increasing `seq` order (replay is a `seq`-ordered DB
+    // query, live events are emitted in the order `createEmitWire` persists
+    // them), and `applyEnvelope`'s own dedupe above already drops any
+    // persisted re-delivery — so append-in-arrival-order is equivalent to a
+    // `seq` sort for persisted envelopes, and is the *only* well-defined
+    // order for an ephemeral one (it only ever means "right now, live").
+    setEnvelopes((prev) => [...prev, envelope]);
   }, []);
 
   // `openTailRef` always holds *this* render's `startTail` closure (fresh

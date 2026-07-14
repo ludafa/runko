@@ -15,7 +15,7 @@ import { usageSchema } from './usageSchema.ts';
 import { z } from 'zod/v4';
 
 export const chatEventEnvelopeSchema = z.object({
-  seq: z.int(),
+  seq: z.optional(z.int()),
   get event() {
     return z.union([
       chatUserMessageSchema,

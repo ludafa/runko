@@ -514,7 +514,7 @@
             ]
           }
         },
-        "required": ["seq", "event"],
+        "required": ["event"],
         "x-readme-ref-name": "ChatEventEnvelope"
       }
     }

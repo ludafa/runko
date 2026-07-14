@@ -18,7 +18,7 @@ export const getApiChatSessionsIdStreamQueryParamsSchema = z
   .optional();
 
 /**
- * @description SSE stream of `{ seq, event }` frames: replay, then live tail (closes once the turn ends, or immediately after replay if no turn is in progress)
+ * @description SSE stream of `{ seq, event }` frames: replay, then live tail (closes once the turn ends, or immediately after replay if no turn is in progress). Some frames omit `seq` (docs/08 §2.2d) — those are ephemeral `item.updated` typewriter ticks, never persisted and never replayed; every other frame always carries one
  */
 export const getApiChatSessionsIdStream200Schema = z.lazy(
   () => chatEventEnvelopeSchema,

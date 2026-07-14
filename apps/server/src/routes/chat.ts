@@ -470,7 +470,7 @@ export function createChatApp(deps: ChatRouteDeps) {
       200: {
         content: { 'text/event-stream': { schema: chatEventEnvelopeSchema } },
         description:
-          'SSE stream of `{ seq, event }` frames: replay, then live tail (closes once the turn ends, or immediately after replay if no turn is in progress)',
+          'SSE stream of `{ seq, event }` frames: replay, then live tail (closes once the turn ends, or immediately after replay if no turn is in progress). Some frames omit `seq` (docs/08 §2.2d) — those are ephemeral `item.updated` typewriter ticks, never persisted and never replayed; every other frame always carries one',
       },
       401: {
         content: { 'application/json': { schema: ErrorSchema } },
@@ -511,9 +511,27 @@ export function createChatApp(deps: ChatRouteDeps) {
         resolve();
       }
 
+      // Flips true once the persisted replay (below) has been fully flushed
+      // to this connection — see the ephemeral-drop rule in the `subscribeTurn`
+      // callback right below it (docs/08 §2.2d "tail 的回归竞态").
+      let replayDone = false;
+
       const unsubscribe = subscribeTurn(
         id,
         (envelope) => {
+          // An ephemeral `item.updated` tick (no `seq`, docs/08 §2.2d) that
+          // arrives while we're still replaying persisted history is
+          // strictly older than (or a duplicate of) whatever the replay is
+          // about to send for that same item — forwarding it would clobber
+          // an already-sent `item.completed` with stale, half-written text
+          // and no completed marker to follow it (the real completed tick
+          // was already replayed). It carries zero replay value on its own
+          // (ephemeral frames only matter live), so it's simply dropped —
+          // never buffered, never sent. Once the replay is done, any
+          // ephemeral tick that arrives necessarily belongs to an item still
+          // in progress (its `item.completed`, if any, can only come later),
+          // so it's safe to buffer and forward like any other live event.
+          if (envelope.seq === undefined && !replayDone) return;
           buffered.push(envelope);
           scheduleWake();
         },
@@ -541,6 +559,15 @@ export function createChatApp(deps: ChatRouteDeps) {
           for (;;) {
             const envelope = buffered.shift();
             if (envelope === undefined) break;
+            if (envelope.seq === undefined) {
+              // Ephemeral (docs/08 §2.2d) — forward as-is, no `maxSentSeq`
+              // bookkeeping (there's no seq to dedupe or advance by).
+              await stream.writeSSE({
+                event: envelope.event.type,
+                data: JSON.stringify(envelope),
+              });
+              continue;
+            }
             if (envelope.seq <= maxSentSeq) continue; // already covered by the replay query below — dedup
             await stream.writeSSE({
               event: envelope.event.type,
@@ -566,6 +593,7 @@ export function createChatApp(deps: ChatRouteDeps) {
         }
 
         await flushBuffered();
+        replayDone = true;
 
         if (wasActive) {
           while (!turnDone && !aborted) {

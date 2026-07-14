@@ -637,3 +637,97 @@ describe('buildTimeline: malformed/out-of-order approval and question resolution
     expect(entry.answer).toBe('好');
   });
 });
+
+// -----------------------------------------------------------------------
+// Ephemeral item.updated frames (docs/08 §2.2d, P13-1 durable/ephemeral
+// split) — no `seq` key at all, but still folded like any other item.*
+// lifecycle event.
+// -----------------------------------------------------------------------
+
+describe('buildTimeline: ephemeral item.updated frames (docs/08 §2.2d, no seq)', () => {
+  it('an ephemeral item.updated (no seq) arriving after item.started updates the entry text in place, without moving its position', () => {
+    const envelopes: ChatStreamEnvelope[] = [
+      { seq: 1, event: { type: 'turn.started', turn: 1 } },
+      {
+        seq: 2,
+        event: {
+          type: 'item.started',
+          item: { id: 'm1', type: 'agent_message', text: '' },
+        },
+      },
+      {
+        // No `seq` key at all — the server never assigns one to an
+        // `item.updated` tick (createEmitWire, docs/08 §2.2d).
+        event: {
+          type: 'item.updated',
+          item: { id: 'm1', type: 'agent_message', text: 'partial' },
+        },
+      },
+    ];
+    const entries = buildTimeline(envelopes);
+    const kinds = entries.map((entry) => entry.kind);
+    expect(kinds).toEqual(['turn-started', 'item']); // still 2 slots — same position, no new row
+
+    const item = entries.find((entry) => entry.kind === 'item');
+    if (
+      item === undefined ||
+      item.kind !== 'item' ||
+      item.item.type !== 'agent_message'
+    )
+      throw new Error('unreachable');
+    expect(item.item.text).toBe('partial');
+    expect(item.lifecycle).toBe('updated');
+    expect(item.firstSeq).toBe(2); // carried over from item.started — the ephemeral tick doesn't reset it
+    expect(item.lastSeq).toBeUndefined(); // the ephemeral tick itself has no seq
+  });
+
+  it('an ephemeral item.updated arriving after item.completed for the same id does not throw — it clobbers the completed slot with the (stale) in-progress content; server-side already prevents this from ever reaching a real client (docs/08 §2.2d "tail 的回归竞态"), this only documents buildTimeline’s own defenseless behavior as a pure reducer', () => {
+    const envelopes: ChatStreamEnvelope[] = [
+      {
+        seq: 1,
+        event: {
+          type: 'item.started',
+          item: { id: 'm1', type: 'agent_message', text: '' },
+        },
+      },
+      {
+        seq: 2,
+        event: {
+          type: 'item.completed',
+          item: { id: 'm1', type: 'agent_message', text: 'final' },
+        },
+      },
+      {
+        event: {
+          type: 'item.updated',
+          item: { id: 'm1', type: 'agent_message', text: 'stale' },
+        },
+      },
+    ];
+
+    expect(() => buildTimeline(envelopes)).not.toThrow();
+    const entries = buildTimeline(envelopes);
+    expect(entries).toHaveLength(1); // still one slot, no crash, no duplicate row
+    const [entry] = entries;
+    if (
+      entry === undefined ||
+      entry.kind !== 'item' ||
+      entry.item.type !== 'agent_message'
+    )
+      throw new Error('unreachable');
+    // Documenting actual (not necessarily desirable) behavior: the reducer
+    // has no id-level "already completed" guard, so the late ephemeral tick
+    // still wins the upsert.
+    expect(entry.lifecycle).toBe('updated');
+    expect(entry.item.text).toBe('stale');
+  });
+
+  it('persistedSeq’s defensive branch: a non-item.* event with no seq (a malformed envelope the real server never produces — it only ever omits seq on an item.updated tick) throws rather than silently fabricating a seq', () => {
+    const malformed: ChatStreamEnvelope[] = [
+      { event: { type: 'turn.started', turn: 1 } }, // no seq key — guards a contract the server-side split is supposed to uphold
+    ];
+    expect(() => buildTimeline(malformed)).toThrow(
+      /expected a persisted envelope/,
+    );
+  });
+});

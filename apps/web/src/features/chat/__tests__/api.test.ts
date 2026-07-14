@@ -240,7 +240,10 @@ describe('streamSessionTail', () => {
     const fetchMock = vi.fn().mockResolvedValue(sseResponse(chunks));
     vi.stubGlobal('fetch', fetchMock);
 
-    const received: number[] = [];
+    // `seq` is `number | undefined` on the envelope type (docs/08 §2.2d) —
+    // neither fixture envelope below is ephemeral, so the assertion still
+    // expects concrete numbers.
+    const received: (number | undefined)[] = [];
     await streamSessionTail('sess_1', 0, {
       onEnvelope: (envelope: ChatStreamEnvelope) => received.push(envelope.seq),
     });
@@ -275,7 +278,7 @@ describe('streamSessionTail', () => {
       );
     vi.stubGlobal('fetch', fetchMock);
 
-    const received: number[] = [];
+    const received: (number | undefined)[] = [];
     const parseErrors: string[] = [];
     await streamSessionTail('sess_1', 0, {
       onEnvelope: (envelope: ChatStreamEnvelope) => received.push(envelope.seq),
