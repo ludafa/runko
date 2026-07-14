@@ -101,6 +101,7 @@
 - **P12-2 前端（coder，依赖 P12-0，与 P12-1 并行）**：§2.3 chat 页 + 时间线组件 + SSE hook；对 API 契约（§2.2 路由 + SSE 信封）编码，用 msw/fixture 事件流开发。
 - **P12-3 集成真机验收（主线程/orchitector）**：register→login→建会话（真沙盒）→发"列仓库文件"类只读消息（不产生 PR）验流式+落库→静置触发休眠→再发消息验恢复（分支还原）→（可选）一条设计任务消息走完 PR。回填 docs/05；沙盒回收审计。
 - **P12-5 人在环上（2026-07-13 立项，拆单）**：§2.2c 全部——工单 A/A2 服务端（coder：审批桥 + ask_user + 裁决路由 + openapi）、工单 B 前端（coder：kubb 重生成 + 事件折叠 + approval/question 卡片）、工单 C 测试（tester：approval-policy 纯函数单测、turn-runner 桥用例、路由集成、web hook 三态折叠）。
+- **P13 持久化系列（2026-07-14 起，逐项确认制）**：P13-1 transcript 减量（§2.2d，✅ 已交付）；P13-2 turn checkpoint 与 P13-2b 沙盒保活——产品与技术方案独立成文，见 [docs/09](./09-turn-checkpoint-and-keepalive.md)；P13-3 中断哨兵、P13-4 留存治理待讨论。
 
 ## 4. 风险与已知取舍
 
