@@ -38,6 +38,47 @@ pnpm add @nimbo/sdk ai
 
 > TODO：npm 裸名 `nimbo` 的发布决策待定（docs/03 P7-1 遗留）——目前一律 `@nimbo/sdk`，定了之后全部 README/examples 的 import 同步替换。
 
+## 配置 agent：模型 / instructions / tools / skills
+
+四样都挂在 `defineAgent` 上——定义是纯数据、无运行状态，同一份定义可以反复开 session。
+
+**模型**。nimbo 的模型层完全构建在 Vercel AI SDK（`ai` 包）之上，不自建 provider 层、不自建模型注册表——「接入某个模型」就是拿到一个 AI SDK 的 `LanguageModel` 值，三条路：
+
+```ts
+// ① Gateway 字符串：零 provider 包，环境里配 AI_GATEWAY_API_KEY 即可
+const agent = defineAgent({ model: "anthropic/claude-sonnet-5" });
+
+// ② 官方 provider 包（30+，宿主按需安装，如 pnpm add @ai-sdk/anthropic）
+import { anthropic } from "@ai-sdk/anthropic";
+const agent = defineAgent({ model: anthropic("claude-sonnet-5") });
+
+// ③ OpenAI 兼容端点：DeepSeek / Qwen / Ollama / vLLM 等自建或第三方服务
+import { createDeepSeek } from "@ai-sdk/deepseek";
+const deepseek = createDeepSeek({ baseURL, apiKey });
+const agent = defineAgent({ model: deepseek("deepseek-chat") });
+```
+
+`ai` 是 peerDependency（`^7`）——宿主自装 `ai` 和所选 provider 包，版本跟宿主走。其余一切（loop、工具、审批、沙盒）对模型层透明：换模型只改这一个值（examples 的 `NIMBO_MODEL` 环境变量一行换模型即此机制）；宿主已有的 AI SDK 中间件（`wrapLanguageModel`、缓存、observability）包装后照常传入。
+
+**instructions**。系统提示正文写在 `defineAgent({ instructions })`；多租户场景在 `createSession(agent, { instructions: { append } })` 追加租户专属内容，不动定义。
+
+**tools** 分三层：
+
+- **内置工具**（`builtinTools` 裁剪，缺省全开）：文件八件套（`read_file` / `write_file` / `edit_file` / `delete_file` / `move_file` / `list_dir` / `glob` / `grep`）+ `update_plan`；
+- **隐式激活的内置工具**：`bash` 随 exec 注入出现、`load_skill` 随 skills 配置出现——两者不经 `builtinTools` 控制；
+- **宿主自定义工具**：`defineTool({ description, inputSchema, approval?, execute(input, ctx) })`——`ctx.fs` 就是 session 的文件面，自定义工具零额外接线即可操作注入的文件系统/工作区。
+
+**skills**（SKILL.md，兼容 Claude/eve 生态）有四种来源：
+
+```ts
+defineSkill({ name, description, markdown, files? })      // 程序化定义
+Skill.fromMarkdown(name, md)                              // flat markdown
+Skill.fromDirectory("./skills/frontend-design")           // 本地 packaged 目录（SKILL.md + 附属文件）
+await Skill.fromFS(fs, "/.agents/skills/frontend-design") // 从任意 NimboFS 装载——包括沙盒工作区
+```
+
+运行机制是渐进式披露：instructions 里只注入名字和描述清单，模型需要时调 `load_skill` 拿正文——只加指令，不加新的执行面。
+
 ## 包结构（pnpm monorepo，依赖单向，8 包）
 
 ```mermaid

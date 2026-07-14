@@ -64,6 +64,66 @@ pnpm add @nimbo/sdk ai
 > leftover) — everything uses `@nimbo/sdk` for now; once decided, the imports in
 > this README and the examples get swapped over.
 
+## Configuring the agent: model / instructions / tools / skills
+
+All four live on `defineAgent` — the definition is pure data with no runtime
+state, so one definition can be reused across many sessions.
+
+**Model.** nimbo's model layer is built entirely on the Vercel AI SDK (`ai`) — no
+in-house provider layer, no model registry. Wiring up a model just means producing
+an AI SDK `LanguageModel` value, and there are three ways:
+
+```ts
+// ① Gateway string: zero provider packages, just set AI_GATEWAY_API_KEY
+const agent = defineAgent({ model: "anthropic/claude-sonnet-5" });
+
+// ② Official provider package (30+; installed by the host, e.g. pnpm add @ai-sdk/anthropic)
+import { anthropic } from "@ai-sdk/anthropic";
+const agent = defineAgent({ model: anthropic("claude-sonnet-5") });
+
+// ③ OpenAI-compatible endpoints: DeepSeek / Qwen / Ollama / vLLM / self-hosted
+import { createDeepSeek } from "@ai-sdk/deepseek";
+const deepseek = createDeepSeek({ baseURL, apiKey });
+const agent = defineAgent({ model: deepseek("deepseek-chat") });
+```
+
+`ai` is a peerDependency (`^7`) — the host installs `ai` and its chosen provider
+package, so versions follow the host. Everything else (loop, tools, approvals,
+sandboxes) is provider-agnostic: swapping models changes this one value and nothing
+else (the examples' `NIMBO_MODEL` env var is exactly this mechanism), and AI SDK
+middleware (`wrapLanguageModel`, caching, observability) passes straight through.
+
+**Instructions.** The system prompt body goes in `defineAgent({ instructions })`;
+for multi-tenant setups, append per-tenant content at session time via
+`createSession(agent, { instructions: { append } })` without touching the
+definition.
+
+**Tools** come in three tiers:
+
+- **Built-ins** (trim with `builtinTools`, default all-on): the eight file tools
+  (`read_file` / `write_file` / `edit_file` / `delete_file` / `move_file` /
+  `list_dir` / `glob` / `grep`) plus `update_plan`;
+- **Implicitly activated built-ins**: `bash` appears when an exec surface is
+  injected, `load_skill` when skills are configured — neither is governed by
+  `builtinTools`;
+- **Host-defined tools**: `defineTool({ description, inputSchema, approval?,
+  execute(input, ctx) })` — `ctx.fs` is the session's file surface, so custom
+  tools operate on the injected filesystem/workspace with zero extra wiring.
+
+**Skills** (SKILL.md, compatible with the Claude/eve ecosystems) load from four
+sources:
+
+```ts
+defineSkill({ name, description, markdown, files? })      // programmatic
+Skill.fromMarkdown(name, md)                              // flat markdown
+Skill.fromDirectory("./skills/frontend-design")           // packaged dir (SKILL.md + attachments)
+await Skill.fromFS(fs, "/.agents/skills/frontend-design") // from any NimboFS — including a sandbox workspace
+```
+
+At runtime skills are progressively disclosed: instructions carry only the
+name+description list, and the model calls `load_skill` to pull in the body —
+loading a skill adds instructions, never a new execution surface.
+
 ## Package structure (pnpm monorepo, one-way deps, 8 packages)
 
 ```mermaid
