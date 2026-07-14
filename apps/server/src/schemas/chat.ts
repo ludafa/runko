@@ -150,10 +150,11 @@ const _sessionEventSchemaCoversAllVariants: (
 export const sessionEventSchema: z.ZodType<SessionEvent> = sessionEventUnion;
 
 /**
- * Two wire-only members on top of `@nimbo/core`'s `SessionEvent` (docs/08
- * §2.2 "契约细化", P12-2 front-end gap): both defined *only* here, never
- * folded into `@nimbo/core`'s own type — that union stays exactly what the
- * SDK produces.
+ * Six wire-only members on top of `@nimbo/core`'s `SessionEvent` (docs/08
+ * §2.2 "契约细化", P12-2 front-end gap; the approval and question pairs added
+ * for the approval/ask_user bridges, docs/08 §2.2c（审批链）): all defined
+ * *only* here, never folded into `@nimbo/core`'s own type — that union stays
+ * exactly what the SDK produces.
  *
  * - `user.message`: persisted (and pushed) as the very first event of every
  *   turn — without it, a `GET .../events` replay after a page refresh can't
@@ -163,6 +164,20 @@ export const sessionEventSchema: z.ZodType<SessionEvent> = sessionEventUnion;
  *   just streamed): the front end folds `turn.completed` into its
  *   `turn.result` rendering, so a replay without the sentinel would render
  *   the last turn without a close-out line.
+ * - `approval.requested`/`approval.resolved`: `turn-runner.ts`'s
+ *   `requestApproval`/`resolveApproval` (docs/08 §2.2c（审批链）) — a pending
+ *   tool call that needs a human, and its eventual outcome (manual decision
+ *   or timeout, both funnel through the same `resolveApproval` call so the
+ *   two look identical on the wire). Persisted like every other event, so a
+ *   reconnecting client can tell whether a request is still pending
+ *   (`approval.requested` with no matching `approval.resolved` yet).
+ * - `question.asked`/`question.answered`: the `ask_user` tool's own pending
+ *   question and its outcome (`turn-runner.ts`'s `requestUserAnswer`/
+ *   `resolveUserAnswer`) — structurally the same shape as the approval pair
+ *   (register → emit → suspend → settle, manual answer and timeout both
+ *   funneling through one settle path), just for "the model needs the user
+ *   to say something" instead of "the model needs the user to authorize a
+ *   command".
  */
 export const userMessageEventSchema = z
   .object({ type: z.literal('user.message'), text: z.string() })
@@ -206,15 +221,102 @@ export const turnFailedSentinelSchema = z
 
 export type TurnFailedSentinel = z.infer<typeof turnFailedSentinelSchema>;
 
-/** Everything that can appear as the `event` half of the `{ seq, event }` envelope: a `SessionEvent`, the `user.message` echo, the `turn.result` sentinel, or turn-runner's own `turn.failed` sentinel. */
+/**
+ * `turn-runner.ts`'s `requestApproval` (docs/08 §2.2c（审批链）): emitted the
+ * moment a tool call escalates to the session's `onApproval` bridge and
+ * actually needs a human — `input` is the already-`inputSchema`-validated
+ * argument object the tool call would run with (`packages/core/src/runtime.ts`'s
+ * `executeToolCall` validates before evaluating approval), reusing
+ * `openApiSafeJsonValueSchema` for the same reason `tool_call`'s `input`
+ * above does.
+ */
+export const approvalRequestedEventSchema = z
+  .object({
+    type: z.literal('approval.requested'),
+    callId: z.string(),
+    toolName: z.string(),
+    input: openApiSafeJsonValueSchema,
+  })
+  .openapi('ChatApprovalRequested');
+
+export type ApprovalRequestedEvent = z.infer<
+  typeof approvalRequestedEventSchema
+>;
+
+/**
+ * `turn-runner.ts`'s `resolveApproval` (docs/08 §2.2c（审批链）): the outcome
+ * of a previously-requested approval, however it was reached (a human's
+ * `POST .../approvals/:callId`, or `requestApproval`'s own timeout deny) —
+ * `message` is only ever present on a `deny` (the human's rejection reason,
+ * or the timeout's own explanatory text); an `allow` never carries one.
+ */
+export const approvalResolvedEventSchema = z
+  .object({
+    type: z.literal('approval.resolved'),
+    callId: z.string(),
+    behavior: z.enum(['allow', 'deny']),
+    message: z.string().optional(),
+  })
+  .openapi('ChatApprovalResolved');
+
+export type ApprovalResolvedEvent = z.infer<typeof approvalResolvedEventSchema>;
+
+/**
+ * `turn-runner.ts`'s `requestUserAnswer` (docs/08 §2.2c（审批链）): emitted the
+ * moment the `ask_user` tool (`chat-agent.ts`) is called and actually
+ * suspends the turn — `options`, when the model supplied any, are quick-reply
+ * suggestions for the human, not a closed set (a free-text `answer` is always
+ * valid too, see `PostAnswerInputSchema`).
+ */
+export const questionAskedEventSchema = z
+  .object({
+    type: z.literal('question.asked'),
+    callId: z.string(),
+    question: z.string(),
+    options: z.array(z.string()).optional(),
+  })
+  .openapi('ChatQuestionAsked');
+
+export type QuestionAskedEvent = z.infer<typeof questionAskedEventSchema>;
+
+/**
+ * `turn-runner.ts`'s `resolveUserAnswer` (docs/08 §2.2c（审批链）): the outcome
+ * of a previously-asked question — `answer` only ever appears when
+ * `outcome === 'answered'` (a human's `POST .../questions/:callId`); a
+ * `'timeout'` outcome (`requestUserAnswer`'s own timeout) never carries one,
+ * mirroring how `approval.resolved`'s `message` is deny-only.
+ */
+export const questionAnsweredEventSchema = z
+  .object({
+    type: z.literal('question.answered'),
+    callId: z.string(),
+    outcome: z.enum(['answered', 'timeout']),
+    answer: z.string().optional(),
+  })
+  .openapi('ChatQuestionAnswered');
+
+export type QuestionAnsweredEvent = z.infer<typeof questionAnsweredEventSchema>;
+
+/** Everything that can appear as the `event` half of the `{ seq, event }` envelope: a `SessionEvent`, the `user.message` echo, the `turn.result`/`turn.failed` sentinels, or the approval/ask_user bridge pairs. */
 export type ChatStreamEvent =
-  SessionEvent | UserMessageEvent | TurnResultSentinel | TurnFailedSentinel;
+  | SessionEvent
+  | UserMessageEvent
+  | TurnResultSentinel
+  | TurnFailedSentinel
+  | ApprovalRequestedEvent
+  | ApprovalResolvedEvent
+  | QuestionAskedEvent
+  | QuestionAnsweredEvent;
 
 const chatStreamEventUnion = z.union([
   sessionEventSchema,
   userMessageEventSchema,
   turnResultSentinelSchema,
   turnFailedSentinelSchema,
+  approvalRequestedEventSchema,
+  approvalResolvedEventSchema,
+  questionAskedEventSchema,
+  questionAnsweredEventSchema,
 ]);
 
 /** Same coverage enforcement as `_sessionEventSchemaCoversAllVariants`, against the unannotated `chatStreamEventUnion`, for `ChatStreamEvent`. */
@@ -302,3 +404,50 @@ export const ChatEventsQuerySchema = z.object({
     .optional()
     .openapi({ param: { name: 'after', in: 'query' } }),
 });
+
+/**
+ * `POST .../approvals/{callId}`'s path params (docs/08 §2.2c（审批链）): `id`
+ * is the chat session, `callId` the pending tool call's own id
+ * (`ApprovalContext.callId`, echoed on `approval.requested`). Also reused
+ * as-is for `POST .../questions/{callId}` (identical id+callId shape, same
+ * `callId` namespace — `ToolContext.callId` — just for the `ask_user` tool
+ * call instead of a gated one); no naming/param conflict, since each
+ * `createRoute` renders its own inline parameter list (same pattern
+ * `ChatSessionParamsSchema` already sets across four other routes).
+ */
+export const ChatApprovalParamsSchema = z.object({
+  id: z
+    .string()
+    .openapi({ param: { name: 'id', in: 'path' }, examples: ['3f1b2c4d-...'] }),
+  callId: z
+    .string()
+    .openapi({ param: { name: 'callId', in: 'path' }, examples: ['call_1'] }),
+});
+
+/** `POST .../approvals/{callId}`'s body (docs/08 §2.2c（审批链）): a human's decision on a pending tool call — `message` is only meaningful (and optional) on `deny`, ignored on `allow`. */
+export const PostApprovalInputSchema = z
+  .object({
+    behavior: z.enum(['allow', 'deny']),
+    message: z.string().optional(),
+  })
+  .openapi('PostApprovalInput');
+
+/**
+ * `POST .../approvals/{callId}`'s 200 body — the decision itself already went
+ * out over `GET .../stream` as `approval.resolved`, so this is just an ack.
+ * Also reused for `POST .../questions/{callId}`'s 200 (its own outcome
+ * likewise already went out as `question.answered`) — same "just an ack,
+ * `{ ok: true }`" shape, no reason for a second identical schema.
+ */
+export const ApprovalAckSchema = z
+  .object({ ok: z.literal(true) })
+  .openapi('ApprovalAck');
+
+export type ApprovalAck = z.infer<typeof ApprovalAckSchema>;
+
+/** `POST .../questions/{callId}`'s body (docs/08 §2.2c（审批链）): a human's free-text answer to a pending `ask_user` question — always required (unlike `PostApprovalInputSchema`'s optional deny `message`, there is no "answer with nothing" case here). */
+export const PostAnswerInputSchema = z
+  .object({
+    answer: z.string().min(1),
+  })
+  .openapi('PostAnswerInput');

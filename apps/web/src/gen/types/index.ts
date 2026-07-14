@@ -1,4 +1,14 @@
 export type { ApiError } from './ApiError.ts';
+export type { ApprovalAck, ApprovalAckOkEnumKey } from './ApprovalAck.ts';
+export type {
+  ChatApprovalRequested,
+  ChatApprovalRequestedTypeEnumKey,
+} from './ChatApprovalRequested.ts';
+export type {
+  ChatApprovalResolved,
+  ChatApprovalResolvedBehaviorEnumKey,
+  ChatApprovalResolvedTypeEnumKey,
+} from './ChatApprovalResolved.ts';
 export type {
   ChangesKindEnumKey,
   ChatEventEnvelope,
@@ -19,6 +29,15 @@ export type {
   ItemTypeEnumKey,
 } from './ChatEventEnvelope.ts';
 export type { ChatEventsList } from './ChatEventsList.ts';
+export type {
+  ChatQuestionAnswered,
+  ChatQuestionAnsweredOutcomeEnumKey,
+  ChatQuestionAnsweredTypeEnumKey,
+} from './ChatQuestionAnswered.ts';
+export type {
+  ChatQuestionAsked,
+  ChatQuestionAskedTypeEnumKey,
+} from './ChatQuestionAsked.ts';
 export type { ChatSession, ChatSessionStatusEnumKey } from './ChatSession.ts';
 export type {
   ChatTurnFailed,
@@ -74,6 +93,7 @@ export type {
 } from './GetApiNotes.ts';
 export type { NimboError, NimboErrorCodeEnumKey } from './NimboError.ts';
 export type { Note } from './Note.ts';
+export type { PostAnswerInput } from './PostAnswerInput.ts';
 export type {
   PostApiChatSessions201,
   PostApiChatSessions401,
@@ -82,6 +102,15 @@ export type {
   PostApiChatSessionsMutationRequest,
   PostApiChatSessionsMutationResponse,
 } from './PostApiChatSessions.ts';
+export type {
+  PostApiChatSessionsIdApprovalsCallid200,
+  PostApiChatSessionsIdApprovalsCallid401,
+  PostApiChatSessionsIdApprovalsCallid404,
+  PostApiChatSessionsIdApprovalsCallidMutation,
+  PostApiChatSessionsIdApprovalsCallidMutationRequest,
+  PostApiChatSessionsIdApprovalsCallidMutationResponse,
+  PostApiChatSessionsIdApprovalsCallidPathParams,
+} from './PostApiChatSessionsIdApprovalsCallid.ts';
 export type {
   PostApiChatSessionsIdMessages202,
   PostApiChatSessionsIdMessages401,
@@ -94,12 +123,25 @@ export type {
   PostApiChatSessionsIdMessagesPathParams,
 } from './PostApiChatSessionsIdMessages.ts';
 export type {
+  PostApiChatSessionsIdQuestionsCallid200,
+  PostApiChatSessionsIdQuestionsCallid401,
+  PostApiChatSessionsIdQuestionsCallid404,
+  PostApiChatSessionsIdQuestionsCallidMutation,
+  PostApiChatSessionsIdQuestionsCallidMutationRequest,
+  PostApiChatSessionsIdQuestionsCallidMutationResponse,
+  PostApiChatSessionsIdQuestionsCallidPathParams,
+} from './PostApiChatSessionsIdQuestionsCallid.ts';
+export type {
   PostApiNotes201,
   PostApiNotes401,
   PostApiNotesMutation,
   PostApiNotesMutationRequest,
   PostApiNotesMutationResponse,
 } from './PostApiNotes.ts';
+export type {
+  PostApprovalInput,
+  PostApprovalInputBehaviorEnumKey,
+} from './PostApprovalInput.ts';
 export type { PostChatMessageInput } from './PostChatMessageInput.ts';
 export type {
   StartTurnAck,
@@ -107,6 +149,10 @@ export type {
   StartTurnAckOkEnumKey,
 } from './StartTurnAck.ts';
 export type { Usage } from './Usage.ts';
+export { approvalAckOkEnum } from './ApprovalAck.ts';
+export { chatApprovalRequestedTypeEnum } from './ChatApprovalRequested.ts';
+export { chatApprovalResolvedBehaviorEnum } from './ChatApprovalResolved.ts';
+export { chatApprovalResolvedTypeEnum } from './ChatApprovalResolved.ts';
 export { changesKindEnum } from './ChatEventEnvelope.ts';
 export { eventTypeEnum } from './ChatEventEnvelope.ts';
 export { eventTypeEnum2 } from './ChatEventEnvelope.ts';
@@ -123,10 +169,14 @@ export { itemTypeEnum4 } from './ChatEventEnvelope.ts';
 export { itemTypeEnum5 } from './ChatEventEnvelope.ts';
 export { itemTypeEnum6 } from './ChatEventEnvelope.ts';
 export { itemTypeEnum7 } from './ChatEventEnvelope.ts';
+export { chatQuestionAnsweredOutcomeEnum } from './ChatQuestionAnswered.ts';
+export { chatQuestionAnsweredTypeEnum } from './ChatQuestionAnswered.ts';
+export { chatQuestionAskedTypeEnum } from './ChatQuestionAsked.ts';
 export { chatSessionStatusEnum } from './ChatSession.ts';
 export { chatTurnFailedTypeEnum } from './ChatTurnFailed.ts';
 export { chatTurnResultTypeEnum } from './ChatTurnResult.ts';
 export { chatUserMessageTypeEnum } from './ChatUserMessage.ts';
 export { nimboErrorCodeEnum } from './NimboError.ts';
+export { postApprovalInputBehaviorEnum } from './PostApprovalInput.ts';
 export { startTurnAckModeEnum } from './StartTurnAck.ts';
 export { startTurnAckOkEnum } from './StartTurnAck.ts';

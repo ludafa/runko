@@ -60,6 +60,18 @@
 - **边界**：进程重启会丢失内存态 turn（沙盒仍在跑但 nimbo loop 停）——DB 事件保留至崩溃点，重启后 tail 回放发现无进行中 turn 即静默收尾；这是 v1 内存态 runner 的已知取舍。
 - **持久化恢复语义**：nimbo `SessionState`（消息史）与沙盒快照（文件态）分别恢复，模式 A 下天然一致（文件真身在沙盒里）。
 
+### 2.2c 人在环上：bash 审批链与 ask_user 提问（P12-5，2026-07-13 用户立项）
+
+**动机**：沙盒 exec 声明 `defaultApproval: "never"`（隔离即边界），chat 应用因此从不产生审批请求；但产品面需要外发动作（git push / 开 PR / 破坏性删除）经人确认，且 agent 需要能在 turn 中途向用户提问。两者同构：**工具执行挂起 → wire 事件（落库+推流）→ web 卡片 → HTTP 裁决 → resolve Promise 继续**。nimbo core 零改动——`onApproval` 本就是可 await 的异步回调，loop 停在工具执行前等它；ask_user 则是普通自定义工具的 `execute` 挂起。
+
+- **触发面（bash 审批）**：`buildSession` 用 `gateWorkspace` 包装沙盒 workspace（逐方法显式委托 + `defaultApproval: "always"`，不用对象展开防丢 this 绑定）→ 内置 bash 的 per-tool approval 变 `"always"`，每次调用升级到 session `onApproval`。放行/拦截策略集中在桥回调（`agent/approval-policy.ts` 纯函数）：`CHAT_APPROVAL_MODE` 三档——`dangerous`（默认：`git push`、GitHub API curl（引用 api.github.com 或 $GH_TOKEN）、`rm -r/-f`、`git reset --hard`、`git clean -f` 人审，其余自动放行；input 形状不符一律升级人审，宁严勿松）/ `all`（全量人审）/ `off`（不包装，零行为变化）。
+- **审批桥（turn-runner）**：`ActiveTurn` 持 `pendingApprovals: Map<callId, {resolve, timer}>`；`requestApproval` **先注册后 emit** `{type:"approval.requested", callId, toolName, input}`（与"订阅先于回放"同款防漏纪律）；`resolveApproval` 摘除 + emit `{type:"approval.resolved", callId, behavior, message?}` + resolve；超时自动 deny（`CHAT_APPROVAL_TIMEOUT_MS` 默认 240s——沙盒 idle 300s 的 80%，走同一条 resolve 通路保证多 tab/回放一致）；turn 收尾兜底 deny 残留 pending 但**不 emit**（terminal 哨兵之后不得追加事件）。emit 闭包（seq+落库+emitter）为此从 `driveTurn` 上提到 `startTurn`，挂 `ActiveTurn.emitWire`。
+- **ask_user 工具**：`BuildSessionOptions.onAskUser` 存在时注册进 `agent.tools`；`execute` 经 `requestUserAnswer`/`resolveUserAnswer` 同款桥挂起（`pendingQuestions`），wire 事件 `{type:"question.asked", callId, question, options?}` / `{type:"question.answered", callId, outcome: "answered"|"timeout", answer?}`；超时（`CHAT_ASK_USER_TIMEOUT_MS` 默认 240s）返回固定提示文案（completed，不抛错，模型自行继续）；与 approvalMode 无关恒注册（产品能力，不是安全闸）。
+- **裁决路由**：`POST .../approvals/:callId` `{behavior: "allow"|"deny", message?}`、`POST .../questions/:callId` `{answer}`——属主校验同其余路由；404 覆盖「session 不存在」与「callId 无 pending」两种；allow/answer 先 `touch` 续沙盒且**失败不阻断裁决**（挂到超时比 exec 失败更糟）。
+- **wire 契约**：四个新事件均为 wire-only 成员（`user.message` 先例）且**落库**——回放据「requested/asked 无对应 resolved/answered + turn 已终结」渲染"已失效"。`tool_call` item 的 id 是 loop 内部 nimboId ≠ `callId` 且映射不上 wire，故审批/提问卡片是时间线上的**独立卡片**，不锚定 tool_call 卡片。
+- **web**：`use-chat-messages` 折叠四个事件为 approval/question 时间线条目（pending/resolved/expired 三态；terminal 哨兵或 tail 无活跃 turn 收尾时过期）；`approval-card`（工具 + 命令预览 + Allow/Deny）、`question-card`（问题 + options 快捷按钮 + 自由文本作答）；ask_user 的 tool_call 卡片仅 failed/denied 时渲染（避免与 question 卡片双显）。
+- **边界**：进程重启丢内存态 pending（与 `activeTurns` 同款 v1 取舍，web 端"已失效"兜底）；`"once"` 审批记忆不跨轮（chat 每轮重建 session，onceMemory 不进 SessionState）——策略里不用 `"once"`；审批/提问挂起期间 steer 照常排队，无冲突。
+
 ### 2.3 前端（apps/web，在 seed 骨架上叠加）
 
 - 路由：`/_app/` 下 `chat`（会话列表 + 时间线）——替换 seed 的 dashboard 示例位。
@@ -79,6 +91,7 @@
 - **P12-1 服务端（coder）**：§2.2 全部模块 + 单测（sandbox-manager 的 acquire/touch 状态机用 fake Sandbox；store 用例；SSE 路由集成测试用 mock model 走通事件落库+推流）。
 - **P12-2 前端（coder，依赖 P12-0，与 P12-1 并行）**：§2.3 chat 页 + 时间线组件 + SSE hook；对 API 契约（§2.2 路由 + SSE 信封）编码，用 msw/fixture 事件流开发。
 - **P12-3 集成真机验收（主线程/orchitector）**：register→login→建会话（真沙盒）→发"列仓库文件"类只读消息（不产生 PR）验流式+落库→静置触发休眠→再发消息验恢复（分支还原）→（可选）一条设计任务消息走完 PR。回填 docs/05；沙盒回收审计。
+- **P12-5 人在环上（2026-07-13 立项，拆单）**：§2.2c 全部——工单 A/A2 服务端（coder：审批桥 + ask_user + 裁决路由 + openapi）、工单 B 前端（coder：kubb 重生成 + 事件折叠 + approval/question 卡片）、工单 C 测试（tester：approval-policy 纯函数单测、turn-runner 桥用例、路由集成、web hook 三态折叠）。
 
 ## 4. 风险与已知取舍
 

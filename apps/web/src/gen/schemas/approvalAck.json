@@ -1,0 +1,6 @@
+{
+  "type": "object",
+  "properties": { "ok": { "type": "boolean", "enum": [true] } },
+  "required": ["ok"],
+  "x-readme-ref-name": "ApprovalAck"
+}

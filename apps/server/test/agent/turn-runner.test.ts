@@ -8,10 +8,18 @@ import {
 } from '../../src/agent/store.js';
 import {
   isTurnActive,
+  requestApproval,
+  requestUserAnswer,
+  resolveApproval,
+  resolveUserAnswer,
   startTurn,
   steerTurn,
   subscribeTurn,
 } from '../../src/agent/turn-runner.js';
+import type {
+  ChatEventEnvelope,
+  ChatStreamEvent,
+} from '../../src/schemas/chat.js';
 import {
   createControllableSession,
   createSteerableControllableSession,
@@ -328,6 +336,503 @@ describe('agent/turn-runner', () => {
       expect(steerable.steerCalls).toEqual(['too late']);
 
       steerable.finish({ items: [], finalResponse: 'ok', usage: {} });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Approval bridge (docs/08 §2.2c（审批链）) — requestApproval/resolveApproval.
+  // ---------------------------------------------------------------------------
+
+  describe('requestApproval / resolveApproval', () => {
+    it('denies immediately, without registering or emitting anything, when there is no active turn for the session', async () => {
+      expect(isTurnActive('sess-1')).toBe(false);
+      const decision = await requestApproval('sess-1', {
+        callId: 'call_x',
+        toolName: 'bash',
+        input: { command: 'ls' },
+      });
+      expect(decision).toEqual({
+        behavior: 'deny',
+        message: 'No active turn to route this approval request to.',
+      });
+      // still no active turn was created as a side effect
+      expect(isTurnActive('sess-1')).toBe(false);
+    });
+
+    it('registers the pending entry before emitting approval.requested — resolving it synchronously from inside the emit listener already finds it', async () => {
+      const fake = createControllableSession();
+      startTurn({ db, sessionId: 'sess-1', session: fake, text: 'hi' });
+
+      let resolvedFromListener: boolean | undefined;
+      subscribeTurn(
+        'sess-1',
+        (envelope) => {
+          if (envelope.event.type === 'approval.requested') {
+            // Only possible to return true here if the pending entry was
+            // already in the map by the time this listener runs — i.e.
+            // registration happened strictly before the emit that invoked it.
+            resolvedFromListener = resolveApproval(
+              'sess-1',
+              envelope.event.callId,
+              { behavior: 'allow' },
+            );
+          }
+        },
+        () => undefined,
+      );
+
+      const decision = await requestApproval('sess-1', {
+        callId: 'call_sync',
+        toolName: 'bash',
+        input: { command: 'ls' },
+      });
+
+      expect(resolvedFromListener).toBe(true);
+      expect(decision).toEqual({ behavior: 'allow' });
+
+      fake.finish({ items: [], finalResponse: 'ok', usage: {} });
+    });
+
+    it('resolveApproval("allow") settles the pending promise and emits approval.resolved with no message field', async () => {
+      const fake = createControllableSession();
+      startTurn({ db, sessionId: 'sess-1', session: fake, text: 'hi' });
+
+      const received: ChatStreamEvent[] = [];
+      subscribeTurn(
+        'sess-1',
+        (envelope) => received.push(envelope.event),
+        () => undefined,
+      );
+
+      const pending = requestApproval('sess-1', {
+        callId: 'call_1',
+        toolName: 'bash',
+        input: { command: 'ls' },
+      });
+
+      expect(resolveApproval('sess-1', 'call_1', { behavior: 'allow' })).toBe(
+        true,
+      );
+      await expect(pending).resolves.toEqual({ behavior: 'allow' });
+
+      const resolvedEvent = received.find(
+        (event) => event.type === 'approval.resolved',
+      );
+      expect(resolvedEvent).toEqual({
+        type: 'approval.resolved',
+        callId: 'call_1',
+        behavior: 'allow',
+      });
+      expect(resolvedEvent !== undefined && 'message' in resolvedEvent).toBe(
+        false,
+      );
+
+      fake.finish({ items: [], finalResponse: 'ok', usage: {} });
+    });
+
+    it('resolveApproval("deny", message) carries the message through both the settled decision and approval.resolved; a deny with no message omits the field entirely', async () => {
+      const fake = createControllableSession();
+      startTurn({ db, sessionId: 'sess-1', session: fake, text: 'hi' });
+
+      const received: ChatStreamEvent[] = [];
+      subscribeTurn(
+        'sess-1',
+        (envelope) => received.push(envelope.event),
+        () => undefined,
+      );
+
+      const pendingWithMessage = requestApproval('sess-1', {
+        callId: 'call_deny_msg',
+        toolName: 'bash',
+        input: { command: 'git push' },
+      });
+      resolveApproval('sess-1', 'call_deny_msg', {
+        behavior: 'deny',
+        message: 'not right now',
+      });
+      await expect(pendingWithMessage).resolves.toEqual({
+        behavior: 'deny',
+        message: 'not right now',
+      });
+
+      const pendingNoMessage = requestApproval('sess-1', {
+        callId: 'call_deny_bare',
+        toolName: 'bash',
+        input: { command: 'rm -rf x' },
+      });
+      resolveApproval('sess-1', 'call_deny_bare', { behavior: 'deny' });
+      await expect(pendingNoMessage).resolves.toEqual({ behavior: 'deny' });
+
+      const resolvedEvents = received.filter(
+        (event) => event.type === 'approval.resolved',
+      );
+      expect(resolvedEvents).toEqual([
+        {
+          type: 'approval.resolved',
+          callId: 'call_deny_msg',
+          behavior: 'deny',
+          message: 'not right now',
+        },
+        {
+          type: 'approval.resolved',
+          callId: 'call_deny_bare',
+          behavior: 'deny',
+        },
+      ]);
+
+      fake.finish({ items: [], finalResponse: 'ok', usage: {} });
+    });
+
+    it('resolving the same callId a second time returns false; unknown callId/unknown session both return false', async () => {
+      const fake = createControllableSession();
+      startTurn({ db, sessionId: 'sess-1', session: fake, text: 'hi' });
+
+      const pending = requestApproval('sess-1', {
+        callId: 'call_1',
+        toolName: 'bash',
+        input: { command: 'ls' },
+      });
+      expect(resolveApproval('sess-1', 'call_1', { behavior: 'allow' })).toBe(
+        true,
+      );
+      expect(resolveApproval('sess-1', 'call_1', { behavior: 'allow' })).toBe(
+        false,
+      );
+      expect(
+        resolveApproval('sess-1', 'never-requested', { behavior: 'allow' }),
+      ).toBe(false);
+      expect(
+        resolveApproval('sess-does-not-exist', 'call_1', {
+          behavior: 'allow',
+        }),
+      ).toBe(false);
+
+      await pending;
+      fake.finish({ items: [], finalResponse: 'ok', usage: {} });
+    });
+
+    it('auto-denies via the exact same resolveApproval path once the timeout elapses, with a timeout explanation; resolving it afterward is a no-op', async () => {
+      const fake = createControllableSession();
+      startTurn({ db, sessionId: 'sess-1', session: fake, text: 'hi' });
+
+      const received: ChatStreamEvent[] = [];
+      subscribeTurn(
+        'sess-1',
+        (envelope) => received.push(envelope.event),
+        () => undefined,
+      );
+
+      const decision = await requestApproval(
+        'sess-1',
+        {
+          callId: 'call_timeout',
+          toolName: 'bash',
+          input: { command: 'rm -rf /' },
+        },
+        { timeoutMs: 10 },
+      );
+
+      expect(decision.behavior).toBe('deny');
+      if (decision.behavior === 'deny') {
+        expect(decision.message).toContain('timed out');
+      }
+
+      expect(received.map((event) => event.type)).toEqual([
+        'approval.requested',
+        'approval.resolved',
+      ]);
+      const resolvedEvent = received[1];
+      expect(resolvedEvent?.type).toBe('approval.resolved');
+      if (resolvedEvent?.type === 'approval.resolved') {
+        expect(resolvedEvent.behavior).toBe('deny');
+        expect(resolvedEvent.message).toContain('timed out');
+      }
+
+      // already settled by the timeout — a later manual resolve is a no-op.
+      expect(
+        resolveApproval('sess-1', 'call_timeout', { behavior: 'allow' }),
+      ).toBe(false);
+
+      fake.finish({ items: [], finalResponse: 'ok', usage: {} });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // ask_user bridge (docs/08 §2.2c（审批链）) — structurally the sibling of the
+  // approval bridge above; requestUserAnswer/resolveUserAnswer.
+  // ---------------------------------------------------------------------------
+
+  describe('requestUserAnswer / resolveUserAnswer', () => {
+    it('resolves { outcome: "timeout" } immediately, without registering or emitting anything, when there is no active turn for the session', async () => {
+      expect(isTurnActive('sess-1')).toBe(false);
+      const outcome = await requestUserAnswer('sess-1', {
+        callId: 'call_x',
+        question: 'what next?',
+      });
+      expect(outcome).toEqual({ outcome: 'timeout' });
+      expect(isTurnActive('sess-1')).toBe(false);
+    });
+
+    it('registers before emitting question.asked (with and without options)', async () => {
+      const fake = createControllableSession();
+      startTurn({ db, sessionId: 'sess-1', session: fake, text: 'hi' });
+
+      const received: ChatStreamEvent[] = [];
+      subscribeTurn(
+        'sess-1',
+        (envelope) => received.push(envelope.event),
+        () => undefined,
+      );
+
+      const withOptions = requestUserAnswer('sess-1', {
+        callId: 'call_opts',
+        question: 'pick a color',
+        options: ['red', 'blue'],
+      });
+      resolveUserAnswer('sess-1', 'call_opts', 'red');
+      await withOptions;
+
+      const withoutOptions = requestUserAnswer('sess-1', {
+        callId: 'call_no_opts',
+        question: 'anything else?',
+      });
+      resolveUserAnswer('sess-1', 'call_no_opts', 'nope');
+      await withoutOptions;
+
+      const askedEvents = received.filter(
+        (event) => event.type === 'question.asked',
+      );
+      expect(askedEvents).toEqual([
+        {
+          type: 'question.asked',
+          callId: 'call_opts',
+          question: 'pick a color',
+          options: ['red', 'blue'],
+        },
+        {
+          type: 'question.asked',
+          callId: 'call_no_opts',
+          question: 'anything else?',
+        },
+      ]);
+      expect(askedEvents[1] !== undefined && 'options' in askedEvents[1]).toBe(
+        false,
+      );
+
+      fake.finish({ items: [], finalResponse: 'ok', usage: {} });
+    });
+
+    it('resolveUserAnswer settles the pending promise and emits question.answered (outcome "answered" + the answer); resolving the same callId again returns false', async () => {
+      const fake = createControllableSession();
+      startTurn({ db, sessionId: 'sess-1', session: fake, text: 'hi' });
+
+      const received: ChatStreamEvent[] = [];
+      subscribeTurn(
+        'sess-1',
+        (envelope) => received.push(envelope.event),
+        () => undefined,
+      );
+
+      const pending = requestUserAnswer('sess-1', {
+        callId: 'call_1',
+        question: 'continue?',
+      });
+      expect(resolveUserAnswer('sess-1', 'call_1', 'yes please')).toBe(true);
+      await expect(pending).resolves.toEqual({
+        outcome: 'answered',
+        answer: 'yes please',
+      });
+      expect(resolveUserAnswer('sess-1', 'call_1', 'yes again')).toBe(false);
+
+      const answeredEvent = received.find(
+        (event) => event.type === 'question.answered',
+      );
+      expect(answeredEvent).toEqual({
+        type: 'question.answered',
+        callId: 'call_1',
+        outcome: 'answered',
+        answer: 'yes please',
+      });
+
+      fake.finish({ items: [], finalResponse: 'ok', usage: {} });
+    });
+
+    it('auto-times-out via the same settle path when the timeout elapses — outcome "timeout" carries no answer field', async () => {
+      const fake = createControllableSession();
+      startTurn({ db, sessionId: 'sess-1', session: fake, text: 'hi' });
+
+      const received: ChatStreamEvent[] = [];
+      subscribeTurn(
+        'sess-1',
+        (envelope) => received.push(envelope.event),
+        () => undefined,
+      );
+
+      const outcome = await requestUserAnswer(
+        'sess-1',
+        { callId: 'call_timeout', question: 'still there?' },
+        { timeoutMs: 10 },
+      );
+      expect(outcome).toEqual({ outcome: 'timeout' });
+
+      const answeredEvent = received.find(
+        (event) => event.type === 'question.answered',
+      );
+      expect(answeredEvent).toEqual({
+        type: 'question.answered',
+        callId: 'call_timeout',
+        outcome: 'timeout',
+      });
+      expect(answeredEvent !== undefined && 'answer' in answeredEvent).toBe(
+        false,
+      );
+
+      expect(resolveUserAnswer('sess-1', 'call_timeout', 'too late')).toBe(
+        false,
+      );
+
+      fake.finish({ items: [], finalResponse: 'ok', usage: {} });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Cross-bridge behavior: independent maps, shared seq counter, and the
+  // turn-teardown sweep.
+  // ---------------------------------------------------------------------------
+
+  describe('approval/question bridges together', () => {
+    it('pendingApprovals and pendingQuestions are independent maps — the same callId in both resolves independently without cross-talk', async () => {
+      const fake = createControllableSession();
+      startTurn({ db, sessionId: 'sess-1', session: fake, text: 'hi' });
+
+      const approvalPromise = requestApproval('sess-1', {
+        callId: 'shared-id',
+        toolName: 'bash',
+        input: { command: 'ls' },
+      });
+      const questionPromise = requestUserAnswer('sess-1', {
+        callId: 'shared-id',
+        question: 'pick one',
+      });
+
+      // Resolve only the question — the approval (same callId, other map)
+      // must remain pending.
+      expect(resolveUserAnswer('sess-1', 'shared-id', 'blue')).toBe(true);
+      await expect(questionPromise).resolves.toEqual({
+        outcome: 'answered',
+        answer: 'blue',
+      });
+
+      // The approval's own pending entry was untouched by the question's resolve.
+      expect(
+        resolveApproval('sess-1', 'shared-id', { behavior: 'allow' }),
+      ).toBe(true);
+      await expect(approvalPromise).resolves.toEqual({ behavior: 'allow' });
+
+      fake.finish({ items: [], finalResponse: 'ok', usage: {} });
+    });
+
+    it('seq stays monotonic across user.message, an approval round-trip, a question round-trip, and the terminal sentinel — persisted rows match emitted envelopes exactly', async () => {
+      const fake = createControllableSession();
+      startTurn({ db, sessionId: 'sess-1', session: fake, text: 'hi' }); // seq 1: user.message (emitted before any subscriber attaches)
+
+      const received: ChatEventEnvelope[] = [];
+      subscribeTurn(
+        'sess-1',
+        (envelope) => received.push(envelope),
+        () => undefined,
+      );
+
+      const approvalPromise = requestApproval('sess-1', {
+        callId: 'call_1',
+        toolName: 'bash',
+        input: { command: 'ls' },
+      }); // seq 2: approval.requested
+      resolveApproval('sess-1', 'call_1', { behavior: 'allow' }); // seq 3: approval.resolved
+      await approvalPromise;
+
+      const questionPromise = requestUserAnswer('sess-1', {
+        callId: 'call_2',
+        question: 'ok?',
+      }); // seq 4: question.asked
+      resolveUserAnswer('sess-1', 'call_2', 'yes'); // seq 5: question.answered
+      await questionPromise;
+
+      fake.finish({ items: [], finalResponse: 'done', usage: {} }); // seq 6: turn.result
+      await flushMicrotasks();
+
+      expect(received.map((envelope) => envelope.seq)).toEqual([2, 3, 4, 5, 6]);
+      expect(received.map((envelope) => envelope.event.type)).toEqual([
+        'approval.requested',
+        'approval.resolved',
+        'question.asked',
+        'question.answered',
+        'turn.result',
+      ]);
+
+      const persisted = listAgentEvents(db, 'sess-1');
+      expect(persisted.map((row) => row.seq)).toEqual([1, 2, 3, 4, 5, 6]);
+      expect(persisted.map((row) => row.type)).toEqual([
+        'user.message',
+        'approval.requested',
+        'approval.resolved',
+        'question.asked',
+        'question.answered',
+        'turn.result',
+      ]);
+    });
+
+    it('turn teardown sweeps leftover pending approvals/questions (deny/timeout) once the turn ends without them ever being resolved — and emits nothing for that sweep', async () => {
+      const fake = createControllableSession();
+      startTurn({ db, sessionId: 'sess-1', session: fake, text: 'hi' });
+
+      const received: ChatEventEnvelope[] = [];
+      subscribeTurn(
+        'sess-1',
+        (envelope) => received.push(envelope),
+        () => undefined,
+      );
+
+      // Registered directly (not via the fake session's own generator) with a
+      // timeout far longer than this test's lifetime — the only way they can
+      // ever settle is via the turn-teardown sweep below.
+      const approvalPromise = requestApproval(
+        'sess-1',
+        { callId: 'call_1', toolName: 'bash', input: { command: 'ls' } },
+        { timeoutMs: 999_999 },
+      );
+      const questionPromise = requestUserAnswer(
+        'sess-1',
+        { callId: 'call_2', question: 'ok?' },
+        { timeoutMs: 999_999 },
+      );
+      await flushMicrotasks();
+      const beforeSweep = received.length; // requested/asked already landed
+
+      // The controllable session's own generator ends right now — with
+      // neither pending request ever resolved through the normal path.
+      fake.finish({ items: [], finalResponse: 'done', usage: {} });
+      await flushMicrotasks();
+
+      const [approvalDecision, questionOutcome] = await Promise.all([
+        approvalPromise,
+        questionPromise,
+      ]);
+      expect(approvalDecision.behavior).toBe('deny');
+      expect(questionOutcome).toEqual({ outcome: 'timeout' });
+
+      // Nothing but the terminal sentinel follows the requested/asked pair —
+      // the teardown sweep itself is silent (no approval.resolved/question.answered).
+      expect(
+        received.slice(beforeSweep).map((envelope) => envelope.event.type),
+      ).toEqual(['turn.result']);
+
+      // Resolving by hand after the sweep is a no-op — the pending entries
+      // (and the whole turn) are already gone.
+      expect(resolveApproval('sess-1', 'call_1', { behavior: 'allow' })).toBe(
+        false,
+      );
+      expect(resolveUserAnswer('sess-1', 'call_2', 'too late')).toBe(false);
     });
   });
 });

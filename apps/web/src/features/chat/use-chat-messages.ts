@@ -50,7 +50,13 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { ChatApiError, postChatMessage, streamSessionTail } from './api';
+import {
+  ChatApiError,
+  postApprovalDecision,
+  postChatMessage,
+  postQuestionAnswer,
+  streamSessionTail,
+} from './api';
 import type { ChatStreamEnvelope, TurnRunnerFailedEvent } from './schema';
 
 export type ChatTurnStatus = 'idle' | 'streaming' | 'error';
@@ -70,6 +76,26 @@ export interface UseChatMessagesResult {
   awaitingFirstEvent: boolean;
   sendMessage: (text: string) => void;
   cancel: () => void;
+  /**
+   * `callId`s with an in-flight `POST .../approvals/:callId` or
+   * `.../questions/:callId` (docs/08 §2.2c（审批链）) — cards use this to
+   * disable their own buttons/show a spinner and block a second submit for
+   * the same `callId` while one is already outstanding.
+   */
+  submittingCallIds: ReadonlySet<string>;
+  /**
+   * `submitApproval`/`submitAnswer` got a `404` back for these `callId`s —
+   * the server no longer has them pending (already timed out, or the turn
+   * already ended) even though no `approval.resolved`/`question.answered`
+   * ever reached this client. Fed into `buildTimeline` (via
+   * `TimelineView`/the page) to fold the matching entry into `'expired'` —
+   * see `timeline.ts`'s `BuildTimelineOptions`.
+   */
+  locallyExpiredCallIds: ReadonlySet<string>;
+  /** Resolve a pending `bash` (or any gated tool) approval — result arrives back over the tail as `approval.resolved`, not from this call's own resolution (docs/08 §2.2c（审批链）: "不做乐观翻转"). */
+  submitApproval: (callId: string, behavior: 'allow' | 'deny') => void;
+  /** Answer a pending `ask_user` question — same "wire event is the only source of truth" posture as `submitApproval`. */
+  submitAnswer: (callId: string, answer: string) => void;
 }
 
 /** Exponential backoff for tail reconnects (docs/08 §2.2b "指数退避、限次") — 1s, 2s, 4s, 8s, 16s, then give up quietly (the DB-only-recovery trade-off the same section documents for a crashed turn-runner process). */
@@ -124,6 +150,12 @@ export function useChatMessages(
   );
   const [error, setError] = useState<string | undefined>(undefined);
   const [awaitingFirstEvent, setAwaitingFirstEvent] = useState(false);
+  const [submittingCallIds, setSubmittingCallIds] = useState<
+    ReadonlySet<string>
+  >(new Set());
+  const [locallyExpiredCallIds, setLocallyExpiredCallIds] = useState<
+    ReadonlySet<string>
+  >(new Set());
 
   const seenSeqs = useRef(
     new Set(initialEnvelopes.map((envelope) => envelope.seq)),
@@ -292,6 +324,73 @@ export function useChatMessages(
     setStatus('idle');
   }, []);
 
+  const markSubmitting = useCallback((callId: string) => {
+    setSubmittingCallIds((prev) => new Set(prev).add(callId));
+  }, []);
+
+  const clearSubmitting = useCallback((callId: string) => {
+    setSubmittingCallIds((prev) => {
+      if (!prev.has(callId)) return prev;
+      const next = new Set(prev);
+      next.delete(callId);
+      return next;
+    });
+  }, []);
+
+  /**
+   * `POST .../approvals/:callId` / `.../questions/:callId` (docs/08
+   * §2.2c（审批链）): both `submitApproval` and `submitAnswer` below funnel
+   * through this — mark `callId` submitting, fire the request, and on
+   * failure either flag it `locallyExpiredCallIds` (a `404`: the server no
+   * longer has it pending) or surface it via the hook's own `error` (
+   * anything else — the entry stays `'pending'`, retryable). The *success*
+   * path deliberately does nothing to `envelopes`/timeline state: the
+   * decision's real effect only lands once `approval.resolved`/
+   * `question.answered` arrives over the tail (docs/08 §2.2c（审批链）:
+   * "不做乐观翻转——多 tab 一致性靠事件").
+   */
+  const submitDecision = useCallback(
+    (callId: string, request: () => Promise<void>) => {
+      if (submittingCallIds.has(callId)) return; // one in flight per callId — the card also disables its own button, this is defense in depth
+      markSubmitting(callId);
+      request()
+        .catch((requestError: unknown) => {
+          if (
+            requestError instanceof ChatApiError &&
+            requestError.status === 404
+          ) {
+            setLocallyExpiredCallIds((prev) => new Set(prev).add(callId));
+            return;
+          }
+          setError(describeError(requestError));
+        })
+        .finally(() => {
+          clearSubmitting(callId);
+        });
+    },
+    [submittingCallIds, markSubmitting, clearSubmitting],
+  );
+
+  const submitApproval = useCallback(
+    (callId: string, behavior: 'allow' | 'deny') => {
+      submitDecision(callId, () =>
+        postApprovalDecision(sessionId, callId, { behavior }),
+      );
+    },
+    [sessionId, submitDecision],
+  );
+
+  const submitAnswer = useCallback(
+    (callId: string, answer: string) => {
+      const trimmed = answer.trim();
+      if (trimmed.length === 0) return;
+      submitDecision(callId, () =>
+        postQuestionAnswer(sessionId, callId, trimmed),
+      );
+    },
+    [sessionId, submitDecision],
+  );
+
   return useMemo(
     () => ({
       envelopes,
@@ -301,6 +400,10 @@ export function useChatMessages(
       awaitingFirstEvent,
       sendMessage,
       cancel,
+      submittingCallIds,
+      locallyExpiredCallIds,
+      submitApproval,
+      submitAnswer,
     }),
     [
       envelopes,
@@ -310,6 +413,10 @@ export function useChatMessages(
       awaitingFirstEvent,
       sendMessage,
       cancel,
+      submittingCallIds,
+      locallyExpiredCallIds,
+      submitApproval,
+      submitAnswer,
     ],
   );
 }

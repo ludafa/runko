@@ -211,6 +211,71 @@ function createHoldableSandboxManager(): SandboxManager & {
   };
 }
 
+/**
+ * A `SandboxManager` whose first `touch()` call succeeds (so `POST .../messages`'s
+ * own acquire+touch still lands normally) but every subsequent call rejects —
+ * used to exercise `POST .../approvals/:callId`'s "allow" branch swallowing a
+ * `touch()` failure instead of letting it block the decision (routes/chat.ts's
+ * own comment on that branch).
+ */
+function createSandboxManagerWithFailingTouchAfterFirst(): SandboxManager {
+  const base = createFakeSandboxManager();
+  let touchCalls = 0;
+  return {
+    acquire: (input) => base.acquire(input),
+    async touch(sessionId: string): Promise<void> {
+      touchCalls += 1;
+      if (touchCalls === 1) {
+        await base.touch(sessionId);
+        return;
+      }
+      throw new Error('sandbox temporarily unavailable');
+    },
+    release: (sessionId: string) => {
+      base.release(sessionId);
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Loosely-typed SSE envelope narrowing helpers (docs/08 §2.2c（审批链）tests
+// below) — `ParsedEnvelope.event` is `{ type: string; [key: string]: unknown }`
+// (see `parseEnvelopes` above), so pulling a specific field back out needs a
+// runtime check rather than a type assertion.
+// ---------------------------------------------------------------------------
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function extractStringField(
+  record: Record<string, unknown>,
+  field: string,
+): string {
+  const value = record[field];
+  if (typeof value !== 'string') {
+    throw new Error(
+      `expected field "${field}" to be a string, got ${JSON.stringify(value)}`,
+    );
+  }
+  return value;
+}
+
+/** The first `item.completed` tool_call item matching `toolName` (if given), across a set of parsed SSE envelopes. */
+function findCompletedToolCall(
+  envelopes: ParsedEnvelope[],
+  toolName?: string,
+): Record<string, unknown> | undefined {
+  for (const envelope of envelopes) {
+    if (envelope.event.type !== 'item.completed') continue;
+    const item = envelope.event.item;
+    if (!isRecord(item) || item.type !== 'tool_call') continue;
+    if (toolName !== undefined && item.toolName !== toolName) continue;
+    return item;
+  }
+  return undefined;
+}
+
 describe('routes/chat: sessions + turn start/stream endpoints', () => {
   const USER_ID = 'user-1';
   let db: Db;
@@ -784,8 +849,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
     const steeredItem = envelopes.find(
       (e) =>
         e.event.type === 'item.completed' &&
-        (e.event as { item?: { type?: string } }).item?.type ===
-          'user_message',
+        (e.event as { item?: { type?: string } }).item?.type === 'user_message',
     );
     expect(steeredItem).toBeDefined();
     expect(
@@ -795,9 +859,433 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
     // both requests still rolled the sandbox's idle timeout forward — the
     // steered branch calls touch() too (routes/chat.ts), not just the
     // normal-start branch.
-    expect(holdableSandboxManager.touchCalls).toEqual([
-      created.id,
-      created.id,
-    ]);
+    expect(holdableSandboxManager.touchCalls).toEqual([created.id, created.id]);
+  });
+
+  // -------------------------------------------------------------------------
+  // Approval chain + ask_user (docs/08 §2.2c（审批链）) — end-to-end through
+  // the real routes, a mock model driving a bash/ask_user tool call, and the
+  // in-process turn-runner bridge (no fakes for any of that machinery, only
+  // the sandbox/model are mocked, same as the rest of this file).
+  // -------------------------------------------------------------------------
+
+  describe('approval chain + ask_user (docs/08 §2.2c（审批链）)', () => {
+    it('a safe bash command under the default (dangerous) approval mode runs straight through — no approval.requested is ever emitted', async () => {
+      const app = buildApp(() =>
+        toolCallThenStopModel(
+          'bash',
+          { command: 'ls -la' },
+          'call_1',
+          'listed it',
+        ),
+      );
+      const created = await createSession(app);
+
+      await app.request(`/api/chat/sessions/${created.id}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'list files' }),
+      });
+      const body = await (
+        await app.request(`/api/chat/sessions/${created.id}/stream`)
+      ).text();
+      const envelopes = parseEnvelopes(body);
+
+      expect(envelopes.some((e) => e.event.type === 'approval.requested')).toBe(
+        false,
+      );
+      expect(envelopes.some((e) => e.event.type === 'approval.resolved')).toBe(
+        false,
+      );
+      expect(envelopes.at(-1)?.event.type).toBe('turn.result');
+
+      const toolCall = findCompletedToolCall(envelopes, 'bash');
+      expect(toolCall?.status).toBe('completed');
+    });
+
+    it('a dangerous bash command escalates to a human: approval.requested appears on the stream; allow lets the turn continue through to turn.result', async () => {
+      const app = buildApp(() =>
+        toolCallThenStopModel(
+          'bash',
+          { command: 'git push origin main' },
+          'call_1',
+          'pushed it',
+        ),
+      );
+      const created = await createSession(app);
+
+      await app.request(`/api/chat/sessions/${created.id}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'push my branch' }),
+      });
+
+      const streamResponse = await app.request(
+        `/api/chat/sessions/${created.id}/stream`,
+      );
+      const reader = createIncrementalReader(streamResponse);
+      const requested = await reader.readUntil((envs) =>
+        envs.some((e) => e.event.type === 'approval.requested'),
+      );
+      const requestedEvent = requested.find(
+        (e) => e.event.type === 'approval.requested',
+      );
+      expect(requestedEvent).toBeDefined();
+      expect(requestedEvent?.event.toolName).toBe('bash');
+      const callId = extractStringField(requestedEvent?.event ?? {}, 'callId');
+
+      const approveResponse = await app.request(
+        `/api/chat/sessions/${created.id}/approvals/${callId}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ behavior: 'allow' }),
+        },
+      );
+      expect(approveResponse.status).toBe(200);
+      expect(await approveResponse.json()).toEqual({ ok: true });
+
+      const envelopes = await reader.drainToClose();
+      const resolvedEvent = envelopes.find(
+        (e) => e.event.type === 'approval.resolved',
+      );
+      expect(resolvedEvent?.event).toEqual({
+        type: 'approval.resolved',
+        callId,
+        behavior: 'allow',
+      });
+      expect(envelopes.at(-1)?.event.type).toBe('turn.result');
+
+      const toolCall = findCompletedToolCall(envelopes, 'bash');
+      expect(toolCall?.status).toBe('completed');
+    });
+
+    it('a dangerous bash command escalates to a human: deny resolves approval.resolved(deny) and the tool_call item completes with status "denied", the turn still reaching turn.result', async () => {
+      const app = buildApp(() =>
+        toolCallThenStopModel(
+          'bash',
+          { command: 'rm -rf /workspace/build' },
+          'call_1',
+          'ok, skipped that',
+        ),
+      );
+      const created = await createSession(app);
+
+      await app.request(`/api/chat/sessions/${created.id}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'clean the build dir' }),
+      });
+
+      const streamResponse = await app.request(
+        `/api/chat/sessions/${created.id}/stream`,
+      );
+      const reader = createIncrementalReader(streamResponse);
+      const requested = await reader.readUntil((envs) =>
+        envs.some((e) => e.event.type === 'approval.requested'),
+      );
+      const requestedEvent = requested.find(
+        (e) => e.event.type === 'approval.requested',
+      );
+      const callId = extractStringField(requestedEvent?.event ?? {}, 'callId');
+
+      const denyResponse = await app.request(
+        `/api/chat/sessions/${created.id}/approvals/${callId}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ behavior: 'deny', message: 'too risky' }),
+        },
+      );
+      expect(denyResponse.status).toBe(200);
+
+      const envelopes = await reader.drainToClose();
+      const resolvedEvent = envelopes.find(
+        (e) => e.event.type === 'approval.resolved',
+      );
+      expect(resolvedEvent?.event).toEqual({
+        type: 'approval.resolved',
+        callId,
+        behavior: 'deny',
+        message: 'too risky',
+      });
+      expect(envelopes.at(-1)?.event.type).toBe('turn.result');
+
+      const toolCall = findCompletedToolCall(envelopes, 'bash');
+      expect(toolCall?.status).toBe('denied');
+      expect(toolCall?.output).toBe('too risky');
+    });
+
+    it('ask_user: question.asked appears on the stream; POST .../questions/:callId answers it and the turn continues through to turn.result', async () => {
+      const app = buildApp(() =>
+        toolCallThenStopModel(
+          'ask_user',
+          {
+            question: 'which environment should I target?',
+            options: ['staging', 'prod'],
+          },
+          'call_1',
+          'got it, using staging',
+        ),
+      );
+      const created = await createSession(app);
+
+      await app.request(`/api/chat/sessions/${created.id}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'deploy it' }),
+      });
+
+      const streamResponse = await app.request(
+        `/api/chat/sessions/${created.id}/stream`,
+      );
+      const reader = createIncrementalReader(streamResponse);
+      const asked = await reader.readUntil((envs) =>
+        envs.some((e) => e.event.type === 'question.asked'),
+      );
+      const askedEvent = asked.find((e) => e.event.type === 'question.asked');
+      expect(askedEvent?.event).toEqual({
+        type: 'question.asked',
+        callId: expect.any(String),
+        question: 'which environment should I target?',
+        options: ['staging', 'prod'],
+      });
+      const callId = extractStringField(askedEvent?.event ?? {}, 'callId');
+
+      const answerResponse = await app.request(
+        `/api/chat/sessions/${created.id}/questions/${callId}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ answer: 'staging' }),
+        },
+      );
+      expect(answerResponse.status).toBe(200);
+      expect(await answerResponse.json()).toEqual({ ok: true });
+
+      const envelopes = await reader.drainToClose();
+      const answeredEvent = envelopes.find(
+        (e) => e.event.type === 'question.answered',
+      );
+      expect(answeredEvent?.event).toEqual({
+        type: 'question.answered',
+        callId,
+        outcome: 'answered',
+        answer: 'staging',
+      });
+      expect(envelopes.at(-1)?.event.type).toBe('turn.result');
+
+      const toolCall = findCompletedToolCall(envelopes, 'ask_user');
+      expect(toolCall?.status).toBe('completed');
+      expect(toolCall?.output).toBe('staging');
+    });
+
+    it('POST .../approvals/:callId 404s: an unknown session id, another user’s session, and a callId with no pending approval (including re-deciding an already-resolved callId)', async () => {
+      const app = buildApp(() =>
+        toolCallThenStopModel(
+          'bash',
+          { command: 'git push' },
+          'call_1',
+          'pushed',
+        ),
+      );
+      const created = await createSession(app);
+
+      // 1. unknown session id
+      const unknownSessionResponse = await app.request(
+        `/api/chat/sessions/does-not-exist/approvals/call_1`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ behavior: 'allow' }),
+        },
+      );
+      expect(unknownSessionResponse.status).toBe(404);
+
+      // 2. another user's session
+      const otherUserApp = buildApp(
+        () => stopOnlyModel('unused'),
+        'someone-else',
+      );
+      const otherUserResponse = await otherUserApp.request(
+        `/api/chat/sessions/${created.id}/approvals/call_1`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ behavior: 'allow' }),
+        },
+      );
+      expect(otherUserResponse.status).toBe(404);
+
+      // 3. callId with no pending approval at all (nothing has been posted yet)
+      const noPendingResponse = await app.request(
+        `/api/chat/sessions/${created.id}/approvals/never-requested`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ behavior: 'allow' }),
+        },
+      );
+      expect(noPendingResponse.status).toBe(404);
+
+      // 3b. re-deciding an already-resolved callId also 404s
+      await app.request(`/api/chat/sessions/${created.id}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'push it' }),
+      });
+      const streamResponse = await app.request(
+        `/api/chat/sessions/${created.id}/stream`,
+      );
+      const reader = createIncrementalReader(streamResponse);
+      const requested = await reader.readUntil((envs) =>
+        envs.some((e) => e.event.type === 'approval.requested'),
+      );
+      const requestedEvent = requested.find(
+        (e) => e.event.type === 'approval.requested',
+      );
+      const callId = extractStringField(requestedEvent?.event ?? {}, 'callId');
+
+      const firstDecision = await app.request(
+        `/api/chat/sessions/${created.id}/approvals/${callId}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ behavior: 'allow' }),
+        },
+      );
+      expect(firstDecision.status).toBe(200);
+
+      const secondDecision = await app.request(
+        `/api/chat/sessions/${created.id}/approvals/${callId}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ behavior: 'deny' }),
+        },
+      );
+      expect(secondDecision.status).toBe(404);
+
+      await reader.drainToClose();
+    });
+
+    it('POST .../questions/:callId 404s the same three ways (unknown session, another user’s session, no pending question); an empty answer 400s at the zod validation layer', async () => {
+      const app = buildApp(() =>
+        toolCallThenStopModel(
+          'ask_user',
+          { question: 'continue?' },
+          'call_1',
+          'ok',
+        ),
+      );
+      const created = await createSession(app);
+
+      const unknownSessionResponse = await app.request(
+        `/api/chat/sessions/does-not-exist/questions/call_1`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ answer: 'yes' }),
+        },
+      );
+      expect(unknownSessionResponse.status).toBe(404);
+
+      const otherUserApp = buildApp(
+        () => stopOnlyModel('unused'),
+        'someone-else',
+      );
+      const otherUserResponse = await otherUserApp.request(
+        `/api/chat/sessions/${created.id}/questions/call_1`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ answer: 'yes' }),
+        },
+      );
+      expect(otherUserResponse.status).toBe(404);
+
+      const noPendingResponse = await app.request(
+        `/api/chat/sessions/${created.id}/questions/never-asked`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ answer: 'yes' }),
+        },
+      );
+      expect(noPendingResponse.status).toBe(404);
+
+      // Empty answer never even reaches resolveUserAnswer — PostAnswerInputSchema requires min(1).
+      const emptyAnswerResponse = await app.request(
+        `/api/chat/sessions/${created.id}/questions/never-asked`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ answer: '' }),
+        },
+      );
+      expect(emptyAnswerResponse.status).toBe(400);
+    });
+
+    it('an approval "allow" decision still succeeds (200 + approval.resolved still emitted) even when sandboxManager.touch rejects', async () => {
+      const failingTouchSandboxManager =
+        createSandboxManagerWithFailingTouchAfterFirst();
+      const app = createChatApp({
+        db,
+        sandboxManager: failingTouchSandboxManager,
+        resolveModel: () =>
+          toolCallThenStopModel(
+            'bash',
+            { command: 'git push' },
+            'call_1',
+            'pushed',
+          ),
+        authMiddleware: fakeAuthMiddleware(USER_ID),
+      });
+      const created = await createSession(app);
+
+      // This first message-triggered touch() call succeeds (see the fake's
+      // own doc comment) — otherwise session creation itself would 500.
+      await app.request(`/api/chat/sessions/${created.id}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'push it' }),
+      });
+
+      const streamResponse = await app.request(
+        `/api/chat/sessions/${created.id}/stream`,
+      );
+      const reader = createIncrementalReader(streamResponse);
+      const requested = await reader.readUntil((envs) =>
+        envs.some((e) => e.event.type === 'approval.requested'),
+      );
+      const requestedEvent = requested.find(
+        (e) => e.event.type === 'approval.requested',
+      );
+      const callId = extractStringField(requestedEvent?.event ?? {}, 'callId');
+
+      // This is the second touch() call — it rejects internally, but the
+      // route must swallow it and still resolve the approval.
+      const approveResponse = await app.request(
+        `/api/chat/sessions/${created.id}/approvals/${callId}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ behavior: 'allow' }),
+        },
+      );
+      expect(approveResponse.status).toBe(200);
+      expect(await approveResponse.json()).toEqual({ ok: true });
+
+      const envelopes = await reader.drainToClose();
+      const resolvedEvent = envelopes.find(
+        (e) => e.event.type === 'approval.resolved',
+      );
+      expect(resolvedEvent?.event).toEqual({
+        type: 'approval.resolved',
+        callId,
+        behavior: 'allow',
+      });
+      expect(envelopes.at(-1)?.event.type).toBe('turn.result');
+    });
   });
 });

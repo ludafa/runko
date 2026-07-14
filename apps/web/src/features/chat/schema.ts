@@ -171,11 +171,67 @@ export const turnRunnerFailedEventSchema = z.object({
 
 export type TurnRunnerFailedEvent = z.infer<typeof turnRunnerFailedEventSchema>;
 
+// ---- approval/ask_user bridge events (docs/08 §2.2c（审批链）) — four more
+// wire-only members, same "not a core SessionEvent, defined only here"
+// discipline as `userMessageEventSchema`/`turnResultEventSchema` above.
+// `turn-runner.ts`'s `requestApproval`/`resolveApproval` and
+// `requestUserAnswer`/`resolveUserAnswer` register-then-emit (so a
+// `*.requested`/`*.asked` always precedes its `*.resolved`/`*.answered`, same
+// ordering guarantee `turn.started` before `turn.completed` relies on) and
+// are persisted like every other event — a reconnecting client tells a still-
+// pending request apart from a settled one by whether the matching
+// resolved/answered event has arrived yet (`timeline.ts` folds the pair). ----
+
+export const approvalRequestedEventSchema = z.object({
+  type: z.literal('approval.requested'),
+  callId: z.string(),
+  toolName: z.string(),
+  input: jsonValueSchema,
+});
+
+export type ApprovalRequestedEvent = z.infer<
+  typeof approvalRequestedEventSchema
+>;
+
+/** `message` is deny-only (a human's rejection reason, or the timeout's own explanatory text) — an `allow` never carries one. */
+export const approvalResolvedEventSchema = z.object({
+  type: z.literal('approval.resolved'),
+  callId: z.string(),
+  behavior: z.enum(['allow', 'deny']),
+  message: z.string().optional(),
+});
+
+export type ApprovalResolvedEvent = z.infer<typeof approvalResolvedEventSchema>;
+
+/** `options`, when the model supplied any, are quick-reply suggestions — not a closed set (a free-text answer is always valid too). */
+export const questionAskedEventSchema = z.object({
+  type: z.literal('question.asked'),
+  callId: z.string(),
+  question: z.string(),
+  options: z.array(z.string()).optional(),
+});
+
+export type QuestionAskedEvent = z.infer<typeof questionAskedEventSchema>;
+
+/** `answer` only appears when `outcome === 'answered'`; a `'timeout'` outcome never carries one, mirroring `approval.resolved`'s deny-only `message`. */
+export const questionAnsweredEventSchema = z.object({
+  type: z.literal('question.answered'),
+  callId: z.string(),
+  outcome: z.enum(['answered', 'timeout']),
+  answer: z.string().optional(),
+});
+
+export type QuestionAnsweredEvent = z.infer<typeof questionAnsweredEventSchema>;
+
 export const chatTimelineEventSchema = z.union([
   sessionEventSchema,
   turnResultEventSchema,
   userMessageEventSchema,
   turnRunnerFailedEventSchema,
+  approvalRequestedEventSchema,
+  approvalResolvedEventSchema,
+  questionAskedEventSchema,
+  questionAnsweredEventSchema,
 ]);
 
 export type ChatTimelineEvent = z.infer<typeof chatTimelineEventSchema>;

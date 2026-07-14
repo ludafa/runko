@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "type": { "type": "string", "enum": ["question.asked"] },
+    "callId": { "type": "string" },
+    "question": { "type": "string" },
+    "options": { "type": "array", "items": { "type": "string" } }
+  },
+  "required": ["type", "callId", "question"],
+  "x-readme-ref-name": "ChatQuestionAsked"
+}

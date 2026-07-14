@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "behavior": { "type": "string", "enum": ["allow", "deny"] },
+    "message": { "type": "string" }
+  },
+  "required": ["behavior"],
+  "x-readme-ref-name": "PostApprovalInput"
+}

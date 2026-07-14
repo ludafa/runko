@@ -237,3 +237,182 @@ export const sampleChatEnvelopes: ChatStreamEnvelope[] = [
     },
   },
 ];
+
+/**
+ * A second, self-contained recorded-style sequence (work order §B, docs/08
+ * §2.2c（审批链）) covering the two human-in-the-loop flows this work order
+ * adds: a `bash` call escalated to approval (`approval.requested` →
+ * `approval.resolved`, allow), an `ask_user` question
+ * (`question.asked` → `question.answered`), and a still-pending approval
+ * that never gets resolved before the turn's own terminal sentinel
+ * (`turn.result`) — the case `timeline.ts`'s terminal-sweep folds into
+ * `'expired'` rather than leaving stuck at `'pending'` forever.
+ *
+ * Kept separate from `sampleChatEnvelopes` above (own seq numbering,
+ * starting at 1, same "no gaps" convention) rather than appended onto it:
+ * several `TimelineView` tests assert exact counts against that fixture (one
+ * `bash` card, one `turn-result-bar`), which extending its single turn would
+ * break.
+ */
+export const SAMPLE_APPROVAL_COMMAND = 'git push origin nimbo/chat-demo';
+export const SAMPLE_QUESTION_TEXT =
+  '登录按钮的颜色，你希望用主题色还是保持现在的灰色？';
+export const SAMPLE_QUESTION_ANSWER = '用主题色吧。';
+export const SAMPLE_EXPIRED_APPROVAL_COMMAND = 'git reset --hard origin/main';
+
+export const sampleApprovalQuestionEnvelopes: ChatStreamEnvelope[] = [
+  { seq: 1, event: { type: 'session.started', sessionId: 'sess_demo_2' } },
+  {
+    seq: 2,
+    event: {
+      type: 'user.message',
+      text: '把改动推上去，另外登录按钮的颜色你看着定就行。',
+    },
+  },
+  { seq: 3, event: { type: 'turn.started', turn: 1 } },
+
+  // bash escalated to approval — the tool_call item and the approval bridge
+  // events are independent (`callId` ≠ item id, docs/08 §2.2c） but ordered
+  // start → request → resolve → complete the way the real bridge produces
+  // them.
+  {
+    seq: 4,
+    event: {
+      type: 'item.started',
+      item: {
+        id: 't1',
+        type: 'tool_call',
+        toolName: 'bash',
+        input: { command: SAMPLE_APPROVAL_COMMAND },
+        status: 'in_progress',
+      },
+    },
+  },
+  {
+    seq: 5,
+    event: {
+      type: 'approval.requested',
+      callId: 'call_1',
+      toolName: 'bash',
+      input: { command: SAMPLE_APPROVAL_COMMAND },
+    },
+  },
+  {
+    seq: 6,
+    event: { type: 'approval.resolved', callId: 'call_1', behavior: 'allow' },
+  },
+  {
+    seq: 7,
+    event: {
+      type: 'item.completed',
+      item: {
+        id: 't1',
+        type: 'tool_call',
+        toolName: 'bash',
+        input: { command: SAMPLE_APPROVAL_COMMAND },
+        output:
+          'To github.com:acme/demo.git\n   1a2b3c4..5d6e7f8  nimbo/chat-demo -> nimbo/chat-demo',
+        status: 'completed',
+      },
+    },
+  },
+
+  // ask_user — its own tool_call item stays suppressed (timeline.ts) once it
+  // settles as `completed`; the `question.*` pair is its sole rendering.
+  {
+    seq: 8,
+    event: {
+      type: 'item.started',
+      item: {
+        id: 't2',
+        type: 'tool_call',
+        toolName: 'ask_user',
+        input: {
+          question: SAMPLE_QUESTION_TEXT,
+          options: ['主题色', '保持灰色'],
+        },
+        status: 'in_progress',
+      },
+    },
+  },
+  {
+    seq: 9,
+    event: {
+      type: 'question.asked',
+      callId: 'call_2',
+      question: SAMPLE_QUESTION_TEXT,
+      options: ['主题色', '保持灰色'],
+    },
+  },
+  {
+    seq: 10,
+    event: {
+      type: 'question.answered',
+      callId: 'call_2',
+      outcome: 'answered',
+      answer: SAMPLE_QUESTION_ANSWER,
+    },
+  },
+  {
+    seq: 11,
+    event: {
+      type: 'item.completed',
+      item: {
+        id: 't2',
+        type: 'tool_call',
+        toolName: 'ask_user',
+        input: {
+          question: SAMPLE_QUESTION_TEXT,
+          options: ['主题色', '保持灰色'],
+        },
+        output: SAMPLE_QUESTION_ANSWER,
+        status: 'completed',
+      },
+    },
+  },
+
+  // A second bash call escalates to approval but never gets resolved before
+  // the turn ends (a timeout resolution that never made it onto this
+  // client's log, or turn-runner's own end-of-turn "deny residual pending
+  // but don't emit" fallback, docs/08 §2.2c（审批链）) — `timeline.ts`'s
+  // terminal-sweep is what folds this into `'expired'` instead of leaving it
+  // stuck offering Allow/Deny for a decision the turn can no longer act on.
+  {
+    seq: 12,
+    event: {
+      type: 'item.started',
+      item: {
+        id: 't3',
+        type: 'tool_call',
+        toolName: 'bash',
+        input: { command: SAMPLE_EXPIRED_APPROVAL_COMMAND },
+        status: 'in_progress',
+      },
+    },
+  },
+  {
+    seq: 13,
+    event: {
+      type: 'approval.requested',
+      callId: 'call_3',
+      toolName: 'bash',
+      input: { command: SAMPLE_EXPIRED_APPROVAL_COMMAND },
+    },
+  },
+
+  {
+    seq: 14,
+    event: {
+      type: 'turn.completed',
+      usage: { inputTokens: 400, outputTokens: 120, totalTokens: 520 },
+    },
+  },
+  {
+    seq: 15,
+    event: {
+      type: 'turn.result',
+      finalResponse: '改动已推送；登录按钮颜色按你的选择改成了主题色。',
+      usage: { inputTokens: 400, outputTokens: 120, totalTokens: 520 },
+    },
+  },
+];

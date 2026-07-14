@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ChatApiError, postChatMessage, streamSessionTail } from '../api';
+import {
+  ChatApiError,
+  postApprovalDecision,
+  postChatMessage,
+  postQuestionAnswer,
+  streamSessionTail,
+} from '../api';
 import type { ChatStreamEnvelope } from '../schema';
 
 function sseResponse(chunks: string[], init?: { status?: number }): Response {
@@ -69,6 +75,153 @@ describe('postChatMessage', () => {
     await expect(postChatMessage('missing', 'hi')).rejects.toThrow(
       ChatApiError,
     );
+  });
+});
+
+describe('postApprovalDecision', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('POSTs { behavior } to .../approvals/<callId> with JSON headers and credentials included', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await postApprovalDecision('sess_1', 'call_1', { behavior: 'allow' });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/chat/sessions/sess_1/approvals/call_1',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ behavior: 'allow' }),
+      }),
+    );
+  });
+
+  it('includes the optional deny message in the request body', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await postApprovalDecision('sess_1', 'call_1', {
+      behavior: 'deny',
+      message: '太危险了',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        body: JSON.stringify({ behavior: 'deny', message: '太危险了' }),
+      }),
+    );
+  });
+
+  it('URL-encodes the callId', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await postApprovalDecision('sess_1', 'call/weird id', {
+      behavior: 'allow',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/chat/sessions/sess_1/approvals/${encodeURIComponent('call/weird id')}`,
+      expect.anything(),
+    );
+  });
+
+  it('rejects with ChatApiError on a non-2xx response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('server error', { status: 500 })),
+    );
+    await expect(
+      postApprovalDecision('sess_1', 'call_1', { behavior: 'allow' }),
+    ).rejects.toThrow(ChatApiError);
+  });
+
+  it('a 404 (callId no longer pending — already timed out or turn already ended) sets ChatApiError.status to 404', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('gone', { status: 404 })),
+    );
+    const error = await postApprovalDecision('sess_1', 'call_1', {
+      behavior: 'allow',
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ChatApiError);
+    expect(error).toHaveProperty('status', 404);
+  });
+});
+
+describe('postQuestionAnswer', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('POSTs { answer } to .../questions/<callId> with JSON headers and credentials included', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await postQuestionAnswer('sess_1', 'call_2', '用主题色吧。');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/chat/sessions/sess_1/questions/call_2',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answer: '用主题色吧。' }),
+      }),
+    );
+  });
+
+  it('URL-encodes the callId', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await postQuestionAnswer('sess_1', 'call/weird id', 'answer');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/chat/sessions/sess_1/questions/${encodeURIComponent('call/weird id')}`,
+      expect.anything(),
+    );
+  });
+
+  it('rejects with ChatApiError on a non-2xx response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('server error', { status: 500 })),
+    );
+    await expect(
+      postQuestionAnswer('sess_1', 'call_2', 'answer'),
+    ).rejects.toThrow(ChatApiError);
+  });
+
+  it('a 404 (callId no longer pending) sets ChatApiError.status to 404', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('gone', { status: 404 })),
+    );
+    const error = await postQuestionAnswer('sess_1', 'call_2', 'answer').catch(
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(ChatApiError);
+    expect(error).toHaveProperty('status', 404);
   });
 });
 

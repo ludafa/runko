@@ -3,6 +3,10 @@
  * Do not edit manually.
  */
 
+import type { ChatApprovalRequested } from './ChatApprovalRequested.ts';
+import type { ChatApprovalResolved } from './ChatApprovalResolved.ts';
+import type { ChatQuestionAnswered } from './ChatQuestionAnswered.ts';
+import type { ChatQuestionAsked } from './ChatQuestionAsked.ts';
 import type { ChatTurnFailed } from './ChatTurnFailed.ts';
 import type { ChatTurnResult } from './ChatTurnResult.ts';
 import type { ChatUserMessage } from './ChatUserMessage.ts';
@@ -560,5 +564,9 @@ export type ChatEventEnvelope = {
       }
     | ChatUserMessage
     | ChatTurnResult
-    | ChatTurnFailed;
+    | ChatTurnFailed
+    | ChatApprovalRequested
+    | ChatApprovalResolved
+    | ChatQuestionAsked
+    | ChatQuestionAnswered;
 };

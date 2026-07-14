@@ -117,6 +117,10 @@ function ChatSessionTimeline({
         <TimelineView
           envelopes={chat.envelopes}
           optimisticMessages={chat.optimisticMessages}
+          submittingCallIds={chat.submittingCallIds}
+          locallyExpiredCallIds={chat.locallyExpiredCallIds}
+          onSubmitApproval={chat.submitApproval}
+          onSubmitAnswer={chat.submitAnswer}
         />
       </div>
 

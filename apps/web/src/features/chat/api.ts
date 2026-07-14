@@ -159,6 +159,58 @@ export async function postChatMessage(
 }
 
 /**
+ * `POST .../approvals/:callId` (docs/08 §2.2c（审批链）): a human's decision
+ * on a pending tool call. Same posture as `postChatMessage` above — the
+ * decision itself arrives back over the tail as `approval.resolved`, this
+ * call only needs to succeed or fail; `use-chat-messages.ts` tells a `404`
+ * (the server no longer has this `callId` pending — already timed out, or
+ * the turn already ended) apart from every other failure via
+ * `ChatApiError.status`.
+ *
+ * `src/gen/clients/postApiChatSessionsIdApprovalsCallid.ts` covers the same
+ * route (kubb now generates it — the routes are in `openapi.yml`), but its
+ * default `@kubb/plugin-client/clients/fetch` client never checks
+ * `response.ok`/throws on a non-2xx status, only returning whatever JSON
+ * body came back regardless of status code — unusable for the
+ * 404-vs-anything-else distinction this hook needs, so this stays
+ * hand-written like the rest of this file.
+ */
+export async function postApprovalDecision(
+  sessionId: string,
+  callId: string,
+  decision: { behavior: 'allow' | 'deny'; message?: string },
+  signal?: AbortSignal,
+): Promise<void> {
+  await requestJson(
+    `/api/chat/sessions/${encodeURIComponent(sessionId)}/approvals/${encodeURIComponent(callId)}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(decision),
+      signal,
+    },
+  );
+}
+
+/** `POST .../questions/:callId` (docs/08 §2.2c（审批链）): a human's free-text answer to a pending `ask_user` question — same posture/rationale as `postApprovalDecision` above. */
+export async function postQuestionAnswer(
+  sessionId: string,
+  callId: string,
+  answer: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  await requestJson(
+    `/api/chat/sessions/${encodeURIComponent(sessionId)}/questions/${encodeURIComponent(callId)}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answer }),
+      signal,
+    },
+  );
+}
+
+/**
  * `GET /api/chat/sessions/:id/stream?after=<seq>` (docs/08 §2.2b): the
  * resumable live tail — replays persisted events after `after`, then
  * forwards the turn's live events until it ends (or closes immediately if

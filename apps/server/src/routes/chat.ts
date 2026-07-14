@@ -1,12 +1,20 @@
 import { randomUUID } from 'node:crypto';
 
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
-import type { SessionState } from '@nimbo/core';
+import type {
+  ApprovalDecision,
+  ApprovalPolicy,
+  SessionState,
+} from '@nimbo/core';
 import { sessionStateSchema } from '@nimbo/core';
 import type { LanguageModel } from 'ai';
 import type { MiddlewareHandler } from 'hono';
 import { streamSSE } from 'hono/streaming';
 
+import {
+  resolveApprovalMode,
+  shouldAutoAllow,
+} from '../agent/approval-policy.js';
 import { buildSession } from '../agent/chat-agent.js';
 import type { GitHubRepoRef } from '../agent/github-repo.js';
 import { resolveGithubPat, resolveRepo } from '../agent/github-repo.js';
@@ -27,8 +35,16 @@ import {
   listAgentEvents,
   listChatSessions,
 } from '../agent/store.js';
+import type {
+  AskUserOutcome,
+  RequestUserAnswerInput,
+} from '../agent/turn-runner.js';
 import {
   isTurnActive,
+  requestApproval,
+  requestUserAnswer,
+  resolveApproval,
+  resolveUserAnswer,
   startTurn,
   steerTurn,
   subscribeTurn,
@@ -38,6 +54,8 @@ import { requireAuth } from '../middleware/auth.js';
 import { ErrorSchema } from '../schemas/api.js';
 import type { ChatEventEnvelope, ChatSessionDto } from '../schemas/chat.js';
 import {
+  ApprovalAckSchema,
+  ChatApprovalParamsSchema,
   chatEventEnvelopeSchema,
   ChatEventsListSchema,
   ChatEventsQuerySchema,
@@ -45,13 +63,16 @@ import {
   ChatSessionSchema,
   chatStreamEventSchema,
   CreateChatSessionInputSchema,
+  PostAnswerInputSchema,
+  PostApprovalInputSchema,
   PostChatMessageInputSchema,
   StartTurnAckSchema,
 } from '../schemas/chat.js';
 
 // ---------------------------------------------------------------------------
-// docs/08-chat-agent-webapp.md §2.2 `routes/chat.ts` — five endpoints, login
-// required on all of them (same `requireAuth` middleware as
+// docs/08-chat-agent-webapp.md §2.2 `routes/chat.ts` (+ §2.2c（审批链）'s
+// `POST .../approvals/:callId` and `POST .../questions/:callId`) — seven
+// endpoints, login required on all of them (same `requireAuth` middleware as
 // `routes/example.ts`).
 // ---------------------------------------------------------------------------
 
@@ -381,6 +402,31 @@ export function createChatApp(deps: ChatRouteDeps) {
       return c.json({ error: describeError(error) }, 500);
     }
 
+    // docs/08 §2.2c（审批链）: the session-level `ApprovalPolicy` bridge —
+    // `shouldAutoAllow` decides on the spot; anything it doesn't clear is
+    // routed to `turn-runner.ts`'s `requestApproval`, which suspends this
+    // turn until a human (or a timeout) resolves it via
+    // `POST .../approvals/:callId`. Captures `id` (the *chat* session id,
+    // this route's own path param) — not `ctx.session.id`, which is
+    // `@nimbo/core`'s own internal session id and means nothing to
+    // `turn-runner.ts`'s `activeTurns` map.
+    const approvalMode = resolveApprovalMode();
+    const onApproval: ApprovalPolicy = (input, ctx) =>
+      shouldAutoAllow(approvalMode, ctx.toolName, input) ?
+        { behavior: 'allow' as const }
+      : requestApproval(id, {
+          callId: ctx.callId,
+          toolName: ctx.toolName,
+          input,
+        });
+
+    // docs/08 §2.2c（审批链）: the ask_user bridge — same "captures `id`, not
+    // an internal id" discipline as `onApproval` above. Always wired in
+    // (unlike `onApproval`'s auto-allow branch, there's no "skip asking"
+    // mode for `ask_user` — see `chat-agent.ts`'s `BuildSessionOptions.onAskUser`).
+    const onAskUser = (req: RequestUserAnswerInput): Promise<AskUserOutcome> =>
+      requestUserAnswer(id, req);
+
     let session;
     try {
       session = await buildSession({
@@ -391,6 +437,9 @@ export function createChatApp(deps: ChatRouteDeps) {
         defaultBranch: acquired.defaultBranch,
         branchName: row.branchName,
         resume: parseResumeState(row.nimboStateJson),
+        onApproval,
+        approvalMode,
+        onAskUser,
       });
     } catch (error) {
       return c.json({ error: describeError(error) }, 500);
@@ -528,6 +577,128 @@ export function createChatApp(deps: ChatRouteDeps) {
         unsubscribe();
       }
     });
+  });
+
+  // ---- POST /api/chat/sessions/{id}/approvals/{callId} (resolve a pending approval, docs/08 §2.2c（审批链）) ----
+
+  const postApprovalRoute = createRoute({
+    method: 'post',
+    path: '/api/chat/sessions/{id}/approvals/{callId}',
+    tags: ['Chat'],
+    summary:
+      '批准或拒绝一个待处理的工具调用审批请求（docs/08 §2.2c（审批链））：结果通过 `GET .../stream` 的 `approval.resolved` 事件送达，本响应只是一个 ack',
+    request: {
+      params: ChatApprovalParamsSchema,
+      body: {
+        content: { 'application/json': { schema: PostApprovalInputSchema } },
+        required: true,
+      },
+    },
+    responses: {
+      200: {
+        content: { 'application/json': { schema: ApprovalAckSchema } },
+        description: 'Resolved',
+      },
+      401: {
+        content: { 'application/json': { schema: ErrorSchema } },
+        description: 'Unauthorized',
+      },
+      404: {
+        content: { 'application/json': { schema: ErrorSchema } },
+        description:
+          'Not found — either this session doesn’t exist (or isn’t the caller’s), or `callId` has no pending approval on it (already resolved, timed out, or never existed)',
+      },
+    },
+  });
+
+  app.openapi(postApprovalRoute, async (c) => {
+    const userId = c.get('userId');
+    const { id, callId } = c.req.valid('param');
+    const { behavior, message } = c.req.valid('json');
+
+    const row = getChatSession(deps.db, id, userId);
+    if (row === undefined) return c.json({ error: 'Not found' }, 404);
+
+    if (behavior === 'allow') {
+      // Rolls the sandbox's idle timeout forward, same as every other
+      // in-turn touch point — but must never block the decision itself: if
+      // `touch()` throws (sandbox already gone, transient Vercel error), the
+      // pending tool call still needs resolving, or it just hangs until
+      // `requestApproval`'s own timeout denies it anyway (worse than letting
+      // `exec()` itself surface whatever sandbox-availability problem there
+      // is as a normal tool failure).
+      try {
+        await deps.sandboxManager.touch(id);
+      } catch {
+        // intentionally swallowed — see comment above
+      }
+    }
+
+    const decision: ApprovalDecision =
+      behavior === 'allow' ?
+        { behavior: 'allow' }
+      : { behavior: 'deny', ...(message !== undefined ? { message } : {}) }; // no message → core's own default deny text (routes/chat.ts never invents one)
+
+    const resolved = resolveApproval(id, callId, decision);
+    if (!resolved) return c.json({ error: 'Not found' }, 404);
+
+    return c.json({ ok: true as const }, 200);
+  });
+
+  // ---- POST /api/chat/sessions/{id}/questions/{callId} (answer a pending ask_user question, docs/08 §2.2c（审批链）) ----
+
+  const postAnswerRoute = createRoute({
+    method: 'post',
+    path: '/api/chat/sessions/{id}/questions/{callId}',
+    tags: ['Chat'],
+    summary:
+      '回答一个待处理的 ask_user 提问（docs/08 §2.2c（审批链））：结果通过 `GET .../stream` 的 `question.answered` 事件送达，本响应只是一个 ack',
+    request: {
+      params: ChatApprovalParamsSchema,
+      body: {
+        content: { 'application/json': { schema: PostAnswerInputSchema } },
+        required: true,
+      },
+    },
+    responses: {
+      200: {
+        content: { 'application/json': { schema: ApprovalAckSchema } },
+        description: 'Resolved',
+      },
+      401: {
+        content: { 'application/json': { schema: ErrorSchema } },
+        description: 'Unauthorized',
+      },
+      404: {
+        content: { 'application/json': { schema: ErrorSchema } },
+        description:
+          'Not found — either this session doesn’t exist (or isn’t the caller’s), or `callId` has no pending question on it (already answered, timed out, or never existed)',
+      },
+    },
+  });
+
+  app.openapi(postAnswerRoute, async (c) => {
+    const userId = c.get('userId');
+    const { id, callId } = c.req.valid('param');
+    const { answer } = c.req.valid('json');
+
+    const row = getChatSession(deps.db, id, userId);
+    if (row === undefined) return c.json({ error: 'Not found' }, 404);
+
+    // Unconditional (unlike the approval route's `allow`-only branch —
+    // answering a question always lets the turn continue, there is no "deny"
+    // analog here): must never block the answer itself, same rationale as
+    // the approval route's own touch-failure comment above.
+    try {
+      await deps.sandboxManager.touch(id);
+    } catch {
+      // intentionally swallowed — see comment above
+    }
+
+    const resolved = resolveUserAnswer(id, callId, answer);
+    if (!resolved) return c.json({ error: 'Not found' }, 404);
+
+    return c.json({ ok: true as const }, 200);
   });
 
   return app;

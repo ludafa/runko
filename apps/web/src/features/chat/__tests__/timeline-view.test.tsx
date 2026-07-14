@@ -3,7 +3,12 @@ import { describe, expect, it } from 'vitest';
 
 import { TimelineView } from '../components/timeline-view';
 import {
+  SAMPLE_APPROVAL_COMMAND,
+  SAMPLE_EXPIRED_APPROVAL_COMMAND,
+  SAMPLE_QUESTION_ANSWER,
+  SAMPLE_QUESTION_TEXT,
   SAMPLE_USER_MESSAGE_TEXT,
+  sampleApprovalQuestionEnvelopes,
   sampleChatEnvelopes,
 } from '../fixtures/sample-session-events';
 import type { ChatStreamEnvelope } from '../schema';
@@ -154,5 +159,54 @@ describe('TimelineView', () => {
     );
     render(<TimelineView envelopes={duplicated} />);
     expect(screen.getAllByTestId('turn-result-bar')).toHaveLength(1);
+  });
+
+  describe('approval/question cards (docs/08 §2.2c（审批链）, sampleApprovalQuestionEnvelopes)', () => {
+    it('renders the resolved approval card (allowed, call_1) with its bash command', () => {
+      render(<TimelineView envelopes={sampleApprovalQuestionEnvelopes} />);
+
+      // two bash calls get escalated in the fixture: call_1 (resolved allow)
+      // and call_3 (never resolved before turn.result — expired below).
+      const approvalCards = screen.getAllByTestId('approval-card');
+      expect(approvalCards).toHaveLength(2);
+
+      const allowedCard = approvalCards.find(
+        (card) => card.getAttribute('data-status') === 'allowed',
+      );
+      if (allowedCard === undefined) throw new Error('unreachable');
+      expect(
+        within(allowedCard).getByText(SAMPLE_APPROVAL_COMMAND),
+      ).toBeInTheDocument();
+    });
+
+    it("renders the never-resolved approval (call_3) as expired once the turn's terminal turn.result sentinel has been replayed", () => {
+      render(<TimelineView envelopes={sampleApprovalQuestionEnvelopes} />);
+
+      const approvalCards = screen.getAllByTestId('approval-card');
+      const expiredCard = approvalCards.find(
+        (card) => card.getAttribute('data-status') === 'expired',
+      );
+      if (expiredCard === undefined) throw new Error('unreachable');
+      expect(
+        within(expiredCard).getByText(SAMPLE_EXPIRED_APPROVAL_COMMAND),
+      ).toBeInTheDocument();
+    });
+
+    it('renders the answered question card (call_2) with its question and answer', () => {
+      render(<TimelineView envelopes={sampleApprovalQuestionEnvelopes} />);
+
+      const questionCard = screen.getByTestId('question-card');
+      expect(questionCard).toHaveAttribute('data-status', 'answered');
+      expect(
+        within(questionCard).getByText(SAMPLE_QUESTION_TEXT),
+      ).toBeInTheDocument();
+      expect(questionCard).toHaveTextContent(SAMPLE_QUESTION_ANSWER);
+    });
+
+    it("suppresses the ask_user tool_call's own card — no 'ask_user' tool name text appears anywhere, the question card is its sole rendering", () => {
+      render(<TimelineView envelopes={sampleApprovalQuestionEnvelopes} />);
+      expect(screen.queryByText('ask_user')).not.toBeInTheDocument();
+      expect(screen.getByTestId('question-card')).toBeInTheDocument();
+    });
   });
 });

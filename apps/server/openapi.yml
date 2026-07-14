@@ -585,6 +585,10 @@ components:
             - $ref: "#/components/schemas/ChatUserMessage"
             - $ref: "#/components/schemas/ChatTurnResult"
             - $ref: "#/components/schemas/ChatTurnFailed"
+            - $ref: "#/components/schemas/ChatApprovalRequested"
+            - $ref: "#/components/schemas/ChatApprovalResolved"
+            - $ref: "#/components/schemas/ChatQuestionAsked"
+            - $ref: "#/components/schemas/ChatQuestionAnswered"
       required:
         - seq
         - event
@@ -656,6 +660,81 @@ components:
         - type
         - code
         - message
+    ChatApprovalRequested:
+      type: object
+      properties:
+        type:
+          type: string
+          enum:
+            - approval.requested
+        callId:
+          type: string
+        toolName:
+          type: string
+        input: {}
+      required:
+        - type
+        - callId
+        - toolName
+    ChatApprovalResolved:
+      type: object
+      properties:
+        type:
+          type: string
+          enum:
+            - approval.resolved
+        callId:
+          type: string
+        behavior:
+          type: string
+          enum:
+            - allow
+            - deny
+        message:
+          type: string
+      required:
+        - type
+        - callId
+        - behavior
+    ChatQuestionAsked:
+      type: object
+      properties:
+        type:
+          type: string
+          enum:
+            - question.asked
+        callId:
+          type: string
+        question:
+          type: string
+        options:
+          type: array
+          items:
+            type: string
+      required:
+        - type
+        - callId
+        - question
+    ChatQuestionAnswered:
+      type: object
+      properties:
+        type:
+          type: string
+          enum:
+            - question.answered
+        callId:
+          type: string
+        outcome:
+          type: string
+          enum:
+            - answered
+            - timeout
+        answer:
+          type: string
+      required:
+        - type
+        - callId
+        - outcome
     StartTurnAck:
       type: object
       properties:
@@ -679,6 +758,35 @@ components:
           minLength: 1
       required:
         - text
+    ApprovalAck:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          enum:
+            - true
+      required:
+        - ok
+    PostApprovalInput:
+      type: object
+      properties:
+        behavior:
+          type: string
+          enum:
+            - allow
+            - deny
+        message:
+          type: string
+      required:
+        - behavior
+    PostAnswerInput:
+      type: object
+      properties:
+        answer:
+          type: string
+          minLength: 1
+      required:
+        - answer
   parameters: {}
 paths:
   /api/notes:
@@ -942,6 +1050,100 @@ paths:
                 $ref: "#/components/schemas/ApiError"
         "404":
           description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/chat/sessions/{id}/approvals/{callId}:
+    post:
+      tags:
+        - Chat
+      summary: 批准或拒绝一个待处理的工具调用审批请求（docs/08 §2.2c（审批链））：结果通过 `GET .../stream` 的
+        `approval.resolved` 事件送达，本响应只是一个 ack
+      parameters:
+        - schema:
+            type: string
+            examples: &a2
+              - 3f1b2c4d-...
+          required: true
+          name: id
+          in: path
+        - schema:
+            type: string
+            examples: &a3
+              - call_1
+          required: true
+          name: callId
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostApprovalInput"
+      responses:
+        "200":
+          description: Resolved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalAck"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not found — either this session doesn’t exist (or isn’t the
+            caller’s), or `callId` has no pending approval on it (already
+            resolved, timed out, or never existed)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/chat/sessions/{id}/questions/{callId}:
+    post:
+      tags:
+        - Chat
+      summary: 回答一个待处理的 ask_user 提问（docs/08 §2.2c（审批链））：结果通过 `GET .../stream` 的
+        `question.answered` 事件送达，本响应只是一个 ack
+      parameters:
+        - schema:
+            type: string
+            examples: *a2
+          required: true
+          name: id
+          in: path
+        - schema:
+            type: string
+            examples: *a3
+          required: true
+          name: callId
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostAnswerInput"
+      responses:
+        "200":
+          description: Resolved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalAck"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not found — either this session doesn’t exist (or isn’t the
+            caller’s), or `callId` has no pending question on it (already
+            answered, timed out, or never existed)
           content:
             application/json:
               schema:

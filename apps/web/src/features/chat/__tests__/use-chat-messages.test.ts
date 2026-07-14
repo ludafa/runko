@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ChatEnvelopeStreamHandlers } from '../api';
+import { ChatApiError } from '../api';
 import { useChatMessages } from '../use-chat-messages';
 
 type PostChatMessageFn = (
@@ -15,10 +16,29 @@ type StreamSessionTailFn = (
   handlers: ChatEnvelopeStreamHandlers,
   signal?: AbortSignal,
 ) => Promise<void>;
+type PostApprovalDecisionFn = (
+  sessionId: string,
+  callId: string,
+  decision: { behavior: 'allow' | 'deny'; message?: string },
+  signal?: AbortSignal,
+) => Promise<void>;
+type PostQuestionAnswerFn = (
+  sessionId: string,
+  callId: string,
+  answer: string,
+  signal?: AbortSignal,
+) => Promise<void>;
 
-const { postChatMessageMock, streamSessionTailMock } = vi.hoisted(() => ({
+const {
+  postChatMessageMock,
+  streamSessionTailMock,
+  postApprovalDecisionMock,
+  postQuestionAnswerMock,
+} = vi.hoisted(() => ({
   postChatMessageMock: vi.fn<PostChatMessageFn>(),
   streamSessionTailMock: vi.fn<StreamSessionTailFn>(),
+  postApprovalDecisionMock: vi.fn<PostApprovalDecisionFn>(),
+  postQuestionAnswerMock: vi.fn<PostQuestionAnswerFn>(),
 }));
 
 vi.mock('../api', async () => {
@@ -27,6 +47,8 @@ vi.mock('../api', async () => {
     ...actual,
     postChatMessage: postChatMessageMock,
     streamSessionTail: streamSessionTailMock,
+    postApprovalDecision: postApprovalDecisionMock,
+    postQuestionAnswer: postQuestionAnswerMock,
   };
 });
 
@@ -428,5 +450,165 @@ describe('useChatMessages', () => {
     expect(result.current.error).toBe('network blip');
     expect(result.current.optimisticMessages).toHaveLength(0);
     expect(calls).toHaveLength(1); // still no new tail opened by the failed attempt
+  });
+
+  // -------------------------------------------------------------------------
+  // submitApproval / submitAnswer (docs/08 §2.2c（审批链）) — work order C2.
+  // -------------------------------------------------------------------------
+
+  describe('submitApproval / submitAnswer', () => {
+    it('ignores a second submitApproval call for the same callId while the first is still in flight', async () => {
+      createStreamSessionTailRecorder();
+      let resolveFirst: () => void = () => undefined;
+      postApprovalDecisionMock.mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveFirst = resolve;
+          }),
+      );
+
+      const { result } = renderHook(() => useChatMessages('sess_1', []));
+
+      act(() => {
+        result.current.submitApproval('c1', 'allow');
+      });
+      expect(result.current.submittingCallIds.has('c1')).toBe(true);
+
+      act(() => {
+        // A second submit for the same callId while the first is still
+        // outstanding — swallowed by the submittingCallIds pre-check (the
+        // card also disables its own button, this is the hook's own defense
+        // in depth, see use-chat-messages.ts's submitDecision doc comment).
+        result.current.submitApproval('c1', 'deny');
+      });
+      expect(postApprovalDecisionMock).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        resolveFirst();
+        await Promise.resolve();
+      });
+      expect(result.current.submittingCallIds.has('c1')).toBe(false);
+    });
+
+    it('a successful submitApproval does not optimistically change envelopes/timeline state — the resolution only ever lands via the tail', async () => {
+      createStreamSessionTailRecorder();
+      postApprovalDecisionMock.mockResolvedValue(undefined);
+
+      const { result } = renderHook(() =>
+        useChatMessages('sess_1', [
+          {
+            seq: 1,
+            event: {
+              type: 'approval.requested',
+              callId: 'c1',
+              toolName: 'bash',
+              input: {},
+            },
+          },
+        ]),
+      );
+
+      await act(async () => {
+        result.current.submitApproval('c1', 'allow');
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(result.current.submittingCallIds.has('c1')).toBe(false);
+      expect(result.current.locallyExpiredCallIds.has('c1')).toBe(false);
+      expect(result.current.error).toBeUndefined();
+      // still just the one requested envelope — no synthesized resolution:
+      expect(result.current.envelopes).toHaveLength(1);
+      expect(result.current.envelopes[0]?.event.type).toBe(
+        'approval.requested',
+      );
+    });
+
+    it('a 404 from submitApproval (server no longer has this callId pending) marks it locally expired and clears submitting', async () => {
+      createStreamSessionTailRecorder();
+      postApprovalDecisionMock.mockRejectedValue(
+        new ChatApiError(404, 'not pending'),
+      );
+
+      const { result } = renderHook(() => useChatMessages('sess_1', []));
+
+      await act(async () => {
+        result.current.submitApproval('c1', 'allow');
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(result.current.locallyExpiredCallIds.has('c1')).toBe(true);
+      expect(result.current.submittingCallIds.has('c1')).toBe(false);
+      expect(result.current.error).toBeUndefined();
+    });
+
+    it('a non-404 error from submitApproval surfaces via the error field and clears submitting, without marking the callId locally expired', async () => {
+      createStreamSessionTailRecorder();
+      postApprovalDecisionMock.mockRejectedValue(
+        new ChatApiError(500, '内部错误'),
+      );
+
+      const { result } = renderHook(() => useChatMessages('sess_1', []));
+
+      await act(async () => {
+        result.current.submitApproval('c1', 'allow');
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(result.current.error).toBe('内部错误');
+      expect(result.current.submittingCallIds.has('c1')).toBe(false);
+      expect(result.current.locallyExpiredCallIds.has('c1')).toBe(false);
+    });
+
+    it('submitAnswer is a no-op for a blank/whitespace-only answer — no request fired, nothing marked submitting', () => {
+      createStreamSessionTailRecorder();
+
+      const { result } = renderHook(() => useChatMessages('sess_1', []));
+
+      act(() => {
+        result.current.submitAnswer('q1', '   ');
+      });
+
+      expect(postQuestionAnswerMock).not.toHaveBeenCalled();
+      expect(result.current.submittingCallIds.has('q1')).toBe(false);
+    });
+
+    it('submitAnswer trims the answer before sending', async () => {
+      createStreamSessionTailRecorder();
+      postQuestionAnswerMock.mockResolvedValue(undefined);
+
+      const { result } = renderHook(() => useChatMessages('sess_1', []));
+
+      await act(async () => {
+        result.current.submitAnswer('q1', '  用主题色吧。  ');
+        await Promise.resolve();
+      });
+
+      expect(postQuestionAnswerMock).toHaveBeenCalledWith(
+        'sess_1',
+        'q1',
+        '用主题色吧。',
+      );
+    });
+
+    it('a 404 from submitAnswer also marks the callId locally expired (same submitDecision path as submitApproval)', async () => {
+      createStreamSessionTailRecorder();
+      postQuestionAnswerMock.mockRejectedValue(
+        new ChatApiError(404, 'not pending'),
+      );
+
+      const { result } = renderHook(() => useChatMessages('sess_1', []));
+
+      await act(async () => {
+        result.current.submitAnswer('q1', '用主题色吧。');
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(result.current.locallyExpiredCallIds.has('q1')).toBe(true);
+      expect(result.current.submittingCallIds.has('q1')).toBe(false);
+    });
   });
 });

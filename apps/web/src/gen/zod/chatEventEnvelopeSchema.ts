@@ -3,6 +3,10 @@
  * Do not edit manually.
  */
 
+import { chatApprovalRequestedSchema } from './chatApprovalRequestedSchema.ts';
+import { chatApprovalResolvedSchema } from './chatApprovalResolvedSchema.ts';
+import { chatQuestionAnsweredSchema } from './chatQuestionAnsweredSchema.ts';
+import { chatQuestionAskedSchema } from './chatQuestionAskedSchema.ts';
 import { chatTurnFailedSchema } from './chatTurnFailedSchema.ts';
 import { chatTurnResultSchema } from './chatTurnResultSchema.ts';
 import { chatUserMessageSchema } from './chatUserMessageSchema.ts';
@@ -17,6 +21,10 @@ export const chatEventEnvelopeSchema = z.object({
       chatUserMessageSchema,
       chatTurnResultSchema,
       chatTurnFailedSchema,
+      chatApprovalRequestedSchema,
+      chatApprovalResolvedSchema,
+      chatQuestionAskedSchema,
+      chatQuestionAnsweredSchema,
       z.object({
         type: z.enum(['session.started']),
         sessionId: z.string(),

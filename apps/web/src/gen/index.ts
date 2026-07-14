@@ -1,4 +1,14 @@
 export type { ApiError } from './types/ApiError.ts';
+export type { ApprovalAck, ApprovalAckOkEnumKey } from './types/ApprovalAck.ts';
+export type {
+  ChatApprovalRequested,
+  ChatApprovalRequestedTypeEnumKey,
+} from './types/ChatApprovalRequested.ts';
+export type {
+  ChatApprovalResolved,
+  ChatApprovalResolvedBehaviorEnumKey,
+  ChatApprovalResolvedTypeEnumKey,
+} from './types/ChatApprovalResolved.ts';
 export type {
   ChangesKindEnumKey,
   ChatEventEnvelope,
@@ -19,6 +29,15 @@ export type {
   ItemTypeEnumKey,
 } from './types/ChatEventEnvelope.ts';
 export type { ChatEventsList } from './types/ChatEventsList.ts';
+export type {
+  ChatQuestionAnswered,
+  ChatQuestionAnsweredOutcomeEnumKey,
+  ChatQuestionAnsweredTypeEnumKey,
+} from './types/ChatQuestionAnswered.ts';
+export type {
+  ChatQuestionAsked,
+  ChatQuestionAskedTypeEnumKey,
+} from './types/ChatQuestionAsked.ts';
 export type {
   ChatSession,
   ChatSessionStatusEnumKey,
@@ -77,6 +96,7 @@ export type {
 } from './types/GetApiNotes.ts';
 export type { NimboError, NimboErrorCodeEnumKey } from './types/NimboError.ts';
 export type { Note } from './types/Note.ts';
+export type { PostAnswerInput } from './types/PostAnswerInput.ts';
 export type {
   PostApiChatSessions201,
   PostApiChatSessions401,
@@ -85,6 +105,15 @@ export type {
   PostApiChatSessionsMutationRequest,
   PostApiChatSessionsMutationResponse,
 } from './types/PostApiChatSessions.ts';
+export type {
+  PostApiChatSessionsIdApprovalsCallid200,
+  PostApiChatSessionsIdApprovalsCallid401,
+  PostApiChatSessionsIdApprovalsCallid404,
+  PostApiChatSessionsIdApprovalsCallidMutation,
+  PostApiChatSessionsIdApprovalsCallidMutationRequest,
+  PostApiChatSessionsIdApprovalsCallidMutationResponse,
+  PostApiChatSessionsIdApprovalsCallidPathParams,
+} from './types/PostApiChatSessionsIdApprovalsCallid.ts';
 export type {
   PostApiChatSessionsIdMessages202,
   PostApiChatSessionsIdMessages401,
@@ -97,12 +126,25 @@ export type {
   PostApiChatSessionsIdMessagesPathParams,
 } from './types/PostApiChatSessionsIdMessages.ts';
 export type {
+  PostApiChatSessionsIdQuestionsCallid200,
+  PostApiChatSessionsIdQuestionsCallid401,
+  PostApiChatSessionsIdQuestionsCallid404,
+  PostApiChatSessionsIdQuestionsCallidMutation,
+  PostApiChatSessionsIdQuestionsCallidMutationRequest,
+  PostApiChatSessionsIdQuestionsCallidMutationResponse,
+  PostApiChatSessionsIdQuestionsCallidPathParams,
+} from './types/PostApiChatSessionsIdQuestionsCallid.ts';
+export type {
   PostApiNotes201,
   PostApiNotes401,
   PostApiNotesMutation,
   PostApiNotesMutationRequest,
   PostApiNotesMutationResponse,
 } from './types/PostApiNotes.ts';
+export type {
+  PostApprovalInput,
+  PostApprovalInputBehaviorEnumKey,
+} from './types/PostApprovalInput.ts';
 export type { PostChatMessageInput } from './types/PostChatMessageInput.ts';
 export type {
   StartTurnAck,
@@ -116,8 +158,14 @@ export { getApiChatSessionsIdEvents } from './clients/getApiChatSessionsIdEvents
 export { getApiChatSessionsIdStream } from './clients/getApiChatSessionsIdStream.ts';
 export { getApiNotes } from './clients/getApiNotes.ts';
 export { postApiChatSessions } from './clients/postApiChatSessions.ts';
+export { postApiChatSessionsIdApprovalsCallid } from './clients/postApiChatSessionsIdApprovalsCallid.ts';
 export { postApiChatSessionsIdMessages } from './clients/postApiChatSessionsIdMessages.ts';
+export { postApiChatSessionsIdQuestionsCallid } from './clients/postApiChatSessionsIdQuestionsCallid.ts';
 export { postApiNotes } from './clients/postApiNotes.ts';
+export { approvalAckOkEnum } from './types/ApprovalAck.ts';
+export { chatApprovalRequestedTypeEnum } from './types/ChatApprovalRequested.ts';
+export { chatApprovalResolvedBehaviorEnum } from './types/ChatApprovalResolved.ts';
+export { chatApprovalResolvedTypeEnum } from './types/ChatApprovalResolved.ts';
 export { changesKindEnum } from './types/ChatEventEnvelope.ts';
 export { eventTypeEnum } from './types/ChatEventEnvelope.ts';
 export { eventTypeEnum2 } from './types/ChatEventEnvelope.ts';
@@ -134,16 +182,25 @@ export { itemTypeEnum4 } from './types/ChatEventEnvelope.ts';
 export { itemTypeEnum5 } from './types/ChatEventEnvelope.ts';
 export { itemTypeEnum6 } from './types/ChatEventEnvelope.ts';
 export { itemTypeEnum7 } from './types/ChatEventEnvelope.ts';
+export { chatQuestionAnsweredOutcomeEnum } from './types/ChatQuestionAnswered.ts';
+export { chatQuestionAnsweredTypeEnum } from './types/ChatQuestionAnswered.ts';
+export { chatQuestionAskedTypeEnum } from './types/ChatQuestionAsked.ts';
 export { chatSessionStatusEnum } from './types/ChatSession.ts';
 export { chatTurnFailedTypeEnum } from './types/ChatTurnFailed.ts';
 export { chatTurnResultTypeEnum } from './types/ChatTurnResult.ts';
 export { chatUserMessageTypeEnum } from './types/ChatUserMessage.ts';
 export { nimboErrorCodeEnum } from './types/NimboError.ts';
+export { postApprovalInputBehaviorEnum } from './types/PostApprovalInput.ts';
 export { startTurnAckModeEnum } from './types/StartTurnAck.ts';
 export { startTurnAckOkEnum } from './types/StartTurnAck.ts';
 export { apiErrorSchema } from './zod/apiErrorSchema.ts';
+export { approvalAckSchema } from './zod/approvalAckSchema.ts';
+export { chatApprovalRequestedSchema } from './zod/chatApprovalRequestedSchema.ts';
+export { chatApprovalResolvedSchema } from './zod/chatApprovalResolvedSchema.ts';
 export { chatEventEnvelopeSchema } from './zod/chatEventEnvelopeSchema.ts';
 export { chatEventsListSchema } from './zod/chatEventsListSchema.ts';
+export { chatQuestionAnsweredSchema } from './zod/chatQuestionAnsweredSchema.ts';
+export { chatQuestionAskedSchema } from './zod/chatQuestionAskedSchema.ts';
 export { chatSessionSchema } from './zod/chatSessionSchema.ts';
 export { chatTurnFailedSchema } from './zod/chatTurnFailedSchema.ts';
 export { chatTurnResultSchema } from './zod/chatTurnResultSchema.ts';
@@ -185,6 +242,15 @@ export {
 } from './zod/getApiNotesSchema.ts';
 export { nimboErrorSchema } from './zod/nimboErrorSchema.ts';
 export { noteSchema } from './zod/noteSchema.ts';
+export { postAnswerInputSchema } from './zod/postAnswerInputSchema.ts';
+export {
+  postApiChatSessionsIdApprovalsCallid200Schema,
+  postApiChatSessionsIdApprovalsCallid401Schema,
+  postApiChatSessionsIdApprovalsCallid404Schema,
+  postApiChatSessionsIdApprovalsCallidMutationRequestSchema,
+  postApiChatSessionsIdApprovalsCallidMutationResponseSchema,
+  postApiChatSessionsIdApprovalsCallidPathParamsSchema,
+} from './zod/postApiChatSessionsIdApprovalsCallidSchema.ts';
 export {
   postApiChatSessionsIdMessages202Schema,
   postApiChatSessionsIdMessages401Schema,
@@ -195,6 +261,14 @@ export {
   postApiChatSessionsIdMessagesMutationResponseSchema,
   postApiChatSessionsIdMessagesPathParamsSchema,
 } from './zod/postApiChatSessionsIdMessagesSchema.ts';
+export {
+  postApiChatSessionsIdQuestionsCallid200Schema,
+  postApiChatSessionsIdQuestionsCallid401Schema,
+  postApiChatSessionsIdQuestionsCallid404Schema,
+  postApiChatSessionsIdQuestionsCallidMutationRequestSchema,
+  postApiChatSessionsIdQuestionsCallidMutationResponseSchema,
+  postApiChatSessionsIdQuestionsCallidPathParamsSchema,
+} from './zod/postApiChatSessionsIdQuestionsCallidSchema.ts';
 export {
   postApiChatSessions201Schema,
   postApiChatSessions401Schema,
@@ -208,6 +282,7 @@ export {
   postApiNotesMutationRequestSchema,
   postApiNotesMutationResponseSchema,
 } from './zod/postApiNotesSchema.ts';
+export { postApprovalInputSchema } from './zod/postApprovalInputSchema.ts';
 export { postChatMessageInputSchema } from './zod/postChatMessageInputSchema.ts';
 export { startTurnAckSchema } from './zod/startTurnAckSchema.ts';
 export { usageSchema } from './zod/usageSchema.ts';
