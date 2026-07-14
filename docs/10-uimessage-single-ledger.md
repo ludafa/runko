@@ -41,12 +41,14 @@
 `examples/13-uimessage-single-ledger.e2e.test.ts`——**不动 packages/\***，直接用 ai 包（`streamText` + `convertToModelMessages` + UIMessage 类型）手写一个最小 loop，复刻 nimbo loop 的全部关键语义：
 
 - 工具声明**不带 execute**（手动 loop，docs/02 §4.3 同款）：模型发起调用 → 实验代码自己执行 → 结果写回 UIMessage 的工具部件；
-- 一个审批场景（脚本化 deny 一次 bash 调用）；一个 ask_user 场景（脚本化回答）；一次 steer（第二步边界注入用户插话）；
+- 一个审批场景（脚本化 deny 一次 bash 调用）；一个 ask-user 场景（脚本化回答）；一次 steer（第二步边界注入用户插话）；
 - 每轮结束把 UIMessage 数组序列化到 `.tmp/`（JSON 文件即可，实验不需要 sqlite）；
 - **恢复路径**：新建 loop 实例，读回序列化的 UIMessage 数组 → 官方转换器 → 继续第二轮，验证模型带着完整记忆工作；
 - 模型走 examples/shared 的 DeepSeek 配置（`loadRootDotEnv`）；用自定义 fetch 包装记录**发给服务商的原始请求体**（字节级对比的取证来源）。
 
 ### 2.2 部件清单：nimbo loop agent 的全部表达（应 review 要求逐项列出）
+
+> **命名约定（2026-07-14 review 定案）**：全部部件类型统一 **dash 格式（kebab-case）**。工具部件的类型是 AI SDK 按 `tool-<工具名>` 自动拼接的，因此工具名本身随之从 snake_case 统一改为 kebab-case：`ask-user`、`read-file`、`write-file`、`edit-file`、`delete-file`、`move-file`、`list-dir`、`update-plan`、`load-skill`（`bash`/`glob`/`grep` 无分隔符不受影响）。杜绝 `tool-ask_user` 这类下划线与连字符混用。SDK 未发版无兼容负担；实验（P13-5a）直接用新名，正式迁移（P13-5）时全局改名（docs/04、core 内置工具、chat 应用与全部测试一并更新）。工具名合法性：主流服务商的工具名约束（字母/数字/`_`/`-`）均允许连字符。
 
 #### 2.2a 标准部件直接覆盖（不需要 data 部件）
 
@@ -54,9 +56,9 @@
 |---|---|---|
 | agent_message（正文） | `text` 部件 | 流式增量走实时通道，落盘只存终稿（P13-1 结论平移） |
 | reasoning（推理） | `reasoning` 部件 | 往返保真是 §2.4 验证项之一 |
-| tool_call（全部工具：bash、文件八件套、update_plan、load_skill、ask_user、宿主自定义） | `tool-<名字>` 部件 | 状态机：input-streaming（入参流入）→ input-available（待执行/待审批）→ output-available（成功）/ output-error（失败） |
+| tool_call（全部工具：`bash`、文件八件套 `read-file`/`write-file`/`edit-file`/`delete-file`/`move-file`/`list-dir`/`glob`/`grep`、`update-plan`、`load-skill`、`ask-user`、宿主自定义） | `tool-<名字>` 部件（如 `tool-bash`、`tool-read-file`） | 状态机：input-streaming（入参流入）→ input-available（待执行/待审批）→ output-available（成功）/ output-error（失败） |
 | tool_call 的 denied 状态 | `output-error` + 伴随 `data-approval` 终态 | 界面靠 data-approval 区分「被人拒绝」和「执行失败」；模型侧看到的措辞是 §2.4 验证项 |
-| ask_user 的提问/回答 | 标准 `tool-ask_user` 部件 | **不需要** `data-question`：callId 就在部件里（今天 web 端「审批卡片对不上工具卡片」的痛点自动消失），pending=input-available、已答=output-available、超时=output-available（超时提示文案作为输出） |
+| ask-user 的提问/回答 | 标准 `tool-ask-user` 部件 | **不需要** `data-question`：callId 就在部件里（今天 web 端「审批卡片对不上工具卡片」的痛点自动消失），pending=input-available、已答=output-available、超时=output-available（超时提示文案作为输出） |
 | 步边界 | `step-start` 部件 | 官方内建，转换器据此切分 assistant/tool 消息 |
 | 用户发言（含 steer 中途插话） | role=user 的 UIMessage | steer 用消息 metadata 标 `steered: true`（界面样式区分），转换器照常处理 |
 | turn 收尾（turn.result：usage/finishReason） | assistant 消息的 **metadata** | metadata 不参与模型转换，天然只给界面 |
