@@ -1,6 +1,6 @@
 /**
  * transcript-store — persists a session's full execution transcript (every
- * `SessionEvent` + the final `TurnResult` + the serialized `SessionState`)
+ * `NimboChunk` from `session.stream()` + the final `TurnResult` + the serialized `SessionState`)
  * into a local SQLite database, using Node's built-in `node:sqlite`
  * (zero new dependencies; prints one ExperimentalWarning on Node 24, which
  * is cosmetic — the DatabaseSync API surface used here has been unchanged
@@ -25,7 +25,7 @@ import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
-import type { SessionEvent, SessionState, TurnResult } from "@nimbo/sdk";
+import type { NimboChunk, SessionState, TurnResult } from "@nimbo/sdk";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS runs (
@@ -83,11 +83,11 @@ export class TranscriptStore {
     return runId;
   }
 
-  recordEvent(runId: string, event: SessionEvent): void {
+  recordEvent(runId: string, chunk: NimboChunk): void {
     this.seq += 1;
     this.db
       .prepare("INSERT INTO events (run_id, seq, ts, type, payload_json) VALUES (?, ?, ?, ?, ?)")
-      .run(runId, this.seq, new Date().toISOString(), event.type, JSON.stringify(event));
+      .run(runId, this.seq, new Date().toISOString(), chunk.type, JSON.stringify(chunk));
   }
 
   finishRun(

@@ -135,7 +135,7 @@ import type { LanguageModel } from "ai";
 import { createDeepSeek } from "@ai-sdk/deepseek";
 import { Sandbox } from "@vercel/sandbox";
 import { createSession, defineAgent, Skill } from "@nimbo/sdk";
-import type { SessionEvent, SessionItem, TurnResult } from "@nimbo/sdk";
+import type { NimboChunk, TurnResult } from "@nimbo/sdk";
 import { vercelWorkspace } from "@nimbo/sandbox-vercel";
 import { TranscriptStore } from "./shared/transcript-store.ts";
 import type {
@@ -475,25 +475,15 @@ function buildInstructions(opts: { owner: string; repo: string; defaultBranch: s
 8. 任何一步失败（例如构建失败、push 被拒绝、创建 PR 失败）都必须在最终回复里如实说明具体失败原因，不要反复重试硬撑，也不要编造一个并未真正发生的成功结果。`;
 }
 
-function formatItem(item: SessionItem): string {
-  switch (item.type) {
-    case "agent_message":
-      return `agent_message  ${item.text.length > 200 ? `${item.text.slice(0, 200)}…` : item.text}`;
-    case "reasoning":
-      return `reasoning  (${String(item.text.length)} chars)`;
-    case "tool_call":
-      return `tool_call  ${item.toolName} -> ${item.status}  input=${JSON.stringify(item.input).slice(0, 160)}`;
-    case "file_change":
-      return `file_change  ${item.changes.map((c) => `${c.kind}:${c.path}`).join(", ")}`;
-    case "plan_update":
-      return `plan_update  ${item.items.map((i) => `${i.completed ? "[x]" : "[ ]"} ${i.text}`).join("; ")}`;
-    case "error":
-      return `error  ${item.message}`;
+function formatChunk(chunk: NimboChunk): string {
+  switch (chunk.type) {
+    case "tool-input-available":
+      return `[tool-input-available] ${chunk.toolName}  input=${JSON.stringify(chunk.input).slice(0, 160)}`;
+    case "tool-output-available":
+      return `[tool-output-available] callId=${chunk.toolCallId}`;
+    default:
+      return `[${chunk.type}]`;
   }
-}
-
-function isItemEvent(event: SessionEvent): event is Extract<SessionEvent, { item: SessionItem }> {
-  return event.type === "item.started" || event.type === "item.updated" || event.type === "item.completed";
 }
 
 /**
@@ -501,19 +491,17 @@ function isItemEvent(event: SessionEvent): event is Extract<SessionEvent, { item
  * driving idiom from 07-streaming (a `for-await` would discard the
  * generator's `return` value, i.e. the TurnResult). Two rendering rules,
  * both borrowed from 07:
- *   - `agent_message` deltas are typewritten with `process.stdout.write`
- *     (only the new slice per `item.updated`, never a full reprint);
- *   - everything else gets one timeline line per event, except `tool_call`'s
- *     `item.updated` progress ticks which are skipped to keep a long design
- *     session's log readable (its started/completed transitions still show,
- *     and `git push`/`curl` style bash calls are what you actually want to
- *     watch scroll by here).
+ *   - `text-delta` / `reasoning-delta` are typewritten with
+ *     `process.stdout.write` (only the new slice per chunk, never a reprint);
+ *   - every other `NimboChunk` gets one `formatChunk` timeline line — for a
+ *     long design session that's the `tool-input-available` /
+ *     `tool-output-available` walk (`git push`/`curl` style bash calls) you
+ *     actually want to watch scroll by here.
  */
 async function streamLive(
-  stream: AsyncGenerator<SessionEvent, TurnResult>,
-  onEvent?: (event: SessionEvent) => void,
+  stream: AsyncGenerator<NimboChunk, TurnResult>,
+  onChunk?: (chunk: NimboChunk) => void,
 ): Promise<TurnResult> {
-  const typedSoFar = new Map<string, string>();
   let midLine = false;
 
   function logLine(text: string): void {
@@ -526,25 +514,15 @@ async function streamLive(
 
   let step = await stream.next();
   while (!step.done) {
-    const event = step.value;
-    onEvent?.(event);
-    if (isItemEvent(event) && event.item.type === "agent_message") {
-      const item = event.item;
-      if (event.type === "item.started") logLine(`[item.started] agent_message (streaming…)`);
-      const previous = typedSoFar.get(item.id) ?? "";
-      const delta = item.text.slice(previous.length);
-      if (delta.length > 0) {
-        process.stdout.write(delta);
+    const chunk = step.value;
+    onChunk?.(chunk);
+    if (chunk.type === "text-delta" || chunk.type === "reasoning-delta") {
+      if (chunk.delta.length > 0) {
+        process.stdout.write(chunk.delta);
         midLine = true;
       }
-      typedSoFar.set(item.id, item.text);
-      if (event.type === "item.completed") logLine(`[item.completed] agent_message`);
-    } else if (isItemEvent(event)) {
-      if (!(event.type === "item.updated" && event.item.type === "tool_call")) {
-        logLine(`[${event.type}] ${formatItem(event.item)}`);
-      }
     } else {
-      logLine(`[${event.type}]${event.type === "turn.failed" ? ` ${event.error.code}: ${event.error.message}` : ""}`);
+      logLine(formatChunk(chunk));
     }
     step = await stream.next();
   }
@@ -651,7 +629,7 @@ async function realProjectSection(): Promise<void> {
     });
     const session = createSession(agent, { workspace });
 
-    // Every run's full transcript (all SessionEvents + finalResponse + the
+    // Every run's full transcript (all NimboChunks + finalResponse + the
     // serialized SessionState) is persisted to a local SQLite DB — default
     // `<repo>/.transcripts/examples-transcript.sqlite`, override with
     // NIMBO_TRANSCRIPT_DB. Query it later with e.g.

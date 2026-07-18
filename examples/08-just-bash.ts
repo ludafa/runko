@@ -119,7 +119,7 @@ async function modelDrivenSection(): Promise<void> {
   console.log("finalResponse:", result.finalResponse);
   console.log(
     "tool_call items:",
-    result.items.filter((item) => item.type === "tool_call"),
+    session.toJSON().messages.flatMap((m) => m.parts).filter((p) => p.type.startsWith("tool-")),
   );
 }
 
