@@ -38,7 +38,14 @@ export function ConversationContent({
 }: ConversationContentProps) {
   return (
     <StickToBottom.Content
-      className={cn('flex flex-col gap-4 p-1', className)}
+      // `min-h-full justify-end`：会话短于滚动视口时把消息锚定到底部（最新
+      // 消息贴着输入框，空白挪到顶部——聊天惯例），而不是顶对齐、下方留一大片
+      // 空白到 composer。内容溢出时 min-h-full 由内容自身满足、justify-end 空转，
+      // 照常滚动，不影响 StickToBottom 的贴底行为。
+      className={cn(
+        'flex min-h-full flex-col justify-end gap-4 p-1',
+        className,
+      )}
       {...props}
     />
   );
