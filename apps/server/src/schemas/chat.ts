@@ -1,373 +1,186 @@
 import { z } from '@hono/zod-openapi';
-import type { JsonValue, SessionEvent, SessionItem } from '@nimbo/core';
+import type { NimboChunk, NimboUIMessage } from '@nimbo/core';
 
 // ---------------------------------------------------------------------------
-// Wire mirror of @nimbo/core's `SessionEvent`/`SessionItem` discriminated
-// unions (docs/08-chat-agent-webapp.md §2.2's `{ seq, event }` SSE envelope).
+// Wire vocabulary for the chat app's SSE stream + replay endpoints
+// (docs/tech/chat-webapp.md §2.2, docs/tech/single-ledger.md §5
+// 单-3 "UIMessage 单账本" / §6 三值审批).
 //
-// `z.ZodType<T>` annotations (same technique as @nimbo/core's own
-// `state.ts`/`types.ts`) only constrain a schema's *input* position — its
-// *output* (`z.infer<...>`) is covariant, so a schema that's missing a
-// variant still satisfies `z.ZodType<T>` and silently compiles (this bit the
-// repo once already: `sessionItemSchema` drifted out of sync with
-// `SessionItem` and `tsc` said nothing). Worse: `z.infer<typeof exported>`
-// where `exported` is *itself* annotated `z.ZodType<T>` just reads back the
-// annotation `T` — the annotation erases the schema's real, narrower
-// inferred shape, so a naive coverage check against the annotated export is
-// circular and always "passes". Each `*Schema` below is therefore built as
-// an **unannotated** `z.union([...])` first (its `z.infer` reflects the true
-// structural shape of the branches actually listed) and only wrapped in a
-// `z.ZodType<T>`-annotated export afterwards; the `_...CoversAllVariants`
-// identity function right after each one checks against the *unannotated*
-// value — that's what actually fails to compile when a variant goes missing.
+// The old `SessionEvent`/`SessionItem` mirror unions, the `user.message`/
+// `turn.result`/`turn.failed` sentinels, and the `approval.requested`/
+// `approval.resolved`/`question.asked`/`question.answered` bridge-event pairs
+// are ALL gone (docs/tech/single-ledger.md §5 单-3 施工要点):
+//
+// - `session.stream()` now yields `NimboChunk` (ai's `UIMessageChunk`
+//   vocabulary, instantiated for `NimboUIMessage` — `@nimbo/core`'s
+//   `state.ts`) directly — the wire's live tail forwards these verbatim
+//   (`turn-runner.ts`'s `driveTurn`), no server-invented wrapper events left.
+// - Approval visibility is now a `tool-approval-request`/
+//   `tool-approval-response` chunk pair `@nimbo/core`'s own loop produces
+//   (docs/tech/single-ledger.md §6.1) — the server no longer emits its own `approval.*` events
+//   (`turn-runner.ts`'s 人审通道 bridge, `requestReview`/`resolveReview`, is
+//   pure in-memory promise routing now, no `TurnEmitter` calls at all).
+// - `ask-user` visibility is the `tool-ask-user` part's own
+//   `input-available`/`output-available` states (already a normal tool call
+//   as far as the loop is concerned) — no `question.*` events either.
+// - The turn-starting user message now has a real wire position of its own
+//   (closing what used to be a known gap inherited from `@nimbo/core`'s
+//   `Session.stream()`, which pushes it onto its own internal ledger but
+//   never yields anything for it): `turn-runner.ts`'s `driveTurn` synthesizes
+//   a user `NimboUIMessage` (its own `id`, a single `text` part — chat input
+//   is always plain text) *before* it ever starts consuming
+//   `session.stream()`, persists it as a `kind = 'message'` row, and
+//   broadcasts it as a `MessageFrame` — sharing the exact same monotonic
+//   `seq` counter the turn's subsequent chunks use
+//   (`turn-runner.ts`'s `createTurnEmitter`), so any listener sees it
+//   strictly before anything else from that turn. `finalizeTurnPersistence`
+//   skips over `@nimbo/core`'s own (structurally-identical, different-`id`)
+//   copy of that same message when persisting the turn's newly-appended
+//   messages, so it's written exactly once, under the synthesized `id` (see
+//   that function's own doc comment). `steer()`'s queued messages are
+//   unaffected by this — they still only ever reach the wire via their own
+//   real `start`/`text-*`/`finish` chunk sequence (`loop.ts`'s
+//   `drainSteerMessages`), never a `MessageFrame`.
+//
+// What replaces them, over the wire:
+//
+// - **Live tail** (`GET .../stream`, its non-replay portion): mostly a
+//   stream of `ChunkEnvelope`s (`{ seq?, chunk }`) — `seq` present ⇔ this
+//   chunk was durable (persisted, replayable — `turn-runner.ts`'s
+//   `isDurableChunk`); absent ⇔ ephemeral (`text-delta`/`reasoning-delta`/any
+//   `transient: true` data part — P13-1's durable/ephemeral split, carried
+//   over verbatim) — plus exactly one `MessageFrame` per turn, its very
+//   first frame: the synthesized turn-start user message (see above).
+// - **Replay** (`GET .../events`, and `GET .../stream`'s replay-before-tail
+//   portion): a sequence of `ChatReplayFrame`s, each *either* a
+//   `ChunkEnvelope` (a still-`kind = 'chunk'` row — the in-progress or
+//   crashed turn's durable chunks) *or* a `MessageFrame` (`{ seq, message }`
+//   — a `kind = 'message'` row, one finished `NimboUIMessage` verbatim).
+//   Finished history never needs chunk replay at all: a `NimboUIMessage` is
+//   already exactly the shape a chat UI's message list holds, so the client
+//   splices `MessageFrame`s straight in; only the (at most one) turn still
+//   in progress needs its `ChunkEnvelope`s fed through the official
+//   incremental UIMessage-from-chunks builder (ai's `readUIMessageStream` or
+//   equivalent) to materialize on top of that history. See this ticket's
+//   report for why this two-frame-kind design was chosen over synthesizing
+//   a fake chunk sequence for every finished message.
 // ---------------------------------------------------------------------------
 
 /**
  * ============================================================
- * Controlled exception: `@nimbo/core`'s own `jsonValueSchema` (a genuinely
- * self-referential `z.lazy`) cannot be used here.
+ * Controlled exception (same rationale/pattern as this file always used for
+ * `@nimbo/core`'s recursive `JsonValue`, before the SessionEvent/SessionItem
+ * era retired that usage): `NimboChunk`/`NimboUIMessage` (ai's
+ * `UIMessageChunk`/`UIMessage`, instantiated in `@nimbo/core`'s `state.ts`)
+ * have no zod schema this file can reuse for `@asteasolutions/zod-to-openapi`
+ * generation (this file's `createRoute` machinery, via `request`/`responses`).
  * ============================================================
  *
- * Feeding it into `@asteasolutions/zod-to-openapi`'s generator — which every
- * schema below eventually is, via `createRoute`'s `request`/`responses` —
- * triggers `RangeError: Maximum call stack size exceeded` (reproduced in
- * isolation: a bare `z.object({ foo: jsonValueSchema })` alone crashes
- * `OpenApiGeneratorV31.generateDocument()`; this generator version has no
- * support for `z.lazy`/recursive schemas at all). `@nimbo/core` isn't ours
- * to change here, and a real `JsonValue` has no non-recursive shape to fall
- * back to for *documentation* purposes without lying about the contract —
- * `z.any()` is the one zod primitive this generator explicitly special-cases
- * as "no constraint" (same branch as `z.unknown()`, see the generator's
- * `transformSchemaWithoutDefault`), i.e. an accurate rendering of "any JSON
- * value" for docs, not a workaround-shaped approximation.
+ * ai@7 *does* export a runtime schema for the base (non-instantiated)
+ * `UIMessageChunk` — `uiMessageChunkSchema` — but it's a `LazySchema` (a
+ * `@ai-sdk/provider-utils` "standard schema" wrapper, built for ai's own
+ * internal validation, not a zod schema `zod-to-openapi` can walk), and it's
+ * parameterized over the *generic* `UIMessageChunk<unknown, UIDataTypes>`
+ * shape anyway (`messageMetadata: unknown`, arbitrary `data-${string}`
+ * parts) — not nimbo's own `NimboMessageMetadata`/`NimboDataParts`
+ * instantiation, and there's no way to hand it those without reimplementing
+ * it. `@nimbo/core`'s own `state.ts` hit the identical wall for
+ * `NimboUIMessage` and settled on "shallow structural `z.custom` + delegate
+ * deep validation to `validateUIMessages()`" — but that's a *validator*, not
+ * an OpenAPI-documentable schema shape either.
  *
- * The two places this schema appears (`tool_call`'s `input`/`output`) only
- * ever parse a value that has *already* round-tripped through
- * `JSON.parse()` (reading `agent_events.payload_json` back in
- * `routes/chat.ts`) — `JSON.parse()` can only ever produce plain
- * objects/arrays/strings/numbers/booleans/null (never `undefined`,
- * functions, symbols, or cycles), i.e. something that already satisfies
- * `JsonValue` by construction. A schema that always accepts is therefore
- * exactly as strict as the real `jsonValueSchema` would be in this specific
- * post-`JSON.parse` position — nothing is actually lost at the one boundary
- * this file uses it at.
- *
- * The `z.ZodType<JsonValue>` annotation is what keeps this contained: from
- * here down, every consumer sees the precise `JsonValue` type, never `any`
- * — this is the same "isolate the unavoidable escape hatch behind an exact
- * type" pattern `@nimbo/core`'s `state.ts` documents for its own comparable
- * case (`isModelMessage`'s `unknown`-typed guard).
+ * `z.any()` is the same escape hatch this file already used for
+ * `JsonValue` pre-migration: the one zod primitive `zod-to-openapi`
+ * explicitly treats as "no constraint" (documenting "any ai SDK chunk/
+ * message" honestly, not a workaround-shaped approximation), contained by a
+ * `z.ZodType<T>` annotation so every consumer of the exported schema still
+ * sees the precise TypeScript type — `any` never actually leaks past this
+ * one declaration. The two places these appear (`ChunkEnvelope.chunk`,
+ * `MessageFrame.message`) only ever parse a value that has already
+ * round-tripped through `JSON.parse()` (reading `conversation_events.payload_json`
+ * back, or `session.stream()`'s own already-typed `NimboChunk` output),
+ * exactly the same "post-`JSON.parse`, already `JsonValue`-shaped" position
+ * this file's old `openApiSafeJsonValueSchema` lived at.
  */
-const openApiSafeJsonValueSchema: z.ZodType<JsonValue> = z.any();
+const nimboChunkSchema: z.ZodType<NimboChunk> = z.any();
 
-const toolOutputSchema = z.union([z.string(), openApiSafeJsonValueSchema]);
-
-const usageSchema = z
-  .object({
-    inputTokens: z.number().optional(),
-    outputTokens: z.number().optional(),
-    totalTokens: z.number().optional(),
-    // 缓存命中的输入 token（DeepSeek 自动前缀缓存），透传自 nimbo Usage
-    cachedInputTokens: z.number().optional(),
-  })
-  .openapi('Usage');
-
-const nimboErrorSchema = z
-  .object({
-    code: z.enum([
-      'max_turns',
-      'context_overflow',
-      'provider_error',
-      'aborted',
-    ]),
-    message: z.string(),
-  })
-  .openapi('NimboError');
-
-const sessionItemUnion = z.union([
-  z.object({
-    id: z.string(),
-    type: z.literal('agent_message'),
-    text: z.string(),
-  }),
-  z.object({ id: z.string(), type: z.literal('reasoning'), text: z.string() }),
-  z.object({
-    id: z.string(),
-    type: z.literal('user_message'),
-    text: z.string(),
-  }),
-  z.object({
-    id: z.string(),
-    type: z.literal('tool_call'),
-    toolName: z.string(),
-    input: openApiSafeJsonValueSchema,
-    output: toolOutputSchema.optional(),
-    status: z.enum(['in_progress', 'completed', 'failed', 'denied']),
-  }),
-  z.object({
-    id: z.string(),
-    type: z.literal('file_change'),
-    changes: z.array(
-      z.object({ path: z.string(), kind: z.enum(['add', 'update', 'delete']) }),
-    ),
-  }),
-  z.object({
-    id: z.string(),
-    type: z.literal('plan_update'),
-    items: z.array(z.object({ text: z.string(), completed: z.boolean() })),
-  }),
-  z.object({ id: z.string(), type: z.literal('error'), message: z.string() }),
-]);
+/** Same rationale as `nimboChunkSchema` above, for `NimboUIMessage` (`MessageFrame.message`). */
+const nimboUIMessageSchema: z.ZodType<NimboUIMessage> = z.any();
 
 /**
- * Coverage enforcement (see file header): every `SessionItem` variant must
- * be assignable to `z.infer<typeof sessionItemUnion>` (the *unannotated*
- * union, not the annotated `sessionItemSchema` export below) — this identity
- * function *is* that assignment, so a schema missing a variant (or narrower
- * than the real one) fails to compile here instead of silently type-checking.
+ * `{ seq?, chunk }` — the live tail's own wire shape (docs/tech/chat-webapp.md §2.2d's
+ * durable/ephemeral split, carried over verbatim per docs/tech/single-ledger.md §5 单-3's
+ * "写入时序": every chunk either persists-then-broadcasts (`seq` present) or
+ * only-ever-broadcasts (`seq` absent)) — also reused, with `seq` always
+ * present, for a replayed `kind = 'chunk'` row (see file header).
  */
-const _sessionItemSchemaCoversAllVariants: (
-  item: SessionItem,
-) => z.infer<typeof sessionItemUnion> = (item) => item;
-
-export const sessionItemSchema: z.ZodType<SessionItem> = sessionItemUnion;
-
-const sessionEventUnion = z.union([
-  z.object({ type: z.literal('session.started'), sessionId: z.string() }),
-  z.object({ type: z.literal('turn.started'), turn: z.number() }),
-  z.object({ type: z.literal('item.started'), item: sessionItemSchema }),
-  z.object({ type: z.literal('item.updated'), item: sessionItemSchema }),
-  z.object({ type: z.literal('item.completed'), item: sessionItemSchema }),
-  z.object({ type: z.literal('turn.completed'), usage: usageSchema }),
-  z.object({ type: z.literal('turn.failed'), error: nimboErrorSchema }),
-]);
-
-/** Same coverage enforcement as `_sessionItemSchemaCoversAllVariants`, against the unannotated `sessionEventUnion`, for `SessionEvent`. */
-const _sessionEventSchemaCoversAllVariants: (
-  event: SessionEvent,
-) => z.infer<typeof sessionEventUnion> = (event) => event;
-
-export const sessionEventSchema: z.ZodType<SessionEvent> = sessionEventUnion;
-
-/**
- * Six wire-only members on top of `@nimbo/core`'s `SessionEvent` (docs/08
- * §2.2 "契约细化", P12-2 front-end gap; the approval and question pairs added
- * for the approval/ask_user bridges, docs/08 §2.2c（审批链）): all defined
- * *only* here, never folded into `@nimbo/core`'s own type — that union stays
- * exactly what the SDK produces.
- *
- * - `user.message`: persisted (and pushed) as the very first event of every
- *   turn — without it, a `GET .../events` replay after a page refresh can't
- *   reconstruct what the user actually typed (`session.stream()` only ever
- *   yields the *agent's* events, never echoes the input back).
- * - `turn.result`: the server's own terminal sentinel — now persisted (not
- *   just streamed): the front end folds `turn.completed` into its
- *   `turn.result` rendering, so a replay without the sentinel would render
- *   the last turn without a close-out line.
- * - `approval.requested`/`approval.resolved`: `turn-runner.ts`'s
- *   `requestApproval`/`resolveApproval` (docs/08 §2.2c（审批链）) — a pending
- *   tool call that needs a human, and its eventual outcome (manual decision
- *   or timeout, both funnel through the same `resolveApproval` call so the
- *   two look identical on the wire). Persisted like every other event, so a
- *   reconnecting client can tell whether a request is still pending
- *   (`approval.requested` with no matching `approval.resolved` yet).
- * - `question.asked`/`question.answered`: the `ask_user` tool's own pending
- *   question and its outcome (`turn-runner.ts`'s `requestUserAnswer`/
- *   `resolveUserAnswer`) — structurally the same shape as the approval pair
- *   (register → emit → suspend → settle, manual answer and timeout both
- *   funneling through one settle path), just for "the model needs the user
- *   to say something" instead of "the model needs the user to authorize a
- *   command".
- */
-export const userMessageEventSchema = z
-  .object({ type: z.literal('user.message'), text: z.string() })
-  .openapi('ChatUserMessage');
-
-export type UserMessageEvent = z.infer<typeof userMessageEventSchema>;
-
-/** The server's own terminal sentinel (docs/08 §2.2) — not part of `@nimbo/core`'s `SessionEvent` union, appended (and, per the §2.2 "契约细化" addendum, persisted) once at the end of every turn's stream. */
-export const turnResultSentinelSchema = z
-  .object({
-    type: z.literal('turn.result'),
-    finalResponse: z.string(),
-    usage: usageSchema,
-  })
-  .openapi('ChatTurnResult');
-
-export type TurnResultSentinel = z.infer<typeof turnResultSentinelSchema>;
-
-/**
- * `turn-runner.ts`'s own terminal sentinel (docs/08 §2.2b): emitted *instead
- * of* `turn.result` when driving `session.stream()` throws an unexpected
- * error (not the graceful mid-stream `turn.failed` `SessionEvent` above,
- * which `session.stream()` already degrades into a normal `TurnResult` for —
- * that case is a regular event on the union above, always still followed by
- * a `turn.result`). This one deliberately "mirrors" that same `type` literal
- * (docs/08 §2.2b's own wording) despite the different shape (`code`+`message`
- * here vs. a nested `error: NimboError` above) — it plays a structurally
- * different role (turn-ending sentinel, never coexists with `turn.result` in
- * the same turn) and is told apart from the `SessionEvent` member by its
- * shape, not by a distinct literal; consumers narrow on field presence
- * (`'error' in event`), same as `use-chat-messages.ts`/`timeline.ts` do on
- * the wire's client side.
- */
-export const turnFailedSentinelSchema = z
-  .object({
-    type: z.literal('turn.failed'),
-    code: z.string(),
-    message: z.string(),
-  })
-  .openapi('ChatTurnFailed');
-
-export type TurnFailedSentinel = z.infer<typeof turnFailedSentinelSchema>;
-
-/**
- * `turn-runner.ts`'s `requestApproval` (docs/08 §2.2c（审批链）): emitted the
- * moment a tool call escalates to the session's `onApproval` bridge and
- * actually needs a human — `input` is the already-`inputSchema`-validated
- * argument object the tool call would run with (`packages/core/src/runtime.ts`'s
- * `executeToolCall` validates before evaluating approval), reusing
- * `openApiSafeJsonValueSchema` for the same reason `tool_call`'s `input`
- * above does.
- */
-export const approvalRequestedEventSchema = z
-  .object({
-    type: z.literal('approval.requested'),
-    callId: z.string(),
-    toolName: z.string(),
-    input: openApiSafeJsonValueSchema,
-  })
-  .openapi('ChatApprovalRequested');
-
-export type ApprovalRequestedEvent = z.infer<
-  typeof approvalRequestedEventSchema
->;
-
-/**
- * `turn-runner.ts`'s `resolveApproval` (docs/08 §2.2c（审批链）): the outcome
- * of a previously-requested approval, however it was reached (a human's
- * `POST .../approvals/:callId`, or `requestApproval`'s own timeout deny) —
- * `message` is only ever present on a `deny` (the human's rejection reason,
- * or the timeout's own explanatory text); an `allow` never carries one.
- */
-export const approvalResolvedEventSchema = z
-  .object({
-    type: z.literal('approval.resolved'),
-    callId: z.string(),
-    behavior: z.enum(['allow', 'deny']),
-    message: z.string().optional(),
-  })
-  .openapi('ChatApprovalResolved');
-
-export type ApprovalResolvedEvent = z.infer<typeof approvalResolvedEventSchema>;
-
-/**
- * `turn-runner.ts`'s `requestUserAnswer` (docs/08 §2.2c（审批链）): emitted the
- * moment the `ask_user` tool (`chat-agent.ts`) is called and actually
- * suspends the turn — `options`, when the model supplied any, are quick-reply
- * suggestions for the human, not a closed set (a free-text `answer` is always
- * valid too, see `PostAnswerInputSchema`).
- */
-export const questionAskedEventSchema = z
-  .object({
-    type: z.literal('question.asked'),
-    callId: z.string(),
-    question: z.string(),
-    options: z.array(z.string()).optional(),
-  })
-  .openapi('ChatQuestionAsked');
-
-export type QuestionAskedEvent = z.infer<typeof questionAskedEventSchema>;
-
-/**
- * `turn-runner.ts`'s `resolveUserAnswer` (docs/08 §2.2c（审批链）): the outcome
- * of a previously-asked question — `answer` only ever appears when
- * `outcome === 'answered'` (a human's `POST .../questions/:callId`); a
- * `'timeout'` outcome (`requestUserAnswer`'s own timeout) never carries one,
- * mirroring how `approval.resolved`'s `message` is deny-only.
- */
-export const questionAnsweredEventSchema = z
-  .object({
-    type: z.literal('question.answered'),
-    callId: z.string(),
-    outcome: z.enum(['answered', 'timeout']),
-    answer: z.string().optional(),
-  })
-  .openapi('ChatQuestionAnswered');
-
-export type QuestionAnsweredEvent = z.infer<typeof questionAnsweredEventSchema>;
-
-/** Everything that can appear as the `event` half of the `{ seq, event }` envelope: a `SessionEvent`, the `user.message` echo, the `turn.result`/`turn.failed` sentinels, or the approval/ask_user bridge pairs. */
-export type ChatStreamEvent =
-  | SessionEvent
-  | UserMessageEvent
-  | TurnResultSentinel
-  | TurnFailedSentinel
-  | ApprovalRequestedEvent
-  | ApprovalResolvedEvent
-  | QuestionAskedEvent
-  | QuestionAnsweredEvent;
-
-const chatStreamEventUnion = z.union([
-  sessionEventSchema,
-  userMessageEventSchema,
-  turnResultSentinelSchema,
-  turnFailedSentinelSchema,
-  approvalRequestedEventSchema,
-  approvalResolvedEventSchema,
-  questionAskedEventSchema,
-  questionAnsweredEventSchema,
-]);
-
-/** Same coverage enforcement as `_sessionEventSchemaCoversAllVariants`, against the unannotated `chatStreamEventUnion`, for `ChatStreamEvent`. */
-const _chatStreamEventSchemaCoversAllVariants: (
-  event: ChatStreamEvent,
-) => z.infer<typeof chatStreamEventUnion> = (event) => event;
-
-export const chatStreamEventSchema: z.ZodType<ChatStreamEvent> =
-  chatStreamEventUnion;
-
-/**
- * `seq` is a two-layer signal (docs/08 §2.2d, "transcript 减量：durable/
- * ephemeral 分层"): **present ⇔ this envelope was persisted and is replayable**
- * (`agent_events`, `GET .../stream?after=<seq>`'s continuation cursor);
- * **absent ⇔ an ephemeral live-only frame** — today exactly `item.updated`'s
- * per-tick "accumulated text so far" (`createEmitWire` in turn-runner.ts
- * broadcasts it straight to subscribers without persisting or consuming a
- * seq number). A reconnecting client only ever needs the seq'd envelopes to
- * pick its `after=` cursor and dedupe overlap; ephemeral frames exist purely
- * for the live typewriter effect and vanish on reconnect (the next
- * `item.completed` — always seq'd — resettles the item's final text).
- */
-export const chatEventEnvelopeSchema = z
+export const chunkEnvelopeSchema = z
   .object({
     seq: z.number().int().optional(),
-    event: chatStreamEventSchema,
+    chunk: nimboChunkSchema,
   })
-  .openapi('ChatEventEnvelope');
+  .openapi('ChatChunkEnvelope');
 
-export type ChatEventEnvelope = z.infer<typeof chatEventEnvelopeSchema>;
+export type ChunkEnvelope = z.infer<typeof chunkEnvelopeSchema>;
 
 /**
- * `GET .../events` response shape (docs/08 §2.2 "契约细化", front-end-consumed
- * contract — NOT a bare array). Reuses `chatEventEnvelopeSchema` as-is rather
- * than a seq-required variant: this route only ever reads back persisted
- * `agent_events` rows (docs/08 §2.2d), so every envelope it returns carries a
- * `seq` in practice — the shared schema's `seq` being *typed* optional is
- * just the envelope shape's general contract, not a claim that this
- * particular endpoint ever omits one.
+ * `{ seq, message }` — usually replay-only (see file header): a finished
+ * `NimboUIMessage`, read back verbatim from a `kind = 'message'` row. Most
+ * `kind = 'message'` rows are only ever written once a turn has already
+ * finished (`turn-runner.ts`'s `finalizeTurnPersistence`), by which point
+ * there's no "live" activity left for that turn to broadcast — the one
+ * exception is the turn-start synthesized user message, which *is*
+ * broadcast live (as the turn's very first frame, `turn-runner.ts`'s
+ * `driveTurn`) the same instant it's persisted, precisely so a client never
+ * has to guess at its own just-sent message's final wire shape.
  */
-export const ChatEventsListSchema = z
-  .object({ events: z.array(chatEventEnvelopeSchema) })
-  .openapi('ChatEventsList');
+export const messageFrameSchema = z
+  .object({
+    seq: z.number().int(),
+    message: nimboUIMessageSchema,
+  })
+  .openapi('ChatMessageFrame');
 
-export type ChatEventsListDto = z.infer<typeof ChatEventsListSchema>;
+export type MessageFrame = z.infer<typeof messageFrameSchema>;
+
+/**
+ * Coverage enforcement (same discipline this file has always used for its
+ * discriminated unions): every wire frame this app can ever produce is
+ * *either* a `ChunkEnvelope` *or* a `MessageFrame` — distinguished by which
+ * of `chunk`/`message` the object actually carries (no shared literal
+ * discriminant field the way the old `SessionEvent`/`SessionItem` unions had
+ * one; a `chunk` key and a `message` key never both appear on the same
+ * frame, so structural presence is enough).
+ */
+export const chatReplayFrameSchema = z.union([
+  chunkEnvelopeSchema,
+  messageFrameSchema,
+]);
+
+export type ChatReplayFrame = ChunkEnvelope | MessageFrame;
+
+/**
+ * `GET .../events` response shape (docs/tech/chat-webapp.md §2.2 "契约细化", front-end-consumed
+ * contract — NOT a bare array): every persisted row for the session, in seq
+ * order — thanks to `store.ts`'s `deleteChunkEventsAfter` GC running at the
+ * end of every gracefully-finished turn, this is already exactly "finished
+ * message history + the in-progress (or crashed) turn's durable chunks"
+ * (docs/tech/single-ledger.md §5 单-3's replay algorithm) with no extra filtering needed on the
+ * way out.
+ */
+export const ConversationEventsListSchema = z
+  .object({ frames: z.array(chatReplayFrameSchema) })
+  .openapi('ConversationEventsList');
+
+export type ConversationEventsListDto = z.infer<
+  typeof ConversationEventsListSchema
+>;
 
 // ---------------------------------------------------------------------------
 // Request/response schemas for routes/chat.ts
 // ---------------------------------------------------------------------------
 
-export const ChatSessionSchema = z
+export const ConversationSchema = z
   .object({
     id: z.string(),
     title: z.string(),
@@ -378,15 +191,15 @@ export const ChatSessionSchema = z
     lastActiveAt: z.string(),
     createdAt: z.string(),
   })
-  .openapi('ChatSession');
+  .openapi('Conversation');
 
-export type ChatSessionDto = z.infer<typeof ChatSessionSchema>;
+export type ConversationDto = z.infer<typeof ConversationSchema>;
 
-export const CreateChatSessionInputSchema = z
+export const CreateConversationInputSchema = z
   .object({
     title: z.string().min(1).max(255).optional(),
   })
-  .openapi('CreateChatSessionInput');
+  .openapi('CreateConversationInput');
 
 export const PostChatMessageInputSchema = z
   .object({
@@ -395,14 +208,13 @@ export const PostChatMessageInputSchema = z
   .openapi('PostChatMessageInput');
 
 /**
- * `POST .../messages`'s 202 body (docs/08 §2.2b): the turn only starts or
+ * `POST .../messages`'s 202 body (docs/tech/chat-webapp.md §2.2b): the turn only starts or
  * the steer only lands here — events arrive over `GET .../stream`, not this
  * response. `mode` (STEER-3B) distinguishes the two ways this request could
  * have been handled: `'started'` — no turn was active for this session, so
  * this kicked off a new one; `'steered'` — a turn was already in progress
  * and `text` was injected into it (`Session.steer`) instead of starting
- * another. See docs/08 §2.2 "契约细化" #3 for the wire-level consequence
- * (`'steered'` never gets its own `user.message` echo).
+ * another.
  */
 export const StartTurnAckSchema = z
   .object({ ok: z.literal(true), mode: z.enum(['started', 'steered']) })
@@ -410,13 +222,13 @@ export const StartTurnAckSchema = z
 
 export type StartTurnAck = z.infer<typeof StartTurnAckSchema>;
 
-export const ChatSessionParamsSchema = z.object({
+export const ConversationParamsSchema = z.object({
   id: z
     .string()
     .openapi({ param: { name: 'id', in: 'path' }, examples: ['3f1b2c4d-...'] }),
 });
 
-export const ChatEventsQuerySchema = z.object({
+export const ConversationEventsQuerySchema = z.object({
   after: z.coerce
     .number()
     .int()
@@ -426,14 +238,15 @@ export const ChatEventsQuerySchema = z.object({
 });
 
 /**
- * `POST .../approvals/{callId}`'s path params (docs/08 §2.2c（审批链）): `id`
+ * `POST .../approvals/{callId}`'s path params (docs/tech/chat-webapp.md §2.2c（审批链）): `id`
  * is the chat session, `callId` the pending tool call's own id
- * (`ApprovalContext.callId`, echoed on `approval.requested`). Also reused
- * as-is for `POST .../questions/{callId}` (identical id+callId shape, same
- * `callId` namespace — `ToolContext.callId` — just for the `ask_user` tool
- * call instead of a gated one); no naming/param conflict, since each
+ * (`@nimbo/core`'s `ApprovalContext.callId`, carried on the
+ * `tool-approval-request` chunk as `approvalId`). Also reused as-is for
+ * `POST .../questions/{callId}` (identical id+callId shape, same `callId`
+ * namespace — `ToolContext.callId` — just for the `ask-user` tool call
+ * instead of a gated one); no naming/param conflict, since each
  * `createRoute` renders its own inline parameter list (same pattern
- * `ChatSessionParamsSchema` already sets across four other routes).
+ * `ConversationParamsSchema` already sets across four other routes).
  */
 export const ChatApprovalParamsSchema = z.object({
   id: z
@@ -444,20 +257,33 @@ export const ChatApprovalParamsSchema = z.object({
     .openapi({ param: { name: 'callId', in: 'path' }, examples: ['call_1'] }),
 });
 
-/** `POST .../approvals/{callId}`'s body (docs/08 §2.2c（审批链）): a human's decision on a pending tool call — `message` is only meaningful (and optional) on `deny`, ignored on `allow`. */
+/**
+ * `POST .../approvals/{callId}`'s body (docs/tech/chat-webapp.md §2.2c（审批链）, docs/tech/single-ledger.md §6.3
+ * 人工裁决): a human's decision on a pending tool call — `message` is only
+ * meaningful (and optional) on `deny` (the rejection reason, 回填模型), ignored
+ * on `allow`/`allow-session`.
+ *
+ * `allow-session` = 会话级授权（docs/terms.md §四）：放行本次 **并且** 记住这次
+ * 具体调用 (tool + 入参指纹)，本会话内相同调用后续直接放行、不再弹卡片。对
+ * `@nimbo/core` 而言它和 `allow` 无异（都映射成 `HumanDecision.{behavior:'allow'}`）
+ * ——「会话内记住」是纯 chat 层概念（`session-grants.ts`），core 不感知。
+ */
 export const PostApprovalInputSchema = z
   .object({
-    behavior: z.enum(['allow', 'deny']),
+    behavior: z.enum(['allow', 'allow-session', 'deny']),
     message: z.string().optional(),
   })
   .openapi('PostApprovalInput');
 
 /**
- * `POST .../approvals/{callId}`'s 200 body — the decision itself already went
- * out over `GET .../stream` as `approval.resolved`, so this is just an ack.
- * Also reused for `POST .../questions/{callId}`'s 200 (its own outcome
- * likewise already went out as `question.answered`) — same "just an ack,
- * `{ ok: true }`" shape, no reason for a second identical schema.
+ * `POST .../approvals/{callId}`'s 200 body — the decision itself now only
+ * ever reaches the client via the live tail's own `tool-approval-response`
+ * chunk (`@nimbo/core`'s loop produces it once `onReview` resolves — the
+ * server no longer emits a bridge event of its own, see file header), so
+ * this is purely an ack. Also reused for `POST .../questions/{callId}`'s 200
+ * (its own outcome likewise now only ever surfaces as the `ask-user` tool
+ * part's `output-available` state) — same "just an ack, `{ ok: true }`"
+ * shape, no reason for a second identical schema.
  */
 export const ApprovalAckSchema = z
   .object({ ok: z.literal(true) })
@@ -465,9 +291,41 @@ export const ApprovalAckSchema = z
 
 export type ApprovalAck = z.infer<typeof ApprovalAckSchema>;
 
-/** `POST .../questions/{callId}`'s body (docs/08 §2.2c（审批链）): a human's free-text answer to a pending `ask_user` question — always required (unlike `PostApprovalInputSchema`'s optional deny `message`, there is no "answer with nothing" case here). */
+/** `POST .../questions/{callId}`'s body (docs/tech/chat-webapp.md §2.2c（审批链）): a human's free-text answer to a pending `ask-user` question — always required (unlike `PostApprovalInputSchema`'s optional deny `message`, there is no "answer with nothing" case here). */
 export const PostAnswerInputSchema = z
   .object({
     answer: z.string().min(1),
   })
   .openapi('PostAnswerInput');
+
+/** `GET .../turns/{turn}/telemetry`'s path params（docs/tech/chat-webapp.md §11.4）：`id` 同 `ConversationParamsSchema`；`turn` 是账本 metadata 里的轮次号（1 起）。 */
+export const TurnTelemetryParamsSchema = z.object({
+  id: z
+    .string()
+    .openapi({ param: { name: 'id', in: 'path' }, examples: ['3f1b2c4d-...'] }),
+  turn: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .openapi({ param: { name: 'turn', in: 'path' }, examples: [1] }),
+});
+
+/**
+ * 一条遥测事件（docs/tech/chat-webapp.md §11.4）：`payloadJson` 保持字符串原样
+ * 透传（收敛后的事件 JSON，形状随 ai 小版本演化，服务端不做二次建模），
+ * 前端自行 `JSON.parse` 按需取字段。
+ */
+export const TurnTelemetryEventSchema = z
+  .object({
+    eventType: z.string(),
+    ts: z.number(),
+    payloadJson: z.string(),
+  })
+  .openapi('TurnTelemetryEvent');
+
+/** `GET .../turns/{turn}/telemetry`'s 200 body——遥测缺席（未启用/该轮无数据/会话尚无 nimbo header）一律空数组，不是错误。 */
+export const TurnTelemetrySchema = z
+  .object({ events: z.array(TurnTelemetryEventSchema) })
+  .openapi('TurnTelemetry');
+
+export type TurnTelemetryDto = z.infer<typeof TurnTelemetrySchema>;
