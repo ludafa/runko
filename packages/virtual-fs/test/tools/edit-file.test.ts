@@ -4,7 +4,7 @@ import { createEditFileTool } from "../../src/tools/edit-file.js";
 import { createReadFileTool } from "../../src/tools/read-file.js";
 import { createMapReadStateStore, createOnFileChangeMock, expectError, expectText, makeCtx, readMtime } from "./helpers.js";
 
-describe("edit_file", () => {
+describe("edit-file", () => {
   it("replaces a uniquely-matching old_string after the file was read", async () => {
     const fs = fromMemory({ "a.ts": "const x = 1;\nconst y = 2;" });
     const readState = createMapReadStateStore();
@@ -18,7 +18,7 @@ describe("edit_file", () => {
     expect(onFileChange).toHaveBeenCalledWith([{ path: "/a.ts", kind: "update" }]);
   });
 
-  it("full acceptance flow: read -> edit -> edit again requires no second read_file call", async () => {
+  it("full acceptance flow: read -> edit -> edit again requires no second read-file call", async () => {
     const fs = fromMemory({ "a.ts": "const x = 1;" });
     const readState = createMapReadStateStore();
     const readTool = createReadFileTool({ readState });
@@ -30,7 +30,7 @@ describe("edit_file", () => {
     const first = expectText(await editTool.execute({ path: "/a.ts", old_string: "const x = 1;", new_string: "const x = 2;" }, ctx));
     expect(first).toContain("1 replacement");
 
-    // no read_file call in between — must still succeed because edit_file re-registers readState after writing
+    // no read-file call in between — must still succeed because edit-file re-registers readState after writing
     const second = expectText(await editTool.execute({ path: "/a.ts", old_string: "const x = 2;", new_string: "const x = 3;" }, ctx));
     expect(second).toContain("1 replacement");
     expect(new TextDecoder().decode(await fs.readFile("/a.ts"))).toBe("const x = 3;");
@@ -41,7 +41,7 @@ describe("edit_file", () => {
     const tool = createEditFileTool({ readState: createMapReadStateStore() });
 
     const content = expectError(await tool.execute({ path: "/a.ts", old_string: "1", new_string: "2" }, makeCtx(fs)));
-    expect(content).toContain("read_file");
+    expect(content).toContain("read-file");
   });
 
   it("rejects an edit when the file changed on disk since it was last read (bash-bypass simulation)", async () => {
@@ -54,7 +54,7 @@ describe("edit_file", () => {
     const tool = createEditFileTool({ readState });
     const content = expectError(await tool.execute({ path: "/a.ts", old_string: "const x = 1;", new_string: "const x = 2;" }, makeCtx(fs)));
     expect(content).toContain("changed since it was last read");
-    expect(content).toContain("read_file");
+    expect(content).toContain("read-file");
   });
 
   it("errors with corrective guidance when old_string is not found", async () => {
@@ -65,7 +65,7 @@ describe("edit_file", () => {
 
     const content = expectError(await tool.execute({ path: "/a.ts", old_string: "const z = 999;", new_string: "const z = 1000;" }, makeCtx(fs)));
     expect(content).toContain("was not found");
-    expect(content).toContain("read_file");
+    expect(content).toContain("read-file");
   });
 
   it("errors with corrective guidance when old_string matches multiple locations and replace_all is not set", async () => {
@@ -100,13 +100,13 @@ describe("edit_file", () => {
     expect(content).toContain("identical");
   });
 
-  it("errors when the path does not exist, suggesting write_file", async () => {
+  it("errors when the path does not exist, suggesting write-file", async () => {
     const fs = fromMemory({});
     const tool = createEditFileTool({ readState: createMapReadStateStore() });
 
     const content = expectError(await tool.execute({ path: "/missing.ts", old_string: "a", new_string: "b" }, makeCtx(fs)));
     expect(content).toContain("does not exist");
-    expect(content).toContain("write_file");
+    expect(content).toContain("write-file");
   });
 
   it("errors when the path is a directory", async () => {

@@ -124,16 +124,16 @@ describe("parse", () => {
       expect(message).toMatch(tokenPattern);
     });
 
-    it("redirection > guidance points to write_file", () => {
-      expect(() => parse("echo hi > out.txt")).toThrow(/写文件请改用 write_file 工具/);
+    it("redirection > guidance points to write-file", () => {
+      expect(() => parse("echo hi > out.txt")).toThrow(/写文件请改用 write-file 工具/);
     });
 
-    it("redirection >> guidance points to write_file", () => {
-      expect(() => parse("echo hi >> out.txt")).toThrow(/写文件请改用 write_file 工具/);
+    it("redirection >> guidance points to write-file", () => {
+      expect(() => parse("echo hi >> out.txt")).toThrow(/写文件请改用 write-file 工具/);
     });
 
-    it("redirection 2>file (stderr-to-file, distinct from 2>&1) is still rejected with write_file guidance", () => {
-      expect(() => parse("cat missing.txt 2>err.txt")).toThrow(/写文件请改用 write_file 工具/);
+    it("redirection 2>file (stderr-to-file, distinct from 2>&1) is still rejected with write-file guidance", () => {
+      expect(() => parse("cat missing.txt 2>err.txt")).toThrow(/写文件请改用 write-file 工具/);
     });
 
     it("redirection < guidance points to cat <file>", () => {

@@ -1,5 +1,5 @@
 /**
- * L0 模型层：单步 `streamText` 封装 `runStep`（tech-spec §4.3 全节 / §4.8）。
+ * L0 模型层：单步 `streamText` 封装 `runStep`（docs/tech/core-sdk.md §4.3 全节 / §4.8）。
  *
  * "每个 assistant step 调一次 `streamText`，loop 归 nimbo"——这里只做一步：
  * 不设置 `stopWhen`（默认值就是 `isStepCount(1)`，见 AI SDK 文档），不做
@@ -11,7 +11,7 @@
  *
  * （P4-2 遗留项回填：`result.fullStream` 在 ai@7 是 `result.stream` 的
  * deprecated 别名，两者同流同类型——本文件已把下面唯一的读取点从
- * `fullStream` 换成非弃用名 `stream`，行为不变，见 tech-spec §4.3"措辞校准"。）
+ * `fullStream` 换成非弃用名 `stream`，行为不变，见 docs/tech/core-sdk.md §4.3"措辞校准"。）
  *
  * 范围裁剪（工单明示 + 本文件的实现取舍，均记录于此，不在 P3 之外的文件里
  * 体现）：
@@ -75,7 +75,7 @@ export interface StepToolCall {
  */
 export type ResponseMessage = AssistantModelMessage | ToolModelMessage;
 
-/** `runStep` 结束后的汇总（tech-spec §4.3 第 3 点）。 */
+/** `runStep` 结束后的汇总（docs/tech/core-sdk.md §4.3 第 3 点）。 */
 export interface StepResult {
   finishReason: FinishReason;
   responseMessages: ResponseMessage[];

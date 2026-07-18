@@ -1,5 +1,5 @@
 /**
- * NimboExec → e2b `Commands.run()` 映射（docs/06 §3.2 / §8.2）。
+ * NimboExec → e2b `Commands.run()` 映射（docs/tech/sandbox.md §3.2 / §8.2）。
  *
  * ---- P6-1 契约：全部失败路径 resolve，不 reject ----
  *
@@ -79,7 +79,8 @@ function raceAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
 
 export function createE2bExec(sandbox: E2bSandboxLike, anchor: PathAnchor): NimboExec {
   return {
-    defaultApproval: "never",
+    // docs/tech/single-ledger.md §6.1（@nimbo/core 审批三值重构，P13-5-2c）：旧 "never" → "allow"（沙盒实现，隔离即边界）。
+    defaultApproval: "allow",
     describe(): string {
       return DESCRIBE;
     },

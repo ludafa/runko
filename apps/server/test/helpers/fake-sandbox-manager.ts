@@ -61,11 +61,11 @@ export function createFakeSandboxManager(
         defaultBranch: opts.defaultBranch ?? 'main',
       };
     },
-    async touch(sessionId: string): Promise<void> {
-      touchCalls.push(sessionId);
+    async touch(conversationId: string): Promise<void> {
+      touchCalls.push(conversationId);
     },
-    release(sessionId: string): void {
-      releaseCalls.push(sessionId);
+    release(conversationId: string): void {
+      releaseCalls.push(conversationId);
     },
   };
 }

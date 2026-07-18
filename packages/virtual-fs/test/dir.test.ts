@@ -2,6 +2,7 @@ import * as nodeFs from "node:fs/promises";
 import * as nodePath from "node:path";
 import * as os from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { NimboFS } from "@nimbo/core";
 import { DirFS, ReadOnlyFileSystemError } from "../src/dir.js";
 import { NotFoundError } from "../src/memory.js";
 
@@ -79,5 +80,15 @@ describe("DirFS", () => {
 
     const matches = await fs.glob("**/*");
     expect(matches.some((p) => p.startsWith("/node_modules"))).toBe(false);
+  });
+});
+
+describe("DirFS native search seam (docs/tech/sandbox.md §4)", () => {
+  it("does not implement searchFiles/searchContent — grep/glob must always fall back to JS scanning against it", () => {
+    // no real directory needed — DirFS's constructor doesn't touch disk, and this test only checks
+    // the shape of the instance (searchFiles/searchContent absent), never calling any I/O method.
+    const fs: NimboFS = new DirFS("/does-not-need-to-exist");
+    expect(fs.searchFiles).toBeUndefined();
+    expect(fs.searchContent).toBeUndefined();
   });
 });

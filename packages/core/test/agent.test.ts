@@ -16,8 +16,8 @@ describe("defineAgent", () => {
   });
 
   it("accepts a curated builtinTools allowlist", () => {
-    const def = defineAgent({ model, builtinTools: ["read_file"] });
-    expect(def.builtinTools).toEqual(["read_file"]);
+    const def = defineAgent({ model, builtinTools: ["read-file"] });
+    expect(def.builtinTools).toEqual(["read-file"]);
   });
 
   it("accepts the full spec field set without mutating or dropping fields", () => {
@@ -43,43 +43,43 @@ describe("defineAgent", () => {
 describe("BuiltinToolName", () => {
   it("is exactly the nine file/plan tool names", () => {
     const names: BuiltinToolName[] = [
-      "read_file",
-      "write_file",
-      "edit_file",
-      "delete_file",
-      "move_file",
-      "list_dir",
+      "read-file",
+      "write-file",
+      "edit-file",
+      "delete-file",
+      "move-file",
+      "list-dir",
       "glob",
       "grep",
-      "update_plan",
+      "update-plan",
     ];
     expect(names).toHaveLength(9);
   });
 
-  it("excludes load_skill and bash at the type level (both are conditionally-activated, not user-toggled)", () => {
-    expectTypeOf<"load_skill">().not.toExtend<BuiltinToolName>();
+  it("excludes load-skill and bash at the type level (both are conditionally-activated, not user-toggled)", () => {
+    expectTypeOf<"load-skill">().not.toExtend<BuiltinToolName>();
     expectTypeOf<"bash">().not.toExtend<BuiltinToolName>();
   });
 
   it("rejects an illegal builtin tool name on AgentDefinition.builtinTools at the type level", () => {
-    expectTypeOf<["load_skill"]>().not.toExtend<AgentDefinition["builtinTools"]>();
+    expectTypeOf<["load-skill"]>().not.toExtend<AgentDefinition["builtinTools"]>();
   });
 });
 
 describe("READ_ONLY_TOOLS", () => {
-  it("is read_file/list_dir/glob/grep", () => {
-    expect(READ_ONLY_TOOLS).toEqual(["read_file", "list_dir", "glob", "grep"]);
+  it("is read-file/list-dir/glob/grep", () => {
+    expect(READ_ONLY_TOOLS).toEqual(["read-file", "list-dir", "glob", "grep"]);
   });
 
   it("is a readonly literal tuple (as const)", () => {
-    expectTypeOf(READ_ONLY_TOOLS).toEqualTypeOf<readonly ["read_file", "list_dir", "glob", "grep"]>();
+    expectTypeOf(READ_ONLY_TOOLS).toEqualTypeOf<readonly ["read-file", "list-dir", "glob", "grep"]>();
   });
 
   it("is assignable to BuiltinToolName[] and usable directly as an agent's builtinTools", () => {
     const tools: BuiltinToolName[] = [...READ_ONLY_TOOLS];
     const def = defineAgent({ model, builtinTools: [...READ_ONLY_TOOLS] });
 
-    expect(tools).toEqual(["read_file", "list_dir", "glob", "grep"]);
-    expect(def.builtinTools).toEqual(["read_file", "list_dir", "glob", "grep"]);
+    expect(tools).toEqual(["read-file", "list-dir", "glob", "grep"]);
+    expect(def.builtinTools).toEqual(["read-file", "list-dir", "glob", "grep"]);
   });
 });

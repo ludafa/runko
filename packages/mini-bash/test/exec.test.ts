@@ -232,8 +232,8 @@ describe("miniBash().exec", () => {
     });
   });
 
-  it("exposes defaultApproval 'never'", () => {
-    expect(miniBash(fixture()).defaultApproval).toBe("never");
+  it("exposes defaultApproval 'allow'", () => {
+    expect(miniBash(fixture()).defaultApproval).toBe("allow");
   });
 
   it("describe() documents the eight commands, single-level pipe, and unsupported syntax", () => {
@@ -252,7 +252,7 @@ describe("miniBash().exec", () => {
     expect(description).toContain("||");
     expect(description).toContain("2>&1");
     expect(description).toContain("通配符");
-    expect(description).toContain("write_file");
+    expect(description).toContain("write-file");
     expect(description).toContain("cat <file>");
   });
 

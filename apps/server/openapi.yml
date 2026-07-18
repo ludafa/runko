@@ -42,7 +42,7 @@ components:
       required:
         - title
         - body
-    ChatSession:
+    Conversation:
       type: object
       properties:
         id:
@@ -74,666 +74,60 @@ components:
         - status
         - lastActiveAt
         - createdAt
-    CreateChatSessionInput:
+    CreateConversationInput:
       type: object
       properties:
         title:
           type: string
           minLength: 1
           maxLength: 255
-    ChatEventsList:
+    ConversationEventsList:
+      type: object
+      properties:
+        frames:
+          type: array
+          items:
+            anyOf:
+              - $ref: "#/components/schemas/ChatChunkEnvelope"
+              - $ref: "#/components/schemas/ChatMessageFrame"
+      required:
+        - frames
+    ChatChunkEnvelope:
+      type: object
+      properties:
+        seq:
+          type: integer
+        chunk: {}
+    ChatMessageFrame:
+      type: object
+      properties:
+        seq:
+          type: integer
+        message: {}
+      required:
+        - seq
+    TurnTelemetry:
       type: object
       properties:
         events:
           type: array
           items:
-            $ref: "#/components/schemas/ChatEventEnvelope"
+            $ref: "#/components/schemas/TurnTelemetryEvent"
       required:
         - events
-    ChatEventEnvelope:
+    TurnTelemetryEvent:
       type: object
       properties:
-        seq:
-          type: integer
-        event:
-          anyOf:
-            - type: object
-              properties:
-                type:
-                  type: string
-                  enum:
-                    - session.started
-                sessionId:
-                  type: string
-              required:
-                - type
-                - sessionId
-            - type: object
-              properties:
-                type:
-                  type: string
-                  enum:
-                    - turn.started
-                turn:
-                  type: number
-              required:
-                - type
-                - turn
-            - type: object
-              properties:
-                type:
-                  type: string
-                  enum:
-                    - item.started
-                item:
-                  anyOf:
-                    - type: object
-                      properties:
-                        id:
-                          type: string
-                        type:
-                          type: string
-                          enum:
-                            - agent_message
-                        text:
-                          type: string
-                      required:
-                        - id
-                        - type
-                        - text
-                    - type: object
-                      properties:
-                        id:
-                          type: string
-                        type:
-                          type: string
-                          enum:
-                            - reasoning
-                        text:
-                          type: string
-                      required:
-                        - id
-                        - type
-                        - text
-                    - type: object
-                      properties:
-                        id:
-                          type: string
-                        type:
-                          type: string
-                          enum:
-                            - user_message
-                        text:
-                          type: string
-                      required:
-                        - id
-                        - type
-                        - text
-                    - type: object
-                      properties:
-                        id:
-                          type: string
-                        type:
-                          type: string
-                          enum:
-                            - tool_call
-                        toolName:
-                          type: string
-                        input: {}
-                        output:
-                          anyOf:
-                            - type: string
-                            - {}
-                            - type: "null"
-                        status:
-                          type: string
-                          enum:
-                            - in_progress
-                            - completed
-                            - failed
-                            - denied
-                      required:
-                        - id
-                        - type
-                        - toolName
-                        - status
-                    - type: object
-                      properties:
-                        id:
-                          type: string
-                        type:
-                          type: string
-                          enum:
-                            - file_change
-                        changes:
-                          type: array
-                          items:
-                            type: object
-                            properties:
-                              path:
-                                type: string
-                              kind:
-                                type: string
-                                enum:
-                                  - add
-                                  - update
-                                  - delete
-                            required:
-                              - path
-                              - kind
-                      required:
-                        - id
-                        - type
-                        - changes
-                    - type: object
-                      properties:
-                        id:
-                          type: string
-                        type:
-                          type: string
-                          enum:
-                            - plan_update
-                        items:
-                          type: array
-                          items:
-                            type: object
-                            properties:
-                              text:
-                                type: string
-                              completed:
-                                type: boolean
-                            required:
-                              - text
-                              - completed
-                      required:
-                        - id
-                        - type
-                        - items
-                    - type: object
-                      properties:
-                        id:
-                          type: string
-                        type:
-                          type: string
-                          enum:
-                            - error
-                        message:
-                          type: string
-                      required:
-                        - id
-                        - type
-                        - message
-              required:
-                - type
-                - item
-            - type: object
-              properties:
-                type:
-                  type: string
-                  enum:
-                    - item.updated
-                item:
-                  anyOf:
-                    - type: object
-                      properties:
-                        id:
-                          type: string
-                        type:
-                          type: string
-                          enum:
-                            - agent_message
-                        text:
-                          type: string
-                      required:
-                        - id
-                        - type
-                        - text
-                    - type: object
-                      properties:
-                        id:
-                          type: string
-                        type:
-                          type: string
-                          enum:
-                            - reasoning
-                        text:
-                          type: string
-                      required:
-                        - id
-                        - type
-                        - text
-                    - type: object
-                      properties:
-                        id:
-                          type: string
-                        type:
-                          type: string
-                          enum:
-                            - user_message
-                        text:
-                          type: string
-                      required:
-                        - id
-                        - type
-                        - text
-                    - type: object
-                      properties:
-                        id:
-                          type: string
-                        type:
-                          type: string
-                          enum:
-                            - tool_call
-                        toolName:
-                          type: string
-                        input: {}
-                        output:
-                          anyOf:
-                            - type: string
-                            - {}
-                            - type: "null"
-                        status:
-                          type: string
-                          enum:
-                            - in_progress
-                            - completed
-                            - failed
-                            - denied
-                      required:
-                        - id
-                        - type
-                        - toolName
-                        - status
-                    - type: object
-                      properties:
-                        id:
-                          type: string
-                        type:
-                          type: string
-                          enum:
-                            - file_change
-                        changes:
-                          type: array
-                          items:
-                            type: object
-                            properties:
-                              path:
-                                type: string
-                              kind:
-                                type: string
-                                enum:
-                                  - add
-                                  - update
-                                  - delete
-                            required:
-                              - path
-                              - kind
-                      required:
-                        - id
-                        - type
-                        - changes
-                    - type: object
-                      properties:
-                        id:
-                          type: string
-                        type:
-                          type: string
-                          enum:
-                            - plan_update
-                        items:
-                          type: array
-                          items:
-                            type: object
-                            properties:
-                              text:
-                                type: string
-                              completed:
-                                type: boolean
-                            required:
-                              - text
-                              - completed
-                      required:
-                        - id
-                        - type
-                        - items
-                    - type: object
-                      properties:
-                        id:
-                          type: string
-                        type:
-                          type: string
-                          enum:
-                            - error
-                        message:
-                          type: string
-                      required:
-                        - id
-                        - type
-                        - message
-              required:
-                - type
-                - item
-            - type: object
-              properties:
-                type:
-                  type: string
-                  enum:
-                    - item.completed
-                item:
-                  anyOf:
-                    - type: object
-                      properties:
-                        id:
-                          type: string
-                        type:
-                          type: string
-                          enum:
-                            - agent_message
-                        text:
-                          type: string
-                      required:
-                        - id
-                        - type
-                        - text
-                    - type: object
-                      properties:
-                        id:
-                          type: string
-                        type:
-                          type: string
-                          enum:
-                            - reasoning
-                        text:
-                          type: string
-                      required:
-                        - id
-                        - type
-                        - text
-                    - type: object
-                      properties:
-                        id:
-                          type: string
-                        type:
-                          type: string
-                          enum:
-                            - user_message
-                        text:
-                          type: string
-                      required:
-                        - id
-                        - type
-                        - text
-                    - type: object
-                      properties:
-                        id:
-                          type: string
-                        type:
-                          type: string
-                          enum:
-                            - tool_call
-                        toolName:
-                          type: string
-                        input: {}
-                        output:
-                          anyOf:
-                            - type: string
-                            - {}
-                            - type: "null"
-                        status:
-                          type: string
-                          enum:
-                            - in_progress
-                            - completed
-                            - failed
-                            - denied
-                      required:
-                        - id
-                        - type
-                        - toolName
-                        - status
-                    - type: object
-                      properties:
-                        id:
-                          type: string
-                        type:
-                          type: string
-                          enum:
-                            - file_change
-                        changes:
-                          type: array
-                          items:
-                            type: object
-                            properties:
-                              path:
-                                type: string
-                              kind:
-                                type: string
-                                enum:
-                                  - add
-                                  - update
-                                  - delete
-                            required:
-                              - path
-                              - kind
-                      required:
-                        - id
-                        - type
-                        - changes
-                    - type: object
-                      properties:
-                        id:
-                          type: string
-                        type:
-                          type: string
-                          enum:
-                            - plan_update
-                        items:
-                          type: array
-                          items:
-                            type: object
-                            properties:
-                              text:
-                                type: string
-                              completed:
-                                type: boolean
-                            required:
-                              - text
-                              - completed
-                      required:
-                        - id
-                        - type
-                        - items
-                    - type: object
-                      properties:
-                        id:
-                          type: string
-                        type:
-                          type: string
-                          enum:
-                            - error
-                        message:
-                          type: string
-                      required:
-                        - id
-                        - type
-                        - message
-              required:
-                - type
-                - item
-            - type: object
-              properties:
-                type:
-                  type: string
-                  enum:
-                    - turn.completed
-                usage:
-                  $ref: "#/components/schemas/Usage"
-              required:
-                - type
-                - usage
-            - type: object
-              properties:
-                type:
-                  type: string
-                  enum:
-                    - turn.failed
-                error:
-                  $ref: "#/components/schemas/NimboError"
-              required:
-                - type
-                - error
-            - $ref: "#/components/schemas/ChatUserMessage"
-            - $ref: "#/components/schemas/ChatTurnResult"
-            - $ref: "#/components/schemas/ChatTurnFailed"
-            - $ref: "#/components/schemas/ChatApprovalRequested"
-            - $ref: "#/components/schemas/ChatApprovalResolved"
-            - $ref: "#/components/schemas/ChatQuestionAsked"
-            - $ref: "#/components/schemas/ChatQuestionAnswered"
-      required:
-        - event
-    Usage:
-      type: object
-      properties:
-        inputTokens:
+        eventType:
+          type: string
+        ts:
           type: number
-        outputTokens:
-          type: number
-        totalTokens:
-          type: number
-        cachedInputTokens:
-          type: number
-    NimboError:
-      type: object
-      properties:
-        code:
-          type: string
-          enum:
-            - max_turns
-            - context_overflow
-            - provider_error
-            - aborted
-        message:
+        payloadJson:
           type: string
       required:
-        - code
-        - message
-    ChatUserMessage:
-      type: object
-      properties:
-        type:
-          type: string
-          enum:
-            - user.message
-        text:
-          type: string
-      required:
-        - type
-        - text
-    ChatTurnResult:
-      type: object
-      properties:
-        type:
-          type: string
-          enum:
-            - turn.result
-        finalResponse:
-          type: string
-        usage:
-          $ref: "#/components/schemas/Usage"
-      required:
-        - type
-        - finalResponse
-        - usage
-    ChatTurnFailed:
-      type: object
-      properties:
-        type:
-          type: string
-          enum:
-            - turn.failed
-        code:
-          type: string
-        message:
-          type: string
-      required:
-        - type
-        - code
-        - message
-    ChatApprovalRequested:
-      type: object
-      properties:
-        type:
-          type: string
-          enum:
-            - approval.requested
-        callId:
-          type: string
-        toolName:
-          type: string
-        input: {}
-      required:
-        - type
-        - callId
-        - toolName
-    ChatApprovalResolved:
-      type: object
-      properties:
-        type:
-          type: string
-          enum:
-            - approval.resolved
-        callId:
-          type: string
-        behavior:
-          type: string
-          enum:
-            - allow
-            - deny
-        message:
-          type: string
-      required:
-        - type
-        - callId
-        - behavior
-    ChatQuestionAsked:
-      type: object
-      properties:
-        type:
-          type: string
-          enum:
-            - question.asked
-        callId:
-          type: string
-        question:
-          type: string
-        options:
-          type: array
-          items:
-            type: string
-      required:
-        - type
-        - callId
-        - question
-    ChatQuestionAnswered:
-      type: object
-      properties:
-        type:
-          type: string
-          enum:
-            - question.answered
-        callId:
-          type: string
-        outcome:
-          type: string
-          enum:
-            - answered
-            - timeout
-        answer:
-          type: string
-      required:
-        - type
-        - callId
-        - outcome
+        - eventType
+        - ts
+        - payloadJson
     StartTurnAck:
       type: object
       properties:
@@ -773,6 +167,7 @@ components:
           type: string
           enum:
             - allow
+            - allow-session
             - deny
         message:
           type: string
@@ -831,7 +226,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
-  /api/chat/sessions:
+  /api/chat/conversations:
     post:
       tags:
         - Chat
@@ -842,14 +237,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateChatSessionInput"
+              $ref: "#/components/schemas/CreateConversationInput"
       responses:
         "201":
           description: Created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ChatSession"
+                $ref: "#/components/schemas/Conversation"
         "401":
           description: Unauthorized
           content:
@@ -874,14 +269,14 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/ChatSession"
+                  $ref: "#/components/schemas/Conversation"
         "401":
           description: Unauthorized
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
-  /api/chat/sessions/{id}:
+  /api/chat/conversations/{id}:
     get:
       tags:
         - Chat
@@ -900,7 +295,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ChatSession"
+                $ref: "#/components/schemas/Conversation"
         "401":
           description: Unauthorized
           content:
@@ -913,7 +308,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
-  /api/chat/sessions/{id}/events:
+  /api/chat/conversations/{id}/events:
     get:
       tags:
         - Chat
@@ -939,7 +334,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ChatEventsList"
+                $ref: "#/components/schemas/ConversationEventsList"
         "401":
           description: Unauthorized
           content:
@@ -952,7 +347,49 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
-  /api/chat/sessions/{id}/messages:
+  /api/chat/conversations/{id}/turns/{turn}/telemetry:
+    get:
+      tags:
+        - Chat
+      summary: One turn’s telemetry events (model-call metrics, tool executions) for
+        the stats detail panel — empty when telemetry is disabled or the turn
+        predates it
+      parameters:
+        - schema:
+            type: string
+            examples:
+              - 3f1b2c4d-...
+          required: true
+          name: id
+          in: path
+        - schema:
+            type: integer
+            minimum: 1
+            examples:
+              - 1
+          required: true
+          name: turn
+          in: path
+      responses:
+        "200":
+          description: Telemetry events for this turn, in write order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TurnTelemetry"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/chat/conversations/{id}/messages:
     post:
       tags:
         - Chat
@@ -1009,14 +446,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
-  /api/chat/sessions/{id}/stream:
+  /api/chat/conversations/{id}/stream:
     get:
       tags:
         - Chat
-      summary: "Resumable live tail of a session’s in-progress turn (docs/08 §2.2b):
-        replays persisted events after `after`, then forwards the turn’s live
-        events until it ends — reconnect-safe (page refresh/HMR/network blip
-        never lose events)"
+      summary: "Resumable live tail of a session’s in-progress turn
+        (docs/tech/chat-webapp.md §2.2b): replays persisted frames after
+        `after`, then forwards the turn’s live chunks until it ends —
+        reconnect-safe (page refresh/HMR/network blip never lose events)"
       parameters:
         - schema:
             type: string
@@ -1034,15 +471,18 @@ paths:
           in: query
       responses:
         "200":
-          description: "SSE stream of `{ seq, event }` frames: replay, then live tail
-            (closes once the turn ends, or immediately after replay if no turn
-            is in progress). Some frames omit `seq` (docs/08 §2.2d) — those are
-            ephemeral `item.updated` typewriter ticks, never persisted and never
-            replayed; every other frame always carries one"
+          description: "SSE stream of `ChatReplayFrame`s (`{seq,message}` or
+            `{seq?,chunk}`): replay, then live tail (closes once the turn ends,
+            or immediately after replay if no turn is in progress). Live `chunk`
+            frames omit `seq` when ephemeral (docs/tech/single-ledger.md §5 单-3
+            — `text-delta`/`reasoning-delta`/`transient` data parts), never
+            persisted and never replayed; every other frame always carries one"
           content:
             text/event-stream:
               schema:
-                $ref: "#/components/schemas/ChatEventEnvelope"
+                anyOf:
+                  - $ref: "#/components/schemas/ChatChunkEnvelope"
+                  - $ref: "#/components/schemas/ChatMessageFrame"
         "401":
           description: Unauthorized
           content:
@@ -1055,12 +495,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
-  /api/chat/sessions/{id}/approvals/{callId}:
+  /api/chat/conversations/{id}/approvals/{callId}:
     post:
       tags:
         - Chat
-      summary: 批准或拒绝一个待处理的工具调用审批请求（docs/08 §2.2c（审批链））：结果通过 `GET .../stream` 的
-        `approval.resolved` 事件送达，本响应只是一个 ack
+      summary: 批准或拒绝一个待处理的工具调用审批请求（docs/tech/chat-webapp.md
+        §2.2c（审批链），docs/tech/single-ledger.md §6）：结果通过 `GET .../stream` 的
+        `tool-approval-response` chunk 送达，本响应只是一个 ack
       parameters:
         - schema:
             type: string
@@ -1103,12 +544,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
-  /api/chat/sessions/{id}/questions/{callId}:
+  /api/chat/conversations/{id}/questions/{callId}:
     post:
       tags:
         - Chat
-      summary: 回答一个待处理的 ask_user 提问（docs/08 §2.2c（审批链））：结果通过 `GET .../stream` 的
-        `question.answered` 事件送达，本响应只是一个 ack
+      summary: 回答一个待处理的 ask-user 提问（docs/tech/chat-webapp.md §2.2c（审批链））：结果通过 `GET
+        .../stream` 的 `tool-ask-user` 部件 output-available 状态送达，本响应只是一个 ack
       parameters:
         - schema:
             type: string

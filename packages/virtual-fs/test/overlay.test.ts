@@ -2,6 +2,7 @@ import * as nodeFs from "node:fs/promises";
 import * as nodePath from "node:path";
 import * as os from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { NimboFS } from "@nimbo/core";
 import { OverlayFS, fromDirectory } from "../src/overlay.js";
 import { NotFoundError, fromMemory } from "../src/memory.js";
 
@@ -207,5 +208,14 @@ describe("fromDirectory", () => {
     const fs = fromDirectory(tmpDir, { ignore: ["node_modules"] });
     await expect(fs.stat("/node_modules/x.js")).rejects.toThrow(NotFoundError);
     expect((await fs.readdir("/")).map((e) => e.name)).not.toContain("node_modules");
+  });
+});
+
+describe("OverlayFS native search seam (docs/tech/sandbox.md §4)", () => {
+  it("does not implement searchFiles/searchContent — a native-searching remote base's results would miss overlay writes, so grep/glob must fall back to JS scanning (which goes through the merged glob() view) against it", () => {
+    const base = fromMemory({ "a.txt": "base-a" });
+    const fs: NimboFS = new OverlayFS(base);
+    expect(fs.searchFiles).toBeUndefined();
+    expect(fs.searchContent).toBeUndefined();
   });
 });

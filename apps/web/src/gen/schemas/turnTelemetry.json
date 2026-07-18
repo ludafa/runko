@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "properties": {
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "eventType": { "type": "string" },
+          "ts": { "type": "number" },
+          "payloadJson": { "type": "string" }
+        },
+        "required": ["eventType", "ts", "payloadJson"],
+        "x-readme-ref-name": "TurnTelemetryEvent"
+      }
+    }
+  },
+  "required": ["events"],
+  "x-readme-ref-name": "TurnTelemetry"
+}

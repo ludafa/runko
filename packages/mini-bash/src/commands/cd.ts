@@ -1,6 +1,7 @@
 /**
  * `cd [dir]`：改变"当前生效工作目录"。本命令自身只做 `stat()` 校验（零写
- * 操作，与全只读性质和 `defaultApproval: "never"` 自洽），不直接触碰任何
+ * 操作，与全只读性质和 `defaultApproval: "allow"`（docs/tech/single-ledger.md §6.1，原
+ * "never"）自洽），不直接触碰任何
  * 持久状态——成功时把新 cwd 通过 `CommandResult.cwd` 报给调用方，是否/
  * 如何传播（同一 exec() 调用内链间穿透、管道内 POSIX 子 shell 语义不传播、
  * 跨 exec() 调用持久化）完全由 exec.ts 的 runPipeline/runChain/exec() 决定，

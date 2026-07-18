@@ -1,5 +1,5 @@
 /**
- * `write_file`（04-builtin-tools.md §1.2）：整文件写入，父目录自动创建（FS 层
+ * `write-file`（docs/tech/builtin-tools.md §1.2）：整文件写入，父目录自动创建（FS 层
  * 已保证，工具层不重复实现——§0.2）；覆盖已存在且未读过的文件 → 拒绝（§0.4）。
  */
 import { z } from "zod";
@@ -18,9 +18,9 @@ export function createWriteFileTool(opts: CreateFileToolsOptions): Tool {
   return defineTool({
     description:
       "Write the full text content of a file, creating it (and any missing parent directories) if it doesn't " +
-      "exist, or replacing it entirely if it does. Overwriting an existing file requires having read_file'd it " +
+      "exist, or replacing it entirely if it does. Overwriting an existing file requires having read-file'd it " +
       "first in this session (guards against blind overwrites) and the file must be unchanged since. For a " +
-      "small change to a file you already know the content of, prefer edit_file — it's cheaper and doesn't " +
+      "small change to a file you already know the content of, prefer edit-file — it's cheaper and doesn't " +
       "require restating the whole file.",
     inputSchema,
     execute: async (input, ctx): Promise<ToolReturn> => {
@@ -36,7 +36,7 @@ export function createWriteFileTool(opts: CreateFileToolsOptions): Tool {
 
       if (existing?.type === "dir") {
         return errorResult(
-          `"${input.path}" is a directory; write_file cannot overwrite a directory. Choose a different path, or delete_file it first.`,
+          `"${input.path}" is a directory; write-file cannot overwrite a directory. Choose a different path, or delete-file it first.`,
         );
       }
 

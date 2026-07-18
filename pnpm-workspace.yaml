@@ -32,7 +32,7 @@ catalog:
   "@vitest/coverage-v8": ^4.1.10
   # P1-1 引入：spec §4.1/§4.5a 的 AbortSignal 等 Node 全局环境类型需要它才能
   # typecheck 通过（此前 P0 脚手架未涉及任何 Node 全局类型，故未装）。
-  "@types/node": ^24.12.2
+  "@types/node": ^24.13.3
   # P9-1 引入：@nimbo/just-bash 的 NimboExec 全语法档实现（tech-spec §4.5b）。
   just-bash: ^3.1.0
   # P10 引入（docs/06 §8.1）：三个云沙盒 provider SDK 均为 devDependencies——

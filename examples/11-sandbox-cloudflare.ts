@@ -1,7 +1,7 @@
 /**
  * 11-sandbox-cloudflare — the third "BYO cloud sandbox" example (see 09's
- * header for the shared background: docs/06-sandbox-workspace-research.md
- * §8, docs/03-construction-plan.md P10). Cloudflare Sandbox is architecturally
+ * header for the shared background: docs/tech/sandbox.md
+ * §8, docs/plans/core-sdk.md P10). Cloudflare Sandbox is architecturally
  * different from E2B/Vercel: it can only be *accessed* from inside a
  * Cloudflare Worker (a Durable Object binding), so "agent runs on any Node
  * machine" (this repo's whole premise) requires a small **gateway** —
@@ -16,7 +16,7 @@
  * @nimbo/sandbox-cloudflare`; note there's no provider SDK to add on the
  * client side — see below).
  *
- * Two entry points, two different "no runtime import" stories (docs/06 §8.1/
+ * Two entry points, two different "no runtime import" stories (docs/tech/sandbox.md §8.1/
  * §8.2):
  *   - `.` (this script's `cloudflareWorkspace`, runs on **any** Node ≥20):
  *     a pure `fetch` client — it never imports `@cloudflare/sandbox` (that
@@ -60,7 +60,7 @@
  *   - each NimboFS file-tool call is one HTTP round trip through the gateway
  *     (tens to hundreds of ms) — prefer a single bash command
  *     (`find`/`grep`) for scan-heavy work over many individual `glob`/
- *     `read_file` calls.
+ *     `read-file` calls.
  *
  * Run: `node examples/11-sandbox-cloudflare.ts` (see examples/README.md for
  * setup; see examples/cloudflare-gateway/README.md to deploy the real
@@ -82,7 +82,7 @@
  *      checkout has no deployed gateway, so this section is expected to stop
  *      at the guidance message — the real-gateway path compiles and reads
  *      correctly but is untested end-to-end here; results get backfilled
- *      into docs/05 once a user deploys the gateway and supplies the two
+ *      into docs/plans/verification.md once a user deploys the gateway and supplies the two
  *      variables. Note there is no `Sandbox`-style SDK object to create or
  *      tear down here (unlike 09/10): the sandbox's lifecycle is owned by
  *      the host's wrangler project, not by this client.
@@ -186,7 +186,7 @@ async function realGatewaySection(): Promise<void> {
   const session = createSession(agent, { workspace });
 
   const result = await session.send(
-    "用 write_file 在 /notes.txt 写一句问候语，然后用 bash 执行 `cat notes.txt`（相对路径，不要写成 /notes.txt）验证内容与写入的一致。",
+    "用 write-file 在 /notes.txt 写一句问候语，然后用 bash 执行 `cat notes.txt`（相对路径，不要写成 /notes.txt）验证内容与写入的一致。",
   );
   console.log("finalResponse:", result.finalResponse);
 }

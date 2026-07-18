@@ -1,5 +1,5 @@
 /**
- * Sandbox lifecycle (docs/08-chat-agent-webapp.md §2.2 `sandbox-manager.ts`):
+ * Sandbox lifecycle (docs/tech/chat-webapp.md §2.2 `sandbox-manager.ts`):
  * every `@vercel/sandbox`/`@nimbo/sandbox-vercel` touch point in the whole
  * server lives in this module — everything else (routes/chat-agent) only
  * sees the structural `SandboxClient`/`ManagedSandbox` interfaces below, so
@@ -7,7 +7,7 @@
  * test/agent/sandbox-manager.test.ts).
  *
  * `acquire()` is the single entry point for both "this session never had a
- * sandbox yet" (called once from `POST /api/chat/sessions`) and "resume an
+ * sandbox yet" (called once from `POST /api/chat/conversations`) and "resume an
  * existing session's sandbox" (called from every `POST .../messages`) — the
  * three states the ticket asks tests to cover:
  *
@@ -23,7 +23,7 @@
  *      way an expired-but-since-recreated remote would; either way the
  *      fallback creates the branch fresh.
  *
- * `touch()` is the whole "sleep" mechanism (docs/08 §1.4): it only calls
+ * `touch()` is the whole "sleep" mechanism (docs/tech/chat-webapp.md §1.4): it only calls
  * Vercel's own `extendTimeout()` — there is no server-side timer. When a
  * session goes idle past `SANDBOX_IDLE_TIMEOUT_MS`, Vercel stops + snapshots
  * the sandbox on its own; the next `acquire()` (state 2 or 3 above) recovers.
@@ -97,7 +97,7 @@ export function createVercelSandboxClient(): SandboxClient {
         teamId,
         projectId,
         runtime: 'node24',
-        persistent: true, // the precondition for "sleep = Vercel's own snapshot-on-timeout" (docs/08 §1.4/§2.2)
+        persistent: true, // the precondition for "sleep = Vercel's own snapshot-on-timeout" (docs/tech/chat-webapp.md §1.4/§2.2)
         timeout: params.timeoutMs,
         source: {
           type: 'git',
@@ -134,7 +134,7 @@ interface InitScripts {
   gitExclude: string;
 }
 
-/** Same six commands as examples/12's `buildInitPlan` (docs/07 §2.3/§2.4), minus default-branch detection (kept separate, see `detectDefaultBranch`). */
+/** Same six commands as examples/12's `buildInitPlan` (docs/tech/sandbox.md §2.3/§2.4), minus default-branch detection (kept separate, see `detectDefaultBranch`). */
 function buildInitScripts(owner: string, repo: string): InitScripts {
   return {
     installSkill:
@@ -245,7 +245,7 @@ async function detectDefaultBranch(
 // ---- SandboxManager: acquire/touch/release state machine ----
 
 export interface AcquireInput {
-  sessionId: string;
+  conversationId: string;
   sandboxName: string;
   branchName: string;
   repoCloneUrl: string;
@@ -262,9 +262,9 @@ export interface AcquiredSandbox {
 export interface SandboxManager {
   acquire(input: AcquireInput): Promise<AcquiredSandbox>;
   /** Extends the sandbox's Vercel-side timeout — throws if this session has no in-memory active sandbox (call `acquire()` first). */
-  touch(sessionId: string): Promise<void>;
+  touch(conversationId: string): Promise<void>;
   /** Evicts the in-process cache entry (no Vercel call) — forces the next `acquire()` to go through `SandboxClient.get()` again. */
-  release(sessionId: string): void;
+  release(conversationId: string): void;
 }
 
 interface ActiveSandbox {
@@ -286,7 +286,7 @@ export function createSandboxManager(
   const inflight = new Map<string, Promise<AcquiredSandbox>>();
 
   async function doAcquire(input: AcquireInput): Promise<AcquiredSandbox> {
-    const cached = active.get(input.sessionId);
+    const cached = active.get(input.conversationId);
     if (cached !== undefined) {
       return {
         workspace: cached.workspace,
@@ -298,7 +298,7 @@ export function createSandboxManager(
     if (getResult.kind === 'ok') {
       const workspace = vercelWorkspace(getResult.sandbox);
       const defaultBranch = await detectDefaultBranch(workspace);
-      active.set(input.sessionId, {
+      active.set(input.conversationId, {
         sandbox: getResult.sandbox,
         workspace,
         defaultBranch,
@@ -321,32 +321,32 @@ export function createSandboxManager(
     const defaultBranch = await detectDefaultBranch(workspace);
     await recoverSessionBranch(workspace, input.branchName);
 
-    active.set(input.sessionId, { sandbox, workspace, defaultBranch });
+    active.set(input.conversationId, { sandbox, workspace, defaultBranch });
     return { workspace, defaultBranch };
   }
 
   return {
     acquire(input: AcquireInput): Promise<AcquiredSandbox> {
-      const existing = inflight.get(input.sessionId);
+      const existing = inflight.get(input.conversationId);
       if (existing !== undefined) return existing;
 
       const promise = doAcquire(input).finally(() =>
-        inflight.delete(input.sessionId),
+        inflight.delete(input.conversationId),
       );
-      inflight.set(input.sessionId, promise);
+      inflight.set(input.conversationId, promise);
       return promise;
     },
-    async touch(sessionId: string): Promise<void> {
-      const activeSandbox = active.get(sessionId);
+    async touch(conversationId: string): Promise<void> {
+      const activeSandbox = active.get(conversationId);
       if (activeSandbox === undefined) {
         throw new Error(
-          `touch(${sessionId}): no active sandbox in memory — call acquire() first.`,
+          `touch(${conversationId}): no active sandbox in memory — call acquire() first.`,
         );
       }
       await activeSandbox.sandbox.extendTimeout(idleTimeoutMs);
     },
-    release(sessionId: string): void {
-      active.delete(sessionId);
+    release(conversationId: string): void {
+      active.delete(conversationId);
     },
   };
 }

@@ -40,7 +40,7 @@ export interface FileStat {
 
 /**
  * readdir() 的单条目。spec §4.4 未单列 DirEntry 的字段，但其验收点——
- * "list_dir 行尾标注类型与 description"/"非文本文件带 mimeType"/
+ * "list-dir 行尾标注类型与 description"/"非文本文件带 mimeType"/
  * "reference 条目带 → href"——需要的信息与 stat() 的返回值完全一致，
  * 因此 DirEntry 定义为 FileStat 的字段集合再加 name，readdir 的实现
  * 不必为目录里每个条目再发一次 stat()。
@@ -81,6 +81,72 @@ export interface NimboFS {
   readdir(path: string): Promise<DirEntry[]>;
   stat(path: string): Promise<FileStat>;
   glob(pattern: string): Promise<string[]>;
+  /**
+   * 原生搜索能力接缝（docs/tech/sandbox.md §4）：实现了 = 该底座能一次调用在
+   * 内部完成整个文件名搜索（典型如远端沙盒在沙盒里跑一条脚本），`grep`/`glob`
+   * 工具会优先调用；抛 `SearchUnsupportedError` 会被工具静默捕获、回退现有
+   * `glob()` + JS 过滤逐文件扫描。**内存态/覆盖态实现故意不实现这两个方法**——
+   * `OverlayFS` 罩着远端 base 时，base 的 native 搜索看不见 overlay 的脏写，
+   * 回退到走 `glob()`（会经过 overlay 合并视图）才是正确语义。
+   */
+  searchFiles?(query: FileSearchQuery): Promise<FileSearchResult>;
+  /** 同 `searchFiles`，覆盖 grep 的正则内容搜索（files/content 双模式）。 */
+  searchContent?(query: ContentSearchQuery): Promise<ContentSearchResult>;
+}
+
+/** `NimboFS.searchFiles` 的查询参数（对应 `glob` 工具的一次调用）。 */
+export interface FileSearchQuery {
+  // 绝对虚拟 glob 模式：joinGlobPattern 拼好 scope 与 pattern 后的形态，如 "/app/**" 或 "/**" + "/*.ts"
+  // 这类跨目录通配（注意：本行是 // 注释而非 /** */，因为形态本身含有会提前闭合块注释的 "*/" 子串）。
+  pattern: string;
+  /** 忽略模式：命中路径本身或其任一祖先目录即整棵子树跳过（与 `DirFS` `ignorePatterns` 同语义）。 */
+  ignore?: string[];
+  /** 源头截断：`paths` 最多返回条数；`total` 不受这个上限影响，仍是全量计数。 */
+  limit: number;
+}
+
+/** `paths` 已按路径升序排列、只含文件（不含目录）。 */
+export interface FileSearchResult {
+  paths: string[];
+  total: number;
+}
+
+/** `NimboFS.searchContent` 的查询参数（对应 `grep` 工具的一次调用）。 */
+export interface ContentSearchQuery {
+  /** JavaScript RegExp 的 source（调用侧已校验过是合法正则）。 */
+  pattern: string;
+  ignoreCase?: boolean;
+  /** 候选集：绝对虚拟 glob 模式，形态同 `FileSearchQuery.pattern`。 */
+  scope: string;
+  ignore?: string[];
+  mode: "files" | "content";
+  /** `content` 模式下每个匹配 ±N 行上下文；`files` 模式忽略这个字段。 */
+  context?: number;
+  /** 命中文件数闸（grep 固定 100）。 */
+  maxFiles: number;
+  /** `content` 模式下的输出行数闸（grep 固定 500）；`files` 模式忽略这个字段。 */
+  maxLines: number;
+}
+
+/** `content` 模式下的一行：`match` 为 true 表示命中行本身，false 表示 ±context 的周边行。 */
+export interface ContentSearchLine {
+  line: number;
+  text: string;
+  match: boolean;
+}
+
+/** 一个文件的搜索结果分组；`files` 模式下 `lines` 恒为 `[]`。 */
+export interface ContentSearchGroup {
+  path: string;
+  lines: ContentSearchLine[];
+}
+
+export interface ContentSearchResult {
+  groups: ContentSearchGroup[];
+  /** 命中文件总数（未经 `maxFiles` 截断的全量计数）。 */
+  totalFiles: number;
+  /** `content` 模式下是否因触达 `maxLines` 而提前截断（`files` 模式恒为 false）。 */
+  lineCapped: boolean;
 }
 
 // ---- NimboExec：命令执行的接口倒置，与 NimboFS 同构（§4.5a） ----
@@ -89,11 +155,11 @@ export interface NimboExec {
   exec(req: ExecRequest, opts?: ExecOptions): Promise<ExecResult>;
   /** 环境自描述（OS/网络/cwd 语义），拼进 bash 工具描述。 */
   describe?(): string;
-  /** 实现自声明的审批默认值（本地实现 "always"，沙盒实现通常 "never"）。 */
+  /** 实现自声明的审批默认值（本地实现 "review"，沙盒实现通常 "allow"）。 */
   defaultApproval?: ApprovalPolicy;
 }
 
-// ---- 审批链（§4.1 / §4.5） ----
+// ---- 审批链（docs/tech/single-ledger.md §6，P13-5-2c 三值重构；术语见 docs/terms.md §4） ----
 
 export interface ApprovalContext {
   toolName: string;
@@ -101,15 +167,56 @@ export interface ApprovalContext {
   session: { id: string; turn: number };
 }
 
-export type ApprovalDecision =
-  | { behavior: "allow"; updatedInput?: JsonValue }
-  | { behavior: "deny"; message?: string };
+/**
+ * 一次工具调用的审批结果三选一（docs/tech/single-ledger.md §6.1）：`allow` 直接执行；`review`
+ * 人工审批（loop 先 yield `tool-approval-request` chunk 再阻塞等真人，见
+ * `loop.ts`）；`deny` 直接拒绝。旧 `ApprovalDecision`（allow+updatedInput /
+ * deny+message 二值）已删除——`updatedInput`（允许时改模型填的参数）随之整体
+ * 移除（2026-07-15 定案，见 docs/tech/single-ledger.md §6.3：chat 卡片从来只有允许/拒绝两个按钮，
+ * 没有编辑框）。
+ */
+export type ApprovalOutcome = "allow" | "review" | "deny";
 
+/**
+ * 策略 vs 结果分层（docs/tech/single-ledger.md §6.1）：策略是配在工具上（`Tool.approval`）/注入
+ * 会话（原 `SessionOptions.onApproval`，现审批分类器）的规则，解析出每次调用
+ * 的结果三值之一。旧字符串 `"never"`/`"always"`/`"once"` 全废——
+ * `"never"` → `"allow"`、`"always"` → `"review"`、`"once"` → `"review-once"`。
+ * `"review"`：每次调用都问。`"review-once"`：第一次问、批准后本会话记住、之后
+ * `"allow"`（复用现有 once 记忆）。回调形态直接产出 `ApprovalOutcome`——这正是
+ * §6.2 的「审批分类器」形态，per-tool 与 session 共用同一个类型。
+ */
 export type ApprovalPolicy =
-  | "never"
-  | "always"
-  | "once"
-  | ((input: JsonValue, ctx: ApprovalContext) => Promise<ApprovalDecision> | ApprovalDecision);
+  | "allow"
+  | "review"
+  | "review-once"
+  | "deny"
+  | ((input: JsonValue, ctx: ApprovalContext) => Promise<ApprovalOutcome> | ApprovalOutcome);
+
+/**
+ * 人工裁决（docs/tech/single-ledger.md §6.3）：分类器返回 `review` 后弹给真人的卡片，真人只答
+ * 两值——`updatedInput`（改参数）彻底删除，"让它换个做法"用「拒绝+理由」或
+ * steer 更直白。`deny.message` = 拒绝理由，回填模型。
+ */
+export type HumanDecision = { behavior: "allow" } | { behavior: "deny"; message?: string };
+
+/** `ApprovalReviewer`（session 的人审通道，见 `loop.ts`）收到的一次待裁决请求。 */
+export interface ApprovalReviewRequest {
+  toolName: string;
+  input: JsonValue;
+  ctx: ApprovalContext;
+}
+
+/**
+ * session 级注入的「等真人」通道（docs/tech/single-ledger.md §6.4 施工回报新增接口，P13-5-2c）：
+ * `evaluateApproval` 解析出 `review` 后，`loop.ts` 先 yield
+ * `tool-approval-request` chunk（界面弹卡片），再 `await` 这个函数拿到人工裁决。
+ * 未注入（`undefined`）时 `review` 视同无仲裁者——按 deny + 现有指导文案处理，
+ * 语义与"session 未配置分类器"一致。与旧 `SessionOptions.onApproval`
+ * （现在的审批分类器，仍是 `ApprovalPolicy`）是两个独立的注入点：分类器是同步
+ * 的三值判断，这个是真正的异步"等人"步骤。
+ */
+export type ApprovalReviewer = (request: ApprovalReviewRequest) => Promise<HumanDecision>;
 
 // ---- Skills：仅类型（§4.1；defineSkill 与加载实现见 P1-2 起） ----
 
@@ -146,5 +253,12 @@ export interface Tool {
   inputSchema: z.ZodType<JsonValue>;
   outputSchema?: z.ZodType<ToolReturn>;
   approval?: ApprovalPolicy;
+  /**
+   * 声明该工具无副作用（纯读：不写工作区、不产生 file-change/plan-update 等
+   * 派生数据）。同一 step 的一批 tool call **全部** readOnly 时，loop 并行
+   * 结算（loop.ts `runOneStep`——模型同批调用本就是一组独立操作，parallel
+   * tool use 契约允许并行）；缺省视为有副作用，整批退回串行。
+   */
+  readOnly?: boolean;
   execute(input: JsonValue, ctx: ToolContext): Promise<ToolReturn> | ToolReturn;
 }

@@ -2,7 +2,7 @@
  * 自包含的极简 POSIX 虚拟路径解析——与 `@nimbo/mini-bash` 的 `src/path.ts`
  * 同一份逻辑独立实现（不跨包依赖：src 侧只允许依赖 `@nimbo/core` + `just-bash`，
  * 见 P6-4 mini-bash 先例头注释）。`..` 越界静默 clamp 到根而非抛错——这一层
- * 不是安全边界（tech-spec §4.4："安全边界在 FS 不在工具"），真正的边界校验
+ * 不是安全边界（docs/tech/core-sdk.md §4.4："安全边界在 FS 不在工具"），真正的边界校验
  * 留给注入的 `NimboFS` 实现自己那一层。
  */
 

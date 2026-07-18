@@ -24,6 +24,7 @@
     "@fontsource-variable/inter": "^5.2.8",
     "@iconify/react": "^6.0.2",
     "@nimbo/core": "workspace:*",
+    "ai": "catalog:",
     "@tailwindcss/vite": "^4.2.4",
     "@tanstack/react-form": "^1.29.1",
     "@tanstack/react-router": "^1.169.1",

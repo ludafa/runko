@@ -1,5 +1,5 @@
 /**
- * `buildSession` (docs/08-chat-agent-webapp.md §2.2 `chat-agent.ts`): loads
+ * `buildSession` (docs/tech/chat-webapp.md §2.2 `chat-agent.ts`): loads
  * the frontend-design skill straight from the sandbox's filesystem
  * (`Skill.fromFS`, same as
  * examples/12-vercel-sandbox-real-project.e2e.test.ts), builds instructions
@@ -7,24 +7,27 @@
  * guess them — same discipline as example 12's `buildInstructions`), and
  * hands the whole thing to `@nimbo/sdk`'s `createSession` — **not**
  * `@nimbo/core`'s: only the sdk facade's version bundles the eight-piece
- * file-tool default assembly (read_file/write_file/edit_file/...) around
+ * file-tool default assembly (read-file/write-file/edit-file/...) around
  * whatever `workspace` it's given, which is what actually lets the agent
  * edit the sandbox's checked-out repo.
  *
- * Called fresh on every turn (every `POST .../messages`, per docs/08 §2.2) —
+ * Called fresh on every turn (every `POST .../messages`, per docs/tech/chat-webapp.md §2.2) —
  * there is no long-lived in-memory `Session` object across requests; message
- * history round-trips through `chat_sessions.nimbo_state_json`
- * (`Session.toJSON()`/`resume`), while the sandbox's filesystem (including
- * any uncommitted edits on the session branch) round-trips separately via
- * the Vercel snapshot (`sandbox-manager.ts`) — docs/08 §2.2's "持久化恢复语义"
- * note.
+ * history round-trips through `conversation_events`'s `kind = 'message'` rows +
+ * `conversations`'s `nimbo*` scalar header (docs/tech/single-ledger.md
+ * §5 单-3, `store.ts`'s `loadResumeState`/`Session.toJSON()`/`resume`), while
+ * the sandbox's filesystem (including any uncommitted edits on the session
+ * branch) round-trips separately via the Vercel snapshot
+ * (`sandbox-manager.ts`) — docs/tech/chat-webapp.md §2.2's "持久化恢复语义" note.
  */
 import type {
   ApprovalPolicy,
+  ApprovalReviewer,
   NimboExec,
   NimboFS,
   Session,
   SessionState,
+  SessionTelemetry,
   Tool,
 } from '@nimbo/sdk';
 import { createSession, defineAgent, defineTool, Skill } from '@nimbo/sdk';
@@ -44,12 +47,16 @@ export interface BuildSessionOptions {
   defaultBranch: string;
   branchName: string;
   resume?: SessionState;
-  /** `routes/chat.ts`'s approval bridge (docs/08 §2.2c（审批链）) — the session-level `onApproval` arbiter (`packages/core/src/approval.ts`). Passing one when `approvalMode` is `'off'` has no effect either way, since the workspace isn't gated in that mode (see `gateWorkspace`) — nothing ever escalates to it. */
+  /** `routes/chat.ts`'s approval bridge (docs/tech/chat-webapp.md §2.2c（审批链）, docs/tech/single-ledger.md §6.2) — the session-level 审批分类器 (`packages/core/src/approval.ts`'s `evaluateApproval`), a three-value `ApprovalOutcome` classifier. Passing one when `approvalMode` is `'off'` has no effect either way, since the workspace isn't gated in that mode (see `gateWorkspace`) — nothing ever escalates to it. */
   onApproval?: ApprovalPolicy;
+  /** `routes/chat.ts`'s 人审通道 (docs/tech/single-ledger.md §6.4 `ApprovalReviewer`) — `@nimbo/core`'s loop `await`s this only after it has already yielded a `tool-approval-request` chunk for a `'review'`-classified call. Independent of `onApproval`: the classifier decides *whether* a human is needed; this is *how* the human's decision actually arrives. */
+  onReview?: ApprovalReviewer;
   /** Defaults to `'dangerous'` (`approval-policy.ts`'s own default) — controls whether/how the workspace's `bash` tool is gated, not what the model is allowed to do overall. */
   approvalMode?: ChatApprovalMode;
-  /** `routes/chat.ts`'s ask_user bridge (docs/08 §2.2c（审批链）), wired to `turn-runner.ts`'s `requestUserAnswer` — registers the `ask_user` tool (see `createAskUserTool`) when present. Independent of `approvalMode`: `ask_user` is a product capability, not a safety gate, so it's registered the same way regardless of mode (including `'off'`). */
+  /** `routes/chat.ts`'s ask-user bridge (docs/tech/chat-webapp.md §2.2c（审批链）), wired to `turn-runner.ts`'s `requestUserAnswer` — registers the `ask-user` tool (see `createAskUserTool`) when present. Independent of `approvalMode`: `ask-user` is a product capability, not a safety gate, so it's registered the same way regardless of mode (including `'off'`). */
   onAskUser?: (req: RequestUserAnswerInput) => Promise<AskUserOutcome>;
+  /** telemetry 事件集成透传（`@nimbo/core` 的 `SessionTelemetry`，docs/tech/chat-webapp.md §11.4）——生产由 `src/telemetry.ts` 的 SQLite 集成供给（routes 经 deps 注入），测试注入假集成或不传。 */
+  telemetry?: SessionTelemetry;
 }
 
 /**
@@ -75,29 +82,38 @@ function buildInstructions(opts: {
 - 只有当用户明确要求提交/推送/开 PR 时，才执行 git 操作；push 前确保当前分支就是 "${branchName}"；开 PR 时用 curl 调 GitHub REST API（\`$GH_TOKEN\` 已是沙盒环境变量，直接引用，不要猜测、复述或打印它的值），head 用 "${branchName}"，base 用 "${defaultBranch}"。
 - 开 PR 前要先检查一下之前的 PR 是否已经被合入：若已合入，请新开个 PR。
 - 每次回复如实说明这一轮做了什么、为什么这么做，或者为什么这一轮没有改动代码——不要夸大、不要编造未发生的操作结果。
-- 当你需要用户做决定或澄清需求时，用 ask_user 工具直接提问，不要在回复文本里空等。`;
+- 当你需要用户做决定或澄清需求时，用 ask-user 工具直接提问，不要在回复文本里空等。`;
 }
 
 /**
- * Forces `workspace`'s `bash` tool to always require approval (docs/08 §2.2c
- * （审批链）): `createBashTool` (packages/core/src/tools/builtin/bash.ts:126)
+ * Forces `workspace`'s `bash` tool to always require approval (docs/tech/chat-webapp.md §2.2c
+ * （审批链）, docs/tech/single-ledger.md §6.4): `createBashTool` (packages/core/src/tools/builtin/bash.ts)
  * picks its per-tool `ApprovalPolicy` from `exec.defaultApproval`, and the
- * Vercel sandbox's own `NimboExec` implementation declares `"never"` there
+ * Vercel sandbox's own `NimboExec` implementation declares `"allow"` there
  * (it has no notion of a human in the loop) — left as-is, every bash command
  * would run unattended regardless of `approvalMode`. Overriding it to
- * `"always"` is what actually makes `packages/core/src/approval.ts`'s
- * evaluation chain produce an approval request per call, escalating to the
- * session's `onApproval` bridge instead of executing straight away.
+ * `"review"` is what actually makes `packages/core/src/approval.ts`'s
+ * evaluation chain classify every call as needing a human, escalating to the
+ * session's `onApproval` classifier (and, once that also says `'review'`, to
+ * `onReview`'s 人审通道) instead of executing straight away.
  *
- * Explicit per-method delegation, not `{ ...workspace, defaultApproval: 'always' }`:
+ * Explicit per-method delegation, not `{ ...workspace, defaultApproval: 'review' }`:
  * `workspace` here is a real object (the Vercel sandbox's own workspace, or a
  * `MemoryFS`-backed fake in tests) whose methods live on its prototype chain
  * — a shallow object spread only copies *own* enumerable properties, which
  * for a class instance is none of its methods, silently producing an object
  * with `undefined` where every `NimboFS`/`NimboExec` method should be.
+ *
+ * 显式逐方法转发的对价：`NimboFS` 的**可选能力方法**（`searchFiles`/
+ * `searchContent`，原生搜索快路径——docs/tech/builtin-tools.md §3.7/§3.8）也必须
+ * 在这里显式跟上，否则会被这层包装静默剥掉、grep/glob 永远走 JS 逐文件回退
+ * （在远端沙盒上是每文件一次网络往返的慢路径）——这正是 2026-07-16 线上
+ * "grep 依旧十几秒"的事故根因。往 `NimboFS` 再加可选方法时，这里要同步。
  */
 function gateWorkspace(workspace: NimboFS & NimboExec): NimboFS & NimboExec {
   const describe = workspace.describe?.bind(workspace);
+  const searchFiles = workspace.searchFiles?.bind(workspace);
+  const searchContent = workspace.searchContent?.bind(workspace);
   return {
     readFile: (path) => workspace.readFile(path),
     writeFile: (path, data) => workspace.writeFile(path, data),
@@ -108,7 +124,9 @@ function gateWorkspace(workspace: NimboFS & NimboExec): NimboFS & NimboExec {
     glob: (pattern) => workspace.glob(pattern),
     exec: (req, opts) => workspace.exec(req, opts),
     ...(describe !== undefined ? { describe } : {}),
-    defaultApproval: 'always',
+    ...(searchFiles !== undefined ? { searchFiles } : {}),
+    ...(searchContent !== undefined ? { searchContent } : {}),
+    defaultApproval: 'review',
   };
 }
 
@@ -122,9 +140,9 @@ const ASK_USER_TIMEOUT_MESSAGE =
   'The user did not respond within the time limit. Proceed with your best judgment, or ask again later.';
 
 /**
- * `ask_user` (docs/08 §2.2c（审批链）): registered only when `opts.onAskUser`
+ * `ask-user` (docs/tech/chat-webapp.md §2.2c（审批链）): registered only when `opts.onAskUser`
  * is supplied (see `buildSession`) — same conditional-registration shape as
- * `load_skill`/`bash`, just driven by an option instead of `agent.skills`/
+ * `load-skill`/`bash`, just driven by an option instead of `agent.skills`/
  * `exec`. No `approval` set: asking the user *is* the human-in-the-loop step
  * here, there's nothing left to gate on top of it.
  */
@@ -156,13 +174,14 @@ function createAskUserTool(
  * agent, and (re)creates the session — restoring message history from
  * `opts.resume` when this is a returning chat session.
  *
- * `approvalMode` (docs/08 §2.2c（审批链）) gates the workspace (see
+ * `approvalMode` (docs/tech/chat-webapp.md §2.2c（审批链）) gates the workspace (see
  * `gateWorkspace`) for every mode except `'off'`, which passes `opts.workspace`
  * straight through unchanged — zero behavior change from before this bridge
- * existed. `onApproval` is otherwise passed through as-is regardless of mode;
- * in `'off'` mode it simply never gets called (nothing ever escalates to it).
- * `onAskUser` (also docs/08 §2.2c（审批链）) registers `ask_user` independent
- * of `approvalMode` — see `BuildSessionOptions.onAskUser`'s own doc comment.
+ * existed. `onApproval`/`onReview` are otherwise passed through as-is
+ * regardless of mode; in `'off'` mode neither ever gets called (nothing ever
+ * escalates to them). `onAskUser` (also docs/tech/chat-webapp.md §2.2c（审批链）) registers
+ * `ask-user` independent of `approvalMode` — see
+ * `BuildSessionOptions.onAskUser`'s own doc comment.
  */
 export async function buildSession(
   opts: BuildSessionOptions,
@@ -173,7 +192,7 @@ export async function buildSession(
     skills: [skill],
     instructions: buildInstructions(opts),
     ...(opts.onAskUser !== undefined ?
-      { tools: { ask_user: createAskUserTool(opts.onAskUser) } }
+      { tools: { 'ask-user': createAskUserTool(opts.onAskUser) } }
     : {}),
   });
   const approvalMode = opts.approvalMode ?? 'dangerous';
@@ -183,5 +202,7 @@ export async function buildSession(
     workspace,
     ...(opts.resume !== undefined ? { resume: opts.resume } : {}),
     ...(opts.onApproval !== undefined ? { onApproval: opts.onApproval } : {}),
+    ...(opts.onReview !== undefined ? { onReview: opts.onReview } : {}),
+    ...(opts.telemetry !== undefined ? { telemetry: opts.telemetry } : {}),
   });
 }

@@ -1,38 +1,38 @@
 /**
  * L1 定义层：`defineAgent` + `BuiltinToolName` + `READ_ONLY_TOOLS`
- * （tech-spec §4.1；`BuiltinToolName` 联合与 `READ_ONLY_TOOLS` 见
- * 04-builtin-tools.md §3）。
+ * （docs/tech/core-sdk.md §4.1；`BuiltinToolName` 联合与 `READ_ONLY_TOOLS` 见
+ * docs/tech/builtin-tools.md §3）。
  */
 import type { LanguageModel } from "ai";
 import type { Tool } from "./types.js";
 import type { Skill } from "./skill.js";
 
 /**
- * 内置工具名联合（04-builtin-tools.md §3）：九个默认全开、可经
- * `builtinTools` 裁剪的文件/计划工具。`load_skill` 由 agent 是否配置
+ * 内置工具名联合（docs/tech/builtin-tools.md §3）：九个默认全开、可经
+ * `builtinTools` 裁剪的文件/计划工具。`load-skill` 由 agent 是否配置
  * `skills` 隐式控制、`bash` 由 session 是否注入 `NimboExec` 隐式控制——
  * 二者是条件内置，不在这个可裁剪列表里（§3 原文括注）。
  */
 export type BuiltinToolName =
-  | "read_file"
-  | "write_file"
-  | "edit_file"
-  | "delete_file"
-  | "move_file"
-  | "list_dir"
+  | "read-file"
+  | "write-file"
+  | "edit-file"
+  | "delete-file"
+  | "move-file"
+  | "list-dir"
   | "glob"
   | "grep"
-  | "update_plan";
+  | "update-plan";
 
-/** 只读审查场景一行开箱的预设组合（04-builtin-tools.md §3），纯类型层面的常量、非新机制。 */
+/** 只读审查场景一行开箱的预设组合（docs/tech/builtin-tools.md §3），纯类型层面的常量、非新机制。 */
 export const READ_ONLY_TOOLS = [
-  "read_file",
-  "list_dir",
+  "read-file",
+  "list-dir",
   "glob",
   "grep",
 ] as const satisfies readonly BuiltinToolName[];
 
-/** agent 定义：纯声明，无运行状态（tech-spec §4.1）。 */
+/** agent 定义：纯声明，无运行状态（docs/tech/core-sdk.md §4.1）。 */
 export interface AgentDefinition {
   /** AI SDK 模型实例或 "provider/model" gateway 字符串。 */
   model: LanguageModel;

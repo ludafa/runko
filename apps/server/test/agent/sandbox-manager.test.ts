@@ -94,7 +94,7 @@ function createFakeSandboxClient(opts: {
 
 function acquireInput(overrides: Partial<AcquireInput> = {}): AcquireInput {
   return {
-    sessionId: 'session-1',
+    conversationId: 'session-1',
     sandboxName: 'nimbo-chat-session-1',
     branchName: 'nimbo/chat-session-1',
     repoCloneUrl: 'https://github.com/acme/demo.git',
@@ -211,7 +211,7 @@ describe('sandbox-manager', () => {
 
     const input = acquireInput();
     await manager.acquire(input);
-    await manager.touch(input.sessionId);
+    await manager.touch(input.conversationId);
 
     expect(fake.createdSandboxes[0]?.extendTimeoutCalls).toEqual([42_000]);
     await expect(manager.touch('never-acquired')).rejects.toThrow(
@@ -227,7 +227,7 @@ describe('sandbox-manager', () => {
 
     const input = acquireInput();
     await manager.acquire(input);
-    manager.release(input.sessionId);
+    manager.release(input.conversationId);
     await manager.acquire(input);
 
     expect(fake.createCalls).toHaveLength(2);

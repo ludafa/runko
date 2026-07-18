@@ -5,7 +5,7 @@
 1. **确定性段**——不需要模型、不需要任何环境变量，直接演练 VirtualFS / NimboExec / skills 的机制本身，输出形状恒定；
 2. **模型驱动段**——真实 agent loop，需要配置 `NIMBO_MODEL`。未配置时脚本打印配置指引后**干净退出**（exit 0），不会崩溃。
 
-| 脚本 | 演示点 | 对应产品场景（docs/01 §3） |
+| 脚本 | 演示点 | 对应产品场景（docs/features/core-sdk.md §3） |
 |---|---|---|
 | [`01-memory-diff.ts`](./01-memory-diff.ts) | 纯内存工作区：agent 改代码，宿主拿 `diff()`，全程不碰磁盘 | SaaS 内嵌代码助手 |
 | [`02-dir-mount.ts`](./02-dir-mount.ts) | 真实目录 overlay 挂载：读穿透、写落内存，`writeBack()` 才落盘 | 安全地把真实项目交给 agent |
@@ -77,4 +77,4 @@ node examples/typecheck.mjs    # 等价于 tsc -p examples/tsconfig.json（--noE
 
 examples/ 演示的是**发布后的消费姿态**——`import { ... } from "@nimbo/sdk"` 裸名导入、解析到各包 `exports` 声明的 dist 产物，与真实用户 `pnpm add @nimbo/sdk` 后的体验同构。做成 workspace 成员反而引入差异（workspace 协议、可能的 src 直连），并把示例的依赖搅进 lockfile。`setup-node-modules.mjs` 手工搭出与 pnpm 等价的符号链接布局（只建 `examples/node_modules`，已被根 `.gitignore` 覆盖，不进版本库、不碰 lockfile）。
 
-> import 源说明：除 `08-just-bash.ts`（`@nimbo/just-bash` 不进 sdk 依赖，见该文件头注释）与 `09`/`10`/`11`/`12`（`@nimbo/sandbox-*` 适配器包同样不进 sdk 依赖，见各自文件头注释；12 号额外直接 import `@ai-sdk/deepseek` 构造模型，不经 `shared/model.ts` 的 `resolveModel()`）外，其余示例统一从 `@nimbo/sdk` 导入。TODO：npm 裸名 `nimbo` 的发布决策待定（docs/03 P7-1 遗留），定了之后这里与各 README 的 import 语句同步替换。
+> import 源说明：除 `08-just-bash.ts`（`@nimbo/just-bash` 不进 sdk 依赖，见该文件头注释）与 `09`/`10`/`11`/`12`（`@nimbo/sandbox-*` 适配器包同样不进 sdk 依赖，见各自文件头注释；12 号额外直接 import `@ai-sdk/deepseek` 构造模型，不经 `shared/model.ts` 的 `resolveModel()`）外，其余示例统一从 `@nimbo/sdk` 导入。TODO：npm 裸名 `nimbo` 的发布决策待定（docs/plans/core-sdk.md P7-1 遗留），定了之后这里与各 README 的 import 语句同步替换。

@@ -1,5 +1,5 @@
 /**
- * `loadAgentFromFS` (P7-3 task 3, tech-spec §4.7) — the virtual-FS counterpart
+ * `loadAgentFromFS` (P7-3 task 3, docs/tech/core-sdk.md §4.7) — the virtual-FS counterpart
  * of `loadAgent`, deliberately narrower: only `instructions.md` and `skills/`
  * are read; `agent.ts`/`agent.json`/`tools/*` are never touched (§4.7 "不引入
  * 任意代码执行面"). `@nimbo/virtual-fs` is a devDependency (not a runtime
@@ -131,12 +131,12 @@ describe("loadAgentFromFS() — remaining opts pass through verbatim (none of th
     const fs = fromMemory({ "instructions.md": "hi" });
     const agent = await loadAgentFromFS(fs, "/", {
       model: "x/y",
-      builtinTools: ["read_file"],
+      builtinTools: ["read-file"],
       maxTurnsPerRun: 3,
       maxOutputTokens: 111,
       maxContextTokens: 2222,
     });
-    expect(agent.builtinTools).toEqual(["read_file"]);
+    expect(agent.builtinTools).toEqual(["read-file"]);
     expect(agent.maxTurnsPerRun).toBe(3);
     expect(agent.maxOutputTokens).toBe(111);
     expect(agent.maxContextTokens).toBe(2222);

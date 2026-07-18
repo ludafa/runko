@@ -1,160 +1,170 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { QuestionPart } from '../components/question-card';
 import { QuestionCard } from '../components/question-card';
-import type { QuestionTimelineEntry } from '../timeline';
 
-function makeEntry(
-  overrides: Partial<QuestionTimelineEntry> = {},
-): QuestionTimelineEntry {
+function pendingQuestion(input?: unknown): QuestionPart {
   return {
-    kind: 'question',
-    callId: 'q1',
-    question: '要不要继续？',
-    status: 'pending',
-    seq: 1,
-    ...overrides,
+    type: 'tool-ask-user',
+    toolCallId: 'call-1',
+    state: 'input-available',
+    input: input ?? { question: '用哪个颜色主题？', options: ['浅色', '深色'] },
   };
 }
 
-describe('QuestionCard (docs/08 §2.2c（审批链）)', () => {
-  it('renders a pending question with quick-reply option buttons', () => {
+function answeredQuestion(answer: string): QuestionPart {
+  return {
+    type: 'tool-ask-user',
+    toolCallId: 'call-1',
+    state: 'output-available',
+    input: { question: '用哪个颜色主题？' },
+    output: answer,
+  };
+}
+
+describe('QuestionCard — pending (input-available)', () => {
+  it('renders the question text and a "待回答" badge', () => {
     render(
       <QuestionCard
-        entry={makeEntry({ options: ['继续', '停止'] })}
+        part={pendingQuestion()}
         submitting={false}
-        onAnswer={vi.fn()}
+        expired={false}
+        onAnswer={() => undefined}
       />,
     );
-    expect(screen.getByTestId('question-card')).toHaveAttribute(
-      'data-status',
-      'pending',
-    );
-    expect(screen.getByRole('button', { name: '继续' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '停止' })).toBeInTheDocument();
+    expect(screen.getByText('用哪个颜色主题？')).toBeInTheDocument();
+    expect(screen.getByText('待回答')).toBeInTheDocument();
   });
 
-  it('clicking an option button answers immediately, with no need to type into the free-text input first', () => {
+  it("renders one quick-option button per option; clicking it answers with that option's text", async () => {
+    const user = userEvent.setup();
     const onAnswer = vi.fn();
     render(
       <QuestionCard
-        entry={makeEntry({ options: ['继续', '停止'] })}
+        part={pendingQuestion()}
         submitting={false}
+        expired={false}
         onAnswer={onAnswer}
       />,
     );
-
-    fireEvent.click(screen.getByRole('button', { name: '继续' }));
-
-    expect(onAnswer).toHaveBeenCalledTimes(1);
-    expect(onAnswer).toHaveBeenCalledWith('继续');
+    await user.click(screen.getByRole('button', { name: '深色' }));
+    expect(onAnswer).toHaveBeenCalledExactlyOnceWith('深色');
   });
 
-  it('renders no quick-reply buttons when the question has no options — only the free-text input', () => {
+  it('renders no option buttons when the input has no options (only the free-text send button)', () => {
     render(
       <QuestionCard
-        entry={makeEntry()}
+        part={pendingQuestion({ question: '你叫什么名字？' })}
         submitting={false}
-        onAnswer={vi.fn()}
+        expired={false}
+        onAnswer={() => undefined}
       />,
     );
-    expect(
-      screen.queryByRole('button', { name: '继续' }),
-    ).not.toBeInTheDocument();
-    expect(screen.getByPlaceholderText('输入你的回答…')).toBeInTheDocument();
+    const buttons = screen.getAllByRole('button');
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]).toHaveAccessibleName('发送');
   });
 
-  it('typing free text and submitting answers with the trimmed text', () => {
+  it('free-text submit calls onAnswer with the trimmed text and clears the input', async () => {
+    const user = userEvent.setup();
     const onAnswer = vi.fn();
     render(
       <QuestionCard
-        entry={makeEntry()}
+        part={pendingQuestion()}
         submitting={false}
+        expired={false}
         onAnswer={onAnswer}
       />,
     );
-
-    const input = screen.getByPlaceholderText('输入你的回答…');
-    fireEvent.change(input, { target: { value: '  用主题色吧。  ' } });
-    fireEvent.click(screen.getByRole('button', { name: '发送' }));
-
-    expect(onAnswer).toHaveBeenCalledTimes(1);
-    expect(onAnswer).toHaveBeenCalledWith('用主题色吧。');
+    const input = screen.getByLabelText('回答');
+    await user.type(input, '  自定义答案  ');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+    expect(onAnswer).toHaveBeenCalledExactlyOnceWith('自定义答案');
+    expect(input).toHaveValue('');
   });
 
-  it('disables the send button while the free-text input is empty', () => {
+  it('the send button is disabled for empty/whitespace-only free text', async () => {
+    const user = userEvent.setup();
     render(
       <QuestionCard
-        entry={makeEntry()}
+        part={pendingQuestion()}
         submitting={false}
-        onAnswer={vi.fn()}
+        expired={false}
+        onAnswer={() => undefined}
       />,
     );
     expect(screen.getByRole('button', { name: '发送' })).toBeDisabled();
-  });
-
-  it('disables option buttons and the free-text input/send button while submitting', () => {
-    render(
-      <QuestionCard
-        entry={makeEntry({ options: ['继续'] })}
-        submitting
-        onAnswer={vi.fn()}
-      />,
-    );
-    expect(screen.getByRole('button', { name: '继续' })).toBeDisabled();
-    expect(screen.getByPlaceholderText('输入你的回答…')).toBeDisabled();
+    await user.type(screen.getByLabelText('回答'), '   ');
     expect(screen.getByRole('button', { name: '发送' })).toBeDisabled();
   });
 
-  it('renders an answered entry with its answer text, the "已回答" badge, and no interactive controls', () => {
+  it('disables the input, send button, and option buttons while submitting', () => {
     render(
       <QuestionCard
-        entry={makeEntry({ status: 'answered', answer: '用主题色吧。' })}
-        submitting={false}
-        onAnswer={vi.fn()}
+        part={pendingQuestion()}
+        submitting={true}
+        expired={false}
+        onAnswer={() => undefined}
       />,
     );
-    const card = screen.getByTestId('question-card');
-    expect(card).toHaveAttribute('data-status', 'answered');
+    expect(screen.getByLabelText('回答')).toBeDisabled();
+    expect(screen.getByRole('button', { name: '浅色' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '深色' })).toBeDisabled();
+  });
+
+  it('renders an expired notice and hides the answer controls when expired (even though the part itself is still pending)', () => {
+    render(
+      <QuestionCard
+        part={pendingQuestion()}
+        submitting={false}
+        expired={true}
+        onAnswer={() => undefined}
+      />,
+    );
+    expect(screen.getByText('已失效（超时或轮次已结束）')).toBeInTheDocument();
+    expect(screen.getByText('已失效')).toBeInTheDocument(); // the badge
+    expect(screen.queryByLabelText('回答')).not.toBeInTheDocument();
+  });
+});
+
+describe('QuestionCard — answered (output-available)', () => {
+  it('renders the answer text and an "已回答" badge, with no answer controls', () => {
+    render(
+      <QuestionCard
+        part={answeredQuestion('深色')}
+        submitting={false}
+        expired={false}
+        onAnswer={() => undefined}
+      />,
+    );
     expect(screen.getByText('已回答')).toBeInTheDocument();
-    expect(card).toHaveTextContent('你的回答：用主题色吧。');
-    expect(screen.queryByRole('button')).not.toBeInTheDocument();
-    expect(
-      screen.queryByPlaceholderText('输入你的回答…'),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText('你的回答：深色')).toBeInTheDocument();
+    expect(screen.queryByLabelText('回答')).not.toBeInTheDocument();
   });
 
-  it('renders a timeout entry with the "已超时" badge and its own explanatory text', () => {
+  it("still surfaces the real answer text even if the caller passes expired=true for an already-answered part (an unusual but structurally possible combination — `expired` comes from a separate 404 flag, not the part's own state)", () => {
     render(
       <QuestionCard
-        entry={makeEntry({ status: 'timeout' })}
+        part={answeredQuestion('浅色')}
         submitting={false}
-        onAnswer={vi.fn()}
+        expired={true}
+        onAnswer={() => undefined}
       />,
     );
-    expect(screen.getByTestId('question-card')).toHaveAttribute(
-      'data-status',
-      'timeout',
-    );
-    expect(screen.getByText('已超时')).toBeInTheDocument();
-    expect(
-      screen.getByText(/未在时限内回答，agent 已继续/),
-    ).toBeInTheDocument();
+    expect(screen.getByText('你的回答：浅色')).toBeInTheDocument();
   });
 
-  it('renders an expired entry with the "已失效" badge and its own explanatory text', () => {
+  it('falls back to a placeholder when the tool input is missing the question field', () => {
     render(
       <QuestionCard
-        entry={makeEntry({ status: 'expired' })}
+        part={{ ...answeredQuestion('浅色'), input: {} }}
         submitting={false}
-        onAnswer={vi.fn()}
+        expired={false}
+        onAnswer={() => undefined}
       />,
     );
-    expect(screen.getByTestId('question-card')).toHaveAttribute(
-      'data-status',
-      'expired',
-    );
-    expect(screen.getByText('已失效')).toBeInTheDocument();
-    expect(screen.getByText(/已失效（超时或轮次已结束）/)).toBeInTheDocument();
+    expect(screen.getByText('（问题内容缺失）')).toBeInTheDocument();
   });
 });

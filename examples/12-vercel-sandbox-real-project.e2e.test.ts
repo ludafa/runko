@@ -1,6 +1,6 @@
 /**
  * 12-vercel-sandbox-real-project — a real-project, real-Git-workflow e2e demo
- * (docs/07-sandbox-e2e-design-example.md §1/§2, docs/03-construction-plan.md
+ * (docs/tech/sandbox.md §1/§2, docs/plans/core-sdk.md
  * P11): a nimbo agent, connected to a real Vercel Sandbox, clones the user's
  * own GitHub repo (a plain frontend project), installs the official
  * `anthropics/skills` "frontend-design" skill straight from the sandbox's
@@ -10,11 +10,11 @@
  * connected for the target project) picks up the push/PR and builds a
  * preview deployment on its own — this script never calls the Vercel deploy
  * API and never promises a deployment URL in its summary, only a PR link
- * (docs/07 §8.3).
+ * (docs/tech/sandbox.md §8.3).
  *
  * ---- File naming / test runner note ----
  *
- * The `.e2e.test.ts` suffix is the user-specified filename (docs/07 §8.6),
+ * The `.e2e.test.ts` suffix is the user-specified filename (docs/tech/sandbox.md §8.6),
  * NOT a vitest spec — this is still a plain `node`-executed example script
  * like every other file in examples/, run with `node examples/12-....ts`.
  * The root `vitest.config.ts` declares `test.projects: ["packages/*"]`
@@ -46,14 +46,14 @@
  * exit cleanly. The rest of the real-project path (repo cloning, skill
  * install, the git/PR workflow, the agent instructions) compiles and reads
  * correctly but is untested end-to-end in this checkout; results get
- * backfilled into docs/05 once a user supplies `GITHUB_REPO`/`GITHUB_PAT`.
+ * backfilled into docs/plans/verification.md once a user supplies `GITHUB_REPO`/`GITHUB_PAT`.
  *
  * ---- Why not shared/model.ts's resolveModel() ----
  *
  * Every other model-driven example calls `resolveModel()`, which tries
  * DeepSeek direct-connect first and falls back to an AI SDK Gateway string.
  * This example deliberately does neither of those things as a fallback
- * chain: docs/07 §8.4 pins DeepSeek specifically (a design-quality task
+ * chain: docs/tech/sandbox.md §8.4 pins DeepSeek specifically (a design-quality task
  * benefits from a stronger tier than the other examples' plain
  * "deepseek-chat" default) and this script constructs `createDeepSeek(...)`
  * itself with a different default model id — see `DEEPSEEK_DESIGN_MODEL_ID`
@@ -65,7 +65,7 @@
  * "$DEEPSEEK_API_BASE_URL/models"` (a read-only listing endpoint — the one
  * real network call this construction task was allowed to make, no
  * completion/chat call). The response listed exactly two ids:
- * `deepseek-v4-flash` and `deepseek-v4-pro`; the latter is docs/07 §8.4's
+ * `deepseek-v4-flash` and `deepseek-v4-pro`; the latter is docs/tech/sandbox.md §8.4's
  * "v4 pro 档". See the final report for the raw response.
  *
  * Root `.env` loading: duplicated from shared/model.ts's private (not
@@ -77,7 +77,7 @@
  * shell vars win over the file). All config lives in the repo-root `.env`
  * now (2026-07-12 consolidation) — see `<repo>/.env.template`.
  *
- * ---- The Git workflow (docs/07 §1/§2, §8.1/§8.3) ----
+ * ---- The Git workflow (docs/tech/sandbox.md §1/§2, §8.1/§8.3) ----
  *
  * Host-side (before any model call): `Sandbox.create({ source: { type: "git",
  * url, username: "x-access-token", password: GITHUB_PAT, depth: 1 }, env: {
@@ -97,7 +97,7 @@
  * default branch/the branch name are baked into the instructions string by
  * this script — the model is never asked to guess them.
  *
- * GitHub auth is fine-grained-PAT v1 (docs/07 §8.1): exactly Contents R+W +
+ * GitHub auth is fine-grained-PAT v1 (docs/tech/sandbox.md §8.1): exactly Contents R+W +
  * Pull requests R+W (+ auto Metadata R), scoped to one repo, short expiry,
  * revoke after the run — see .env.template's GITHUB_PAT comment.
  *
@@ -162,7 +162,7 @@ const SSH_REPO_PATTERN = /^git@github\.com:([^/]+)\/([^/]+?)(?:\.git)?$/;
 const HTTPS_REPO_PATTERN = /^https:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/;
 
 /**
- * Accepts both forms `GITHUB_REPO` might hold (docs/07 §8.3): SSH
+ * Accepts both forms `GITHUB_REPO` might hold (docs/tech/sandbox.md §8.3): SSH
  * (`git@github.com:owner/repo.git`) and HTTPS (`https://github.com/owner/repo`,
  * with or without a trailing `.git`/`/`). Always resolves to the HTTPS form —
  * `Sandbox.create`'s git source and the `git remote set-url` the sandbox init
@@ -208,7 +208,7 @@ function initPlanSteps(plan: InitPlan): InitStep[] {
 }
 
 /**
- * Six host-side `runCommand` calls (docs/07 §2.3/§2.4), none of them routed
+ * Six host-side `runCommand` calls (docs/tech/sandbox.md §2.3/§2.4), none of them routed
  * through the model. `remoteAuth` reads the PAT from the sandbox's own
  * `$GH_TOKEN` environment variable (set via `Sandbox.create`'s `env` option)
  * rather than interpolating the PAT into this script's command string — the
@@ -456,8 +456,8 @@ function buildInstructions(opts: { owner: string; repo: string; defaultBranch: s
   const { owner, repo, defaultBranch, branchName } = opts;
   return `你在一个已经 clone 好用户仓库 ${owner}/${repo}（默认分支 ${defaultBranch}）的 Vercel Sandbox 里工作，仓库根目录就是你的工作区根目录 "/"。请按以下顺序完成一次「frontend-design skill 驱动的设计优化」，并走完整的 Git 工作流：
 
-1. 先调用 load_skill 加载 "frontend-design"，理解它的设计哲学与检查清单。
-2. 用 read_file/list_dir/grep 等工具通读现有代码，理解这是一个什么项目（这是一个纯前端的舒尔特方格训练小游戏）。
+1. 先调用 load-skill 加载 "frontend-design"，理解它的设计哲学与检查清单。
+2. 用 read-file/list-dir/grep 等工具通读现有代码，理解这是一个什么项目（这是一个纯前端的舒尔特方格训练小游戏）。
 3. 按 skill 的设计哲学，做「一次聚焦的」视觉或交互优化——挑一个有意义的改进点做深做透即可，不要大面积重写、不要更换技术栈或框架。
 4. 如果仓库根目录有 package.json，用 bash 跑一次构建命令（例如 npm run build；如果没有对应脚本就跳过，并在最终回复里如实说明）验证改动没有破坏构建。
 5. 用 bash 依次执行下面的 Git 流程：
@@ -561,7 +561,7 @@ async function realProjectSection(): Promise<void> {
   if (model === undefined) {
     console.log(
       "[nimbo example] DeepSeek is not configured — skipping the real-project section.\n" +
-        "This example is DeepSeek-only (docs/07 §8.4 pins a stronger tier for the design task), unlike other\n" +
+        "This example is DeepSeek-only (docs/tech/sandbox.md §8.4 pins a stronger tier for the design task), unlike other\n" +
         "examples' resolveModel() dual path. Set in the repo-root .env:\n" +
         "  DEEPSEEK_API_BASE_URL=...\n" +
         "  DEEPSEEK_API_TOKEN=...\n" +

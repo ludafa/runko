@@ -5,9 +5,10 @@ import {
   postApprovalDecision,
   postChatMessage,
   postQuestionAnswer,
-  streamSessionTail,
+  streamConversationTail,
 } from '../api';
-import type { ChatStreamEnvelope } from '../schema';
+import type { ChatReplayFrame } from '../schema';
+import { isMessageFrame } from '../schema';
 
 function sseResponse(chunks: string[], init?: { status?: number }): Response {
   const encoder = new TextEncoder();
@@ -41,7 +42,7 @@ describe('postChatMessage', () => {
     await postChatMessage('sess_1', 'hello');
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/chat/sessions/sess_1/messages',
+      '/api/chat/conversations/sess_1/messages',
       expect.objectContaining({
         method: 'POST',
         credentials: 'include',
@@ -94,7 +95,7 @@ describe('postApprovalDecision', () => {
     await postApprovalDecision('sess_1', 'call_1', { behavior: 'allow' });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/chat/sessions/sess_1/approvals/call_1',
+      '/api/chat/conversations/sess_1/approvals/call_1',
       expect.objectContaining({
         method: 'POST',
         credentials: 'include',
@@ -134,7 +135,7 @@ describe('postApprovalDecision', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      `/api/chat/sessions/sess_1/approvals/${encodeURIComponent('call/weird id')}`,
+      `/api/chat/conversations/sess_1/approvals/${encodeURIComponent('call/weird id')}`,
       expect.anything(),
     );
   });
@@ -178,7 +179,7 @@ describe('postQuestionAnswer', () => {
     await postQuestionAnswer('sess_1', 'call_2', '用主题色吧。');
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/chat/sessions/sess_1/questions/call_2',
+      '/api/chat/conversations/sess_1/questions/call_2',
       expect.objectContaining({
         method: 'POST',
         credentials: 'include',
@@ -197,7 +198,7 @@ describe('postQuestionAnswer', () => {
     await postQuestionAnswer('sess_1', 'call/weird id', 'answer');
 
     expect(fetchMock).toHaveBeenCalledWith(
-      `/api/chat/sessions/sess_1/questions/${encodeURIComponent('call/weird id')}`,
+      `/api/chat/conversations/sess_1/questions/${encodeURIComponent('call/weird id')}`,
       expect.anything(),
     );
   });
@@ -225,32 +226,39 @@ describe('postQuestionAnswer', () => {
   });
 });
 
-describe('streamSessionTail', () => {
+describe('streamConversationTail', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it('GETs .../stream?after=<seq> and delivers envelopes in order, even when SSE lines are split across fetch chunks', async () => {
+  it('GETs .../stream?after=<seq> and delivers frames in order (a ChunkEnvelope and a MessageFrame alike), even when SSE lines are split across fetch chunks', async () => {
     const chunks = [
-      'data: {"seq":1,"event":{"type":"session.started","sessi',
-      'onId":"s1"}}\n\n',
-      'data: {"seq":2,"event":{"type":"turn.star',
-      'ted","turn":1}}\n\n',
+      // A ChunkEnvelope (`{ seq, chunk }`), split mid-payload.
+      'data: {"seq":1,"chunk":{"type":"start","messageI',
+      'd":"m1"}}\n\n',
+      // A MessageFrame (`{ seq, message }`, replay-only), also split mid-payload.
+      'data: {"seq":2,"message":{"id":"m1","role":"assist',
+      'ant","parts":[]}}\n\n',
     ];
     const fetchMock = vi.fn().mockResolvedValue(sseResponse(chunks));
     vi.stubGlobal('fetch', fetchMock);
 
-    // `seq` is `number | undefined` on the envelope type (docs/08 §2.2d) —
-    // neither fixture envelope below is ephemeral, so the assertion still
+    // `seq` is `number | undefined` on the envelope type (docs/tech/single-ledger.md §5 单-3) —
+    // neither fixture frame below is ephemeral, so the assertion still
     // expects concrete numbers.
     const received: (number | undefined)[] = [];
-    await streamSessionTail('sess_1', 0, {
-      onEnvelope: (envelope: ChatStreamEnvelope) => received.push(envelope.seq),
+    let sawMessageFrame = false;
+    await streamConversationTail('sess_1', 0, {
+      onFrame: (frame: ChatReplayFrame) => {
+        received.push(frame.seq);
+        if (isMessageFrame(frame)) sawMessageFrame = true;
+      },
     });
 
     expect(received).toEqual([1, 2]);
+    expect(sawMessageFrame).toBe(true);
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/chat/sessions/sess_1/stream?after=0',
+      '/api/chat/conversations/sess_1/stream?after=0',
       expect.objectContaining({ method: 'GET', credentials: 'include' }),
     );
   });
@@ -259,10 +267,10 @@ describe('streamSessionTail', () => {
     const fetchMock = vi.fn().mockResolvedValue(sseResponse([]));
     vi.stubGlobal('fetch', fetchMock);
 
-    await streamSessionTail('sess_1', 42, { onEnvelope: () => undefined });
+    await streamConversationTail('sess_1', 42, { onFrame: () => undefined });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/chat/sessions/sess_1/stream?after=42',
+      '/api/chat/conversations/sess_1/stream?after=42',
       expect.anything(),
     );
   });
@@ -273,15 +281,15 @@ describe('streamSessionTail', () => {
       .mockResolvedValue(
         sseResponse([
           'data: not json at all\n\n',
-          'data: {"seq":1,"event":{"type":"turn.started","turn":1}}\n\n',
+          'data: {"seq":1,"chunk":{"type":"finish","finishReason":"stop"}}\n\n',
         ]),
       );
     vi.stubGlobal('fetch', fetchMock);
 
     const received: (number | undefined)[] = [];
     const parseErrors: string[] = [];
-    await streamSessionTail('sess_1', 0, {
-      onEnvelope: (envelope: ChatStreamEnvelope) => received.push(envelope.seq),
+    await streamConversationTail('sess_1', 0, {
+      onFrame: (frame: ChatReplayFrame) => received.push(frame.seq),
       onParseError: (message: string) => parseErrors.push(message),
     });
 
@@ -301,7 +309,7 @@ describe('streamSessionTail', () => {
     );
 
     await expect(
-      streamSessionTail('missing', 0, { onEnvelope: () => undefined }),
+      streamConversationTail('missing', 0, { onFrame: () => undefined }),
     ).rejects.toThrow(ChatApiError);
   });
 
@@ -314,10 +322,10 @@ describe('streamSessionTail', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(
-      streamSessionTail(
+      streamConversationTail(
         'sess_1',
         0,
-        { onEnvelope: () => undefined },
+        { onFrame: () => undefined },
         controller.signal,
       ),
     ).rejects.toThrow('aborted');

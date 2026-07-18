@@ -1,5 +1,5 @@
 /**
- * `NimboFS` 值命名空间（tech-spec §4.4 原文字面调用形态：`NimboFS.fromMemory(...)`/
+ * `NimboFS` 值命名空间（docs/tech/core-sdk.md §4.4 原文字面调用形态：`NimboFS.fromMemory(...)`/
  * `NimboFS.fromDirectory(...)`）。P2-1 施工时把工厂拆成 `@nimbo/virtual-fs` 的
  * 独立函数 `fromMemory`/`fromDirectory`——因为 `NimboFS` 本身已经是 `@nimbo/core`
  * 导出的**接口类型**名，interface（跨包）与值命名空间没法通过声明合并凑到一起

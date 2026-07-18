@@ -1,86 +1,86 @@
 export { apiErrorSchema } from './apiErrorSchema.ts';
 export { approvalAckSchema } from './approvalAckSchema.ts';
-export { chatApprovalRequestedSchema } from './chatApprovalRequestedSchema.ts';
-export { chatApprovalResolvedSchema } from './chatApprovalResolvedSchema.ts';
-export { chatEventEnvelopeSchema } from './chatEventEnvelopeSchema.ts';
-export { chatEventsListSchema } from './chatEventsListSchema.ts';
-export { chatQuestionAnsweredSchema } from './chatQuestionAnsweredSchema.ts';
-export { chatQuestionAskedSchema } from './chatQuestionAskedSchema.ts';
-export { chatSessionSchema } from './chatSessionSchema.ts';
-export { chatTurnFailedSchema } from './chatTurnFailedSchema.ts';
-export { chatTurnResultSchema } from './chatTurnResultSchema.ts';
-export { chatUserMessageSchema } from './chatUserMessageSchema.ts';
-export { createChatSessionInputSchema } from './createChatSessionInputSchema.ts';
+export { chatChunkEnvelopeSchema } from './chatChunkEnvelopeSchema.ts';
+export { chatMessageFrameSchema } from './chatMessageFrameSchema.ts';
+export { conversationEventsListSchema } from './conversationEventsListSchema.ts';
+export { conversationSchema } from './conversationSchema.ts';
+export { createConversationInputSchema } from './createConversationInputSchema.ts';
 export { createNoteInputSchema } from './createNoteInputSchema.ts';
 export {
-  getApiChatSessionsIdEvents200Schema,
-  getApiChatSessionsIdEvents401Schema,
-  getApiChatSessionsIdEvents404Schema,
-  getApiChatSessionsIdEventsPathParamsSchema,
-  getApiChatSessionsIdEventsQueryParamsSchema,
-  getApiChatSessionsIdEventsQueryResponseSchema,
-} from './getApiChatSessionsIdEventsSchema.ts';
+  getApiChatConversationsIdEvents200Schema,
+  getApiChatConversationsIdEvents401Schema,
+  getApiChatConversationsIdEvents404Schema,
+  getApiChatConversationsIdEventsPathParamsSchema,
+  getApiChatConversationsIdEventsQueryParamsSchema,
+  getApiChatConversationsIdEventsQueryResponseSchema,
+} from './getApiChatConversationsIdEventsSchema.ts';
 export {
-  getApiChatSessionsId200Schema,
-  getApiChatSessionsId401Schema,
-  getApiChatSessionsId404Schema,
-  getApiChatSessionsIdPathParamsSchema,
-  getApiChatSessionsIdQueryResponseSchema,
-} from './getApiChatSessionsIdSchema.ts';
+  getApiChatConversationsId200Schema,
+  getApiChatConversationsId401Schema,
+  getApiChatConversationsId404Schema,
+  getApiChatConversationsIdPathParamsSchema,
+  getApiChatConversationsIdQueryResponseSchema,
+} from './getApiChatConversationsIdSchema.ts';
 export {
-  getApiChatSessionsIdStream200Schema,
-  getApiChatSessionsIdStream401Schema,
-  getApiChatSessionsIdStream404Schema,
-  getApiChatSessionsIdStreamPathParamsSchema,
-  getApiChatSessionsIdStreamQueryParamsSchema,
-  getApiChatSessionsIdStreamQueryResponseSchema,
-} from './getApiChatSessionsIdStreamSchema.ts';
+  getApiChatConversationsIdStream200Schema,
+  getApiChatConversationsIdStream401Schema,
+  getApiChatConversationsIdStream404Schema,
+  getApiChatConversationsIdStreamPathParamsSchema,
+  getApiChatConversationsIdStreamQueryParamsSchema,
+  getApiChatConversationsIdStreamQueryResponseSchema,
+} from './getApiChatConversationsIdStreamSchema.ts';
 export {
-  getApiChatSessions200Schema,
-  getApiChatSessions401Schema,
-  getApiChatSessionsQueryResponseSchema,
-} from './getApiChatSessionsSchema.ts';
+  getApiChatConversationsIdTurnsTurnTelemetry200Schema,
+  getApiChatConversationsIdTurnsTurnTelemetry401Schema,
+  getApiChatConversationsIdTurnsTurnTelemetry404Schema,
+  getApiChatConversationsIdTurnsTurnTelemetryPathParamsSchema,
+  getApiChatConversationsIdTurnsTurnTelemetryQueryResponseSchema,
+} from './getApiChatConversationsIdTurnsTurnTelemetrySchema.ts';
+export {
+  getApiChatConversations200Schema,
+  getApiChatConversations401Schema,
+  getApiChatConversationsQueryResponseSchema,
+} from './getApiChatConversationsSchema.ts';
 export {
   getApiNotes200Schema,
   getApiNotes401Schema,
   getApiNotesQueryResponseSchema,
 } from './getApiNotesSchema.ts';
-export { nimboErrorSchema } from './nimboErrorSchema.ts';
 export { noteSchema } from './noteSchema.ts';
 export { postAnswerInputSchema } from './postAnswerInputSchema.ts';
 export {
-  postApiChatSessionsIdApprovalsCallid200Schema,
-  postApiChatSessionsIdApprovalsCallid401Schema,
-  postApiChatSessionsIdApprovalsCallid404Schema,
-  postApiChatSessionsIdApprovalsCallidMutationRequestSchema,
-  postApiChatSessionsIdApprovalsCallidMutationResponseSchema,
-  postApiChatSessionsIdApprovalsCallidPathParamsSchema,
-} from './postApiChatSessionsIdApprovalsCallidSchema.ts';
+  postApiChatConversationsIdApprovalsCallid200Schema,
+  postApiChatConversationsIdApprovalsCallid401Schema,
+  postApiChatConversationsIdApprovalsCallid404Schema,
+  postApiChatConversationsIdApprovalsCallidMutationRequestSchema,
+  postApiChatConversationsIdApprovalsCallidMutationResponseSchema,
+  postApiChatConversationsIdApprovalsCallidPathParamsSchema,
+} from './postApiChatConversationsIdApprovalsCallidSchema.ts';
 export {
-  postApiChatSessionsIdMessages202Schema,
-  postApiChatSessionsIdMessages401Schema,
-  postApiChatSessionsIdMessages404Schema,
-  postApiChatSessionsIdMessages409Schema,
-  postApiChatSessionsIdMessages500Schema,
-  postApiChatSessionsIdMessagesMutationRequestSchema,
-  postApiChatSessionsIdMessagesMutationResponseSchema,
-  postApiChatSessionsIdMessagesPathParamsSchema,
-} from './postApiChatSessionsIdMessagesSchema.ts';
+  postApiChatConversationsIdMessages202Schema,
+  postApiChatConversationsIdMessages401Schema,
+  postApiChatConversationsIdMessages404Schema,
+  postApiChatConversationsIdMessages409Schema,
+  postApiChatConversationsIdMessages500Schema,
+  postApiChatConversationsIdMessagesMutationRequestSchema,
+  postApiChatConversationsIdMessagesMutationResponseSchema,
+  postApiChatConversationsIdMessagesPathParamsSchema,
+} from './postApiChatConversationsIdMessagesSchema.ts';
 export {
-  postApiChatSessionsIdQuestionsCallid200Schema,
-  postApiChatSessionsIdQuestionsCallid401Schema,
-  postApiChatSessionsIdQuestionsCallid404Schema,
-  postApiChatSessionsIdQuestionsCallidMutationRequestSchema,
-  postApiChatSessionsIdQuestionsCallidMutationResponseSchema,
-  postApiChatSessionsIdQuestionsCallidPathParamsSchema,
-} from './postApiChatSessionsIdQuestionsCallidSchema.ts';
+  postApiChatConversationsIdQuestionsCallid200Schema,
+  postApiChatConversationsIdQuestionsCallid401Schema,
+  postApiChatConversationsIdQuestionsCallid404Schema,
+  postApiChatConversationsIdQuestionsCallidMutationRequestSchema,
+  postApiChatConversationsIdQuestionsCallidMutationResponseSchema,
+  postApiChatConversationsIdQuestionsCallidPathParamsSchema,
+} from './postApiChatConversationsIdQuestionsCallidSchema.ts';
 export {
-  postApiChatSessions201Schema,
-  postApiChatSessions401Schema,
-  postApiChatSessions500Schema,
-  postApiChatSessionsMutationRequestSchema,
-  postApiChatSessionsMutationResponseSchema,
-} from './postApiChatSessionsSchema.ts';
+  postApiChatConversations201Schema,
+  postApiChatConversations401Schema,
+  postApiChatConversations500Schema,
+  postApiChatConversationsMutationRequestSchema,
+  postApiChatConversationsMutationResponseSchema,
+} from './postApiChatConversationsSchema.ts';
 export {
   postApiNotes201Schema,
   postApiNotes401Schema,
@@ -90,4 +90,5 @@ export {
 export { postApprovalInputSchema } from './postApprovalInputSchema.ts';
 export { postChatMessageInputSchema } from './postChatMessageInputSchema.ts';
 export { startTurnAckSchema } from './startTurnAckSchema.ts';
-export { usageSchema } from './usageSchema.ts';
+export { turnTelemetryEventSchema } from './turnTelemetryEventSchema.ts';
+export { turnTelemetrySchema } from './turnTelemetrySchema.ts';

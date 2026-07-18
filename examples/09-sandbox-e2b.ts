@@ -1,6 +1,6 @@
 /**
  * 09-sandbox-e2b — the first of three "BYO cloud sandbox" examples
- * (docs/06-sandbox-workspace-research.md §8, docs/03-construction-plan.md P10):
+ * (docs/tech/sandbox.md §8, docs/plans/core-sdk.md P10):
  * instead of `NimboFS.fromMemory()`/`fromDirectory()` or the in-process
  * `miniBash`/`justBash` exec implementations, an agent's files and bash
  * commands can live in a real E2B cloud sandbox (a Firecracker microVM) —
@@ -33,7 +33,7 @@
  *     it needs e2b's separate `background: true` + `CommandHandle.kill()`
  *     API, outside this adapter's v1 surface;
  *   - **bash reaches the whole VM, not just the workspace root**: the file
- *     tools (`read_file`/`write_file`/...) are anchored under `opts.root`
+ *     tools (`read-file`/`write-file`/...) are anchored under `opts.root`
  *     (default `/home/user`), but `bash` itself is a real shell with no such
  *     confinement — an *absolute* path in a bash command (e.g. `cat
  *     /notes.txt`) resolves against the sandbox's real filesystem root, not
@@ -45,7 +45,7 @@
  *     all three sandbox adapters, not e2b-specific);
  *   - each NimboFS file-tool call is a network round trip — prefer a single
  *     bash command for scan-heavy work (grep/find over many files) instead of
- *     many individual `glob`/`read_file` calls.
+ *     many individual `glob`/`read-file` calls.
  *
  * Run: `node examples/09-sandbox-e2b.ts` (see examples/README.md for setup).
  *
@@ -64,7 +64,7 @@
  *      file, then `sandbox.kill()`s it. This repo's checkout has no E2B
  *      credentials, so this section is expected to stop at the guidance
  *      message — the real-sandbox path compiles and reads correctly but is
- *      untested end-to-end here; results get backfilled into docs/05 once a
+ *      untested end-to-end here; results get backfilled into docs/plans/verification.md once a
  *      user supplies E2B_API_KEY.
  */
 import { createSession, defineAgent } from "@nimbo/sdk";
@@ -177,7 +177,7 @@ async function realSandboxSection(): Promise<void> {
     const session = createSession(agent, { workspace });
 
     const result = await session.send(
-      "用 write_file 在 /notes.txt 写一句问候语，然后用 bash 执行 `cat notes.txt`（相对路径，不要写成 /notes.txt）验证内容与写入的一致。",
+      "用 write-file 在 /notes.txt 写一句问候语，然后用 bash 执行 `cat notes.txt`（相对路径，不要写成 /notes.txt）验证内容与写入的一致。",
     );
     console.log("finalResponse:", result.finalResponse);
   } finally {

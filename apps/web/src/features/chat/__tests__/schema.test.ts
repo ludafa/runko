@@ -1,61 +1,121 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseChatStreamEnvelope, sessionItemSchema } from '../schema';
+import {
+  conversationEventsListSchema,
+  chatReplayFrameSchema,
+  isMessageFrame,
+  parseChatReplayFrame,
+} from '../schema';
+import {
+  assistantMessage,
+  finishChunk,
+  messageFrame,
+  startChunk,
+  userMessage,
+} from './helpers/nimbo-chunks';
 
-/**
- * Regression coverage for the local-review Finding 3 fix: `sessionItemSchema`
- * here (this file's own wire-level mirror of `@nimbo/core`'s `SessionItem` —
- * see schema.ts's header comment for why it can't just import a zod schema
- * from core) used to be missing the `user_message` variant `Session.steer()`
- * (docs/02-tech-spec.md §4.2) added — a `user_message` item arriving over
- * `GET .../events` replay, or live via SSE, would fail `.parse()`/`.safeParse()`
- * and either throw (an unhandled envelope) or get silently dropped via
- * `onParseError` (api.ts), never rendering. The `_sessionItemSchemaCoversAllVariants`
- * compile-time check now guards against this drifting again; these are the
- * runtime-level regression tests for the specific bug that motivated it.
- */
-describe('schema: sessionItemSchema', () => {
-  it('parses a user_message item (steer()-injected mid-turn message)', () => {
-    const parsed = sessionItemSchema.parse({
-      id: 'u1',
-      type: 'user_message',
-      text: '补充：也顺便检查一下 API 超时时间',
+describe('chatReplayFrameSchema / parseChatReplayFrame', () => {
+  it('accepts a ChunkEnvelope with a seq (durable/replayable chunk)', () => {
+    const raw = JSON.stringify({ seq: 3, chunk: startChunk('msg-1') });
+    const result = parseChatReplayFrame(raw);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.frame).toEqual({ seq: 3, chunk: startChunk('msg-1') });
+    expect(isMessageFrame(result.frame)).toBe(false);
+  });
+
+  it('accepts a ChunkEnvelope with no seq at all (ephemeral live-tail-only chunk)', () => {
+    const raw = JSON.stringify({
+      chunk: { type: 'text-delta', id: 'a', delta: 'hi' },
     });
-    expect(parsed).toEqual({
-      id: 'u1',
-      type: 'user_message',
-      text: '补充：也顺便检查一下 API 超时时间',
-    });
+    const result = parseChatReplayFrame(raw);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.frame.seq).toBeUndefined();
+    expect(isMessageFrame(result.frame)).toBe(false);
+  });
+
+  it('accepts a MessageFrame (replay-only, always carries a seq)', () => {
+    const message = assistantMessage('msg-1', [
+      { type: 'text', text: 'hi', state: 'done' },
+    ]);
+    const raw = JSON.stringify({ seq: 5, message });
+    const result = parseChatReplayFrame(raw);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(isMessageFrame(result.frame)).toBe(true);
+    if (!isMessageFrame(result.frame)) return;
+    expect(result.frame.seq).toBe(5);
+    expect(result.frame.message).toEqual(message);
+  });
+
+  it('rejects a MessageFrame with no seq (message frames are always durable/replayed)', () => {
+    const message = userMessage('msg-1', 'hi');
+    const result = chatReplayFrameSchema.safeParse({ message });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a frame carrying neither chunk nor message', () => {
+    const result = chatReplayFrameSchema.safeParse({ seq: 1 });
+    expect(result.success).toBe(false);
+  });
+
+  it('parseChatReplayFrame reports invalid JSON without throwing', () => {
+    const result = parseChatReplayFrame('not json at all {');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('invalid JSON');
+  });
+
+  it('parseChatReplayFrame reports a structurally invalid payload (neither shape) without throwing', () => {
+    const result = parseChatReplayFrame(JSON.stringify({ foo: 'bar' }));
+    expect(result.ok).toBe(false);
+  });
+
+  it('a seq of 0 round-trips (falsy but valid)', () => {
+    const raw = JSON.stringify({ seq: 0, chunk: finishChunk('stop') });
+    const result = parseChatReplayFrame(raw);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.frame.seq).toBe(0);
   });
 });
 
-describe('schema: parseChatStreamEnvelope', () => {
-  it('parses an SSE data: payload whose item.completed event carries a user_message item — the direct regression for a steered turn failing to parse/render', () => {
-    const raw = JSON.stringify({
-      seq: 4,
-      event: {
-        type: 'item.completed',
-        item: {
-          id: 'u1',
-          type: 'user_message',
-          text: '补充：也顺便检查一下 API 超时时间',
-        },
-      },
-    });
+describe('isMessageFrame', () => {
+  it('narrows a MessageFrame', () => {
+    const frame = messageFrame(1, userMessage('msg-1', 'hi'));
+    expect(isMessageFrame(frame)).toBe(true);
+  });
 
-    const result = parseChatStreamEnvelope(raw);
-    expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error('unreachable');
-    expect(result.envelope).toEqual({
-      seq: 4,
-      event: {
-        type: 'item.completed',
-        item: {
-          id: 'u1',
-          type: 'user_message',
-          text: '补充：也顺便检查一下 API 超时时间',
-        },
-      },
-    });
+  it('narrows a ChunkEnvelope as false', () => {
+    const frame = { seq: 1, chunk: startChunk('msg-1') };
+    expect(isMessageFrame(frame)).toBe(false);
+  });
+});
+
+describe('conversationEventsListSchema', () => {
+  it('parses { frames: [...] } — not a bare array', () => {
+    const payload = {
+      frames: [
+        { seq: 1, chunk: startChunk('msg-1') },
+        messageFrame(2, userMessage('msg-1', 'hi')),
+      ],
+    };
+    const result = conversationEventsListSchema.safeParse(payload);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.frames).toHaveLength(2);
+  });
+
+  it('rejects a bare array (not wrapped in { frames })', () => {
+    const result = conversationEventsListSchema.safeParse([
+      { seq: 1, chunk: startChunk('msg-1') },
+    ]);
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts an empty frame list (a brand-new session with no history yet)', () => {
+    const result = conversationEventsListSchema.safeParse({ frames: [] });
+    expect(result.success).toBe(true);
   });
 });

@@ -5,6 +5,7 @@
 
 export const postApprovalInputBehaviorEnum = {
   allow: 'allow',
+  'allow-session': 'allow-session',
   deny: 'deny',
 } as const;
 

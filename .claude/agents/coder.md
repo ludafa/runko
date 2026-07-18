@@ -11,9 +11,9 @@ tools: Read, Edit, Write, Bash, Glob, Grep
 
 nimbo 是可嵌入 Node.js 的轻量 agent SDK（pnpm monorepo：`@nimbo/sdk` 门面 / `@nimbo/core` / `@nimbo/virtual-fs` / `@nimbo/mini-bash`）。开工前必读（按需精读工单指向的章节，不要全文通读浪费上下文）：
 
-- `docs/02-tech-spec.md` —— 接口与架构的唯一事实来源，实现必须与之一致
-- `docs/04-builtin-tools.md` —— 内置工具的行为规格与验收要点
-- `docs/03-construction-plan.md` —— 当前阶段与包结构
+- `docs/tech/core-sdk.md` —— 接口与架构的唯一事实来源，实现必须与之一致（技术面按功能拆分见 docs/tech/*）
+- `docs/tech/builtin-tools.md` —— 内置工具的行为规格与验收要点
+- `docs/plans/core-sdk.md` —— 当前阶段与包结构（各功能施工见 docs/plans/*）
 
 工具链：typescript@7（tsgo）、tsdown、vitest@4、pnpm workspace。模型层用 `ai@^7`（peer）。
 
@@ -38,7 +38,8 @@ nimbo 是可嵌入 Node.js 的轻量 agent SDK（pnpm monorepo：`@nimbo/sdk` �
    - `pnpm -F <目标包> typecheck`
    - `pnpm -F <目标包> test`（既有测试不回归；有失败按上面的职责边界处理并如实汇报）
    - `pnpm -F <目标包> build`
-3. 不做工单之外的"顺手改进"；发现 spec 与代码矛盾时不擅自改 spec，在汇报中提出。
+3. 交付前自检（减少返工来回）：对着工单验收标准逐条核一遍——每条是否真做到、边界/失败路径是否处理；关键改动能用一段一次性脚本（写到 `.tmp/`，跑完即弃）驱动一遍看实际行为，别只靠"编译过了"就汇报。发现自己遗漏的先补掉再交。
+4. 不做工单之外的"顺手改进"；发现 spec 与代码矛盾时不擅自改 spec，在汇报中提出。
 
 ## 汇报格式（最终输出）
 

@@ -1,5 +1,5 @@
 /**
- * `@nimbo/sandbox-cloudflare` 网关协议（tech-spec 见 docs/06-sandbox-workspace-research.md
+ * `@nimbo/sandbox-cloudflare` 网关协议（tech-spec 见 docs/tech/sandbox.md
  * §8.3）：`.`（客户端）与 `./worker`（网关）两端共用同一份 zod schema——schema 是
  * wire 契约的唯一事实来源，两端各自 `parse()` 校验后再消费，任何一端改了字段形状
  * 都会在另一端的 parse() 上炸出来，而不是悄悄读到 `undefined`。

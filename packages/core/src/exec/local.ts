@@ -1,12 +1,13 @@
 /**
- * `localExec(opts?)`：`NimboExec` 的本机实现（tech-spec §4.5a / 04-builtin-tools.md
+ * `localExec(opts?)`：`NimboExec` 的本机实现（docs/tech/core-sdk.md §4.5a / docs/tech/builtin-tools.md
  * §1.10；P7-3 工单任务 1）。用 `node:child_process` 起一个真实 OS shell 子进程
  * 执行 `command`——与 `@nimbo/mini-bash` 的纯 TS 解释器互为对偶：mini-bash 不
- * fork 子进程、只读、`defaultApproval: "never"`；`localExec` fork 真实进程、
- * 无只读限制、`defaultApproval: "always"`（出厂值，04 §1.10——本机执行没有天然
- * 隔离，审批是唯一的把关点）。
+ * fork 子进程、只读、`defaultApproval: "allow"`（docs/tech/single-ledger.md §6.1 三值重构后的
+ * 映射，原 "never"）；`localExec` fork 真实进程、无只读限制、
+ * `defaultApproval: "review"`（同一映射，原 "always"；出厂值，docs/tech/builtin-tools.md §1.10——
+ * 本机执行没有天然隔离，审批是唯一的把关点）。
  *
- * ---- `exec()` 契约（tech-spec §4.5a"实现契约"，同 `tools/builtin/bash.ts` 头注释） ----
+ * ---- `exec()` 契约（docs/tech/core-sdk.md §4.5a"实现契约"，同 `tools/builtin/bash.ts` 头注释） ----
  *
  * "失败即 ExecResult"：解析错误、命令级非零退出、超时、abort 都必须以
  * **resolve 的 `ExecResult`**返回，不 reject。`spawnShell()`（下方）内部统一
@@ -40,7 +41,7 @@
  *
  * `reconcileFS()` 回收阶段只处理 `dirent.isDirectory()`/`dirent.isFile()`，
  * 命令在临时目录里创建的符号链接会被静默跳过（既不报错也不回收）。这不是安全
- * 边界（`localExec` 本来就跑在真实主机上、`defaultApproval: "always"`，信任
+ * 边界（`localExec` 本来就跑在真实主机上、`defaultApproval: "review"`，信任
  * 边界在审批链而非这里）——只是 v1 图省事没做符号链接的虚拟化语义（`NimboFS`
  * 接口本身也没有 symlink 概念），因此干脆不支持，而不是花成本做一个语义模糊的
  * 近似。
@@ -67,9 +68,9 @@ export interface LocalExecOptions {
 const MATERIALIZE_REQUIRES_FS_MESSAGE =
   "localExec({ materialize: true }) requires a NimboFS reference to materialize into the temp dir and " +
   "reconcile changes back from — pass { fs } (typically the same NimboFS injected as SessionOptions.fs, " +
-  "so bash and the file tools stay consistent, tech-spec §4.5a mode B).";
+  "so bash and the file tools stay consistent, docs/tech/core-sdk.md §4.5a mode B).";
 
-/** ≤150 token 规格（04 §1.10）：OS/架构/node 版本 + 网络可达假设 + 模式 B/C 的 fs 映射说明 + 默认 cwd。 */
+/** ≤150 token 规格（docs/tech/builtin-tools.md §1.10）：OS/架构/node 版本 + 网络可达假设 + 模式 B/C 的 fs 映射说明 + 默认 cwd。 */
 function buildDescribe(opts: LocalExecOptions): string {
   const mode = opts.materialize === true ? "B" : "C";
   const fsNote =
@@ -279,13 +280,13 @@ async function runLocalExec(opts: LocalExecOptions, req: ExecRequest, execOpts: 
   }
 }
 
-/** `NimboExec` 的本机实现（tech-spec §4.5a / 04 §1.10）。`defaultApproval: "always"` 出厂值——本机执行没有天然隔离。 */
+/** `NimboExec` 的本机实现（docs/tech/core-sdk.md §4.5a / docs/tech/builtin-tools.md §1.10）。`defaultApproval: "review"` 出厂值（docs/tech/single-ledger.md §6.1 三值重构后的映射，原 "always"）——本机执行没有天然隔离。 */
 export function localExec(opts: LocalExecOptions = {}): NimboExec {
   if (opts.materialize === true && opts.fs === undefined) {
     throw new Error(MATERIALIZE_REQUIRES_FS_MESSAGE);
   }
   return {
-    defaultApproval: "always",
+    defaultApproval: "review",
     describe: (): string => buildDescribe(opts),
     exec: (req: ExecRequest, execOpts?: ExecOptions): Promise<ExecResult> => runLocalExec(opts, req, execOpts),
   };

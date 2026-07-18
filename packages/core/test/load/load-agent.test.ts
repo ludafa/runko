@@ -1,5 +1,5 @@
 /**
- * `loadAgent` (P7-3 task 2, tech-spec §4.7). The golden-path/full-field
+ * `loadAgent` (P7-3 task 2, docs/tech/core-sdk.md §4.7). The golden-path/full-field
  * assertions run against the committed fixture `test/fixtures/agent-dir/`
  * (instructions.md + agent.json + tools/*.js + skills/ flat & packaged).
  * Edge/error paths use ephemeral `mkdtemp()` directories so we don't need to
@@ -78,7 +78,7 @@ describe("loadAgent() — golden path (test/fixtures/agent-dir)", () => {
     expect(agent.maxTurnsPerRun).toBe(7);
     expect(agent.maxOutputTokens).toBe(512);
     expect(agent.maxContextTokens).toBe(8000);
-    expect(agent.builtinTools).toEqual(["read_file", "grep"]);
+    expect(agent.builtinTools).toEqual(["read-file", "grep"]);
   });
 
   describe("tools/*.js — file name is the tool name", () => {
@@ -98,9 +98,9 @@ describe("loadAgent() — golden path (test/fixtures/agent-dir)", () => {
       expect(output).toBe("Hello, Ada!");
     });
 
-    it("search.js's approval field ('once') round-trips", async () => {
+    it("search.js's approval field ('review-once') round-trips", async () => {
       const agent = await loadAgent(FIXTURE_DIR);
-      expect(agent.tools?.search?.approval).toBe("once");
+      expect(agent.tools?.search?.approval).toBe("review-once");
       const output = await agent.tools?.search?.execute({}, stubToolContext());
       expect(output).toBe("no results (fixture)");
     });

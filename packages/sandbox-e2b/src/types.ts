@@ -1,5 +1,5 @@
 /**
- * `e2b` SDK 面的最小结构化子集（tech-spec §4.5a 施工依据 docs/06 §8.1
+ * `e2b` SDK 面的最小结构化子集（docs/tech/core-sdk.md §4.5a 施工依据 docs/tech/sandbox.md §8.1
  * "依赖策略"）：只声明适配器实际调用到的方法/字段，以官方 d.ts
  * （`e2b@2.32.0`，`node_modules/e2b/dist/index.d.ts`）为蓝本手写。`e2bWorkspace()`
  * 收的是这份结构接口而非 `import("e2b").Sandbox` 具体类——宿主与本包各自安装的

@@ -2,7 +2,7 @@
 
 `NimboExec` 的全语法档实现：适配 [vercel-labs/just-bash](https://github.com/vercel-labs/just-bash)（Apache-2.0，纯 TS，专为 AI agent 场景设计），跑在任意 `NimboFS` 之上——"模式 A 同源工作区"的另一种实证，语法面从 `@nimbo/mini-bash` 的六个只读命令升级到完整 `if`/`elif`/`for`/`while`/`until`/`case`/函数/`local`/变量与参数扩展/glob/管道/`&&`/`||`/重定向。定位：Claude 系模型高频产出的控制流脚本，mini-bash 的六命令撑不住时换这个档（一行代码：`exec: justBash(fs)` 换掉 `exec: miniBash(fs)`）。
 
-> **本包不随 `@nimbo/sdk` 一起装**（[docs/02-tech-spec.md §4.5b](../../docs/02-tech-spec.md) "包关系"）：`just-bash` 自身依赖树含 sql.js / quickjs-emscripten 等 wasm 大件，强制打包进门面违背 sdk 轻量默认。需要全语法档的宿主显式 `pnpm add @nimbo/just-bash`；`@nimbo/mini-bash` 仍是零依赖极简档，随 `@nimbo/sdk` 一起装，定位是安全默认与测试/演示载体。真实命令执行的第三个选项是 `@nimbo/core` 的 `localExec`，或宿主自己的沙盒实现（见 [docs/02-tech-spec.md §4.5a](../../docs/02-tech-spec.md)）。
+> **本包不随 `@nimbo/sdk` 一起装**（[docs/tech/core-sdk.md §4.5b](../../docs/tech/core-sdk.md) "包关系"）：`just-bash` 自身依赖树含 sql.js / quickjs-emscripten 等 wasm 大件，强制打包进门面违背 sdk 轻量默认。需要全语法档的宿主显式 `pnpm add @nimbo/just-bash`；`@nimbo/mini-bash` 仍是零依赖极简档，随 `@nimbo/sdk` 一起装，定位是安全默认与测试/演示载体。真实命令执行的第三个选项是 `@nimbo/core` 的 `localExec`，或宿主自己的沙盒实现（见 [docs/tech/core-sdk.md §4.5a](../../docs/tech/core-sdk.md)）。
 
 ## 安装
 
@@ -79,7 +79,7 @@ justBash(fs, { limits: { maxCommandCount: 500 } });   // 只覆盖这一个字�
 
 完整控制流：`if`/`elif`/`else`、`for`（list 形式与 C 式 `for ((i=0;i<n;i++))`）、`while`/`until`、`case`、函数（含 `local`）、变量/参数扩展、glob 展开、管道、`&&`/`||`、重定向（`>`/`>>`/`<`/`2>&1`）。命令集是 just-bash 内置的完整命令族（`cat`/`grep`/`sed`/`awk`/`find`/`sort`/`jq` 等数十个，详见 [just-bash 上游文档](https://github.com/vercel-labs/just-bash)），而非 mini-bash 那样的手写六命令子集。
 
-## 已知限制（tech-spec §4.5b，如实照抄，不发明）
+## 已知限制（docs/tech/core-sdk.md §4.5b，如实照抄，不发明）
 
 - **无 symlink**：`symlink`/`link`/`readlink` 始终抛不支持；`stat`/`lstat` 从不报告符号链接（与 v1 全线"无符号链接"立场一致）。
 - **无网络**：curl/wget 不注册（未接入 fetch/network 配置）。
@@ -89,6 +89,6 @@ justBash(fs, { limits: { maxCommandCount: 500 } });   // 只覆盖这一个字�
 - `chmod`/`utimes` 是 no-op 成功（脚本常见惯用法，硬失败徒增纠错轮次），不是真实生效的权限/时间戳变更。
 - `cwd` 的跨调用持久化由适配器自己维护（闭包变量 + 读回 `env.PWD`），不是 just-bash 引擎自带的免费特性——`Bash.exec()` 每次调用本身是无状态的。
 
-## 退出码与取消契约（同 `@nimbo/mini-bash`，tech-spec §4.5a"实现契约"）
+## 退出码与取消契约（同 `@nimbo/mini-bash`，docs/tech/core-sdk.md §4.5a"实现契约"）
 
 `exec()` 的全部失败路径以 resolve 的 `ExecResult`（非零 `exitCode` + stderr）返回，从不 reject：超时 124、abort 130；just-bash 自身抛出的非正常异常兜底为 `exitCode: 1`。中止/超时不采信 just-bash 自己返回的退出码（实测不稳定）——适配器用独立的 `raceAbort` 竞速，信号一响就立即以合成结果返回，不等底层调用真正落定。

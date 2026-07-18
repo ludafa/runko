@@ -1,122 +1,238 @@
 import { describe, expect, it } from "vitest";
-import type { NimboError, SessionEvent, SessionItem, Usage } from "../src/events.js";
+import type { NimboChunk, NimboDataParts, NimboMessageMetadata } from "../src/state.js";
+import type { NimboError, Usage } from "../src/events.js";
 
 /**
- * 编译期穷尽性断言：只要 SessionEvent/SessionItem 的判别联合新增一个
- * 变体而下面的 switch 没有跟着补 case，default 分支里 event/item 就不再
- * 是 never，assertNever 的形参类型不匹配，`pnpm typecheck` 直接编译失败。
+ * 编译期穷尽性断言（docs/tech/single-ledger.md §5 单-2 工单原文
+ * "改写为对 NimboChunk/NimboDataParts/NimboMessageMetadata 的等价穷尽性检查，
+ * 保持漏成员编译即炸的防线精神"）：只要下面任一 switch 漏了一个变体，
+ * default 分支里的实参类型就不再是 never，`pnpm typecheck` 直接编译失败。
  */
 function assertNever(x: never): never {
   throw new Error(`unreachable variant: ${JSON.stringify(x)}`);
 }
 
-function describeSessionEvent(event: SessionEvent): string {
-  switch (event.type) {
-    case "session.started":
-      return `session ${event.sessionId} started`;
-    case "turn.started":
-      return `turn ${event.turn} started`;
-    case "item.started":
-    case "item.updated":
-    case "item.completed":
-      return `${event.type}: ${event.item.type}`;
-    case "turn.completed":
-      return `turn completed usage=${JSON.stringify(event.usage)}`;
-    case "turn.failed":
-      return `turn failed: ${event.error.code}`;
-    default:
-      return assertNever(event);
-  }
-}
-
-function describeSessionItem(item: SessionItem): string {
-  switch (item.type) {
-    case "agent_message":
-      return `agent_message:${item.text}`;
-    case "reasoning":
-      return `reasoning:${item.text}`;
-    case "user_message":
-      return `user_message:${item.text}`;
-    case "tool_call":
-      return `tool_call:${item.toolName}:${item.status}`;
-    case "file_change":
-      return `file_change:${item.changes.length}`;
-    case "plan_update":
-      return `plan_update:${item.items.length}`;
+/** 穷尽 `NimboChunk`（ai 的 `UIMessageChunk` 词汇表，对 `NimboUIMessage` 实例化）的全部 32 个 `type` 判别值（含 chat 可观测性新增的 `data-tool-timing`）。 */
+function describeChunk(chunk: NimboChunk): string {
+  switch (chunk.type) {
+    case "text-start":
+      return `text-start:${chunk.id}`;
+    case "text-delta":
+      return `text-delta:${chunk.id}:${chunk.delta}`;
+    case "text-end":
+      return `text-end:${chunk.id}`;
+    case "reasoning-start":
+      return `reasoning-start:${chunk.id}`;
+    case "reasoning-delta":
+      return `reasoning-delta:${chunk.id}:${chunk.delta}`;
+    case "reasoning-end":
+      return `reasoning-end:${chunk.id}`;
+    case "custom":
+      return `custom:${chunk.kind}`;
     case "error":
-      return `error:${item.message}`;
+      return `error:${chunk.errorText}`;
+    case "tool-input-available":
+      return `tool-input-available:${chunk.toolCallId}:${chunk.toolName}`;
+    case "tool-input-error":
+      return `tool-input-error:${chunk.toolCallId}:${chunk.errorText}`;
+    case "tool-approval-request":
+      return `tool-approval-request:${chunk.approvalId}:${chunk.toolCallId}`;
+    case "tool-approval-response":
+      return `tool-approval-response:${chunk.approvalId}:${String(chunk.approved)}`;
+    case "tool-output-available":
+      return `tool-output-available:${chunk.toolCallId}`;
+    case "tool-output-error":
+      return `tool-output-error:${chunk.toolCallId}:${chunk.errorText}`;
+    case "tool-output-denied":
+      return `tool-output-denied:${chunk.toolCallId}`;
+    case "tool-input-start":
+      return `tool-input-start:${chunk.toolCallId}:${chunk.toolName}`;
+    case "tool-input-delta":
+      return `tool-input-delta:${chunk.toolCallId}:${chunk.inputTextDelta}`;
+    case "source-url":
+      return `source-url:${chunk.sourceId}`;
+    case "source-document":
+      return `source-document:${chunk.sourceId}`;
+    case "file":
+      return `file:${chunk.url}`;
+    case "reasoning-file":
+      return `reasoning-file:${chunk.url}`;
+    case "data-file-change":
+      return `data-file-change:${chunk.data.changes.length}`;
+    case "data-plan-update":
+      return `data-plan-update:${chunk.data.items.length}`;
+    case "data-error":
+      return `data-error:${chunk.data.message}`;
+    case "data-tool-progress":
+      return `data-tool-progress:${chunk.data.toolCallId}:${chunk.data.text}:transient=${String(chunk.transient)}`;
+    case "data-tool-timing":
+      return `data-tool-timing:${chunk.data.toolCallId}:${String(chunk.data.completedAt !== undefined)}`;
+    case "start-step":
+      return "start-step";
+    case "finish-step":
+      return "finish-step";
+    case "start":
+      return `start:${chunk.messageId ?? ""}`;
+    case "finish":
+      return `finish:${chunk.finishReason ?? ""}`;
+    case "abort":
+      return `abort:${chunk.reason ?? ""}`;
+    case "message-metadata":
+      return `message-metadata:${chunk.messageMetadata.status ?? ""}`;
     default:
-      return assertNever(item);
+      return assertNever(chunk);
   }
 }
 
-describe("SessionEvent", () => {
-  it("covers session.started/turn.started/item.*/turn.completed/turn.failed exhaustively", () => {
-    const events: SessionEvent[] = [
-      { type: "session.started", sessionId: "sess_1" },
-      { type: "turn.started", turn: 1 },
-      { type: "item.started", item: { id: "item_1", type: "agent_message", text: "hi" } },
-      { type: "item.updated", item: { id: "item_1", type: "agent_message", text: "hi " } },
-      { type: "item.completed", item: { id: "item_1", type: "agent_message", text: "hi there" } },
-      { type: "turn.completed", usage: { totalTokens: 10 } },
-      { type: "turn.failed", error: { code: "max_turns", message: "hit max turns" } },
+describe("NimboChunk", () => {
+  it("covers all 31 UIMessageChunk variants exhaustively (docs/tech/single-ledger.md §5-2)", () => {
+    const chunks: NimboChunk[] = [
+      { type: "text-start", id: "t1" },
+      { type: "text-delta", id: "t1", delta: "hi" },
+      { type: "text-end", id: "t1" },
+      { type: "reasoning-start", id: "r1" },
+      { type: "reasoning-delta", id: "r1", delta: "thinking" },
+      { type: "reasoning-end", id: "r1" },
+      { type: "custom", kind: "provider.thing" },
+      { type: "error", errorText: "boom" },
+      { type: "tool-input-available", toolCallId: "call_1", toolName: "bash", input: { command: "ls" } },
+      { type: "tool-input-error", toolCallId: "call_2", toolName: "bash", input: null, errorText: "malformed" },
+      { type: "tool-approval-request", approvalId: "call_3", toolCallId: "call_3" },
+      { type: "tool-approval-response", approvalId: "call_3", approved: false, reason: "denied by policy" },
+      { type: "tool-output-available", toolCallId: "call_1", output: "ok" },
+      { type: "tool-output-error", toolCallId: "call_4", errorText: "failed" },
+      { type: "tool-output-denied", toolCallId: "call_3" },
+      { type: "tool-input-start", toolCallId: "call_5", toolName: "read-file" },
+      { type: "tool-input-delta", toolCallId: "call_5", inputTextDelta: '{"path":' },
+      { type: "source-url", sourceId: "src_1", url: "https://example.com" },
+      { type: "source-document", sourceId: "src_2", mediaType: "application/pdf", title: "doc" },
+      { type: "file", url: "data:text/plain;base64,aGk=", mediaType: "text/plain" },
+      { type: "reasoning-file", url: "data:text/plain;base64,aGk=", mediaType: "text/plain" },
+      { type: "data-file-change", id: "fc_1", data: { changes: [{ path: "a.txt", kind: "add" }] } },
+      { type: "data-plan-update", id: "plan-update", data: { items: [{ text: "step 1", completed: true }] } },
+      { type: "data-error", id: "err_1", data: { message: "non-fatal" } },
+      {
+        type: "data-tool-progress",
+        id: "call_5",
+        data: { toolCallId: "call_5", text: "50%" },
+        transient: true,
+      },
+      { type: "data-tool-timing", id: "call_1", data: { toolCallId: "call_1", startedAt: 1_700_000_000_000, completedAt: 1_700_000_000_500 } },
+      { type: "start-step" },
+      { type: "finish-step" },
+      { type: "start", messageId: "msg_1" },
+      { type: "finish", finishReason: "stop" },
+      { type: "abort", reason: "signal aborted" },
+      { type: "message-metadata", messageMetadata: { turn: 1, status: "completed" } },
     ];
 
-    expect(events.map(describeSessionEvent)).toEqual([
-      "session sess_1 started",
-      "turn 1 started",
-      "item.started: agent_message",
-      "item.updated: agent_message",
-      "item.completed: agent_message",
-      "turn completed usage={\"totalTokens\":10}",
-      "turn failed: max_turns",
-    ]);
-  });
-});
-
-describe("SessionItem", () => {
-  it("covers all seven item variants exhaustively", () => {
-    const items: SessionItem[] = [
-      { id: "1", type: "agent_message", text: "hello" },
-      { id: "2", type: "reasoning", text: "thinking..." },
-      { id: "3", type: "user_message", text: "steered input" },
-      { id: "4", type: "tool_call", toolName: "read_file", input: { path: "a.txt" }, status: "completed" },
-      { id: "5", type: "file_change", changes: [{ path: "a.txt", kind: "update" }] },
-      { id: "6", type: "plan_update", items: [{ text: "step 1", completed: true }] },
-      { id: "7", type: "error", message: "boom" },
-    ];
-
-    expect(items.map(describeSessionItem)).toEqual([
-      "agent_message:hello",
-      "reasoning:thinking...",
-      "user_message:steered input",
-      "tool_call:read_file:completed",
-      "file_change:1",
-      "plan_update:1",
+    expect(chunks.map(describeChunk)).toEqual([
+      "text-start:t1",
+      "text-delta:t1:hi",
+      "text-end:t1",
+      "reasoning-start:r1",
+      "reasoning-delta:r1:thinking",
+      "reasoning-end:r1",
+      "custom:provider.thing",
       "error:boom",
+      "tool-input-available:call_1:bash",
+      "tool-input-error:call_2:malformed",
+      "tool-approval-request:call_3:call_3",
+      "tool-approval-response:call_3:false",
+      "tool-output-available:call_1",
+      "tool-output-error:call_4:failed",
+      "tool-output-denied:call_3",
+      "tool-input-start:call_5:read-file",
+      'tool-input-delta:call_5:{"path":',
+      "source-url:src_1",
+      "source-document:src_2",
+      "file:data:text/plain;base64,aGk=",
+      "reasoning-file:data:text/plain;base64,aGk=",
+      "data-file-change:1",
+      "data-plan-update:1",
+      "data-error:non-fatal",
+      "data-tool-progress:call_5:50%:transient=true",
+      "data-tool-timing:call_1:true",
+      "start-step",
+      "finish-step",
+      "start:msg_1",
+      "finish:stop",
+      "abort:signal aborted",
+      "message-metadata:completed",
     ]);
   });
+});
 
-  it("carries an optional output alongside status on tool_call", () => {
-    const inProgress: SessionItem = { id: "1", type: "tool_call", toolName: "bash", input: "ls", status: "in_progress" };
-    const denied: SessionItem = {
-      id: "2",
-      type: "tool_call",
-      toolName: "bash",
-      input: "rm -rf /",
-      status: "denied",
-      output: "denied by policy",
-    };
+/**
+ * 穷尽 `NimboDataParts` 的全部五个 data 部件名（docs/tech/single-ledger.md
+ * §2.2b：`tool-progress` 是 transient；`tool-timing` 是 chat 可观测性新增的
+ * **持久**部件，与 `tool-progress` 相反——见 state.ts 头注释）。
+ */
+function describeDataPartName(name: keyof NimboDataParts): string {
+  switch (name) {
+    case "file-change":
+      return "file-change";
+    case "plan-update":
+      return "plan-update";
+    case "error":
+      return "error";
+    case "tool-progress":
+      return "tool-progress";
+    case "tool-timing":
+      return "tool-timing";
+    default:
+      return assertNever(name);
+  }
+}
 
-    expect(inProgress.output).toBeUndefined();
-    expect(denied.output).toBe("denied by policy");
+describe("NimboDataParts", () => {
+  it("covers all five data part names exhaustively", () => {
+    const names: (keyof NimboDataParts)[] = ["file-change", "plan-update", "error", "tool-progress", "tool-timing"];
+    expect(names.map(describeDataPartName)).toEqual(["file-change", "plan-update", "error", "tool-progress", "tool-timing"]);
   });
 });
+
+/** 穷尽 `NimboMessageMetadata.status` 的三态（`interrupted` 对应 `NimboError.code === "aborted"`，loop.ts 的 `statusForError`）。 */
+function describeStatus(status: NonNullable<NimboMessageMetadata["status"]>): string {
+  switch (status) {
+    case "completed":
+      return "completed";
+    case "failed":
+      return "failed";
+    case "interrupted":
+      return "interrupted";
+    default:
+      return assertNever(status);
+  }
+}
+
+describe("NimboMessageMetadata.status", () => {
+  it("covers completed/failed/interrupted exhaustively", () => {
+    const statuses: NonNullable<NimboMessageMetadata["status"]>[] = ["completed", "failed", "interrupted"];
+    expect(statuses.map(describeStatus)).toEqual(["completed", "failed", "interrupted"]);
+  });
+});
+
+/** 穷尽 `NimboError.code` 的四个错误码。 */
+function describeErrorCode(code: NimboError["code"]): string {
+  switch (code) {
+    case "max_turns":
+      return "max_turns";
+    case "context_overflow":
+      return "context_overflow";
+    case "provider_error":
+      return "provider_error";
+    case "aborted":
+      return "aborted";
+    default:
+      return assertNever(code);
+  }
+}
 
 describe("NimboError.code", () => {
   it("only allows the four defined error codes", () => {
     const codes: NimboError["code"][] = ["max_turns", "context_overflow", "provider_error", "aborted"];
-    expect(codes).toHaveLength(4);
+    expect(codes.map(describeErrorCode)).toEqual(["max_turns", "context_overflow", "provider_error", "aborted"]);
   });
 });
 

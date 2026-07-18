@@ -4,7 +4,7 @@ import { OverlayFS } from "../../src/overlay.js";
 import { createDeleteFileTool } from "../../src/tools/delete-file.js";
 import { createMapReadStateStore, createOnFileChangeMock, expectError, expectText, makeCtx } from "./helpers.js";
 
-describe("delete_file", () => {
+describe("delete-file", () => {
   it("deletes a single file and reports a delete file_change", async () => {
     const fs = fromMemory({ "a.txt": "x" });
     const onFileChange = createOnFileChangeMock();

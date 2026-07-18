@@ -1,5 +1,5 @@
 /**
- * L1 定义层：`defineTool`（tech-spec §4.1）。纯函数，把带精确 zod 推导的
+ * L1 定义层：`defineTool`（docs/tech/core-sdk.md §4.1）。纯函数，把带精确 zod 推导的
  * 工具定义收敛成 P1-1 预铺的类型擦除态 `Tool`（`types.ts`）。
  *
  * 两处相对 spec 原文字面签名收紧的类型参数约束，理由见下，均不触碰
@@ -25,12 +25,14 @@
 import type { z } from "zod";
 import type { ApprovalPolicy, JsonValue, Tool, ToolContext, ToolReturn } from "./types.js";
 
-/** `defineTool(...)` 的入参形状（tech-spec §4.1），无 `name` 字段。 */
+/** `defineTool(...)` 的入参形状（docs/tech/core-sdk.md §4.1），无 `name` 字段。 */
 export interface ToolDefinition<In extends z.ZodType<JsonValue>, Out extends ToolReturn = ToolReturn> {
   description: string;
   inputSchema: In;
   outputSchema?: z.ZodType<Out>;
   approval?: ApprovalPolicy;
+  /** 见 `Tool.readOnly`（types.ts）：纯读声明，整批全 readOnly 时 loop 并行结算。 */
+  readOnly?: boolean;
   execute(input: z.infer<In>, ctx: ToolContext): Promise<Out> | Out;
 }
 
@@ -43,6 +45,7 @@ export function defineTool<In extends z.ZodType<JsonValue>, Out extends ToolRetu
     inputSchema: def.inputSchema,
     outputSchema: def.outputSchema,
     approval: def.approval,
+    readOnly: def.readOnly,
     execute: def.execute,
   };
 }

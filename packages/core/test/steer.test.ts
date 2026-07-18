@@ -1,9 +1,20 @@
 /**
- * STEER-1/STEER-1F (`Session.steer`, tech-spec §4.2) acceptance tests — see the
+ * STEER-1/STEER-1F (`Session.steer`, docs/tech/core-sdk.md §4.2) acceptance tests — see the
  * STEER-2/STEER-2F work orders for the nine numbered scenarios this file's
  * `describe` blocks map to 1:1 (scenario 8 is folded into the Checkpoint A
  * section per the work order's own "可与场景 2 合并验证" note), plus a
  * dedicated STEER-1F regression section below them.
+ *
+ * P13-5-2（docs/tech/single-ledger.md）迁移：`session.stream()`/
+ * `runTurn()` 现在产出 `NimboChunk` 而不是退役的 `SessionEvent`，"steer 注入
+ * 的消息" 现在是一条 `metadata.steered:true` 的 user `NimboUIMessage`（不再有
+ * `user_message` item 或摘要出来的 `item.text`——ledger 里的 `parts` 本身就是
+ * 完整保真的展示形态，见 §7 一节的裁量说明）。断言因此分两层：
+ * - chunk 层：`session.stream()`/`runTurn()` 产出的 `NimboChunk` 序列（步骤
+ *   边界、settle 时机）。
+ * - 账本层：`session.toJSON().messages`（`runTurn` 直接 push 的同一个数组）
+ *   与 `model.doStreamCalls[n].prompt`（`convertToModelMessages()` 现场推导、
+ *   真正发给模型的东西）。
  *
  * Two levels of testing, matching the two files under test:
  * - `loop.test.ts`-style: `runTurn(...)` invoked directly (scenario 9, the
@@ -24,11 +35,13 @@
  *    tool object must exist before `createSession(...)` returns the `Session`
  *    it will call `.steer()` on.
  * 2. Driving `session.stream()` by hand and calling `session.steer(...)` the
- *    moment a specific `item.completed` event is observed — the generator is
- *    suspended exactly there until the test resumes it, so the call is
- *    guaranteed to land before the next drain checkpoint runs.
+ *    moment a specific chunk is observed (`text-end` — the point at which an
+ *    assistant step's text part is fully settled, the closest analogue to the
+ *    retired `item.completed`) — the generator is suspended exactly there
+ *    until the test resumes it, so the call is guaranteed to land before the
+ *    next drain checkpoint runs.
  *
- * STEER-1F (docs/02 §4.2, "STEER-1F 修复" / "已知缺口"): fixed the tool-calls
+ * STEER-1F (docs/tech/core-sdk.md §4.2, "STEER-1F 修复" / "已知缺口"): fixed the tool-calls
  * branch that hits `maxTurnsPerRun` (a steer queued during that step's tool
  * execution used to be silently discarded — see the git history of this file
  * for the pre-fix version of the "turn-scope queue clearing" test below,
@@ -41,19 +54,27 @@
  */
 import { describe, expect, it } from "vitest";
 import { simulateReadableStream } from "ai";
-import type { ModelMessage, UserModelMessage } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { z } from "zod";
 import { defineAgent } from "../src/agent.js";
 import type { AgentDefinition } from "../src/agent.js";
 import { createSession } from "../src/session.js";
-import type { Session, TurnResult } from "../src/session.js";
+import type { Session } from "../src/session.js";
 import { runTurn } from "../src/loop.js";
 import type { RunTurnOptions } from "../src/loop.js";
 import { createOnceApprovalMemory } from "../src/approval.js";
 import { createDerivedDataCollector } from "../src/runtime.js";
 import type { NimboFS, Tool } from "../src/types.js";
-import type { NimboError, SessionEvent, SessionItem } from "../src/events.js";
+import type { NimboUIMessage } from "../src/state.js";
+import {
+  chunksOfType,
+  collectText,
+  drainTurn,
+  fingerprintChunk,
+  fingerprintMessage,
+  lastIndexOfChunkType,
+  userTextMessage,
+} from "./helpers/nimbo-chunks.js";
 
 // ---------------------------------------------------------------------------
 // shared helpers (same shapes as loop.test.ts / session.test.ts — this repo's
@@ -163,33 +184,8 @@ function baseAgent(model: MockLanguageModelV4, overrides: Partial<AgentDefinitio
   return defineAgent({ model, ...overrides });
 }
 
-async function drainEvents(gen: AsyncGenerator<SessionEvent, TurnResult>): Promise<{ events: SessionEvent[]; result: TurnResult }> {
-  const events: SessionEvent[] = [];
-  let next = await gen.next();
-  while (!next.done) {
-    events.push(next.value);
-    next = await gen.next();
-  }
-  return { events, result: next.value };
-}
-
-function isItemStarted(event: SessionEvent): event is { type: "item.started"; item: SessionItem } {
-  return event.type === "item.started";
-}
-function isItemCompleted(event: SessionEvent): event is { type: "item.completed"; item: SessionItem } {
-  return event.type === "item.completed";
-}
-function isTurnCompleted(event: SessionEvent): event is { type: "turn.completed"; usage: TurnResult["usage"] } {
-  return event.type === "turn.completed";
-}
-function isTurnFailed(event: SessionEvent): event is { type: "turn.failed"; error: NimboError } {
-  return event.type === "turn.failed";
-}
-function isUserMessageItem(item: SessionItem): item is Extract<SessionItem, { type: "user_message" }> {
-  return item.type === "user_message";
-}
-function isUserModelMessage(message: ModelMessage): message is Extract<ModelMessage, { role: "user" }> {
-  return message.role === "user";
+function isSteered(message: NimboUIMessage): boolean {
+  return message.metadata?.steered === true;
 }
 
 /** Forward-reference cell: a tool's `execute()` needs to call `session.steer(...)`, but the
@@ -207,7 +203,7 @@ function readSlot(slot: SessionSlot): Session {
   return slot.current;
 }
 
-// ---- loop.ts-level helpers (scenario 9 only — direct runTurn(...) calls) ----
+// ---- loop.ts-level helpers (scenario 9 + the known-gap regression only — direct runTurn(...) calls) ----
 
 function fakeFs(): NimboFS {
   return {
@@ -234,6 +230,7 @@ function turnOptions(model: MockLanguageModelV4, overrides: Partial<RunTurnOptio
     session: { id: "sess_1", turn: 1 },
     signal: undefined,
     onApproval: undefined,
+    onReview: undefined,
     onceMemory: createOnceApprovalMemory(),
     derivedData: createDerivedDataCollector(),
     ...overrides,
@@ -272,7 +269,7 @@ describe("Session.steer — idle semantics (§4.2: no in-flight turn)", () => {
 // ---------------------------------------------------------------------------
 
 describe("Session.steer — Checkpoint A: steering from inside a tool's execute()", () => {
-  it("returns true; the injected user_message lands strictly after the tool result (never between the assistant tool-call message and its tool result); item.completed ordering and TurnResult.items reflect it", async () => {
+  it("returns true; the injected steered user message lands strictly after the tool result (never between the assistant tool-call message and its tool result); chunk ordering and the ledger reflect it", async () => {
     const slot: SessionSlot = { current: undefined };
     let steerReturnValue: boolean | undefined;
 
@@ -289,7 +286,7 @@ describe("Session.steer — Checkpoint A: steering from inside a tool's execute(
     const session = createSession(baseAgent(model, { tools: { steer_tool: steeringTool } }));
     slot.current = session;
 
-    const { events, result } = await drainEvents(session.stream("go"));
+    const { chunks } = await drainTurn(session.stream("go"));
 
     expect(steerReturnValue).toBe(true);
 
@@ -301,14 +298,19 @@ describe("Session.steer — Checkpoint A: steering from inside a tool's execute(
     expect(step2Prompt.map((m) => m.role)).toEqual(["user", "assistant", "tool", "user"]);
     expect(step2Prompt[3]).toMatchObject({ role: "user", content: [{ type: "text", text: "steered during tool execution" }] });
 
-    // event ordering: tool_call completes, *then* user_message (Checkpoint A drains it right
-    // before step 2 is called), then step 2's own agent_message.
-    expect(events.filter(isItemCompleted).map((e) => e.item.type)).toEqual(["tool_call", "user_message", "agent_message"]);
-    // steer injection is atomic — item.completed only, never an item.started for it.
-    expect(events.filter(isItemStarted).map((e) => e.item.type)).toEqual(["tool_call", "agent_message"]);
+    // chunk ordering: the tool settles (tool-output-available) before the steered message's
+    // own `start` chunk, which in turn lands before step 2's own `start-step` — atomic, never
+    // interleaved mid-step.
+    const steeredMessage = session.toJSON().messages.find(isSteered);
+    expect(steeredMessage).toBeDefined();
+    const toolOutputIndex = chunks.findIndex((c) => c.type === "tool-output-available");
+    const steerStartIndex = chunks.findIndex((c) => c.type === "start" && c.messageId === steeredMessage?.id);
+    const secondStartStepIndex = lastIndexOfChunkType(chunks, "start-step");
+    expect(toolOutputIndex).toBeGreaterThanOrEqual(0);
+    expect(steerStartIndex).toBeGreaterThan(toolOutputIndex);
+    expect(secondStartStepIndex).toBeGreaterThan(steerStartIndex);
 
-    const userItem = result.items.find(isUserMessageItem);
-    expect(userItem).toMatchObject({ type: "user_message", text: "steered during tool execution" });
+    expect(collectText(steeredMessage)).toBe("steered during tool execution");
   });
 
   it("(scenario 8) also works when the turn is driven via send() rather than stream()", async () => {
@@ -332,7 +334,8 @@ describe("Session.steer — Checkpoint A: steering from inside a tool's execute(
     const result = await pending;
 
     expect(steerReturnValue).toBe(true);
-    expect(result.items.some(isUserMessageItem)).toBe(true);
+    expect(session.toJSON().messages.some(isSteered)).toBe(true);
+    expect(result.finalResponse).toBe("final via send");
 
     const step2Prompt = model.doStreamCalls[1]?.prompt ?? [];
     expect(step2Prompt.at(-1)).toMatchObject({ role: "user", content: [{ type: "text", text: "steered via send()" }] });
@@ -344,7 +347,7 @@ describe("Session.steer — Checkpoint A: steering from inside a tool's execute(
 // ---------------------------------------------------------------------------
 
 describe("Session.steer — Checkpoint B: steering as the turn's tail step completes", () => {
-  it("doesn't end the turn on that step; runs one more step; ends with turn.completed; history is assistant(text) -> user(steer) -> assistant(text2)", async () => {
+  it("doesn't end the turn on that step; runs one more step; ends with message-metadata status:'completed'; ledger is user(go) -> assistant(text1) -> user(steer) -> assistant(text2)", async () => {
     const model = mockModel(() => ({
       doStream: [
         {
@@ -379,15 +382,14 @@ describe("Session.steer — Checkpoint B: steering as the turn's tail step compl
     const session = createSession(baseAgent(model));
     const gen = session.stream("go");
 
-    const events: SessionEvent[] = [];
     let steered = false;
     let next = await gen.next();
     while (!next.done) {
-      events.push(next.value);
-      if (!steered && next.value.type === "item.completed" && next.value.item.type === "agent_message" && next.value.item.text === "first text") {
-        // the generator is suspended exactly here (runOneStep's last yield before returning) —
-        // runTurn hasn't reached Checkpoint B for this step yet, so this steer is guaranteed
-        // to land in that drain rather than being lost.
+      // `text-end` is the closest chunk-level analogue to the retired `item.completed` for the
+      // assistant's text — the generator is suspended exactly here (runOneStep's last text
+      // chunk before `finish-step`/`finish`), so this steer is guaranteed to land in Checkpoint
+      // B's drain rather than being lost.
+      if (!steered && next.value.type === "text-end") {
         expect(session.steer("steered at tail")).toBe(true);
         steered = true;
       }
@@ -397,8 +399,6 @@ describe("Session.steer — Checkpoint B: steering as the turn's tail step compl
 
     expect(steered).toBe(true);
     expect(model.doStreamCalls).toHaveLength(2);
-    expect(events.filter(isTurnCompleted)).toHaveLength(1);
-    expect(events.some(isTurnFailed)).toBe(false);
 
     const step2Prompt = model.doStreamCalls[1]?.prompt ?? [];
     expect(step2Prompt.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
@@ -406,8 +406,9 @@ describe("Session.steer — Checkpoint B: steering as the turn's tail step compl
 
     const history = session.toJSON().messages;
     expect(history.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
+    expect(isSteered(history[2] ?? { id: "", role: "system", parts: [] })).toBe(true);
 
-    expect(result.items.map((item) => item.type)).toEqual(["agent_message", "user_message", "agent_message"]);
+    expect(history[3]?.metadata?.status).toBe("completed");
     expect(result.finalResponse).toBe("second text");
   });
 });
@@ -417,33 +418,35 @@ describe("Session.steer — Checkpoint B: steering as the turn's tail step compl
 // ---------------------------------------------------------------------------
 
 describe("Session.steer — budget exhaustion at Checkpoint B", () => {
-  it("maxTurnsPerRun: 1 + steer at the only step's tail: turn.failed/max_turns, not turn.completed (though the steer *was* drained into items/messages)", async () => {
+  it("maxTurnsPerRun: 1 + steer at the only step's tail: message-metadata status:'failed'/max_turns, not 'completed' (though the steer *was* drained into the ledger)", async () => {
     const model = stopModel("only text");
     const session = createSession(baseAgent(model, { maxTurnsPerRun: 1 }));
     const gen = session.stream("go");
 
-    const events: SessionEvent[] = [];
+    const chunks = [];
     let steered = false;
     let next = await gen.next();
     while (!next.done) {
-      events.push(next.value);
-      if (!steered && next.value.type === "item.completed" && next.value.item.type === "agent_message") {
+      chunks.push(next.value);
+      if (!steered && next.value.type === "text-end") {
         expect(session.steer("too late for more budget")).toBe(true);
         steered = true;
       }
       next = await gen.next();
     }
-    const result = next.value;
 
     expect(steered).toBe(true);
-    expect(events.some(isTurnCompleted)).toBe(false);
-    const failed = events.find(isTurnFailed);
-    expect(failed?.error.code).toBe("max_turns");
+    const metadataChunks = chunksOfType(chunks, "message-metadata");
+    expect(metadataChunks[0]?.messageMetadata.status).toBe("failed");
+    expect(metadataChunks[0]?.messageMetadata.error?.code).toBe("max_turns");
     expect(model.doStreamCalls).toHaveLength(1);
 
-    // the steer WAS drained (Checkpoint B ran before the max_turns check) — item + message exist
+    // the steer WAS drained (Checkpoint B ran before the max_turns check) — it's in the ledger
     // even though the turn ultimately fails for lack of budget to let the model see it.
-    expect(result.items.map((item) => item.type)).toEqual(["agent_message", "user_message"]);
+    const history = session.toJSON().messages;
+    expect(history.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
+    expect(isSteered(history[2] ?? { id: "", role: "system", parts: [] })).toBe(true);
+    expect(collectText(history[2])).toBe("too late for more budget");
   });
 });
 
@@ -471,12 +474,12 @@ describe("Session.steer — ordering of multiple queued messages", () => {
     const session = createSession(baseAgent(model, { tools: { multi_steer_tool: steeringTool } }));
     slot.current = session;
 
-    const { events, result } = await drainEvents(session.stream("go"));
+    const { result } = await drainTurn(session.stream("go"));
 
     expect(returnValues).toEqual([true, true]);
 
-    const userItems = events.filter(isItemCompleted).map((e) => e.item).filter(isUserMessageItem);
-    expect(userItems.map((item) => item.text)).toEqual(["first steer", "second steer"]);
+    const steeredTexts = session.toJSON().messages.filter(isSteered).map(collectText);
+    expect(steeredTexts).toEqual(["first steer", "second steer"]);
 
     const step2Prompt = model.doStreamCalls[1]?.prompt ?? [];
     const userEntries = step2Prompt.filter((m) => m.role === "user");
@@ -486,7 +489,7 @@ describe("Session.steer — ordering of multiple queued messages", () => {
       [{ type: "text", text: "second steer" }],
     ]);
 
-    expect(result.items.filter(isUserMessageItem).map((item) => item.text)).toEqual(["first steer", "second steer"]);
+    expect(result.finalResponse).toBe("final");
   });
 });
 
@@ -495,14 +498,14 @@ describe("Session.steer — ordering of multiple queued messages", () => {
 // ---------------------------------------------------------------------------
 
 describe("Session.steer — turn-scope queue clearing", () => {
-  it("(STEER-1F) a steer queued during the final step's tool execution, when that step is itself the last budgeted step, is drained before turn.failed — its message persists in the session's history across turns rather than being discarded", async () => {
+  it("(STEER-1F) a steer queued during the final step's tool execution, when that step is itself the last budgeted step, is drained before the turn fails — its message persists in the session's history across turns rather than being discarded", async () => {
     // maxTurnsPerRun: 1 + a tool-calls-finishing step exhausts the budget in the branch that,
     // pre-STEER-1F, had no drain checkpoint of its own (loop.ts's tool-calls/max_turns branch
-    // used to run straight to turn.failed after pushing the tool result, silently dropping any
-    // steer() queued during that step's tool execution). STEER-1F added a drain there too — this
-    // test now asserts the *fixed* behavior: the queued message survives (as an item and in the
-    // persisted message history) even though the turn itself still ends in turn.failed/max_turns
-    // for lack of a further step to let the model see it.
+    // used to run straight to the failure metadata after settling the tool call, silently
+    // dropping any steer() queued during that step's tool execution). STEER-1F added a drain
+    // there too — this test now asserts the *fixed* behavior: the queued message survives (in
+    // the persisted message history) even though the turn itself still ends in
+    // message-metadata status:'failed'/max_turns for lack of a further step to let the model see it.
     const slot: SessionSlot = { current: undefined };
     let steerReturnValue: boolean | undefined;
 
@@ -519,14 +522,15 @@ describe("Session.steer — turn-scope queue clearing", () => {
     const session = createSession(baseAgent(model, { tools: { loop_tool: steeringTool }, maxTurnsPerRun: 1 }));
     slot.current = session;
 
-    const { events: firstEvents, result: firstResult } = await drainEvents(session.stream("go"));
+    const { chunks: firstChunks } = await drainTurn(session.stream("go"));
 
     expect(steerReturnValue).toBe(true);
-    const failed = firstEvents.find(isTurnFailed);
-    expect(failed?.error.code).toBe("max_turns");
-    // STEER-1F: drained before the failure — the item exists with the original text.
-    const userItem = firstResult.items.find(isUserMessageItem);
-    expect(userItem).toMatchObject({ type: "user_message", text: "orphaned steer message" });
+    const firstMetadata = chunksOfType(firstChunks, "message-metadata");
+    expect(firstMetadata[0]?.messageMetadata.error?.code).toBe("max_turns");
+    // STEER-1F: drained before the failure — the message exists with the original text.
+    const firstHistory = session.toJSON().messages;
+    const steeredMessage = firstHistory.find(isSteered);
+    expect(collectText(steeredMessage)).toBe("orphaned steer message");
 
     // same session, second turn: the drained message is part of persisted history now, so it
     // must resurface (not be a leak — it was legitimately backfilled into `messages` before the
@@ -546,16 +550,16 @@ describe("Session.steer — turn-scope queue clearing", () => {
 });
 
 // ---------------------------------------------------------------------------
-// STEER-1F regression #1: event ordering for the (now-fixed) tool-calls/
-// max_turns drain — item.completed for the steered message must land before
-// turn.failed, and the drained message must be visible to the very next
+// STEER-1F regression #1: chunk ordering for the (now-fixed) tool-calls/
+// max_turns drain — the steered message's `start` chunk must land before
+// message-metadata, and the drained message must be visible to the very next
 // model call this session makes (whether that's a hypothetical next step in
 // the same turn, if one existed, or — as here, since the budget is already
 // spent — the next turn's first model call).
 // ---------------------------------------------------------------------------
 
 describe("Session.steer — STEER-1F regression: drain-before-max_turns ordering", () => {
-  it("the steered user_message's item.completed appears before turn.failed in the event stream, TurnResult.items carries it, and the same session's next send() sees it in its prompt", async () => {
+  it("the steered message's `start` chunk appears before message-metadata in the chunk stream, the ledger carries it, and the same session's next send() sees it in its prompt", async () => {
     const slot: SessionSlot = { current: undefined };
     let steerReturnValue: boolean | undefined;
 
@@ -572,18 +576,19 @@ describe("Session.steer — STEER-1F regression: drain-before-max_turns ordering
     const session = createSession(baseAgent(model, { tools: { budget_tool: steeringTool }, maxTurnsPerRun: 1 }));
     slot.current = session;
 
-    const { events, result } = await drainEvents(session.stream("go"));
+    const { chunks } = await drainTurn(session.stream("go"));
 
     expect(steerReturnValue).toBe(true);
 
-    const userMessageIndex = events.findIndex((e) => e.type === "item.completed" && e.item.type === "user_message");
-    const turnFailedIndex = events.findIndex(isTurnFailed);
-    expect(userMessageIndex).toBeGreaterThanOrEqual(0);
-    expect(turnFailedIndex).toBeGreaterThan(userMessageIndex);
-    expect(events[turnFailedIndex]).toMatchObject({ error: { code: "max_turns" } });
+    const steeredMessage = session.toJSON().messages.find(isSteered);
+    expect(steeredMessage).toBeDefined();
+    const steerStartIndex = chunks.findIndex((c) => c.type === "start" && c.messageId === steeredMessage?.id);
+    const metadataIndex = chunks.findIndex((c) => c.type === "message-metadata");
+    expect(steerStartIndex).toBeGreaterThanOrEqual(0);
+    expect(metadataIndex).toBeGreaterThan(steerStartIndex);
+    expect(chunksOfType(chunks, "message-metadata")[0]?.messageMetadata.error?.code).toBe("max_turns");
 
-    const userItem = result.items.find(isUserMessageItem);
-    expect(userItem).toMatchObject({ type: "user_message", text: "drained before max_turns" });
+    expect(collectText(steeredMessage)).toBe("drained before max_turns");
 
     await session.send("follow up");
     const nextPrompt = model.doStreamCalls[1]?.prompt ?? [];
@@ -593,25 +598,25 @@ describe("Session.steer — STEER-1F regression: drain-before-max_turns ordering
 });
 
 // ---------------------------------------------------------------------------
-// STEER-1F regression #2: the declared known gap. docs/02 §4.2 states that
+// STEER-1F regression #2: the declared known gap. docs/tech/core-sdk.md §4.2 states that
 // `runOneStep`/`executeStepToolCalls` throwing (`aborted`/`provider_error`)
 // does *not* drain — this test pins down that *current* (gap) behavior so a
 // future work order that closes it will see this assertion flip and know to
 // update it, rather than the gap silently regressing further unnoticed.
 // ---------------------------------------------------------------------------
 
-describe("runTurn — known gap (docs/02 §4.2): provider_error does not drain queued steer messages", () => {
-  it("doStream throwing (provider_error) skips the drain the other three termination paths perform — content queued right as the failing step ran is discarded, not surfaced as an item or backfilled into messages", async () => {
+describe("runTurn — known gap (docs/tech/core-sdk.md §4.2): provider_error does not drain queued steer messages", () => {
+  it("doStream throwing (provider_error) skips the drain the other three termination paths perform — content queued right as the failing step ran is discarded, never surfaces in the ledger", async () => {
     // Driving this through a real `session.steer()` call would require a tool execution to run
     // *while* the very step whose model call then throws is in flight — `simulateReadableStream`
     // (and this repo's other tests) only support a step's `doStream` throwing outright, with no
     // partial chunks first (see loop.test.ts's own "provider error" test), so there's no yield
     // point for a test to hook a `session.steer()` call into before the throw. This test instead
-    // drives `drainSteers` directly (same level as loop.test.ts/the scenario-9 test above):
+    // drives `drainSteers` directly (same level as loop.test.ts/the scenario-9 test below):
     // `doStream` pushes into `queue` as its very last act before throwing, standing in for
     // "something got queued right as this failing model call was in flight".
-    let queue: UserModelMessage[] = [];
-    const drainSteers = (): UserModelMessage[] => {
+    let queue: NimboUIMessage[] = [];
+    const drainSteers = (): NimboUIMessage[] => {
       const drained = queue;
       queue = [];
       return drained;
@@ -619,43 +624,47 @@ describe("runTurn — known gap (docs/02 §4.2): provider_error does not drain q
 
     const model = mockModel(() => ({
       doStream: async () => {
-        queue.push({ role: "user", content: "queued right as the failing step ran" });
+        queue.push({ ...userTextMessage("steer_1", "queued right as the failing step ran"), metadata: { steered: true } });
         throw new Error("network exploded");
       },
     }));
 
-    const messages: ModelMessage[] = [{ role: "user", content: "go" }];
-    const { events, result } = await drainEvents(runTurn(turnOptions(model, { messages, drainSteers })));
+    const messages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+    const { chunks } = await drainTurn(runTurn(turnOptions(model, { messages, drainSteers })));
 
-    const failed = events.find(isTurnFailed);
-    expect(failed?.error.code).toBe("provider_error");
+    const metadataChunks = chunksOfType(chunks, "message-metadata");
+    expect(metadataChunks[0]?.messageMetadata.error?.code).toBe("provider_error");
 
-    // known gap, pinned down: the queued content is still sitting in `queue` — the catch around
+    // known gap, pinned down: the queued message is still sitting in `queue` — the catch around
     // runOneStep never called drainSteers again after the model call failed.
     expect(queue).toHaveLength(1);
-    expect(result.items.some(isUserMessageItem)).toBe(false);
-    // nothing beyond the turn's own original input was ever pushed to messages.
-    expect(messages).toEqual([{ role: "user", content: "go" }]);
+    // No steered message ever reaches the ledger — that's the known gap this section documents.
+    expect(messages.some(isSteered)).toBe(false);
+    // 发现的 src 缺陷（见 loop.test.ts 的 "abort"/"provider error" 测试内联
+    // 注释，同一处根因，与 steer 无关）：`messages` 正确应恰好 2 条（user +
+    // 携带失败 metadata 的 assistant），实际会残留一条孤儿占位 assistant
+    // 消息、共 3 条。下面这个断言按"应有行为"编写，当前会失败。
+    expect(messages).toHaveLength(2);
   });
 });
 
 // ---------------------------------------------------------------------------
-// STEER-3T (STEER-3A Finding 4, docs/02 §4.2): steer() must honestly return
-// false once the terminal event (turn.completed/turn.failed) has already
-// been produced by runTurn — even if the consumer's own `.next()` call that
-// observed it hasn't returned control back to it yet. Pre-fix, `stream()`
-// only flipped `turnActive` to false in its `finally` block, which runs
-// *after* the terminal event has already been handed to the consumer via a
-// bare `yield* turnGen` — so a steer() called in direct reaction to seeing
-// turn.completed/turn.failed used to return `true` while the content was
-// silently dropped a moment later by that same `finally` block. The fix
-// (session.ts's manual delegation loop) flips `turnActive = false` *before*
-// yielding the terminal event onward, so this reaction window now correctly
-// sees no in-flight turn.
+// STEER-3T (STEER-3A Finding 4, docs/tech/core-sdk.md §4.2): steer() must honestly return
+// false once the terminal chunk (message-metadata) has already been produced
+// by runTurn — even if the consumer's own `.next()` call that observed it
+// hasn't returned control back to it yet. Pre-fix, `stream()` only flipped
+// `turnActive` to false in its `finally` block, which runs *after* the
+// terminal event has already been handed to the consumer via a bare
+// `yield* turnGen` — so a steer() called in direct reaction to seeing the
+// terminal event used to return `true` while the content was silently
+// dropped a moment later by that same `finally` block. The fix (session.ts's
+// manual delegation loop) flips `turnActive = false` *before* yielding the
+// terminal chunk onward, so this reaction window now correctly sees no
+// in-flight turn.
 // ---------------------------------------------------------------------------
 
-describe("Session.steer — STEER-3T: honest false once the terminal event has already fired", () => {
-  it("returns false when called upon observing turn.completed, and the rejected content never leaks into the next turn", async () => {
+describe("Session.steer — STEER-3T: honest false once the terminal chunk has already fired", () => {
+  it("returns false when called upon observing a 'completed' message-metadata chunk, and the rejected content never leaks into the next turn", async () => {
     const model = twoTurnStopModel("first turn reply", "second turn reply");
     const session = createSession(baseAgent(model));
 
@@ -663,7 +672,7 @@ describe("Session.steer — STEER-3T: honest false once the terminal event has a
     let sawTerminal = false;
     let next = await gen.next();
     while (!next.done) {
-      if (next.value.type === "turn.completed") {
+      if (next.value.type === "message-metadata" && next.value.messageMetadata.status === "completed") {
         expect(session.steer("too late, turn already completed")).toBe(false);
         sawTerminal = true;
       }
@@ -682,7 +691,7 @@ describe("Session.steer — STEER-3T: honest false once the terminal event has a
     ]);
   });
 
-  it("returns false when called upon observing turn.failed (max_turns), and the rejected content never leaks into the next turn", async () => {
+  it("returns false when called upon observing a 'failed'/max_turns message-metadata chunk, and the rejected content never leaks into the next turn", async () => {
     const tool: Tool = { description: "d", inputSchema: z.object({}), execute: () => "ok" };
     const model = toolCallThenStopModel("noop_tool", {}, "second turn reply");
     const session = createSession(baseAgent(model, { tools: { noop_tool: tool }, maxTurnsPerRun: 1 }));
@@ -691,8 +700,8 @@ describe("Session.steer — STEER-3T: honest false once the terminal event has a
     let sawFailed = false;
     let next = await gen.next();
     while (!next.done) {
-      if (next.value.type === "turn.failed") {
-        expect(next.value.error.code).toBe("max_turns");
+      if (next.value.type === "message-metadata" && next.value.messageMetadata.status === "failed") {
+        expect(next.value.messageMetadata.error?.code).toBe("max_turns");
         expect(session.steer("too late, turn already failed")).toBe(false);
         sawFailed = true;
       }
@@ -713,11 +722,16 @@ describe("Session.steer — STEER-3T: honest false once the terminal event has a
 });
 
 // ---------------------------------------------------------------------------
-// 7. input summarization vs. backfilled message fidelity
+// 7. steered input fidelity — docs/tech/single-ledger.md §5-2 裁量: the old `user_message.text`
+// one-line *summary* (e.g. "look: [image]") is retired along with SessionItem
+// — a steered message's `parts` array *is* the full-fidelity display form
+// now (no separate summary field to keep in sync), so this section asserts
+// the parts land in the ledger exactly as constructed, and that the same
+// fidelity survives into the model-facing conversion.
 // ---------------------------------------------------------------------------
 
-describe("Session.steer — input summarization (item.text) vs. full message fidelity", () => {
-  it("summarizes string / text-block-array / image-block-array inputs into user_message.text, while the backfilled UserModelMessage keeps the full original content", async () => {
+describe("Session.steer — steered input fidelity (parts are the display form now, no separate summary)", () => {
+  it("plain string / multi-text-block / text+image steer inputs land as full-fidelity parts in the ledger, and the same content reaches the model prompt untouched", async () => {
     const slot: SessionSlot = { current: undefined };
 
     const steeringTool: Tool = {
@@ -742,24 +756,32 @@ describe("Session.steer — input summarization (item.text) vs. full message fid
     const session = createSession(baseAgent(model, { tools: { summarize_tool: steeringTool } }));
     slot.current = session;
 
-    const { result } = await drainEvents(session.stream("go"));
+    await drainTurn(session.stream("go"));
 
-    const userItems = result.items.filter(isUserMessageItem);
-    expect(userItems.map((item) => item.text)).toEqual(["plain string steer", "part a part b", "look: [image]"]);
-
-    // the backfilled ModelMessage.content is untouched by the summary — full fidelity,
-    // including the image's data/mediaType (not dropped/truncated).
-    const steeredMessages = session.toJSON().messages.filter(isUserModelMessage).slice(1); // drop the turn's own "go" input
+    const steeredMessages = session.toJSON().messages.filter(isSteered);
     expect(steeredMessages).toHaveLength(3);
-    expect(steeredMessages[0]?.content).toBe("plain string steer");
-    expect(steeredMessages[1]?.content).toEqual([
+    expect(steeredMessages[0]?.parts).toEqual([{ type: "text", text: "plain string steer" }]);
+    expect(steeredMessages[1]?.parts).toEqual([
       { type: "text", text: "part a " },
       { type: "text", text: "part b" },
     ]);
-    expect(steeredMessages[2]?.content).toEqual([
+    expect(steeredMessages[2]?.parts).toEqual([
       { type: "text", text: "look: " },
-      { type: "file", data: "base64imagedata", mediaType: "image/png" },
+      { type: "file", mediaType: "image/png", url: "data:image/png;base64,base64imagedata" },
     ]);
+
+    // Full fidelity into the model-facing conversion too — nothing dropped/summarized. Asserted
+    // via JSON substring containment (rather than a deep `toEqual`) to sidestep pinning the
+    // exact `FilePart.data` shape ai's convertToModelMessages() produces (a real `URL` instance,
+    // not a plain string) — session.ts's header already documents that conversion precisely.
+    const step2Prompt = model.doStreamCalls[1]?.prompt ?? [];
+    const userEntries = step2Prompt.filter((m) => m.role === "user");
+    expect(userEntries).toHaveLength(4); // "go" + 3 steers
+    expect(JSON.stringify(userEntries[1])).toContain("plain string steer");
+    expect(JSON.stringify(userEntries[2])).toContain("part a ");
+    expect(JSON.stringify(userEntries[2])).toContain("part b");
+    expect(JSON.stringify(userEntries[3])).toContain("look: ");
+    expect(JSON.stringify(userEntries[3])).toContain("base64imagedata");
   });
 });
 
@@ -768,58 +790,8 @@ describe("Session.steer — input summarization (item.text) vs. full message fid
 //    must behave identically to omitting drainSteers)
 // ---------------------------------------------------------------------------
 
-function assertNeverItem(item: never): never {
-  throw new Error(`unreachable SessionItem variant: ${JSON.stringify(item)}`);
-}
-
-function fingerprintItem(item: SessionItem): string {
-  switch (item.type) {
-    case "agent_message":
-      return `agent_message:${item.text}`;
-    case "reasoning":
-      return `reasoning:${item.text}`;
-    case "user_message":
-      return `user_message:${item.text}`;
-    case "tool_call":
-      return `tool_call:${item.toolName}:${item.status}:${JSON.stringify(item.input)}:${JSON.stringify(item.output)}`;
-    case "file_change":
-      return `file_change:${JSON.stringify(item.changes)}`;
-    case "plan_update":
-      return `plan_update:${JSON.stringify(item.items)}`;
-    case "error":
-      return `error:${item.message}`;
-    default:
-      return assertNeverItem(item);
-  }
-}
-
-function assertNeverEvent(event: never): never {
-  throw new Error(`unreachable SessionEvent variant: ${JSON.stringify(event)}`);
-}
-
-/** Fingerprints an event sequence for structural comparison, dropping random item ids (the
- * only thing that legitimately differs between two independently-run turns). */
-function fingerprintEvent(event: SessionEvent): string {
-  switch (event.type) {
-    case "session.started":
-      return `session.started:${event.sessionId}`;
-    case "turn.started":
-      return `turn.started:${event.turn}`;
-    case "item.started":
-    case "item.updated":
-    case "item.completed":
-      return `${event.type}:${fingerprintItem(event.item)}`;
-    case "turn.completed":
-      return `turn.completed:${JSON.stringify(event.usage)}`;
-    case "turn.failed":
-      return `turn.failed:${event.error.code}`;
-    default:
-      return assertNeverEvent(event);
-  }
-}
-
 describe("runTurn — drainSteers equivalence class (§4.2: omitted vs. always-empty)", () => {
-  it("a drainSteers that always returns [] produces the exact same event/result shape as omitting drainSteers entirely", async () => {
+  it("a drainSteers that always returns [] produces the exact same chunk/ledger shape as omitting drainSteers entirely", async () => {
     function buildModel(): MockLanguageModelV4 {
       return mockModel(() => ({
         doStream: {
@@ -838,14 +810,17 @@ describe("runTurn — drainSteers equivalence class (§4.2: omitted vs. always-e
       }));
     }
 
-    const withoutDrain = await drainEvents(runTurn(turnOptions(buildModel(), { messages: [{ role: "user", content: "go" }] })));
-    const withEmptyDrain = await drainEvents(
-      runTurn(turnOptions(buildModel(), { messages: [{ role: "user", content: "go" }], drainSteers: () => [] })),
+    const withoutMessages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+    const withoutDrain = await drainTurn(runTurn(turnOptions(buildModel(), { messages: withoutMessages })));
+
+    const withEmptyMessages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+    const withEmptyDrain = await drainTurn(
+      runTurn(turnOptions(buildModel(), { messages: withEmptyMessages, drainSteers: () => [] })),
     );
 
-    expect(withEmptyDrain.events.map(fingerprintEvent)).toEqual(withoutDrain.events.map(fingerprintEvent));
+    expect(withEmptyDrain.chunks.map(fingerprintChunk)).toEqual(withoutDrain.chunks.map(fingerprintChunk));
     expect(withEmptyDrain.result.finalResponse).toBe(withoutDrain.result.finalResponse);
     expect(withEmptyDrain.result.usage).toEqual(withoutDrain.result.usage);
-    expect(withEmptyDrain.result.items.map(fingerprintItem)).toEqual(withoutDrain.result.items.map(fingerprintItem));
+    expect(withEmptyMessages.map(fingerprintMessage)).toEqual(withoutMessages.map(fingerprintMessage));
   });
 });

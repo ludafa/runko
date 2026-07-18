@@ -1,5 +1,5 @@
 /**
- * `@nimbo/sdk` 门面（tech-spec §2 "L3/L2/L1/L0" 分层里的主包定位、§4.2 全节）：
+ * `@nimbo/sdk` 门面（docs/tech/core-sdk.md §2 "L3/L2/L1/L0" 分层里的主包定位、§4.2 全节）：
  * re-export `@nimbo/core` + `@nimbo/virtual-fs` + `@nimbo/mini-bash` 的全部公共
  * API，外加两处默认装配——`createSession`（fs 缺省 `MemoryFS`、文件工具八件套
  * 默认全开，见 `./session.js`）与 `NimboFS` 值命名空间（`fromMemory`/

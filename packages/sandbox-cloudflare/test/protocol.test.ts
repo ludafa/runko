@@ -1,5 +1,5 @@
 /**
- * 协议两端进程内对接（docs/06 §8.4）：`cloudflareWorkspace()` 的 `fetch` 注入为
+ * 协议两端进程内对接（docs/tech/sandbox.md §8.4）：`cloudflareWorkspace()` 的 `fetch` 注入为
  * `fetchViaGateway(gateway)`，客户端 ← fake fetch ← 网关 ← `FakeCfSandbox` 全链路
  * 走真实 wire 编解码——覆盖 NimboFS 七方法 + NimboExec 契约、二进制往返、NDJSON
  * 跨 chunk 边界、401/404/409 错误翻译、abort 传播、timeoutMs 124。

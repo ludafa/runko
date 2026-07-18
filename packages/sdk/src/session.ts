@@ -1,6 +1,6 @@
 /**
- * `@nimbo/sdk` 的默认装配版 `createSession`（tech-spec §2 门面定位 / §4.2 L2 运行层
- * / 04-builtin-tools.md §3 `builtinTools` 语义）。包装 `@nimbo/core` 的原始
+ * `@nimbo/sdk` 的默认装配版 `createSession`（docs/tech/core-sdk.md §2 门面定位 / §4.2 L2 运行层
+ * / docs/tech/builtin-tools.md §3 `builtinTools` 语义）。包装 `@nimbo/core` 的原始
  * `createSession`——`@nimbo/core` 本身刻意不依赖 `@nimbo/virtual-fs`（避免
  * core ↔ virtual-fs 成环，见 core `session.ts` 文件头"fs 缺省"一节），因此
  * "fs 缺省时默认 `MemoryFS`"与"文件工具八件套默认全开"这两条 batteries-included
@@ -54,23 +54,23 @@ import { createFileTools, MemoryFS } from "@nimbo/virtual-fs";
 /** sdk 门面版 `Session`：与 core 的原始 `Session` 完全一致，只是 `fs` 保留调用方传入的具体类型。 */
 export type Session<F extends NimboFS = NimboFS> = Omit<CoreSession, "fs"> & { readonly fs: F };
 
-/** 八件套的全部工具名，按 04-builtin-tools.md §1.1–§1.8 的声明顺序列出。 */
+/** 八件套的全部工具名，按 docs/tech/builtin-tools.md §1.1–§1.8 的声明顺序列出。 */
 const ALL_FILE_TOOL_NAMES = [
-  "read_file",
-  "write_file",
-  "edit_file",
-  "delete_file",
-  "move_file",
-  "list_dir",
+  "read-file",
+  "write-file",
+  "edit-file",
+  "delete-file",
+  "move-file",
+  "list-dir",
   "glob",
   "grep",
 ] as const satisfies readonly FileToolName[];
 
 /**
- * `agent.builtinTools` 对文件工具八件套的过滤（04-builtin-tools.md §3）：
+ * `agent.builtinTools` 对文件工具八件套的过滤（docs/tech/builtin-tools.md §3）：
  * `false` 全关；`undefined`（未配置）默认全开；数组按白名单交集（数组里
- * 出现的 `update_plan`/其他非文件工具名对这里无意义，交集自然把它们滤掉——
- * `update_plan` 的开关逻辑仍由 core 自己的 `isUpdatePlanEnabled` 负责，两条
+ * 出现的 `update-plan`/其他非文件工具名对这里无意义，交集自然把它们滤掉——
+ * `update-plan` 的开关逻辑仍由 core 自己的 `isUpdatePlanEnabled` 负责，两条
  * 过滤各自独立、互不影响）。
  */
 function resolveEnabledFileToolNames(builtinTools: BuiltinToolName[] | false | undefined): readonly FileToolName[] {

@@ -1,15 +1,15 @@
 /**
- * 04-mini-bash — the "same-origin workspace" story from docs/02-tech-spec.md
+ * 04-mini-bash — the "same-origin workspace" story from docs/tech/core-sdk.md
  * §4.5a mode A: `createSession({ fs, exec: miniBash(fs) })` gives the file
  * tools and the `bash` tool the *same* NimboFS instance, so there is nothing
- * to keep in sync — a file written through `write_file` is immediately
+ * to keep in sync — a file written through `write-file` is immediately
  * visible to `cat`, because there's only ever one copy of the data.
  *
  * mini-bash itself is a pure-TypeScript interpreter (no child process, no
  * real OS access) supporting `cat`/`grep`/`find`/`tail`/`head`/`echo` plus
  * the control operators `|`, `;`, `&&`, `||`, `2>&1`. It refuses file
  * redirection (`>`, `>>`, `<`) on purpose — writes must go through
- * `write_file` so they produce a `file_change` item and stay in readState;
+ * `write-file` so they produce a `file_change` item and stay in readState;
  * a redirect would be a silent bypass. `cat <file>` covers the `<` use case.
  *
  * Demonstrates: miniBash(fs), createSession({ fs, exec }), the conditional

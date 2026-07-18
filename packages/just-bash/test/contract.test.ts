@@ -1,5 +1,5 @@
 /**
- * NimboExec 表面契约（tech-spec §4.5b "NimboExec 表面" 一节）：describe() 的
+ * NimboExec 表面契约（docs/tech/core-sdk.md §4.5b "NimboExec 表面" 一节）：describe() 的
  * 声明内容、defaultApproval，以及"全部失败路径 resolve 而非 reject"（§4.5a
  * 实现契约）在语法错误这条路径上的验证。
  */
@@ -10,8 +10,8 @@ import { justBash } from "../src/index.js";
 import { run } from "./helpers.js";
 
 describe("NimboExec surface", () => {
-  it("exposes defaultApproval 'never'", () => {
-    expect(justBash(fromMemory({})).defaultApproval).toBe("never");
+  it("exposes defaultApproval 'allow'", () => {
+    expect(justBash(fromMemory({})).defaultApproval).toBe("allow");
   });
 
   it("describe() declares full syntax, no symlinks, no network, non-streaming output, persistent cwd, and execution limits", () => {

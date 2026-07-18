@@ -4,6 +4,11 @@
  * without the host hand-assembling `createFileTools({...})` the way core's own
  * `test/integration.test.ts` demonstrates as the "host" seam this ticket automates.
  * Also covers the `workspace` (NimboFS & NimboExec) overload's generic type retention.
+ *
+ * P13-5-2（docs/tech/single-ledger.md）迁移：断言从 `SessionEvent`/
+ * `SessionItem` 改为读账本（`session.toJSON().messages` 的部件）：
+ * `toolCallItems`/`fileChangeItems`（helpers.ts）现在从账本 flatMap 工具/
+ * `data-file-change` 部件，`status: "completed"` 换成 `state: "output-available"`。
  */
 import { describe, expect, it } from "vitest";
 import { defineAgent, MemoryFS, miniBash } from "../src/index.js";
@@ -23,41 +28,42 @@ describe("default assembly: fs defaults to MemoryFS, file tools eight-set defaul
     expect(result.finalResponse).toBe("hi");
   });
 
-  it("write_file (mock model tool call) actually writes the default MemoryFS, derives a file_change item, and is visible via session.fs.diff()", async () => {
+  it("write-file (mock model tool call) actually writes the default MemoryFS, derives a data-file-change part, and is visible via session.fs.diff()", async () => {
     const model = mockModel(() => ({
-      doStream: [toolCallChunk("call_1", "write_file", { path: "/notes.txt", content: "hello nimbo" }), stopChunk("done")],
+      doStream: [toolCallChunk("call_1", "write-file", { path: "/notes.txt", content: "hello nimbo" }), stopChunk("done")],
     }));
     const agent = defineAgent({ model });
     const session = createSession(agent);
 
-    const events = await drainStream(session.stream("write a file"));
+    await drainStream(session.stream("write a file"));
+    const messages = session.toJSON().messages;
 
-    const calls = toolCallItems(events);
+    const calls = toolCallItems(messages);
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.status).toBe("completed");
+    expect(calls[0]?.state).toBe("output-available");
 
-    const changes = fileChangeItems(events);
-    expect(changes).toEqual([{ id: changes[0]?.id, type: "file_change", changes: [{ path: "/notes.txt", kind: "add" }] }]);
+    const changes = fileChangeItems(messages);
+    expect(changes).toEqual([{ type: "data-file-change", id: changes[0]?.id, data: { changes: [{ path: "/notes.txt", kind: "add" }] } }]);
 
     expect(new TextDecoder().decode(await session.fs.readFile("/notes.txt"))).toBe("hello nimbo");
     const diff = await session.fs.diff();
     expect(diff).toEqual([{ path: "/notes.txt", kind: "created", after: "hello nimbo", patch: expect.any(String) }]);
   });
 
-  it("readState is shared internally: write_file then edit_file (same turn, no explicit read_file) succeeds", async () => {
+  it("readState is shared internally: write-file then edit-file (same turn, no explicit read-file) succeeds", async () => {
     const model = mockModel(() => ({
       doStream: [
-        toolCallChunk("call_1", "write_file", { path: "/a.txt", content: "hello world" }),
-        toolCallChunk("call_2", "edit_file", { path: "/a.txt", old_string: "world", new_string: "nimbo" }),
+        toolCallChunk("call_1", "write-file", { path: "/a.txt", content: "hello world" }),
+        toolCallChunk("call_2", "edit-file", { path: "/a.txt", old_string: "world", new_string: "nimbo" }),
         stopChunk("done"),
       ],
     }));
     const agent = defineAgent({ model });
     const session = createSession(agent);
 
-    const events = await drainStream(session.stream("write then edit"));
-    const calls = toolCallItems(events);
-    expect(calls.map((c) => c.status)).toEqual(["completed", "completed"]);
+    await drainStream(session.stream("write then edit"));
+    const calls = toolCallItems(session.toJSON().messages);
+    expect(calls.map((c) => c.state)).toEqual(["output-available", "output-available"]);
     expect(new TextDecoder().decode(await session.fs.readFile("/a.txt"))).toBe("hello nimbo");
 
     // session.readState is the same store the internally-wired file tools use.
@@ -65,12 +71,12 @@ describe("default assembly: fs defaults to MemoryFS, file tools eight-set defaul
   });
 
   it("session.derivedData is the same collector the internal file tools report into (host can still record its own derived data on it)", async () => {
-    const model = mockModel(() => ({ doStream: [toolCallChunk("call_1", "write_file", { path: "/x.txt", content: "y" }), stopChunk("done")] }));
+    const model = mockModel(() => ({ doStream: [toolCallChunk("call_1", "write-file", { path: "/x.txt", content: "y" }), stopChunk("done")] }));
     const agent = defineAgent({ model });
     const session = createSession(agent);
 
-    const events = await drainStream(session.stream("write"));
-    expect(fileChangeItems(events)).toHaveLength(1);
+    await drainStream(session.stream("write"));
+    expect(fileChangeItems(session.toJSON().messages)).toHaveLength(1);
     // recordPlanUpdate is exposed on the same object (SessionDerivedDataRecorder) — proving
     // this is the live session-internal collector, not a disconnected default.
     expect(typeof session.derivedData.recordFileChange).toBe("function");
@@ -101,7 +107,7 @@ describe("default assembly: SessionOptions.workspace (NimboFS & NimboExec, mode 
     const workspace = createWorkspace();
     const model = mockModel(() => ({
       doStream: [
-        toolCallChunk("call_1", "write_file", { path: "/a.txt", content: "hello" }),
+        toolCallChunk("call_1", "write-file", { path: "/a.txt", content: "hello" }),
         toolCallChunk("call_2", "bash", { command: "cat a.txt" }),
         stopChunk("done"),
       ],
@@ -114,11 +120,11 @@ describe("default assembly: SessionOptions.workspace (NimboFS & NimboExec, mode 
     // widened `session.fs` back down to `NimboFS`.
     expect(session.fs.marker()).toBe("combined-workspace");
 
-    const events = await drainStream(session.stream("write then cat via bash"));
-    const calls = toolCallItems(events);
-    expect(calls.map((c) => c.status)).toEqual(["completed", "completed"]);
-    // the bash tool call's output should contain the content written by write_file — same
-    // source, no materialize/reconcile step needed (tech-spec §4.5a mode A).
+    await drainStream(session.stream("write then cat via bash"));
+    const calls = toolCallItems(session.toJSON().messages);
+    expect(calls.map((c) => c.state)).toEqual(["output-available", "output-available"]);
+    // the bash tool call's output should contain the content written by write-file — same
+    // source, no materialize/reconcile step needed (docs/tech/core-sdk.md §4.5a mode A).
     expect(JSON.stringify(calls[1]?.output)).toContain("hello");
   });
 });

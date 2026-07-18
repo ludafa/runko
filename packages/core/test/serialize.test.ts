@@ -1,21 +1,31 @@
 /**
- * P7-2: `Session.toJSON`/`SessionOptions.resume` — tech-spec §4.2/§4.8
+ * P7-2: `Session.toJSON`/`SessionOptions.resume` — docs/tech/core-sdk.md §4.2/§4.8
  * "会话恢复" 段. `@nimbo/virtual-fs` is a devDependency here (not a runtime
  * dependency of `@nimbo/core`, see `session.ts`'s header "fs 缺省" note) —
  * this file plays the same "host" role `integration.test.ts` already does,
  * supplying a real snapshot()/restore()-capable `NimboFS` to exercise the
  * structural capability probes end to end.
+ *
+ * P13-5-2（docs/tech/single-ledger.md）迁移：messages 从 `ModelMessage[]`
+ * 换成 `NimboUIMessage[]`；"resume 后不重发 session.started" 一节随
+ * `session.started`/`turn.started` 事件整体退役直接删除（`session.ts` 头注释：
+ * 两者不再有对应 chunk，没有"重发抑制"这回事）；新增两条 resume 边界用例
+ * （state.ts 头注释"恢复校验的深层通路"）：`toJSON()` 不需要等后台的深层
+ * `validateSessionMessages()` 跑完；深层校验失败推迟到首次 `stream()`/`send()`
+ * 才 reject，不在 `createSession(...)` 调用的当下同步抛错。
  */
 import { describe, expect, it } from "vitest";
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
+import { z } from "zod";
 import { fromMemory } from "@nimbo/virtual-fs";
 import { defineAgent } from "../src/agent.js";
 import { createSession } from "../src/session.js";
+import { sessionStateSchema } from "../src/state.js";
 import type { AgentDefinition } from "../src/agent.js";
-import type { NimboFS } from "../src/types.js";
-import type { SessionEvent } from "../src/events.js";
-import type { SessionState } from "../src/state.js";
+import type { NimboFS, Tool } from "../src/types.js";
+import type { NimboUIMessage, SessionState } from "../src/state.js";
+import { toolTimingPartFor } from "./helpers/nimbo-chunks.js";
 
 function mockModel(buildOptions: () => ConstructorParameters<typeof MockLanguageModelV4>[0]): MockLanguageModelV4 {
   return new MockLanguageModelV4(buildOptions());
@@ -70,16 +80,6 @@ function asUntrustedSessionState(value: object): SessionState {
   return value as SessionState;
 }
 
-async function drainStream(gen: AsyncGenerator<SessionEvent, unknown>): Promise<SessionEvent[]> {
-  const events: SessionEvent[] = [];
-  let next = await gen.next();
-  while (!next.done) {
-    events.push(next.value);
-    next = await gen.next();
-  }
-  return events;
-}
-
 describe("Session.toJSON", () => {
   it("returns id/turn/messages/createdAt and omits fsSnapshot when includeFs isn't requested", async () => {
     const model = mockModel(() => ({ doStream: stopStream("hi") }));
@@ -106,7 +106,7 @@ describe("Session.toJSON", () => {
     await session.send("hello");
 
     const state = session.toJSON();
-    state.messages.push({ role: "user", content: "injected" });
+    state.messages.push({ id: "injected", role: "user", parts: [{ type: "text", text: "injected" }] });
 
     expect(session.toJSON().messages).toHaveLength(2);
   });
@@ -127,6 +127,63 @@ describe("Session.toJSON", () => {
     const session = createSession(baseAgent(model), { fs });
 
     expect(() => session.toJSON({ includeFs: true })).toThrow(/snapshot/i);
+  });
+
+  describe("data-tool-timing persistence (chat 可观测性：工具起止时间戳，state.ts 的 toolTimingDataSchema)", () => {
+    /** A tool-call-then-stop `doStream` script — same shape as `loop.test.ts`/`session.test.ts`'s own `toolCallThenStopModel`. */
+    function toolCallThenStopStream(toolName: string, input: unknown, stopText: string) {
+      const usage = {
+        inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
+        outputTokens: { total: 5, text: 5, reasoning: undefined },
+      } as const;
+      return [
+        {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: "stream-start" as const, warnings: [] },
+              { type: "tool-call" as const, toolCallId: "call_1", toolName, input: JSON.stringify(input) },
+              { type: "finish" as const, finishReason: { unified: "tool-calls" as const, raw: undefined }, usage },
+            ],
+            initialDelayInMs: null,
+            chunkDelayInMs: null,
+          }),
+        },
+        {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: "stream-start" as const, warnings: [] },
+              { type: "text-start" as const, id: "t1" },
+              { type: "text-delta" as const, id: "t1", delta: stopText },
+              { type: "text-end" as const, id: "t1" },
+              { type: "finish" as const, finishReason: { unified: "stop" as const, raw: undefined }, usage },
+            ],
+            initialDelayInMs: null,
+            chunkDelayInMs: null,
+          }),
+        },
+      ];
+    }
+
+    it("a tool call's data-tool-timing part survives a JSON.stringify/JSON.parse round trip, with both timestamps intact", async () => {
+      const tool: Tool = { description: "d", inputSchema: z.object({}), execute: () => "done" };
+      const model = mockModel(() => ({ doStream: toolCallThenStopStream("t", {}, "ok") }));
+      const session = createSession(baseAgent(model, { tools: { t: tool } }));
+      await session.send("go");
+
+      const before = toolTimingPartFor(session.toJSON().messages, "call_1");
+      expect(before).toBeDefined();
+      expect(before?.completedAt).toBeDefined();
+
+      // `sessionStateSchema.parse(...)` (not a type assertion) is the typed way
+      // back from the JSON round trip — `JSON.parse`'s `any` return flows
+      // straight into `.parse()`'s `unknown` parameter, no cast needed, same
+      // discipline `session.ts`'s own `jsonValueSchema.parse(JSON.parse(...))`
+      // precedent uses.
+      const roundTripped = sessionStateSchema.parse(JSON.parse(JSON.stringify(session.toJSON())));
+      const after = toolTimingPartFor(roundTripped.messages, "call_1");
+
+      expect(after).toEqual(before);
+    });
   });
 });
 
@@ -182,18 +239,45 @@ describe("SessionOptions.resume", () => {
     expect(() => createSession(baseAgent(model), { resume: malformed })).toThrow(/sessionStateSchema/);
   });
 
-  it("hasStarted semantics: a resumed session does not re-emit session.started on its next call", async () => {
-    const model1 = mockModel(() => ({ doStream: stopStream("hi") }));
-    const session1 = createSession(baseAgent(model1));
-    await session1.send("hello");
-    const state = session1.toJSON();
+  it("toJSON() called synchronously right after resume (no await in between) returns the resumed messages without waiting on the background deep validation", () => {
+    const model = mockModel(() => ({ doStream: stopStream("hi") }));
+    const priorMessages: NimboUIMessage[] = [
+      { id: "m1", role: "user", parts: [{ type: "text", text: "hi" }] },
+      { id: "m2", role: "assistant", parts: [{ type: "text", text: "hello" }], metadata: { turn: 1, status: "completed" } },
+    ];
+    const state: SessionState = { id: "sess-sync", turn: 1, createdAt: Date.now(), messages: priorMessages };
 
-    const model2 = mockModel(() => ({ doStream: stopStream("hi again") }));
-    const session2 = createSession(baseAgent(model2), { resume: state });
+    // createSession(...) is synchronous and starts the deep validateSessionMessages() pass in
+    // the background (not awaited) — toJSON() called immediately after, with no `await`
+    // anywhere in between, must still return the resumed ledger from the shallow-validated
+    // scaffold (state.ts header: "messages 先用浅层校验通过的原始账本 scaffold").
+    const session = createSession(baseAgent(model), { resume: state });
+    expect(session.toJSON().messages).toEqual(priorMessages);
+  });
 
-    const events = await drainStream(session2.stream("continue"));
+  it("a resume state that passes shallow sessionStateSchema but fails deep validateUIMessages rejects on the first stream()/send(), not at createSession()", async () => {
+    const model = mockModel(() => ({ doStream: stopStream("hi") }));
+    // `metadata.status: "not-a-real-status"` satisfies the shallow envelope check (state.ts's
+    // `isUIMessageShape` only looks at id/role/parts) but violates `nimboMessageMetadataSchema`'s
+    // status enum — exactly the "structure ok, deep semantics not ok" case `state.ts`'s header
+    // describes as deferred to `validateSessionMessages()`.
+    const malformed = asUntrustedSessionState({
+      id: "sess-bad-metadata",
+      turn: 1,
+      createdAt: Date.now(),
+      messages: [
+        {
+          id: "m1",
+          role: "assistant",
+          parts: [{ type: "text", text: "hello", state: "done" }],
+          metadata: { status: "not-a-real-status" },
+        },
+      ],
+    });
 
-    expect(events.some((e) => e.type === "session.started")).toBe(false);
-    expect(events[0]).toEqual({ type: "turn.started", turn: 2 });
+    // createSession() itself does not throw — only the async deep validation catches this.
+    const session = createSession(baseAgent(model), { resume: malformed });
+
+    await expect(session.send("continue")).rejects.toThrow();
   });
 });

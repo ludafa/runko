@@ -1,13 +1,13 @@
 /**
  * 03-skills — SKILL.md loading and progressive disclosure
- * (docs/02-tech-spec.md §4.6): a skill's name+description is injected into
+ * (docs/tech/core-sdk.md §4.6): a skill's name+description is injected into
  * the system prompt up front; the full markdown body only reaches the model
- * when it calls the built-in `load_skill` tool. Both the flat (`skills/*.md`)
+ * when it calls the built-in `load-skill` tool. Both the flat (`skills/*.md`)
  * and packaged (`skills/<name>/SKILL.md` + attachments) forms from the Claude
  * skills / eve ecosystem are supported unmodified.
  *
  * Demonstrates: Skill.fromMarkdown, Skill.fromFS, buildAvailableSkillsBlock,
- * defineAgent({ skills }), the `load_skill` built-in tool.
+ * defineAgent({ skills }), the `load-skill` built-in tool.
  *
  * Run: `node examples/03-skills.ts` (see examples/README.md for setup).
  *
@@ -19,7 +19,7 @@
  *      injects into the system prompt — just name + description, not the
  *      full markdown (progressive disclosure).
  *   2. If NIMBO_MODEL is set: the agent is asked a question that should make
- *      it call `load_skill`, and the transcript's tool_call items are
+ *      it call `load-skill`, and the transcript's tool_call items are
  *      printed. If NIMBO_MODEL is unset, this section is skipped with a
  *      clean exit.
  */
@@ -37,7 +37,7 @@ const PACKAGED_SKILL_MD = `---
 description: Checklist for reviewing a pull request before approval.
 ---
 Walk the checklist in checklist.md before approving. Read it with
-\`read_file "/.skills/pr-review/checklist.md"\` once this skill is loaded.
+\`read-file "/.skills/pr-review/checklist.md"\` once this skill is loaded.
 `;
 
 const PACKAGED_SKILL_CHECKLIST = `# PR review checklist
@@ -75,7 +75,7 @@ async function deterministicSection(): Promise<void> {
 async function modelDrivenSection(): Promise<void> {
   const model = resolveModel();
 
-  console.log("\n--- 2. agent calls load_skill on demand ---");
+  console.log("\n--- 2. agent calls load-skill on demand ---");
 
   const skills = await buildSkills();
   const agent = defineAgent({ model, skills });

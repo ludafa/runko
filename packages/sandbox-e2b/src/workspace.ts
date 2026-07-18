@@ -1,11 +1,11 @@
 /**
  * `e2bWorkspace(sandbox, opts?)`：把一个已创建好的 e2b 沙盒包成
  * `NimboFS & NimboExec`，供 `createSession(agent, { workspace })` 一次注入
- * （tech-spec §4.5a 模式 A；docs/06 §5.2/§8.2）。
+ * （docs/tech/core-sdk.md §4.5a 模式 A；docs/tech/sandbox.md §5.2/§8.2）。
  *
  * BYO 实例是唯一入口：本函数不创建、不销毁沙盒——沙盒的生命周期（创建、
  * 超时延长、暂停/恢复）完全由宿主自己管理，`e2bWorkspace()` 只是给一个已经
- * 存在的沙盒包一层 NimboFS/NimboExec 的视图（docs/06 §5.2 "nimbo 不关心沙盒
+ * 存在的沙盒包一层 NimboFS/NimboExec 的视图（docs/tech/sandbox.md §5.2 "nimbo 不关心沙盒
  * 长什么样"）。
  */
 import type { NimboExec, NimboFS } from "@nimbo/core";

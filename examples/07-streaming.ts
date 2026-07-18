@@ -1,5 +1,5 @@
 /**
- * 07-streaming — consuming `session.stream()` live (docs/02-tech-spec.md
+ * 07-streaming — consuming `session.stream()` live (docs/tech/core-sdk.md
  * §4.2 `stream()`/`SessionEvent`, §4.3 event 翻译): `session.stream(input)`
  * returns an `AsyncGenerator<SessionEvent, TurnResult>` — every `yield` is a
  * `SessionEvent` the host can render as it happens (agent_message text
@@ -31,7 +31,7 @@
  *      `MockLanguageModelV4` (from `ai/test`, the same fixture style as
  *      `packages/core/test/loop.test.ts`) is scripted with two response
  *      steps — a few text deltas explaining the plan followed by a
- *      `write_file` tool call, then a final wrap-up message — run through
+ *      `write-file` tool call, then a final wrap-up message — run through
  *      the real `createSession()` + `stream()` pipeline (`@nimbo/sdk`'s
  *      default file tools, an in-memory `NimboFS`). Every event prints as a
  *      typed timeline line (`[event.type] ...`); the agent_message deltas
@@ -58,7 +58,7 @@ const MOCK_USAGE = {
 
 /**
  * Two `doStream` steps — step 1 ends in `finishReason: "tool-calls"` so
- * `runTurn` executes `write_file` and loops for step 2, which ends in
+ * `runTurn` executes `write-file` and loops for step 2, which ends in
  * `"stop"` and closes the turn. Same two-step shape as the existing
  * `runTurn` multi-step test in packages/core/test/loop.test.ts.
  */
@@ -77,7 +77,7 @@ function buildMockModel(): MockLanguageModelV4 {
             {
               type: "tool-call",
               toolCallId: "call_1",
-              toolName: "write_file",
+              toolName: "write-file",
               input: JSON.stringify({ path: "/notes.txt", content: "hello from nimbo\n" }),
             },
             { type: "finish", finishReason: { unified: "tool-calls", raw: undefined }, usage: MOCK_USAGE },
@@ -156,7 +156,7 @@ function formatEvent(event: SessionEvent): string {
  *
  * `midLine` tracks whether the cursor is mid-typewriter-line (a raw
  * `process.stdout.write` with no trailing `\n` yet) — `logLine` closes that
- * line first if so, so a timeline line (e.g. the `write_file` tool call that
+ * line first if so, so a timeline line (e.g. the `write-file` tool call that
  * fires while text is still streaming) never gets glued onto the tail of a
  * delta instead of starting on its own line.
  */

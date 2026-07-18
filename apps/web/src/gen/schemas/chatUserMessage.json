@@ -1,9 +1,0 @@
-{
-  "type": "object",
-  "properties": {
-    "type": { "type": "string", "enum": ["user.message"] },
-    "text": { "type": "string" }
-  },
-  "required": ["type", "text"],
-  "x-readme-ref-name": "ChatUserMessage"
-}
