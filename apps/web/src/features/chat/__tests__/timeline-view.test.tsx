@@ -1,212 +1,409 @@
+import type { NimboUIMessage } from '@nimbo/core';
 import { render, screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { TimelineView } from '../components/timeline-view';
-import {
-  SAMPLE_APPROVAL_COMMAND,
-  SAMPLE_EXPIRED_APPROVAL_COMMAND,
-  SAMPLE_QUESTION_ANSWER,
-  SAMPLE_QUESTION_TEXT,
-  SAMPLE_USER_MESSAGE_TEXT,
-  sampleApprovalQuestionEnvelopes,
-  sampleChatEnvelopes,
-} from '../fixtures/sample-session-events';
-import type { ChatStreamEnvelope } from '../schema';
 
-describe('TimelineView', () => {
-  it('renders an empty state with zero envelopes and no optimistic messages', () => {
-    render(<TimelineView envelopes={[]} />);
+describe('TimelineView — empty state', () => {
+  it('renders the empty-state copy when there are no messages and no pending echoes', () => {
+    render(<TimelineView messages={[]} />);
     expect(screen.getByText('还没有消息')).toBeInTheDocument();
   });
 
-  it('aggregates agent_message increments into the final full text, with no duplicated fragments', () => {
-    const { rerender } = render(<TimelineView envelopes={[]} />);
-
-    const withDeltas: ChatStreamEnvelope[] = sampleChatEnvelopes.filter(
-      (envelope) => envelope.seq <= 18,
+  it('a pending echo alone (no materialized messages yet) is enough to skip the empty state', () => {
+    render(
+      <TimelineView
+        messages={[]}
+        pendingUserEchoes={[{ id: 1, text: '你好', afterMessageCount: 0 }]}
+      />,
     );
-    rerender(<TimelineView envelopes={withDeltas} />);
-    expect(
-      screen.getByText(
-        /根据代码分析，登录页面的密码输入框缺少显示\/隐藏切换，$/,
-      ),
-    ).toBeInTheDocument();
+    expect(screen.queryByText('还没有消息')).not.toBeInTheDocument();
+    expect(screen.getByText('你好')).toBeInTheDocument();
+  });
+});
 
-    rerender(<TimelineView envelopes={sampleChatEnvelopes} />);
-    const finalText = screen.getByText(
-      /由于直接修改文件权限被拒绝，以上是我的建议方案。$/,
+describe('TimelineView — message part rendering', () => {
+  it("renders a user message's text", () => {
+    const messages: NimboUIMessage[] = [
+      { id: 'm1', role: 'user', parts: [{ type: 'text', text: '你好啊' }] },
+    ];
+    render(<TimelineView messages={messages} />);
+    expect(screen.getByText('你好啊')).toBeInTheDocument();
+  });
+
+  it('marks a steered user message with the "插话" label', () => {
+    const messages: NimboUIMessage[] = [
+      {
+        id: 'm1',
+        role: 'user',
+        parts: [{ type: 'text', text: '等一下' }],
+        metadata: { steered: true },
+      },
+    ];
+    render(<TimelineView messages={messages} />);
+    expect(screen.getByText('插话')).toBeInTheDocument();
+  });
+
+  it('renders assistant text and reasoning parts', () => {
+    const messages: NimboUIMessage[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          { type: 'reasoning', text: '让我想想', state: 'done' },
+          { type: 'text', text: '答案是 42', state: 'done' },
+        ],
+      },
+    ];
+    render(<TimelineView messages={messages} />);
+    expect(screen.getByText('答案是 42')).toBeInTheDocument();
+    // A `state: 'done'` reasoning part starts collapsed — its trigger still shows "思考过程".
+    expect(screen.getByText('思考过程')).toBeInTheDocument();
+  });
+
+  it('renders data-file-change, data-plan-update, and data-error parts', () => {
+    const messages: NimboUIMessage[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          {
+            type: 'data-file-change',
+            id: 'fc-1',
+            data: { changes: [{ path: 'a.txt', kind: 'add' }] },
+          },
+          {
+            type: 'data-plan-update',
+            id: 'plan-update',
+            data: { items: [{ text: '写测试', completed: false }] },
+          },
+          { type: 'data-error', id: 'turn-error', data: { message: '出错了' } },
+        ],
+      },
+    ];
+    render(<TimelineView messages={messages} />);
+    expect(screen.getByTestId('file-change-badges')).toBeInTheDocument();
+    expect(screen.getByText('a.txt')).toBeInTheDocument();
+    expect(screen.getByTestId('plan-checklist')).toBeInTheDocument();
+    expect(screen.getByText('写测试')).toBeInTheDocument();
+    expect(screen.getByTestId('error-bar')).toHaveTextContent('出错了');
+  });
+
+  it('a gated tool call in approval-requested state renders ApprovalCard, not ToolCallCard', () => {
+    const messages: NimboUIMessage[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          {
+            type: 'tool-bash',
+            toolCallId: 'call-1',
+            state: 'approval-requested',
+            input: { command: 'rm -rf /tmp' },
+            approval: { id: 'call-1' },
+          },
+        ],
+      },
+    ];
+    render(<TimelineView messages={messages} />);
+    expect(screen.getByTestId('approval-card')).toBeInTheDocument();
+  });
+
+  it('a gated tool call resolved to approval-responded(denied) renders ToolCallCard with the deny reason, not ApprovalCard', async () => {
+    const messages: NimboUIMessage[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          {
+            type: 'tool-bash',
+            toolCallId: 'call-1',
+            state: 'output-denied',
+            input: { command: 'rm -rf /tmp' },
+            approval: { id: 'call-1', approved: false, reason: '太危险了' },
+          },
+        ],
+      },
+    ];
+    const { default: userEvent } = await import('@testing-library/user-event');
+    const user = userEvent.setup();
+    render(<TimelineView messages={messages} />);
+    expect(screen.queryByTestId('approval-card')).not.toBeInTheDocument();
+    expect(screen.getByText('bash')).toBeInTheDocument();
+    expect(screen.getByText('已拒绝')).toBeInTheDocument();
+
+    // The deny reason lives in ToolCallCard's collapsible content, closed by default.
+    await user.click(screen.getByRole('button', { expanded: false }));
+    expect(screen.getByText(/拒绝原因：太危险了/)).toBeInTheDocument();
+  });
+
+  it('an ask-user tool part in input-available state renders QuestionCard, not ToolCallCard', () => {
+    const messages: NimboUIMessage[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          {
+            type: 'tool-ask-user',
+            toolCallId: 'call-2',
+            state: 'input-available',
+            input: { question: '选哪个？', options: ['A', 'B'] },
+          },
+        ],
+      },
+    ];
+    render(<TimelineView messages={messages} />);
+    expect(screen.getByTestId('question-card')).toBeInTheDocument();
+    expect(screen.getByText('选哪个？')).toBeInTheDocument();
+  });
+
+  it('an ask-user tool part in output-available state also renders QuestionCard (answered), not ToolCallCard', () => {
+    const messages: NimboUIMessage[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          {
+            type: 'tool-ask-user',
+            toolCallId: 'call-2',
+            state: 'output-available',
+            input: { question: '选哪个？' },
+            output: 'A',
+          },
+        ],
+      },
+    ];
+    render(<TimelineView messages={messages} />);
+    expect(screen.getByTestId('question-card')).toBeInTheDocument();
+    expect(screen.getByText('你的回答：A')).toBeInTheDocument();
+  });
+
+  it('joins a data-tool-timing part into its matching ToolCallCard by toolCallId (chat 可观测性), coexisting with other data parts on the same message, and never renders it as an independent card of its own', () => {
+    const messages: NimboUIMessage[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          {
+            type: 'tool-write-file',
+            toolCallId: 'call-1',
+            state: 'output-available',
+            input: { path: 'a.txt' },
+            output: 'ok',
+          },
+          {
+            type: 'data-tool-timing',
+            id: 'call-1',
+            data: {
+              toolCallId: 'call-1',
+              startedAt: 1_700_000_000_000,
+              completedAt: 1_700_000_001_500,
+            },
+          },
+          {
+            type: 'data-plan-update',
+            id: 'plan-update',
+            data: { items: [{ text: '写测试', completed: false }] },
+          },
+        ],
+      },
+    ];
+    render(<TimelineView messages={messages} />);
+
+    // The timing strip is joined onto the ToolCallCard, and the sibling
+    // data-plan-update part still renders normally alongside it.
+    expect(screen.getByTestId('tool-timing')).toBeInTheDocument();
+    expect(screen.getByTestId('plan-checklist')).toBeInTheDocument();
+    // Exactly one strip — data-tool-timing itself never renders as its own
+    // card (message-entry.tsx's switch has no case for it).
+    expect(screen.getAllByTestId('tool-timing')).toHaveLength(1);
+  });
+
+  it('renders no tool-timing strip at all when the tool part has no matching data-tool-timing (old session, or input still streaming) — no crash, no empty strip', () => {
+    const messages: NimboUIMessage[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          {
+            type: 'tool-write-file',
+            toolCallId: 'call-1',
+            state: 'output-available',
+            input: { path: 'a.txt' },
+            output: 'ok',
+          },
+        ],
+      },
+    ];
+    render(<TimelineView messages={messages} />);
+    expect(screen.queryByTestId('tool-timing')).not.toBeInTheDocument();
+  });
+
+  it('a non-gated, non-ask-user tool call (e.g. write-file, output-available) renders the generic ToolCallCard', () => {
+    const messages: NimboUIMessage[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          {
+            type: 'tool-write-file',
+            toolCallId: 'call-3',
+            state: 'output-available',
+            input: { path: 'a.txt' },
+            output: 'ok',
+          },
+        ],
+      },
+    ];
+    render(<TimelineView messages={messages} />);
+    expect(screen.getByText('write-file')).toBeInTheDocument();
+    expect(screen.queryByTestId('approval-card')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('question-card')).not.toBeInTheDocument();
+  });
+
+  it("routes onSubmitApproval/onSubmitAnswer callbacks through with the part's own toolCallId", async () => {
+    const { default: userEvent } = await import('@testing-library/user-event');
+    const user = userEvent.setup();
+    const onSubmitApproval = vi.fn();
+    const messages: NimboUIMessage[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          {
+            type: 'tool-bash',
+            toolCallId: 'call-9',
+            state: 'approval-requested',
+            input: { command: 'ls' },
+            approval: { id: 'call-9' },
+          },
+        ],
+      },
+    ];
+    render(
+      <TimelineView messages={messages} onSubmitApproval={onSubmitApproval} />,
     );
-    expect(finalText).toBeInTheDocument();
-    // no leftover duplicate of the intermediate partial text once the full text has replaced it:
-    expect(screen.queryByText(/切换，$/)).not.toBeInTheDocument();
+    // 精确名：卡片现在还有「会话内都允许」按钮，/允许/ 正则会多重匹配。
+    await user.click(screen.getByRole('button', { name: '允许' }));
+    expect(onSubmitApproval).toHaveBeenCalledExactlyOnceWith('call-9', 'allow');
   });
+});
 
-  it('renders each tool_call as a single card whose status reflects the latest lifecycle event', () => {
-    render(<TimelineView envelopes={sampleChatEnvelopes} />);
-    expect(screen.getAllByText('bash')).toHaveLength(1);
-    expect(screen.getAllByText('write_file')).toHaveLength(1);
-    expect(screen.getByText('已完成')).toBeInTheDocument();
-    expect(screen.getByText('失败')).toBeInTheDocument();
-  });
-
-  it('renders file_change as one badge per change', () => {
-    render(<TimelineView envelopes={sampleChatEnvelopes} />);
-    const badges = screen.getByTestId('file-change-badges');
-    expect(within(badges).getByText('src/pages/login.tsx')).toBeInTheDocument();
-    expect(within(badges).getByText('src/pages/login.css')).toBeInTheDocument();
-  });
-
-  it('renders plan_update as a checklist reflecting the latest completed flags', () => {
-    render(<TimelineView envelopes={sampleChatEnvelopes} />);
-    const checklist = screen.getByTestId('plan-checklist');
-    const checkboxes = within(checklist).getAllByRole('checkbox');
-    expect(checkboxes).toHaveLength(2);
-    expect(checkboxes[0]).toHaveAttribute('aria-checked', 'true');
-    expect(checkboxes[1]).toHaveAttribute('aria-checked', 'false');
-  });
-
-  it('renders the error item as a red alert bar', () => {
-    render(<TimelineView envelopes={sampleChatEnvelopes} />);
-    expect(screen.getByTestId('error-bar')).toBeInTheDocument();
-  });
-
-  it('renders the turn.result sentinel as a usage summary bar', () => {
-    render(<TimelineView envelopes={sampleChatEnvelopes} />);
-    const bar = screen.getByTestId('turn-result-bar');
-    expect(bar).toHaveTextContent('1200');
-    expect(bar).toHaveTextContent('340');
-    expect(bar).toHaveTextContent('1540');
-    // cached prompt tokens shown per turn (fixture: cachedInputTokens 896)
-    expect(bar).toHaveTextContent('缓存命中 896');
-  });
-
-  it('renders the server-echoed user.message event as a single user bubble (docs/08 §2.2 "契约细化" #1)', () => {
-    render(<TimelineView envelopes={sampleChatEnvelopes} />);
-    expect(screen.getAllByText(SAMPLE_USER_MESSAGE_TEXT)).toHaveLength(1);
-  });
-
-  it('renders a steer()-injected user_message item through the same from="user" bubble as the turn-initiating user.message (local-review Finding 1 / STEER §4.2)', () => {
-    const steeredText = '补充：也顺便检查一下登录页的 API 超时时间';
-    const envelopes: ChatStreamEnvelope[] = [
-      { seq: 1, event: { type: 'session.started', sessionId: 'sess_steer' } },
-      { seq: 2, event: { type: 'user.message', text: '先看看登录页面' } },
-      { seq: 3, event: { type: 'turn.started', turn: 1 } },
+describe('TimelineView — turn-stats / turn-failed bar placement', () => {
+  it('a completed assistant message shows the turn-stats button after its parts', () => {
+    const messages: NimboUIMessage[] = [
       {
-        seq: 4,
-        event: {
-          type: 'item.completed',
-          item: { id: 'u1', type: 'user_message', text: steeredText },
-        },
+        id: 'm1',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          { type: 'text', text: '完成了', state: 'done' },
+        ],
+        metadata: { status: 'completed', usage: { totalTokens: 10 } },
       },
+    ];
+    render(<TimelineView messages={messages} />);
+    // 概览格式化（耗时首位、工具/agent 拆分、千分位、旧记录省略）由
+    // turn-stats-dialog.test.tsx 直接覆盖；这里只验证集成层的按钮落位。
+    expect(screen.getByTestId('turn-stats-button')).toBeInTheDocument();
+    expect(screen.queryByTestId('turn-failed-bar')).not.toBeInTheDocument();
+  });
+
+  it('a failed assistant message shows TurnFailedBar (not the turn-stats button)', () => {
+    const messages: NimboUIMessage[] = [
       {
-        seq: 5,
-        event: {
-          type: 'item.completed',
-          item: { id: 'a1', type: 'agent_message', text: '好的，都检查一下。' },
-        },
-      },
-      { seq: 6, event: { type: 'turn.completed', usage: {} } },
-      {
-        seq: 7,
-        event: {
-          type: 'turn.result',
-          finalResponse: '好的，都检查一下。',
-          usage: {},
+        id: 'm1',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          { type: 'text', text: '出错前的部分响应', state: 'done' },
+        ],
+        metadata: {
+          status: 'failed',
+          error: { code: 'provider_error', message: '模型服务超时' },
         },
       },
     ];
-
-    render(<TimelineView envelopes={envelopes} />);
-
-    const steeredBubble = screen.getByText(steeredText);
-    expect(steeredBubble).toBeInTheDocument();
-    // `bg-secondary` is `MessageContent`'s `from="user"`-only styling (message.tsx) — its
-    // presence is what actually distinguishes "rendered via the user bubble branch" from,
-    // say, an assistant/plain-text rendering that happens to contain the same string.
-    expect(steeredBubble.closest('.bg-secondary')).not.toBeNull();
+    render(<TimelineView messages={messages} />);
+    expect(screen.getByTestId('turn-failed-bar')).toBeInTheDocument();
+    expect(screen.getByText('模型服务超时')).toBeInTheDocument();
+    expect(screen.queryByTestId('turn-stats-button')).not.toBeInTheDocument();
   });
 
-  it('does not duplicate the user bubble once optimisticMessages no longer holds the confirmed entry', () => {
-    // Mirrors what useChatMessages does the instant the real `user.message`
-    // envelope arrives: it's already in `envelopes` (confirmed) and has been
-    // dequeued out of `optimisticMessages` — so passing an *empty* optimistic
-    // list alongside the confirmed envelope must render exactly one bubble.
-    render(
-      <TimelineView envelopes={sampleChatEnvelopes} optimisticMessages={[]} />,
-    );
-    expect(screen.getAllByText(SAMPLE_USER_MESSAGE_TEXT)).toHaveLength(1);
+  it('a "turn signal" placeholder message (empty parts, only metadata) renders just the trailing bar, no bubble', () => {
+    const messages: NimboUIMessage[] = [
+      {
+        id: 'turn-signal-1',
+        role: 'assistant',
+        parts: [],
+        metadata: {
+          status: 'failed',
+          error: { code: 'context_overflow', message: '上下文太长了' },
+        },
+      },
+    ];
+    render(<TimelineView messages={messages} />);
+    expect(screen.getByTestId('turn-failed-bar')).toBeInTheDocument();
+    expect(
+      screen.queryByText(/./, { selector: 'pre' }),
+    ).not.toBeInTheDocument();
   });
 
-  it('renders a still-unconfirmed optimistic message alongside (not instead of) the confirmed timeline', () => {
+  it('an assistant message with no metadata status shows neither bar', () => {
+    const messages: NimboUIMessage[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          { type: 'text', text: '还在说', state: 'streaming' },
+        ],
+      },
+    ];
+    render(<TimelineView messages={messages} />);
+    expect(screen.queryByTestId('turn-stats-button')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('turn-failed-bar')).not.toBeInTheDocument();
+  });
+});
+
+describe('TimelineView — pending-echo interleaving with real materialized messages', () => {
+  it('renders a pending echo between the two turns it was sent between, in document order', () => {
+    const messages: NimboUIMessage[] = [
+      { id: 'm1', role: 'user', parts: [{ type: 'text', text: '第一轮' }] },
+      {
+        id: 'm2',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          { type: 'text', text: '第一轮回复', state: 'done' },
+        ],
+        metadata: { status: 'completed' },
+      },
+      { id: 'm3', role: 'user', parts: [{ type: 'text', text: '第二轮' }] },
+    ];
     render(
       <TimelineView
-        envelopes={sampleChatEnvelopes}
-        optimisticMessages={[{ id: 1, text: '另外这个提交能顺便看一下吗？' }]}
+        messages={messages}
+        pendingUserEchoes={[
+          { id: 1, text: '回显：第二轮', afterMessageCount: 2 },
+        ]}
       />,
     );
-    expect(screen.getAllByText(SAMPLE_USER_MESSAGE_TEXT)).toHaveLength(1);
-    expect(
-      screen.getByText('另外这个提交能顺便看一下吗？'),
-    ).toBeInTheDocument();
-  });
 
-  it('applying the same envelope twice (seq re-delivery) does not duplicate its rendering', () => {
-    const duplicated: ChatStreamEnvelope[] = [
-      ...sampleChatEnvelopes,
-      sampleChatEnvelopes[sampleChatEnvelopes.length - 1],
-    ].filter(
-      (envelope): envelope is ChatStreamEnvelope => envelope !== undefined,
-    );
-    render(<TimelineView envelopes={duplicated} />);
-    expect(screen.getAllByTestId('turn-result-bar')).toHaveLength(1);
-  });
-
-  describe('approval/question cards (docs/08 §2.2c（审批链）, sampleApprovalQuestionEnvelopes)', () => {
-    it('renders the resolved approval card (allowed, call_1) with its bash command', () => {
-      render(<TimelineView envelopes={sampleApprovalQuestionEnvelopes} />);
-
-      // two bash calls get escalated in the fixture: call_1 (resolved allow)
-      // and call_3 (never resolved before turn.result — expired below).
-      const approvalCards = screen.getAllByTestId('approval-card');
-      expect(approvalCards).toHaveLength(2);
-
-      const allowedCard = approvalCards.find(
-        (card) => card.getAttribute('data-status') === 'allowed',
-      );
-      if (allowedCard === undefined) throw new Error('unreachable');
-      expect(
-        within(allowedCard).getByText(SAMPLE_APPROVAL_COMMAND),
-      ).toBeInTheDocument();
-    });
-
-    it("renders the never-resolved approval (call_3) as expired once the turn's terminal turn.result sentinel has been replayed", () => {
-      render(<TimelineView envelopes={sampleApprovalQuestionEnvelopes} />);
-
-      const approvalCards = screen.getAllByTestId('approval-card');
-      const expiredCard = approvalCards.find(
-        (card) => card.getAttribute('data-status') === 'expired',
-      );
-      if (expiredCard === undefined) throw new Error('unreachable');
-      expect(
-        within(expiredCard).getByText(SAMPLE_EXPIRED_APPROVAL_COMMAND),
-      ).toBeInTheDocument();
-    });
-
-    it('renders the answered question card (call_2) with its question and answer', () => {
-      render(<TimelineView envelopes={sampleApprovalQuestionEnvelopes} />);
-
-      const questionCard = screen.getByTestId('question-card');
-      expect(questionCard).toHaveAttribute('data-status', 'answered');
-      expect(
-        within(questionCard).getByText(SAMPLE_QUESTION_TEXT),
-      ).toBeInTheDocument();
-      expect(questionCard).toHaveTextContent(SAMPLE_QUESTION_ANSWER);
-    });
-
-    it("suppresses the ask_user tool_call's own card — no 'ask_user' tool name text appears anywhere, the question card is its sole rendering", () => {
-      render(<TimelineView envelopes={sampleApprovalQuestionEnvelopes} />);
-      expect(screen.queryByText('ask_user')).not.toBeInTheDocument();
-      expect(screen.getByTestId('question-card')).toBeInTheDocument();
-    });
+    const log = screen.getByRole('log');
+    const texts = within(log)
+      .getAllByText(/第一轮|第一轮回复|第二轮|回显：第二轮/)
+      .map((el) => el.textContent);
+    expect(texts).toEqual(['第一轮', '第一轮回复', '回显：第二轮', '第二轮']);
   });
 });

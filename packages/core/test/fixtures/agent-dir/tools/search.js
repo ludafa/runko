@@ -3,6 +3,6 @@
 export default {
   description: "Search fixture data (dummy — always returns a canned result).",
   inputSchema: { _fixtureNote: "same as greet.js", safeParse: () => ({ success: true, data: {} }) },
-  approval: "once",
+  approval: "review-once",
   execute: () => "no results (fixture)",
 };

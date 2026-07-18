@@ -1,5 +1,5 @@
 /**
- * `miniBash(fs)`：NimboExec 的纯 TS 解释器实现（tech-spec §4.5a）。不 fork
+ * `miniBash(fs)`：NimboExec 的纯 TS 解释器实现（docs/tech/core-sdk.md §4.5a）。不 fork
  * 子进程，全部命令跑在注入的 NimboFS 七方法上，只读。模式 A（同源工作区）
  * 的典型消费方式是 `createSession({ fs, exec: miniBash(fs) })`——同一个
  * fs 实例既是文件工具的后端，也是 bash 命令的执行环境，天然一致。
@@ -45,7 +45,7 @@ const DESCRIBE = [
   "             如 `cmd 2>&1 | grep x`，右侧命令能读到原本的 stderr 内容）；",
   "             不写 2>&1 时 stderr 仍照常单独输出，不受影响。",
   "不支持（解析阶段直接报错，不静默降级）：",
-  "  重定向 (>, >>, <)——写文件请改用 write_file 工具，读文件请直接 cat <file>；",
+  "  重定向 (>, >>, <)——写文件请改用 write-file 工具，读文件请直接 cat <file>；",
   "  变量展开 ($var, ${var})、子 shell/命令替换 ($(...), `...`)、后台执行 (&)、",
   "  通配符展开（*、? 等按字面字符传给命令，不做文件名展开）。",
 ].join("\n");
@@ -228,7 +228,9 @@ export function miniBash(fs: NimboFS): NimboExec {
   let instanceCwd = "/";
 
   return {
-    defaultApproval: "never",
+    // docs/tech/single-ledger.md §6.1（@nimbo/core 审批三值重构，
+    // P13-5-2c）：旧 "never" → "allow"（沙盒/只读实现，隔离即边界）。
+    defaultApproval: "allow",
     describe(): string {
       return DESCRIBE;
     },

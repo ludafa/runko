@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "properties": {
+    "frames": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": { "seq": { "type": "integer" }, "chunk": {} },
+            "x-readme-ref-name": "ChatChunkEnvelope"
+          },
+          {
+            "type": "object",
+            "properties": { "seq": { "type": "integer" }, "message": {} },
+            "required": ["seq"],
+            "x-readme-ref-name": "ChatMessageFrame"
+          }
+        ]
+      }
+    }
+  },
+  "required": ["frames"],
+  "x-readme-ref-name": "ConversationEventsList"
+}

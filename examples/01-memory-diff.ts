@@ -1,6 +1,6 @@
 /**
  * 01-memory-diff — the "SaaS inline code assistant" scenario from
- * docs/01-product-design.md §3.1: a code snippet lives only in memory, the
+ * docs/features/core-sdk.md §3.1: a code snippet lives only in memory, the
  * agent edits it, the host reads back a diff. Nothing ever touches the real
  * disk, which is the whole point of NimboFS.fromMemory — this is what makes
  * nimbo safe to run per-request in a multi-tenant service.
@@ -28,7 +28,7 @@ async function deterministicSection(): Promise<void> {
   const fs = NimboFS.fromMemory({ "src/index.ts": "var x = 1;\n" });
   await fs.writeFile("src/greeting.ts", 'export const greeting = "hi";\n');
 
-  // MemoryFS has no persistent base snapshot (tech-spec §4.4) — every entry
+  // MemoryFS has no persistent base snapshot (docs/tech/core-sdk.md §4.4) — every entry
   // it currently holds reports as `kind: "created"`, including the file the
   // constructor seeded it with.
   console.log(JSON.stringify(await fs.diff(), null, 2));

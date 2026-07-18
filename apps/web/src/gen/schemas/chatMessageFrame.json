@@ -1,0 +1,6 @@
+{
+  "type": "object",
+  "properties": { "seq": { "type": "integer" }, "message": {} },
+  "required": ["seq"],
+  "x-readme-ref-name": "ChatMessageFrame"
+}

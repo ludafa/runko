@@ -1,4 +1,4 @@
-/** 网关单测：不经客户端，直接构造 Request 断言鉴权/解析/路由三条边界（docs/06 §8.4）。 */
+/** 网关单测：不经客户端，直接构造 Request 断言鉴权/解析/路由三条边界（docs/tech/sandbox.md §8.4）。 */
 import { describe, expect, it } from "vitest";
 import { createSandboxGateway } from "../src/worker.js";
 import { errorBodySchema } from "../src/protocol.js";

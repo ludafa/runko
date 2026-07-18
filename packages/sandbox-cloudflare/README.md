@@ -1,6 +1,6 @@
 # @nimbo/sandbox-cloudflare
 
-把一个 [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/)（真实 Linux 容器）通过一个自部署的 HTTP 网关包成 `NimboFS & NimboExec`，一次注入 `createSession(agent, { workspace })`——"模式 A 同源工作区"落在真实云沙盒上的实现（对照 [docs/02-tech-spec.md §4.5a](../../docs/02-tech-spec.md) / [docs/06-sandbox-workspace-research.md §8](../../docs/06-sandbox-workspace-research.md)）。
+把一个 [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/)（真实 Linux 容器）通过一个自部署的 HTTP 网关包成 `NimboFS & NimboExec`，一次注入 `createSession(agent, { workspace })`——"模式 A 同源工作区"落在真实云沙盒上的实现（对照 [docs/tech/core-sdk.md §4.5a](../../docs/tech/core-sdk.md) / [docs/tech/sandbox.md §8](../../docs/tech/sandbox.md)）。
 
 与 E2B/Vercel 两个适配器架构不同：Cloudflare Sandbox 只能从 Cloudflare Worker 内部访问（Durable Object binding），没有办法从任意 Node 进程直连——因此本包是**两个入口**：
 
@@ -70,9 +70,9 @@ function createSandboxGateway(opts: { token: string; getSandbox: (sandboxId: str
 
 - 客户端没有"实例"概念（E2B/Vercel 是 BYO 一个已创建的沙盒对象；这里 BYO 的是一个已部署的**网关**——一个 URL + token）；`fetch` 可注入自定义传输（测试/演示用直连网关 handler，见 examples 11 的进程内演示）。
 - `CfSandboxLike` 是以 `@cloudflare/sandbox@0.12.3` 的 `ISandbox` 为蓝本手写的结构化最小子集（`exec`/`readFile`/`writeFile`/`mkdir`/`deleteFile`/`listFiles`）——`./worker` 运行时零 `import "@cloudflare/sandbox"`，真实装配（`getSandbox(env.Sandbox, id)` 的返回值）天然结构兼容这个接口，留给宿主项目经 `createSandboxGateway({ getSandbox })` 注入。
-- 全部 `POST` + JSON body，`Authorization: Bearer <token>` 鉴权，`x-nimbo-sandbox` 头选择沙盒（缺省 `"default"`），二进制经 base64，`/exec` 走 NDJSON 流式响应——完整协议见 [docs/06 §8.3](../../docs/06-sandbox-workspace-research.md)。
+- 全部 `POST` + JSON body，`Authorization: Bearer <token>` 鉴权，`x-nimbo-sandbox` 头选择沙盒（缺省 `"default"`），二进制经 base64，`/exec` 走 NDJSON 流式响应——完整协议见 [docs/tech/sandbox.md §8.3](../../docs/tech/sandbox.md)。
 
-## 已知限制（docs/06 §8.2–§8.3 / docs/03-construction-plan.md P10-3 实际改动，如实照抄不发明）
+## 已知限制（docs/tech/sandbox.md §8.2–§8.3 / docs/plans/core-sdk.md P10-3 实际改动，如实照抄不发明）
 
 - **路径锚定是隐式的、发生在网关一侧，没有 `root` 配置项**：不同于 E2B/Vercel 的客户端 `opts.root`，这里的虚拟根 `/` 锚定在**沙盒自身的默认工作目录**——网关把客户端送来的虚拟绝对路径去掉前导 `/` 就得到沙盒相对路径，两端都不需要显式配置真实目录。**副作用**：bash 命令里带前导 `/` 的绝对路径（如 `cat /notes.txt`）落在沙盒真实文件系统根，而不是虚拟工作区根——同一份文件要在文件工具和 bash 之间互通，bash 侧要用相对路径。这是"真实 FS + root 锚定"的固有语义，E2B（`/home/user`）/Vercel（`/vercel/sandbox`）同样存在，只是那两家的锚点是客户端可见的配置项，这里锚点藏在网关内部。
 - **`readdir`/`stat` 对 symlink 与其他非常规条目一律归一为 `"file"`**——真实沙盒文件系统没有 `MemoryFS` 那种"reference"概念。

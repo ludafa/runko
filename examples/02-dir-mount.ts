@@ -1,6 +1,6 @@
 /**
  * 02-dir-mount — zero-copy overlay mount of a real directory
- * (docs/02-tech-spec.md §4.4 `OverlayFS`): reads pass through to disk, every
+ * (docs/tech/core-sdk.md §4.4 `OverlayFS`): reads pass through to disk, every
  * write lands in an in-memory overlay, and the real directory is untouched
  * until you explicitly call `writeBack()`. This is what makes it safe to
  * hand an agent a real project directory without risking the working tree.

@@ -1,5 +1,5 @@
 /**
- * `loadAgent(dir, opts?)`：L3 目录约定层（tech-spec §4.7；P7-3 工单任务 2）——
+ * `loadAgent(dir, opts?)`：L3 目录约定层（docs/tech/core-sdk.md §4.7；P7-3 工单任务 2）——
  * eve 布局兼容："agent 目录"约定：`instructions.md`（必需，或 `opts.instructions`
  * 兜底）+ `agent.ts`/`agent.json`（model 等运行配置，动态 import()）+
  * `tools/*.ts`（文件名即工具名，动态 import()）+ `skills/`（flat `*.md` +
@@ -122,15 +122,15 @@ interface AgentConfigFromFile {
 }
 
 const ALL_BUILTIN_TOOL_NAMES: readonly string[] = [
-  "read_file",
-  "write_file",
-  "edit_file",
-  "delete_file",
-  "move_file",
-  "list_dir",
+  "read-file",
+  "write-file",
+  "edit-file",
+  "delete-file",
+  "move-file",
+  "list-dir",
   "glob",
   "grep",
-  "update_plan",
+  "update-plan",
 ];
 
 function isBuiltinToolName(value: string): value is BuiltinToolName {
@@ -281,8 +281,9 @@ function isToolLikeRecord(record: Record<string, unknown>): record is ToolLikeRe
   return typeof record.description === "string" && typeof record.execute === "function" && isZodSchemaLike(record.inputSchema);
 }
 
+/** docs/tech/single-ledger.md §6.1 三值重构：固定策略字符串是 "allow"/"review"/"review-once"/"deny"（旧 "never"/"always"/"once" 已废）。 */
 function isApprovalPolicyLike(value: unknown): value is ApprovalPolicy {
-  return value === "never" || value === "always" || value === "once" || typeof value === "function";
+  return value === "allow" || value === "review" || value === "review-once" || value === "deny" || typeof value === "function";
 }
 
 /** `tools/*.ts` 默认导出的形状核验：单一守卫 `isToolLikeRecord` 吸收 `description`/`execute`/`inputSchema`；`outputSchema` 用同一个 `isZodSchemaLike` 探针单独核验（可选字段，存在但不像 schema 时报错而非静默丢弃）。 */
@@ -359,7 +360,7 @@ async function loadSkillsDir(absoluteDir: string): Promise<Skill[]> {
 // ---- loadAgent(dir, opts?) ----
 
 /**
- * L3 目录约定层（tech-spec §4.7）：把一个 eve 布局的 agent 目录加载成
+ * L3 目录约定层（docs/tech/core-sdk.md §4.7）：把一个 eve 布局的 agent 目录加载成
  * `AgentDefinition`。`opts.model` 优先于 `agent.ts`/`agent.json` 里的 model；
  * 两者都没提供 model 时报错带指导。
  */

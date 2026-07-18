@@ -1,7 +1,10 @@
 {
   "type": "object",
   "properties": {
-    "behavior": { "type": "string", "enum": ["allow", "deny"] },
+    "behavior": {
+      "type": "string",
+      "enum": ["allow", "allow-session", "deny"]
+    },
     "message": { "type": "string" }
   },
   "required": ["behavior"],

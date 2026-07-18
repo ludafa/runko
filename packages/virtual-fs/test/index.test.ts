@@ -55,11 +55,11 @@ describe("@nimbo/virtual-fs public API surface", () => {
       onFileChange: (changes: FileChange[]) => void changes,
     };
     const tools = createFileTools(opts);
-    const names: FileToolName[] = ["read_file", "write_file", "edit_file", "delete_file", "move_file", "list_dir", "glob", "grep"];
+    const names: FileToolName[] = ["read-file", "write-file", "edit-file", "delete-file", "move-file", "list-dir", "glob", "grep"];
     expect(Object.keys(tools).sort()).toEqual([...names].sort());
 
     const fs = fromMemory({ "a.txt": "hello" });
-    await tools.read_file.execute({ path: "/a.txt" }, {
+    await tools["read-file"].execute({ path: "/a.txt" }, {
       fs,
       abortSignal: new AbortController().signal,
       callId: "call_1",

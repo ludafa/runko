@@ -1,7 +1,7 @@
 # nimbo sandbox gateway（Cloudflare Worker 模板）
 
 把 Cloudflare Sandbox 暴露给任意 Node 机器上的 `@nimbo/sandbox-cloudflare` 客户端。
-背景与协议见 [docs/06 §8.2–§8.3](../../docs/06-sandbox-workspace-research.md)。
+背景与协议见 [docs/tech/sandbox.md §8.2–§8.3](../../docs/tech/sandbox.md)。
 
 Cloudflare Sandbox 只能从 Workers 内部访问（Durable Object binding），因此接入
 nimbo 需要先把本目录部署成你自己的网关。**需要 Workers Paid 计划（$5/月起），无免费层。**
@@ -45,6 +45,6 @@ createSession(agent, { workspace });
 
 - `Dockerfile` 的镜像 tag 必须与 `package.json` 里 `@cloudflare/sandbox` 的版本一致。
 - 沙盒磁盘是临时的：Durable Object idle 睡眠（默认 10 分钟）后文件系统丢失
-  （docs/06 §2 生命周期行）；长期数据用 R2 backup / bucket mount，v1 网关不代理这些。
+  （docs/tech/sandbox.md §2 生命周期行）；长期数据用 R2 backup / bucket mount，v1 网关不代理这些。
 - 本模板通过 `file:../../packages/sandbox-cloudflare` 引用工作区包；发布到 npm 后
   改成正式版本号即可独立使用。

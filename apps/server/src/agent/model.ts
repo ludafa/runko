@@ -1,8 +1,8 @@
 import { createDeepSeek } from '@ai-sdk/deepseek';
 import type { LanguageModel } from 'ai';
 
-// DeepSeek direct-connect (docs/08-chat-agent-webapp.md §2.2 `model.ts` /
-// docs/07 §8.4): same "v4 pro" default tier as
+// DeepSeek direct-connect (docs/tech/chat-webapp.md §2.2 `model.ts` /
+// docs/tech/sandbox.md §8.4): same "v4 pro" default tier as
 // examples/12-vercel-sandbox-real-project.e2e.test.ts's
 // `DEEPSEEK_DESIGN_MODEL_ID` (confirmed there via `GET
 // {DEEPSEEK_API_BASE_URL}/models`), overridable with `NIMBO_MODEL`. Reads

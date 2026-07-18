@@ -1,53 +1,148 @@
+/**
+ * `schemas/chat.ts`'s wire vocabulary (docs/tech/single-ledger.md §5
+ * 单-3): `chunkEnvelopeSchema` (`{seq?, chunk}` — the live tail's own shape,
+ * also reused for a replayed `kind = 'chunk'` row), `messageFrameSchema`
+ * (`{seq, message}` — replay-only, a finished `kind = 'message'` row),
+ * `chatReplayFrameSchema` (their union — structurally discriminated by which
+ * of `chunk`/`message` the frame actually carries, no shared literal
+ * discriminant field), and `ConversationEventsListSchema` (`GET .../events`'s
+ * `{frames}` response envelope — NOT a bare array, `events` was the retired
+ * field name).
+ */
 import { describe, expect, it } from 'vitest';
 
 import {
-  chatStreamEventSchema,
-  sessionItemSchema,
+  ConversationEventsListSchema,
+  chatReplayFrameSchema,
+  chunkEnvelopeSchema,
+  messageFrameSchema,
 } from '../../src/schemas/chat.js';
 
-/**
- * Regression coverage for the local-review Finding 2 fix: `sessionItemSchema`
- * (and, transitively, `sessionEventSchema`/`chatStreamEventSchema`) used to
- * be missing the `user_message` variant `@nimbo/core`'s `SessionItem` union
- * gained for `Session.steer()` (docs/02-tech-spec.md §4.2) — a `user_message`
- * item arriving over `GET .../events`/`GET .../stream` replay would fail
- * `.parse()` with a `ZodError` (silently reported as end-user-visible replay
- * breakage, not a schema-shape bug). The `_...CoversAllVariants` compile-time
- * check in schemas/chat.ts now guards against this drifting again; these are
- * the runtime-level regression tests for the specific bug that motivated it.
- */
-describe('schemas/chat: sessionItemSchema', () => {
-  it('parses a user_message item (steer()-injected mid-turn message, @nimbo/core tech-spec §4.2)', () => {
-    const parsed = sessionItemSchema.parse({
-      id: 'u1',
-      type: 'user_message',
-      text: '补充：也顺便检查一下 API 超时时间',
+const sampleChunk = { type: 'text-delta', id: 't1', delta: 'hi' };
+const sampleMessage = {
+  id: 'm1',
+  role: 'assistant' as const,
+  parts: [{ type: 'text', text: 'hi' }],
+};
+
+describe('schemas/chat: chunkEnvelopeSchema', () => {
+  it('parses an envelope with no `seq` key at all — the ephemeral shape (docs/tech/single-ledger.md §5 单-3)', () => {
+    const result = chunkEnvelopeSchema.safeParse({ chunk: sampleChunk });
+    expect(result.success).toBe(true);
+  });
+
+  it('parses an envelope carrying an integer `seq` — the durable/replayed shape', () => {
+    const result = chunkEnvelopeSchema.safeParse({
+      seq: 1,
+      chunk: sampleChunk,
     });
-    expect(parsed).toEqual({
-      id: 'u1',
-      type: 'user_message',
-      text: '补充：也顺便检查一下 API 超时时间',
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a non-integer seq (e.g. 1.5)', () => {
+    const result = chunkEnvelopeSchema.safeParse({
+      seq: 1.5,
+      chunk: sampleChunk,
     });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a payload with no `chunk` field at all', () => {
+    const result = chunkEnvelopeSchema.safeParse({ seq: 1 });
+    expect(result.success).toBe(false);
+  });
+
+  // Documents actual behavior, not a claim this should be relied on: the
+  // schema only constrains `seq` with `.int()`, not `.nonnegative()` — a
+  // negative value round-trips fine here even though the server itself never
+  // produces one (`createEmitWire` in turn-runner.ts only ever counts up from
+  // `getMaxEventSeq`). Carried over verbatim from the pre-migration
+  // `chatEventEnvelopeSchema` coverage this schema replaces.
+  it('does NOT reject a negative seq — the schema has no .nonnegative() constraint', () => {
+    const result = chunkEnvelopeSchema.safeParse({
+      seq: -1,
+      chunk: sampleChunk,
+    });
+    expect(result.success).toBe(true);
   });
 });
 
-describe('schemas/chat: chatStreamEventSchema', () => {
-  it('parses an item.completed event carrying a user_message item without throwing — the direct regression for GET .../events replay ZodError-ing on a steered turn', () => {
-    const parsed = chatStreamEventSchema.parse({
-      type: 'item.completed',
-      item: {
-        id: 'u1',
-        type: 'user_message',
-        text: '补充：也顺便检查一下 API 超时时间',
-      },
+describe('schemas/chat: messageFrameSchema', () => {
+  it('parses a { seq, message } frame', () => {
+    const result = messageFrameSchema.safeParse({
+      seq: 1,
+      message: sampleMessage,
     });
-    expect(parsed).toEqual({
-      type: 'item.completed',
-      item: {
-        id: 'u1',
-        type: 'user_message',
-        text: '补充：也顺便检查一下 API 超时时间',
-      },
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a frame with no seq at all — unlike chunkEnvelopeSchema, seq is required here (replay-only, always a persisted row)', () => {
+    const result = messageFrameSchema.safeParse({ message: sampleMessage });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a frame with no message field', () => {
+    const result = messageFrameSchema.safeParse({ seq: 1 });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('schemas/chat: chatReplayFrameSchema (union, structurally discriminated)', () => {
+  it('accepts a chunk-shaped frame', () => {
+    const result = chatReplayFrameSchema.safeParse({
+      seq: 1,
+      chunk: sampleChunk,
     });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts an ephemeral chunk-shaped frame with no seq', () => {
+    const result = chatReplayFrameSchema.safeParse({ chunk: sampleChunk });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts a message-shaped frame', () => {
+    const result = chatReplayFrameSchema.safeParse({
+      seq: 2,
+      message: sampleMessage,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a frame carrying neither `chunk` nor `message`', () => {
+    const result = chatReplayFrameSchema.safeParse({ seq: 1 });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('schemas/chat: ConversationEventsListSchema', () => {
+  it('parses { frames: [...] } — mixed message and chunk frames, in any order', () => {
+    const result = ConversationEventsListSchema.safeParse({
+      frames: [
+        { seq: 1, message: sampleMessage },
+        { seq: 2, chunk: sampleChunk },
+        { chunk: { type: 'text-delta', id: 't2', delta: 'more' } },
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('parses an empty frames array (a session with no events yet)', () => {
+    const result = ConversationEventsListSchema.safeParse({ frames: [] });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects the retired bare-array shape (no `frames` wrapper) — `events`/a top-level array is not this schema', () => {
+    const result = ConversationEventsListSchema.safeParse([
+      { seq: 1, message: sampleMessage },
+    ]);
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects `{ events: [...] }` — the retired field name', () => {
+    const result = ConversationEventsListSchema.safeParse({
+      events: [{ seq: 1, message: sampleMessage }],
+    });
+    expect(result.success).toBe(false);
   });
 });

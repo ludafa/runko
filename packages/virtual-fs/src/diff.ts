@@ -1,5 +1,5 @@
 /**
- * 行级 diff + 自实现 unified-diff 风格 patch 文本（tech-spec §4.4：
+ * 行级 diff + 自实现 unified-diff 风格 patch 文本（docs/tech/core-sdk.md §4.4：
  * "diff(): FileDiff[]（{ path, kind, before?, after?, patch }，patch 为自实现行级
  * unified diff，LCS/Myers 简化版，不引第三方依赖）"）。
  *

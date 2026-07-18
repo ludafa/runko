@@ -2,7 +2,7 @@
  * nimbo sandbox gateway — the only place where the real Cloudflare pieces
  * are assembled. The protocol translation itself lives in
  * `@nimbo/sandbox-cloudflare/worker` and deliberately has zero Cloudflare
- * imports (docs/06 §8.2: `@cloudflare/sandbox` can only load inside workerd,
+ * imports (docs/tech/sandbox.md §8.2: `@cloudflare/sandbox` can only load inside workerd,
  * so the package keeps `getSandbox` injectable and this template provides
  * the actual `getSandbox(env.Sandbox, id)` wiring).
  *

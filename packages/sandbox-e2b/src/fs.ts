@@ -1,5 +1,5 @@
 /**
- * NimboFS 七方法 → e2b `Filesystem` 映射（docs/06 §3.1 E2B 列 / §8.2）。
+ * NimboFS 七方法 → e2b `Filesystem` 映射（docs/tech/sandbox.md §3.1 E2B 列 / §8.2）。
  */
 import type { DirEntry, FileStat, NimboFS } from "@nimbo/core";
 import { DirectoryNotEmptyError, matchesGlob, NotFoundError } from "@nimbo/virtual-fs";
@@ -18,7 +18,7 @@ const NOT_FOUND_NAMES = ["FileNotFoundError", "NotFoundError"] as const;
 /** `list(root, { depth })` 用于 glob 的递归深度——远超"典型工作区目录嵌套层数"的量级，避免深层子目录被漏扫。 */
 const GLOB_LIST_DEPTH = 64;
 
-/** `EntryInfo.type` 非 `"file"` 一律视为目录（docs/06 §8.2："FileType 非 file 视为 dir"）；`size` 只在文件类型下有意义，仿 MemoryFS 用条件展开省略而非填 0/undefined。 */
+/** `EntryInfo.type` 非 `"file"` 一律视为目录（docs/tech/sandbox.md §8.2："FileType 非 file 视为 dir"）；`size` 只在文件类型下有意义，仿 MemoryFS 用条件展开省略而非填 0/undefined。 */
 function toFileStat(entry: E2bEntryInfo): FileStat {
   const type: FileStat["type"] = entry.type === "file" ? "file" : "dir";
   const mtime = entry.modifiedTime?.getTime();
@@ -64,7 +64,7 @@ export function createE2bFs(sandbox: E2bSandboxLike, anchor: PathAnchor): NimboF
       }
       // e2b 的 remove() 恒递归（没有"非递归删非空目录就报错"的选项）——非
       // recursive 调用必须自己先查一层子项再决定要不要拒绝，对齐 MemoryFS
-      // 的 DirectoryNotEmptyError 语义（docs/06 §8.2）。
+      // 的 DirectoryNotEmptyError 语义（docs/tech/sandbox.md §8.2）。
       if (opts?.recursive !== true && info.type !== "file") {
         const children = await sandbox.files.list(real, { depth: 1 });
         if (children.length > 0) throw new DirectoryNotEmptyError(path);
@@ -102,7 +102,7 @@ export function createE2bFs(sandbox: E2bSandboxLike, anchor: PathAnchor): NimboF
 
     async glob(pattern: string): Promise<string[]> {
       // e2b 没有原生 glob：递归列出 root 下全部条目（大 depth）+ 客户端
-      // matcher，不依赖沙盒内是否装了 find（docs/06 §4 决策点 4）。
+      // matcher，不依赖沙盒内是否装了 find（docs/tech/sandbox.md §4 决策点 4）。
       let entries: E2bEntryInfo[];
       try {
         entries = await sandbox.files.list(anchor.rootReal, { depth: GLOB_LIST_DEPTH });

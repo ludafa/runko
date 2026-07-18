@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
 import { defineTool } from "../src/tool.js";
-import type { ApprovalContext, ApprovalDecision, ApprovalPolicy, JsonValue, Tool, ToolContext } from "../src/types.js";
+import type { ApprovalContext, ApprovalOutcome, ApprovalPolicy, JsonValue, Tool, ToolContext } from "../src/types.js";
 
 function makeCtx(): ToolContext {
   return {
@@ -90,21 +90,22 @@ describe("defineTool", () => {
     // The point of this test is that the next line type-checks at all: two
     // `defineTool` results with unrelated `In`/`Out` generics both collapse
     // to `Tool` and coexist in one Record.
-    const tools: Record<string, Tool> = { read_file: readTool, search: searchTool };
+    const tools: Record<string, Tool> = { "read-file": readTool, search: searchTool };
 
-    expect(Object.keys(tools)).toEqual(["read_file", "search"]);
+    expect(Object.keys(tools)).toEqual(["read-file", "search"]);
   });
 
-  describe("approval", () => {
-    it("accepts the three approval literals at the type level", () => {
-      expectTypeOf<"never">().toExtend<ApprovalPolicy>();
-      expectTypeOf<"always">().toExtend<ApprovalPolicy>();
-      expectTypeOf<"once">().toExtend<ApprovalPolicy>();
+  describe("approval (docs/tech/single-ledger.md §6.1 三值重构)", () => {
+    it("accepts the four approval literals at the type level", () => {
+      expectTypeOf<"allow">().toExtend<ApprovalPolicy>();
+      expectTypeOf<"review">().toExtend<ApprovalPolicy>();
+      expectTypeOf<"review-once">().toExtend<ApprovalPolicy>();
+      expectTypeOf<"deny">().toExtend<ApprovalPolicy>();
     });
 
-    it("accepts an approval callback at the type level", () => {
+    it("accepts an approval callback returning ApprovalOutcome at the type level", () => {
       expectTypeOf<
-        (input: JsonValue, ctx: ApprovalContext) => Promise<ApprovalDecision> | ApprovalDecision
+        (input: JsonValue, ctx: ApprovalContext) => Promise<ApprovalOutcome> | ApprovalOutcome
       >().toExtend<ApprovalPolicy>();
     });
 
@@ -112,14 +113,20 @@ describe("defineTool", () => {
       expectTypeOf<"sometimes">().not.toExtend<ApprovalPolicy>();
     });
 
+    it("rejects the retired 'never'/'always'/'once' literals at the type level (2026-07-15 三值重构, docs/tech/single-ledger.md §6.1)", () => {
+      expectTypeOf<"never">().not.toExtend<ApprovalPolicy>();
+      expectTypeOf<"always">().not.toExtend<ApprovalPolicy>();
+      expectTypeOf<"once">().not.toExtend<ApprovalPolicy>();
+    });
+
     it("threads each of the four approval kinds through defineTool at runtime", () => {
-      const literalKinds = ["never", "always", "once"] as const;
+      const literalKinds = ["allow", "review", "review-once", "deny"] as const;
       for (const approval of literalKinds) {
         const tool = defineTool({ description: "a", inputSchema: z.object({}), approval, execute: () => "ok" });
         expect(tool.approval).toBe(approval);
       }
 
-      const callback: ApprovalPolicy = () => ({ behavior: "allow" });
+      const callback: ApprovalPolicy = () => "allow";
       const withCallback = defineTool({
         description: "a",
         inputSchema: z.object({}),

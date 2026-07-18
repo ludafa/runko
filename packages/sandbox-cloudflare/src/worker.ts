@@ -2,7 +2,7 @@
  * `./worker`：Cloudflare Sandbox 网关（部署在宿主自己的 wrangler 项目里）。
  * 把 `src/protocol.ts` 的八个端点翻译成对注入的 `CfSandboxLike` 的调用——本文件
  * **零 `@cloudflare/sandbox` import**（该包加载依赖 `cloudflare:workers` 内置模块，
- * Node 下不可加载，见 docs/06-sandbox-workspace-research.md §8.2/§4"包本体零
+ * Node 下不可加载，见 docs/tech/sandbox.md §8.2/§4"包本体零
  * cloudflare import"）：`CfSandboxLike` 是以该包 0.12.3 版本 `ISandbox` d.ts 为
  * 蓝本手写的结构化最小子集，真实装配（`getSandbox(env.Sandbox, id)` 返回值天然
  * 结构兼容本接口）留给宿主项目经 `createSandboxGateway({ getSandbox })` 注入。
@@ -272,7 +272,7 @@ async function handleStat(sandbox: CfSandboxLike, virtualPath: string): Promise<
 async function handleGlob(sandbox: CfSandboxLike, pattern: string): Promise<Response> {
   try {
     // 递归列出沙盒默认 cwd（虚拟根 "."）下的全部条目，网关侧用 matchesGlob 过滤——
-    // 不依赖沙盒内 `find` 命令是否存在，行为与 E2B/Vercel 两个适配器一致（docs/06 §4.4）。
+    // 不依赖沙盒内 `find` 命令是否存在，行为与 E2B/Vercel 两个适配器一致（docs/tech/sandbox.md §4.4）。
     const listing = await sandbox.listFiles(".", { recursive: true });
     const paths = listing.files
       .filter((f) => f.type !== "directory") // NimboFS.glob 只匹配文件（MemoryFS 先例）

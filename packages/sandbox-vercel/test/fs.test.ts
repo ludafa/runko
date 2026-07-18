@@ -1,5 +1,5 @@
 /**
- * NimboFS 七方法契约（docs/06 §3.1 / §8.2 Vercel 列）：ENOENT → NotFoundError，
+ * NimboFS 七方法契约（docs/tech/sandbox.md §3.1 / §8.2 Vercel 列）：ENOENT → NotFoundError，
  * 非递归 rm 对空/非空目录的分流（`src/fs.ts` 头注释记录的实测发现——node
  * `fs.rm()` 不能承担这个语义，必须靠 `fs.rmdir()`），glob 递归 + matcher，
  * mtime 整数 ms，root 锚定，readdir/mkdir/writeFile 的父目录语义。
@@ -7,7 +7,7 @@
 import { DirectoryNotEmptyError, NotFoundError } from "@nimbo/virtual-fs";
 import { describe, expect, it } from "vitest";
 import { vercelWorkspace } from "../src/index.js";
-import { FakeVercelSandbox } from "./helpers.js";
+import { FakeVercelSandbox, writeChunks } from "./helpers.js";
 
 describe("readFile", () => {
   it("reads a file anchored under root", async () => {
@@ -174,24 +174,75 @@ describe("rm", () => {
   });
 });
 
+/**
+ * `glob()` is now a single `node -e`-script round-trip (docs/tech/sandbox.md §4 native search fast
+ * path, `src/fs.ts` header) with the old per-file `readdir` + `matchesGlob` walk (`walkFiles`) kept
+ * only as the fallback for when the sandbox has no usable `node` (`exitCode: 127`/rejection —
+ * `FakeVercelSandbox`'s default `runCommandImpl` resolves `{exitCode:0}` with empty stdout, which is
+ * neither of those — it's a script-ran-but-produced-garbage-output case, covered separately in
+ * search.test.ts's "script really executed but failed" scenarios). The two sub-`describe`s below
+ * exercise the native round-trip (writing the script's expected stdout JSON directly, since the
+ * fake never actually executes the `-e` argument) and the `walkFiles` fallback respectively.
+ */
 describe("glob", () => {
-  it("recursively walks directories (readdir + matchesGlob), returns only files, sorted", async () => {
-    const sandbox = new FakeVercelSandbox({
-      files: {
-        "/src/index.ts": "a",
-        "/src/sub/deep.ts": "b",
-        "/README.md": "c",
-      },
+  describe("native round-trip (single runCommand call, JSON stdout parsed into paths)", () => {
+    it("returns only files, sorted, from a single runCommand call", async () => {
+      const sandbox = new FakeVercelSandbox({
+        files: { "/src/index.ts": "a", "/src/sub/deep.ts": "b", "/README.md": "c" },
+        runCommandImpl: async (call) => {
+          await writeChunks(call.stdout, [JSON.stringify({ paths: ["/src/index.ts", "/src/sub/deep.ts"], total: 2 })]);
+          return { exitCode: 0 };
+        },
+      });
+      const ws = vercelWorkspace(sandbox);
+      const matches = await ws.glob("**/*.ts");
+      expect(matches).toEqual(["/src/index.ts", "/src/sub/deep.ts"]);
+      expect(sandbox.calls).toHaveLength(1);
+      expect(sandbox.calls[0]?.cmd).toBe("node");
     });
-    const ws = vercelWorkspace(sandbox);
-    const matches = await ws.glob("**/*.ts");
-    expect(matches).toEqual(["/src/index.ts", "/src/sub/deep.ts"]);
+
+    it("returns an empty array when nothing matches, without throwing", async () => {
+      const sandbox = new FakeVercelSandbox({
+        files: { "/a.txt": "x" },
+        runCommandImpl: async (call) => {
+          await writeChunks(call.stdout, [JSON.stringify({ paths: [], total: 0 })]);
+          return { exitCode: 0 };
+        },
+      });
+      const ws = vercelWorkspace(sandbox);
+      expect(await ws.glob("**/*.nomatch")).toEqual([]);
+    });
   });
 
-  it("returns an empty array when nothing matches, without throwing", async () => {
-    const sandbox = new FakeVercelSandbox({ files: { "/a.txt": "x" } });
-    const ws = vercelWorkspace(sandbox);
-    expect(await ws.glob("**/*.nomatch")).toEqual([]);
+  describe("walkFiles fallback (node unavailable: exit 127)", () => {
+    it("recursively walks directories (readdir + matchesGlob), returns only files, sorted", async () => {
+      const sandbox = new FakeVercelSandbox({
+        files: {
+          "/src/index.ts": "a",
+          "/src/sub/deep.ts": "b",
+          "/README.md": "c",
+        },
+        runCommandImpl: async () => ({ exitCode: 127 }),
+      });
+      const ws = vercelWorkspace(sandbox);
+      const matches = await ws.glob("**/*.ts");
+      expect(matches).toEqual(["/src/index.ts", "/src/sub/deep.ts"]);
+    });
+
+    it("returns an empty array when nothing matches, without throwing", async () => {
+      const sandbox = new FakeVercelSandbox({ files: { "/a.txt": "x" }, runCommandImpl: async () => ({ exitCode: 127 }) });
+      const ws = vercelWorkspace(sandbox);
+      expect(await ws.glob("**/*.nomatch")).toEqual([]);
+    });
+
+    it("does not apply the grep/glob-tool default ignore (.git/node_modules) — glob() itself never filtered them, even before the native rewrite", async () => {
+      const sandbox = new FakeVercelSandbox({
+        files: { "/.git/config": "a", "/node_modules/pkg/index.js": "b", "/src/a.ts": "c" },
+        runCommandImpl: async () => ({ exitCode: 127 }),
+      });
+      const ws = vercelWorkspace(sandbox);
+      expect(await ws.glob("**/*")).toEqual(expect.arrayContaining(["/.git/config", "/node_modules/pkg/index.js", "/src/a.ts"]));
+    });
   });
 });
 
@@ -210,7 +261,7 @@ describe("root anchoring", () => {
     expect(entries.map((e) => e.name)).toEqual(["a.txt"]);
   });
 
-  it("rejects '..' escaping past the virtual root for the fs tools (PathEscapesRootError), same boundary as MemoryFS/DirFS — src/path.ts's documented interpretation of docs/06 §3.1", async () => {
+  it("rejects '..' escaping past the virtual root for the fs tools (PathEscapesRootError), same boundary as MemoryFS/DirFS — src/path.ts's documented interpretation of docs/tech/sandbox.md §3.1", async () => {
     const sandbox = new FakeVercelSandbox({ files: { "/a.txt": "hi" } });
     const ws = vercelWorkspace(sandbox);
     await expect(ws.readFile("/../etc/passwd")).rejects.toThrow(/escapes root/);

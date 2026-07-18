@@ -1,129 +1,156 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { PendingApprovalPart } from '../components/approval-card';
 import { ApprovalCard } from '../components/approval-card';
-import type { ApprovalTimelineEntry } from '../timeline';
 
-function makeEntry(
-  overrides: Partial<ApprovalTimelineEntry> = {},
-): ApprovalTimelineEntry {
+function pendingBashPart(
+  overrides: Partial<PendingApprovalPart> = {},
+): PendingApprovalPart {
   return {
-    kind: 'approval',
-    callId: 'call_1',
-    toolName: 'bash',
-    input: { command: 'git push origin main' },
-    status: 'pending',
-    seq: 1,
+    type: 'tool-bash',
+    toolCallId: 'call-1',
+    state: 'approval-requested',
+    input: { command: 'rm -rf /tmp/x' },
+    approval: { id: 'call-1' },
     ...overrides,
   };
 }
 
-describe('ApprovalCard (docs/08 §2.2c（审批链）)', () => {
-  it('renders a pending approval with clickable Allow/Deny buttons that call onDecide', () => {
+describe('ApprovalCard', () => {
+  it('renders the tool name, the bash command, and a "待审批" badge for an approval-requested part', () => {
+    render(
+      <ApprovalCard
+        part={pendingBashPart()}
+        submitting={false}
+        expired={false}
+        onDecide={() => undefined}
+      />,
+    );
+    expect(screen.getByText('bash')).toBeInTheDocument();
+    expect(screen.getByText('rm -rf /tmp/x')).toBeInTheDocument();
+    expect(screen.getByText('待审批')).toBeInTheDocument();
+  });
+
+  it('falls back to a pretty-printed JSON payload for a tool whose input has no "command" field', () => {
+    render(
+      <ApprovalCard
+        part={pendingBashPart({
+          type: 'tool-write-file',
+          input: { path: 'a.txt', content: 'hi' },
+        })}
+        submitting={false}
+        expired={false}
+        onDecide={() => undefined}
+      />,
+    );
+    expect(screen.getByText('write-file')).toBeInTheDocument();
+    expect(screen.getByText(/"path": "a.txt"/)).toBeInTheDocument();
+  });
+
+  it('clicking 允许 calls onDecide("allow") with the part\'s own callId implicit in the handler', async () => {
+    const user = userEvent.setup();
     const onDecide = vi.fn();
     render(
       <ApprovalCard
-        entry={makeEntry()}
+        part={pendingBashPart()}
         submitting={false}
+        expired={false}
         onDecide={onDecide}
       />,
     );
-
-    const card = screen.getByTestId('approval-card');
-    expect(card).toHaveAttribute('data-status', 'pending');
-
-    const allowButton = screen.getByRole('button', { name: /允许/ });
-    const denyButton = screen.getByRole('button', { name: /拒绝/ });
-    expect(allowButton).toBeEnabled();
-    expect(denyButton).toBeEnabled();
-
-    fireEvent.click(allowButton);
-    expect(onDecide).toHaveBeenCalledWith('allow');
-
-    fireEvent.click(denyButton);
-    expect(onDecide).toHaveBeenCalledWith('deny');
+    // 精确名（不用 /允许/ 正则）——否则会同时匹配「会话内都允许」，报多重匹配。
+    await user.click(screen.getByRole('button', { name: '允许' }));
+    expect(onDecide).toHaveBeenCalledExactlyOnceWith('allow');
   });
 
-  it('disables both Allow/Deny buttons while submitting', () => {
-    render(<ApprovalCard entry={makeEntry()} submitting onDecide={vi.fn()} />);
-    expect(screen.getByRole('button', { name: /允许/ })).toBeDisabled();
-    expect(screen.getByRole('button', { name: /拒绝/ })).toBeDisabled();
-  });
-
-  it('renders an allowed entry with the "已允许" badge and no action buttons', () => {
+  it('clicking 会话内都允许 calls onDecide("allow-session") — 会话级授权（docs/terms.md §四）', async () => {
+    const user = userEvent.setup();
+    const onDecide = vi.fn();
     render(
       <ApprovalCard
-        entry={makeEntry({ status: 'allowed' })}
+        part={pendingBashPart()}
         submitting={false}
-        onDecide={vi.fn()}
+        expired={false}
+        onDecide={onDecide}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: '会话内都允许' }));
+    expect(onDecide).toHaveBeenCalledExactlyOnceWith('allow-session');
+  });
+
+  it('clicking 拒绝 calls onDecide("deny")', async () => {
+    const user = userEvent.setup();
+    const onDecide = vi.fn();
+    render(
+      <ApprovalCard
+        part={pendingBashPart()}
+        submitting={false}
+        expired={false}
+        onDecide={onDecide}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: /拒绝/ }));
+    expect(onDecide).toHaveBeenCalledExactlyOnceWith('deny');
+  });
+
+  it('disables all decision buttons while submitting', () => {
+    render(
+      <ApprovalCard
+        part={pendingBashPart()}
+        submitting={true}
+        expired={false}
+        onDecide={() => undefined}
+      />,
+    );
+    for (const button of screen.getAllByRole('button')) {
+      expect(button).toBeDisabled();
+    }
+  });
+
+  it('renders an expired notice instead of the allow/deny buttons when expired', () => {
+    render(
+      <ApprovalCard
+        part={pendingBashPart()}
+        submitting={false}
+        expired={true}
+        onDecide={() => undefined}
+      />,
+    );
+    expect(screen.getByText('已失效（超时或轮次已结束）')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /允许/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /拒绝/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('sets data-status="pending" normally and "expired" when expired (for e2e/style hooks)', () => {
+    const { rerender } = render(
+      <ApprovalCard
+        part={pendingBashPart()}
+        submitting={false}
+        expired={false}
+        onDecide={() => undefined}
       />,
     );
     expect(screen.getByTestId('approval-card')).toHaveAttribute(
       'data-status',
-      'allowed',
+      'pending',
     );
-    expect(screen.getByText('已允许')).toBeInTheDocument();
-    expect(screen.queryByRole('button')).not.toBeInTheDocument();
-  });
-
-  it('renders a denied entry with its deny message and the "已拒绝" badge', () => {
-    render(
+    rerender(
       <ApprovalCard
-        entry={makeEntry({ status: 'denied', message: '太危险了' })}
+        part={pendingBashPart()}
         submitting={false}
-        onDecide={vi.fn()}
-      />,
-    );
-    expect(screen.getByTestId('approval-card')).toHaveAttribute(
-      'data-status',
-      'denied',
-    );
-    expect(screen.getByText('已拒绝')).toBeInTheDocument();
-    expect(screen.getByText(/拒绝原因：太危险了/)).toBeInTheDocument();
-    expect(screen.queryByRole('button')).not.toBeInTheDocument();
-  });
-
-  it('renders an expired entry with its own explanatory text and no action buttons', () => {
-    render(
-      <ApprovalCard
-        entry={makeEntry({ status: 'expired' })}
-        submitting={false}
-        onDecide={vi.fn()}
+        expired={true}
+        onDecide={() => undefined}
       />,
     );
     expect(screen.getByTestId('approval-card')).toHaveAttribute(
       'data-status',
       'expired',
     );
-    expect(screen.getByText(/已失效（超时或轮次已结束）/)).toBeInTheDocument();
-    expect(screen.queryByRole('button')).not.toBeInTheDocument();
-  });
-
-  it('renders a bash command as a <pre> block, not a generic JSON preview', () => {
-    render(
-      <ApprovalCard
-        entry={makeEntry({ input: { command: 'rm -rf build' } })}
-        submitting={false}
-        onDecide={vi.fn()}
-      />,
-    );
-    const commandNode = screen.getByText('rm -rf build');
-    expect(commandNode.tagName).toBe('PRE');
-    expect(screen.queryByText('Parameters')).not.toBeInTheDocument();
-  });
-
-  it('renders a non-bash tool input as a pretty-printed JSON preview under a "Parameters" heading', () => {
-    render(
-      <ApprovalCard
-        entry={makeEntry({
-          toolName: 'write_file',
-          input: { path: 'a.ts', content: 'x' },
-        })}
-        submitting={false}
-        onDecide={vi.fn()}
-      />,
-    );
-    expect(screen.getByText('Parameters')).toBeInTheDocument();
-    expect(screen.getByText(/"path": "a.ts"/)).toBeInTheDocument();
   });
 });

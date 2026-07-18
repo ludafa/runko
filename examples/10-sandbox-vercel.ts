@@ -1,14 +1,14 @@
 /**
  * 10-sandbox-vercel — the second "BYO cloud sandbox" example (see 09's header
- * for the shared background: docs/06-sandbox-workspace-research.md §8,
- * docs/03-construction-plan.md P10). This one wraps a Vercel Sandbox — a real
+ * for the shared background: docs/tech/sandbox.md §8,
+ * docs/plans/core-sdk.md P10). This one wraps a Vercel Sandbox — a real
  * Amazon Linux 2023 Firecracker microVM — instead of an E2B one.
  *
  * `@nimbo/sandbox-vercel` is, like `@nimbo/sandbox-e2b`, **not** re-exported
  * by `@nimbo/sdk` — install it explicitly (`pnpm add @nimbo/sandbox-vercel
  * @vercel/sandbox`).
  *
- * Same structural-interface story as 09 (docs/06 §8.1): `vercelWorkspace(sandbox,
+ * Same structural-interface story as 09 (docs/tech/sandbox.md §8.1): `vercelWorkspace(sandbox,
  * opts?)` accepts anything shaped like `VercelSandboxLike` (the `fs`/`runCommand`
  * subset it actually calls) — it never imports "@vercel/sandbox" at runtime.
  * The deterministic section below hands it an in-process fake and proves the
@@ -37,7 +37,7 @@
  *     `packages/sandbox-vercel/README.md` "已知限制" (a trait shared by all
  *     three sandbox adapters, not vercel-specific);
  *   - each NimboFS file-tool call is a network round trip — prefer a single
- *     bash command for scan-heavy work over many individual `glob`/`read_file`
+ *     bash command for scan-heavy work over many individual `glob`/`read-file`
  *     calls.
  *
  * Run: `node examples/10-sandbox-vercel.ts` (see examples/README.md for setup).
@@ -56,7 +56,7 @@
  *      repo's checkout has no Vercel Sandbox credentials, so this section is
  *      expected to stop at the guidance message — the real-sandbox path
  *      compiles and reads correctly but is untested end-to-end here; results
- *      get backfilled into docs/05 once a user supplies the three variables.
+ *      get backfilled into docs/plans/verification.md once a user supplies the three variables.
  */
 import { createSession, defineAgent } from "@nimbo/sdk";
 import { vercelWorkspace } from "@nimbo/sandbox-vercel";
@@ -172,7 +172,7 @@ async function realSandboxSection(): Promise<void> {
   // deleted; a demo run has nothing worth resuming, so opt out and leave the
   // account clean (a billed leftover per run otherwise). Real applications
   // that resume sessions across processes are the case that wants the
-  // persistent default (docs/06 §3.3).
+  // persistent default (docs/tech/sandbox.md §3.3).
   const sandbox = await Sandbox.create({ token, teamId, projectId, runtime: "node24", persistent: false });
   try {
     const workspace = vercelWorkspace(sandbox);
@@ -180,7 +180,7 @@ async function realSandboxSection(): Promise<void> {
     const session = createSession(agent, { workspace });
 
     const result = await session.send(
-      "用 write_file 在 /notes.txt 写一句问候语，然后用 bash 执行 `cat notes.txt`（相对路径，不要写成 /notes.txt）验证内容与写入的一致。",
+      "用 write-file 在 /notes.txt 写一句问候语，然后用 bash 执行 `cat notes.txt`（相对路径，不要写成 /notes.txt）验证内容与写入的一致。",
     );
     console.log("finalResponse:", result.finalResponse);
   } finally {

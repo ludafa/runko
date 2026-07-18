@@ -1,16 +1,20 @@
+/**
+ * docs/tech/single-ledger.md §5/§6 migration: `TurnStartedMarker`
+ * (a "第 N 轮" divider) is dropped — there is no wire signal for a turn
+ * *starting* any more (`session.started`/`turn.started` "不需要部件/chunk",
+ * `@nimbo/core`'s `loop.ts` doc comment), only for one *ending*
+ * (`message-metadata`'s `turn`/`status`), so a start divider could only ever
+ * be rendered retroactively, which isn't useful enough to keep. `TurnFailedBar`
+ * now takes the real `@nimbo/core` `NimboError` directly — the retired
+ * `TurnFailedErrorInfo` widening existed only to also cover apps/server
+ * turn-runner's old open-ended-`code: string` flat sentinel, which no longer
+ * exists (its replacement, `driveTurn`'s generator-threw catch branch,
+ * reuses the exact same `NimboError` shape as a graceful degrade — `code:
+ * 'provider_error'`).
+ */
 import type { NimboError } from '@nimbo/core';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-
-import type { TurnFailedErrorInfo } from '../timeline';
-
-export function TurnStartedMarker({ turn }: { turn: number }) {
-  return (
-    <div className="text-muted-foreground/70 flex items-center justify-center text-[0.7rem] tracking-wide uppercase">
-      第 {turn} 轮
-    </div>
-  );
-}
 
 const KNOWN_ERROR_TITLE: Record<NimboError['code'], string> = {
   max_turns: '达到最大轮次',
@@ -19,19 +23,10 @@ const KNOWN_ERROR_TITLE: Record<NimboError['code'], string> = {
   aborted: '已中止',
 };
 
-/** `code` may be a `NimboError` code (a mid-stream, still-completing turn) or apps/server turn-runner's own open-ended `code: string` (the turn crashed outright) — see `timeline.ts`'s `TurnFailedErrorInfo`. */
-function isKnownNimboErrorCode(code: string): code is NimboError['code'] {
-  return code in KNOWN_ERROR_TITLE;
-}
-
-function errorTitle(code: string): string {
-  return isKnownNimboErrorCode(code) ? KNOWN_ERROR_TITLE[code] : '本轮执行出错';
-}
-
-export function TurnFailedBar({ error }: { error: TurnFailedErrorInfo }) {
+export function TurnFailedBar({ error }: { error: NimboError }) {
   return (
     <Alert variant="destructive" data-testid="turn-failed-bar">
-      <AlertTitle>{errorTitle(error.code)}</AlertTitle>
+      <AlertTitle>{KNOWN_ERROR_TITLE[error.code]}</AlertTitle>
       <AlertDescription>{error.message}</AlertDescription>
     </Alert>
   );

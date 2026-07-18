@@ -6,6 +6,6 @@
 import { z } from 'zod/v4';
 
 export const postApprovalInputSchema = z.object({
-  behavior: z.enum(['allow', 'deny']),
+  behavior: z.enum(['allow', 'allow-session', 'deny']),
   message: z.optional(z.string()),
 });

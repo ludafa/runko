@@ -1,6 +1,6 @@
 /**
  * `createVercelExec(sandbox, root)`：NimboExec 在 `sandbox.runCommand` 上的实现
- * （docs/06 §3.2 / §8.2 Vercel 列）。
+ * （docs/tech/sandbox.md §3.2 / §8.2 Vercel 列）。
  *
  * ---- argv 语义：整段脚本是单个 argv，零字符串拼接 ----
  *
@@ -12,7 +12,7 @@
  *
  * ---- 超时：SDK 有原生 `timeoutMs` 字段，但契约仍自己用 AbortController 兜底 ----
  *
- * 工单研究文档（docs/06 §2/§8.2）说 Vercel "无 timeout 选项"，但实测当前安装的
+ * 工单研究文档（docs/tech/sandbox.md §2/§8.2）说 Vercel "无 timeout 选项"，但实测当前安装的
  * `@vercel/sandbox@2.5.0` d.ts（`session.d.ts` 的 `RunCommandParams`）其实已经
  * 有 `timeoutMs?: number`（"sandbox 侧到点 SIGKILL"）——工单研究文档这一点已过
  * 时，这里如实记录偏差。但仍按工单指示自建 `AbortController` 竞速作为 124/130
@@ -43,11 +43,11 @@ const DESCRIBE = [
   "Vercel Sandbox: real Linux (Amazon Linux 2023) in an isolated Firecracker microVM — not a virtual FS.",
   "The default user has passwordless sudo, so `sudo ...` works directly inside commands. Commands run via",
   '`bash -lc "<script>"`, a full real bash shell (pipes, redirects, globs, variable expansion — everything works',
-  "natively, nothing is emulated). Mode A (same-source workspace): the fs tools (read_file/write_file/list_dir/...)",
+  "natively, nothing is emulated). Mode A (same-source workspace): the fs tools (read-file/write-file/list-dir/...)",
   "are anchored to a configured root directory inside the sandbox (default /vercel/sandbox) and reject `..` past",
   "it, but bash itself is NOT confined to that root — it can cd/read/write anywhere in the sandbox's real",
   "filesystem; the isolation boundary is the sandbox/VM itself, not this root. Prefer bash for scanning-heavy",
-  "work (grep/find across many files) over many individual glob/read_file calls — each fs tool call is a network",
+  "work (grep/find across many files) over many individual glob/read-file calls — each fs tool call is a network",
   "round trip to the sandbox.",
 ].join(" ");
 
@@ -107,7 +107,8 @@ function collectorStream(stream: "stdout" | "stderr", onOutput: ExecOptions["onO
 
 export function createVercelExec(sandbox: VercelSandboxLike, root: string): NimboExec {
   return {
-    defaultApproval: "never",
+    // docs/tech/single-ledger.md §6.1（@nimbo/core 审批三值重构，P13-5-2c）：旧 "never" → "allow"（沙盒实现，隔离即边界）。
+    defaultApproval: "allow",
     describe(): string {
       return DESCRIBE;
     },

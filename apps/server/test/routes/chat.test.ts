@@ -1,4 +1,9 @@
-import type { NimboExec, NimboFS } from '@nimbo/core';
+import type {
+  NimboChunk,
+  NimboExec,
+  NimboFS,
+  NimboUIMessage,
+} from '@nimbo/core';
 import { MemoryFS } from '@nimbo/sdk';
 import type { MiddlewareHandler } from 'hono';
 import { createMiddleware } from 'hono/factory';
@@ -10,14 +15,34 @@ import type {
   SandboxManager,
 } from '../../src/agent/sandbox-manager.js';
 import type { Db } from '../../src/agent/store.js';
-import { getChatSession, listAgentEvents } from '../../src/agent/store.js';
+import {
+  getConversation,
+  listConversationEvents,
+  updateConversation,
+} from '../../src/agent/store.js';
 import { startTurn } from '../../src/agent/turn-runner.js';
 import { createChatApp } from '../../src/routes/chat.js';
-import type { ChatSessionDto } from '../../src/schemas/chat.js';
+import type {
+  ChatReplayFrame,
+  ChunkEnvelope,
+  ConversationDto,
+  MessageFrame,
+} from '../../src/schemas/chat.js';
+import {
+  chatReplayFrameSchema,
+  ConversationEventsListSchema,
+  ConversationSchema,
+} from '../../src/schemas/chat.js';
+import { createTelemetryStore } from '../../src/telemetry.js';
 import { createControllableSession } from '../helpers/controllable-session.js';
 import type { FakeSandboxManager } from '../helpers/fake-sandbox-manager.js';
 import { createFakeSandboxManager } from '../helpers/fake-sandbox-manager.js';
-import { stopOnlyModel, toolCallThenStopModel } from '../helpers/mock-model.js';
+import {
+  capturingModel,
+  stopOnlyModel,
+  toolCallThenStopModel,
+} from '../helpers/mock-model.js';
+import { allToolParts, collectText } from '../helpers/nimbo-chunks.js';
 import { createTestDb, seedUser } from '../helpers/test-db.js';
 
 type ChatEnv = { Variables: { userId: string } };
@@ -34,12 +59,23 @@ const unauthorizedMiddleware: MiddlewareHandler<ChatEnv> =
     c.json({ error: 'Unauthorized' }, 401),
   );
 
-interface SseFrame {
+// ---------------------------------------------------------------------------
+// SSE parsing (docs/tech/single-ledger.md §5 单-3): every frame this
+// app's SSE endpoints can ever send is a `ChatReplayFrame` — either a
+// `ChunkEnvelope` (`{seq?, chunk}`, live or replayed) or a `MessageFrame`
+// (`{seq, message}`, replay-only). Parsing through the real
+// `chatReplayFrameSchema` (rather than a hand-rolled/`as`-asserted shape)
+// gives every test a properly-typed `NimboChunk`/`NimboUIMessage` for free,
+// and doubles as live schema-conformance coverage on every SSE body this
+// file reads.
+// ---------------------------------------------------------------------------
+
+interface SseChunk {
   event?: string;
   data: string;
 }
 
-function parseSseFrames(body: string): SseFrame[] {
+function parseSseChunks(body: string): SseChunk[] {
   return body
     .split('\n\n')
     .map((chunk) => chunk.trim())
@@ -56,20 +92,59 @@ function parseSseFrames(body: string): SseFrame[] {
     });
 }
 
-interface ParsedEnvelope {
-  seq: number;
-  event: { type: string; [key: string]: unknown };
+function parseFrames(body: string): ChatReplayFrame[] {
+  return parseSseChunks(body).map((chunk) =>
+    chatReplayFrameSchema.parse(JSON.parse(chunk.data)),
+  );
 }
 
-function parseEnvelopes(body: string): ParsedEnvelope[] {
-  return parseSseFrames(body).map(
-    (frame) => JSON.parse(frame.data) as ParsedEnvelope,
+/** Narrows a frame list to its `ChunkEnvelope`s — structural discrimination (`'chunk' in frame`), same as `routes/chat.ts`'s own `frameEventName`. */
+function chunkFrames(frames: ChatReplayFrame[]): ChunkEnvelope[] {
+  return frames.filter((frame): frame is ChunkEnvelope => 'chunk' in frame);
+}
+
+/** Narrows a frame list to its `MessageFrame`s. */
+function messageFrames(frames: ChatReplayFrame[]): MessageFrame[] {
+  return frames.filter((frame): frame is MessageFrame => 'message' in frame);
+}
+
+function chunksOnly(frames: ChatReplayFrame[]): NimboChunk[] {
+  return chunkFrames(frames).map((frame) => frame.chunk);
+}
+
+function messagesOnly(frames: ChatReplayFrame[]): NimboUIMessage[] {
+  return messageFrames(frames).map((frame) => frame.message);
+}
+
+/** The `tool-approval-request`/`tool-output-*` etc. chunk carrying a given `toolCallId`, across a chunk sequence — most tool-lifecycle chunk variants share this field, letting a single lookup correlate them. */
+function findByToolCallId(
+  chunks: NimboChunk[],
+  type: NimboChunk['type'],
+  toolCallId: string,
+): NimboChunk | undefined {
+  return chunks.find(
+    (chunk) =>
+      chunk.type === type &&
+      'toolCallId' in chunk &&
+      chunk.toolCallId === toolCallId,
   );
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
+  });
+}
+
+/**
+ * Same role as turn-runner.test.ts's own `flushMicrotasks` — draining a
+ * `ControllableSession`'s wake/queue dance (promise-resolution-driven, no
+ * timers) after a `pushChunk`, so a subsequent synchronous assertion (or DB
+ * read) sees its effects landed.
+ */
+function flushMicrotasks(): Promise<void> {
+  return new Promise((resolve) => {
+    setImmediate(resolve);
   });
 }
 
@@ -110,21 +185,21 @@ function createIncrementalReader(response: Response) {
 
   return {
     async readUntil(
-      predicate: (envelopes: ParsedEnvelope[]) => boolean,
+      predicate: (frames: ChatReplayFrame[]) => boolean,
       maxAttempts = 200,
-    ): Promise<ParsedEnvelope[]> {
+    ): Promise<ChatReplayFrame[]> {
       for (let i = 0; i < maxAttempts; i += 1) {
-        const envelopes = parseEnvelopes(buffer);
-        if (predicate(envelopes) || closed) return envelopes;
+        const frames = parseFrames(buffer);
+        if (predicate(frames) || closed) return frames;
         await sleep(5);
       }
       throw new Error(
-        `timed out waiting for expected envelopes; buffer so far: ${buffer}`,
+        `timed out waiting for expected frames; buffer so far: ${buffer}`,
       );
     },
-    async drainToClose(maxAttempts = 200): Promise<ParsedEnvelope[]> {
+    async drainToClose(maxAttempts = 200): Promise<ChatReplayFrame[]> {
       for (let i = 0; i < maxAttempts; i += 1) {
-        if (closed) return parseEnvelopes(buffer);
+        if (closed) return parseFrames(buffer);
         await sleep(5);
       }
       throw new Error(`stream never closed; buffer so far: ${buffer}`);
@@ -143,11 +218,11 @@ description: Make one focused, non-generic visual/interaction improvement to an 
  * `buildFakeWorkspace()` (a `MemoryFS` pre-seeded with the frontend-design
  * skill stub, plus a trivial `NimboExec`), except `writeFile` pauses on a
  * manually-released gate — this is what lets the STEER-3B integration test
- * below hold a *real* `write_file` tool_call step open long enough to send a
+ * below hold a *real* `write-file` tool_call step open long enough to send a
  * second `POST .../messages` mid-turn, deterministically (no sleep/race).
  * Needed because that test exercises the real `@nimbo/core`/`@nimbo/sdk`
  * `Session.steer()` wiring (not a `ControllableSession` fake) — only a real
- * in-flight tool execution actually produces a real `user_message` item.
+ * in-flight tool execution actually produces a real steered user message.
  */
 function buildHoldableWorkspace(): {
   workspacePromise: Promise<NimboFS & NimboExec>;
@@ -202,8 +277,8 @@ function createHoldableSandboxManager(): SandboxManager & {
     async acquire(_input: AcquireInput): Promise<AcquiredSandbox> {
       return { workspace: await workspacePromise, defaultBranch: 'main' };
     },
-    async touch(sessionId: string): Promise<void> {
-      touchCalls.push(sessionId);
+    async touch(conversationId: string): Promise<void> {
+      touchCalls.push(conversationId);
     },
     release(): void {
       // no-op — this fake only cares about acquire()'s workspace and touch()'s call log.
@@ -223,57 +298,18 @@ function createSandboxManagerWithFailingTouchAfterFirst(): SandboxManager {
   let touchCalls = 0;
   return {
     acquire: (input) => base.acquire(input),
-    async touch(sessionId: string): Promise<void> {
+    async touch(conversationId: string): Promise<void> {
       touchCalls += 1;
       if (touchCalls === 1) {
-        await base.touch(sessionId);
+        await base.touch(conversationId);
         return;
       }
       throw new Error('sandbox temporarily unavailable');
     },
-    release: (sessionId: string) => {
-      base.release(sessionId);
+    release: (conversationId: string) => {
+      base.release(conversationId);
     },
   };
-}
-
-// ---------------------------------------------------------------------------
-// Loosely-typed SSE envelope narrowing helpers (docs/08 §2.2c（审批链）tests
-// below) — `ParsedEnvelope.event` is `{ type: string; [key: string]: unknown }`
-// (see `parseEnvelopes` above), so pulling a specific field back out needs a
-// runtime check rather than a type assertion.
-// ---------------------------------------------------------------------------
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function extractStringField(
-  record: Record<string, unknown>,
-  field: string,
-): string {
-  const value = record[field];
-  if (typeof value !== 'string') {
-    throw new Error(
-      `expected field "${field}" to be a string, got ${JSON.stringify(value)}`,
-    );
-  }
-  return value;
-}
-
-/** The first `item.completed` tool_call item matching `toolName` (if given), across a set of parsed SSE envelopes. */
-function findCompletedToolCall(
-  envelopes: ParsedEnvelope[],
-  toolName?: string,
-): Record<string, unknown> | undefined {
-  for (const envelope of envelopes) {
-    if (envelope.event.type !== 'item.completed') continue;
-    const item = envelope.event.item;
-    if (!isRecord(item) || item.type !== 'tool_call') continue;
-    if (toolName !== undefined && item.toolName !== toolName) continue;
-    return item;
-  }
-  return undefined;
 }
 
 describe('routes/chat: sessions + turn start/stream endpoints', () => {
@@ -307,25 +343,25 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
 
   async function createSession(
     app: ReturnType<typeof buildApp>,
-  ): Promise<ChatSessionDto> {
-    const response = await app.request('/api/chat/sessions', {
+  ): Promise<ConversationDto> {
+    const response = await app.request('/api/chat/conversations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     });
-    return (await response.json()) as ChatSessionDto;
+    return ConversationSchema.parse(await response.json());
   }
 
-  it('POST /api/chat/sessions provisions a sandbox (via acquire) and persists a chat_sessions row', async () => {
+  it('POST /api/chat/conversations provisions a sandbox (via acquire) and persists a conversations row with a null nimbo header (never turned yet)', async () => {
     const app = buildApp(() => stopOnlyModel('hi'));
 
-    const response = await app.request('/api/chat/sessions', {
+    const response = await app.request('/api/chat/conversations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: 'My session' }),
     });
     expect(response.status).toBe(201);
-    const created = (await response.json()) as ChatSessionDto;
+    const created = ConversationSchema.parse(await response.json());
     expect(created.title).toBe('My session');
     expect(created.repo).toBe('acme/demo');
     expect(created.status).toBe('active');
@@ -337,26 +373,28 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       'https://github.com/acme/demo.git',
     );
 
-    const row = getChatSession(db, created.id, USER_ID);
+    const row = getConversation(db, created.id, USER_ID);
     expect(row).toBeDefined();
-    expect(row?.nimboStateJson).toBeNull();
+    expect(row?.agentSessionId).toBeNull();
+    expect(row?.agentSessionCreatedAt).toBeNull();
+    expect(row?.agentSessionTurn).toBeNull();
   });
 
-  it('POST /api/chat/sessions defaults the title and 500s when GITHUB_REPO is unset', async () => {
+  it('POST /api/chat/conversations defaults the title and 500s when GITHUB_REPO is unset', async () => {
     const app = buildApp(() => stopOnlyModel('hi'));
-    const noTitleResponse = await app.request('/api/chat/sessions', {
+    const noTitleResponse = await app.request('/api/chat/conversations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     });
     expect(noTitleResponse.status).toBe(201);
-    expect(((await noTitleResponse.json()) as ChatSessionDto).title).toBe(
+    expect(ConversationSchema.parse(await noTitleResponse.json()).title).toBe(
       'New chat',
     );
 
     vi.unstubAllEnvs();
     vi.stubEnv('GITHUB_PAT', 'test-pat'); // GITHUB_REPO deliberately left unset
-    const response = await app.request('/api/chat/sessions', {
+    const response = await app.request('/api/chat/conversations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
@@ -364,27 +402,37 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
     expect(response.status).toBe(500);
   });
 
-  it('GET /api/chat/sessions only lists the current user’s sessions; GET .../:id and .../events and .../stream 404 for another user’s session', async () => {
+  it('GET /api/chat/conversations only lists the current user’s sessions; GET .../:id and .../events and .../stream 404 for another user’s session', async () => {
     const app = buildApp(() => stopOnlyModel('hi'));
     const created = await createSession(app);
 
-    const listResponse = await app.request('/api/chat/sessions');
+    const listResponse = await app.request('/api/chat/conversations');
     expect(listResponse.status).toBe(200);
-    expect(
-      ((await listResponse.json()) as ChatSessionDto[]).map((s) => s.id),
-    ).toEqual([created.id]);
+    const listBody = await listResponse.json();
+    const list =
+      Array.isArray(listBody) ?
+        listBody.map((r) => ConversationSchema.parse(r))
+      : [];
+    expect(list.map((s) => s.id)).toEqual([created.id]);
 
     const otherUserApp = buildApp(() => stopOnlyModel('hi'), 'someone-else');
     expect(
-      (await otherUserApp.request(`/api/chat/sessions/${created.id}`)).status,
-    ).toBe(404);
-    expect(
-      (await otherUserApp.request(`/api/chat/sessions/${created.id}/events`))
+      (await otherUserApp.request(`/api/chat/conversations/${created.id}`))
         .status,
     ).toBe(404);
     expect(
-      (await otherUserApp.request(`/api/chat/sessions/${created.id}/stream`))
-        .status,
+      (
+        await otherUserApp.request(
+          `/api/chat/conversations/${created.id}/events`,
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await otherUserApp.request(
+          `/api/chat/conversations/${created.id}/stream`,
+        )
+      ).status,
     ).toBe(404);
   });
 
@@ -395,13 +443,13 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       resolveModel: () => stopOnlyModel('hi'),
       authMiddleware: unauthorizedMiddleware,
     });
-    const response = await app.request('/api/chat/sessions');
+    const response = await app.request('/api/chat/conversations');
     expect(response.status).toBe(401);
     expect(sandboxManager.acquireCalls).toHaveLength(0);
   });
 
   // -------------------------------------------------------------------------
-  // POST .../messages (docs/08 §2.2b: starts a turn, 202, doesn't stream)
+  // POST .../messages (docs/tech/chat-webapp.md §2.2b: starts a turn, 202, doesn't stream)
   // -------------------------------------------------------------------------
 
   it('POST .../messages starts a turn and returns 202 { ok: true, mode: "started" } immediately (no SSE body) when no turn is already in progress', async () => {
@@ -409,7 +457,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
     const created = await createSession(app);
 
     const response = await app.request(
-      `/api/chat/sessions/${created.id}/messages`,
+      `/api/chat/conversations/${created.id}/messages`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -423,7 +471,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
   it('POST .../messages 404s for an unknown session id', async () => {
     const app = buildApp(() => stopOnlyModel('hi'));
     const response = await app.request(
-      '/api/chat/sessions/does-not-exist/messages',
+      '/api/chat/conversations/does-not-exist/messages',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -443,14 +491,15 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
     const stuck = createControllableSession();
     const { started } = startTurn({
       db,
-      sessionId: created.id,
+      conversationId: created.id,
       session: stuck,
       text: 'first',
+      priorMessageCount: 0,
     });
     expect(started).toBe(true);
 
     const response = await app.request(
-      `/api/chat/sessions/${created.id}/messages`,
+      `/api/chat/conversations/${created.id}/messages`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -462,78 +511,117 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       error: 'turn already in progress',
     });
 
-    stuck.finish({ items: [], finalResponse: 'ok', usage: {} });
+    stuck.finish({ finalResponse: 'ok', usage: {} });
   });
 
   // -------------------------------------------------------------------------
-  // GET .../stream (docs/08 §2.2b: resumable live tail)
+  // GET .../stream (docs/tech/chat-webapp.md §2.2b: resumable live tail; docs/tech/single-ledger.md §5 单-3):
+  // startTurn synthesizes+persists+broadcasts the turn-start user
+  // MessageFrame synchronously, before it ever returns (this ticket's fix) —
+  // a connection opened *after* startTurn already ran (every test/real usage
+  // below) always sees that message via replay (its very first frame), then
+  // the turn's subsequent chunks live, closing the instant the turn ends.
   // -------------------------------------------------------------------------
 
-  it('GET .../stream replays persisted history then forwards live events seamlessly — no duplicate/missing seq — and closes once the turn ends', async () => {
+  it('GET .../stream replays the turn-start user MessageFrame first (already persisted+broadcast synchronously by startTurn, before this connection ever opened), then observes the live turn as a chunk feed — durable chunks carry seq, and the connection closes the instant the turn ends', async () => {
     const app = buildApp(() => stopOnlyModel('unused'));
     const created = await createSession(app);
 
     const fake = createControllableSession();
     const { started } = startTurn({
       db,
-      sessionId: created.id,
+      conversationId: created.id,
       session: fake,
       text: '你好',
+      priorMessageCount: 0,
     });
-    expect(started).toBe(true); // user.message (seq 1) already persisted synchronously
+    expect(started).toBe(true);
 
     const response = await app.request(
-      `/api/chat/sessions/${created.id}/stream`,
+      `/api/chat/conversations/${created.id}/stream`,
     );
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('text/event-stream');
 
     const reader = createIncrementalReader(response);
-    await reader.readUntil((envs) =>
-      envs.some((e) => e.event.type === 'user.message'),
+
+    // The turn-start user MessageFrame already landed (persisted+broadcast
+    // synchronously inside startTurn, above) — this connection only ever
+    // sees it via replay, as its very first frame.
+    const afterReplay = await reader.readUntil(
+      (frames) => messageFrames(frames).length > 0,
+    );
+    expect(messageFrames(afterReplay)).toHaveLength(1);
+    expect(messageFrames(afterReplay)[0]?.seq).toBe(1);
+    expect(messageFrames(afterReplay)[0]?.message.role).toBe('user');
+    expect(collectText(messageFrames(afterReplay)[0]?.message)).toBe('你好');
+
+    fake.pushChunk({ type: 'start', messageId: 'm1' });
+    await reader.readUntil((frames) =>
+      chunksOnly(frames).some((c) => c.type === 'start'),
     );
 
-    fake.pushEvent({ type: 'session.started', sessionId: created.id });
-    await reader.readUntil((envs) =>
-      envs.some((e) => e.event.type === 'session.started'),
+    fake.pushChunk({ type: 'start-step' });
+    await reader.readUntil((frames) =>
+      chunksOnly(frames).some((c) => c.type === 'start-step'),
     );
 
-    fake.pushEvent({ type: 'turn.started', turn: 1 });
-    await reader.readUntil((envs) =>
-      envs.some((e) => e.event.type === 'turn.started'),
-    );
+    fake.setState({
+      id: 'nimbo-sess-1',
+      turn: 1,
+      createdAt: 1000,
+      messages: [],
+    });
+    fake.finish({ finalResponse: 'done streaming', usage: {} });
+    const frames = await reader.drainToClose();
 
-    fake.finish({ items: [], finalResponse: 'done streaming', usage: {} });
-    const envelopes = await reader.drainToClose();
-
-    expect(envelopes.map((e) => e.event.type)).toEqual([
-      'user.message',
-      'session.started',
-      'turn.started',
-      'turn.result',
+    expect(chunksOnly(frames).map((c) => c.type)).toEqual([
+      'start',
+      'start-step',
     ]);
-    expect(envelopes.map((e) => e.seq)).toEqual([1, 2, 3, 4]); // strictly monotonic, no gaps, no repeats
-    expect(envelopes[0]?.event.text).toBe('你好');
-    expect(envelopes.at(-1)?.event.finalResponse).toBe('done streaming');
+    // seq 1 was the turn-start message; the chunks continue from seq 2.
+    expect(chunkFrames(frames).map((f) => f.seq)).toEqual([2, 3]); // strictly monotonic, no gaps, no repeats
+    expect(messageFrames(frames)).toHaveLength(1); // still just the turn-start message — finalize appended no further messages (state.messages was empty)
   });
 
-  it('GET .../stream supports after=<seq> to skip the already-seen prefix of a live tail', async () => {
+  it('GET .../stream supports after=<seq> to skip the already-seen prefix of a still-in-progress turn’s replay', async () => {
     const app = buildApp(() => stopOnlyModel('unused'));
     const created = await createSession(app);
 
     const fake = createControllableSession();
-    startTurn({ db, sessionId: created.id, session: fake, text: 'hi' }); // seq 1: user.message
+    startTurn({
+      db,
+      conversationId: created.id,
+      session: fake,
+      text: 'hi',
+      priorMessageCount: 0,
+    });
+    // seq 1: the turn-start user MessageFrame (persisted synchronously by
+    // startTurn, above); seq 2: this chunk, still persisted (turn not
+    // finished yet).
+    fake.pushChunk({ type: 'start', messageId: 'm1' });
+    await flushMicrotasks();
 
     const response = await app.request(
-      `/api/chat/sessions/${created.id}/stream?after=1`,
+      `/api/chat/conversations/${created.id}/stream?after=2`,
     );
     const reader = createIncrementalReader(response);
 
-    fake.finish({ items: [], finalResponse: 'ok', usage: {} });
-    const envelopes = await reader.drainToClose();
+    fake.setState({
+      id: 'nimbo-sess-1',
+      turn: 1,
+      createdAt: 1000,
+      messages: [],
+    });
+    fake.finish({ finalResponse: 'ok', usage: {} });
+    const frames = await reader.drainToClose();
 
-    expect(envelopes.map((e) => e.event.type)).toEqual(['turn.result']);
-    expect(envelopes.map((e) => e.seq)).toEqual([2]);
+    // Both the message row (seq 1) and the chunk row (seq 2) are skipped by
+    // after=2 — then the chunk row is GC'd on finish (empty message slice),
+    // so there's nothing new past it besides live chunks that arrived after
+    // this connection opened (none, in this test).
+    expect(chunksOnly(frames)).toEqual([]);
+    expect(messageFrames(frames)).toEqual([]);
   });
 
   it('GET .../stream closes immediately after replay when there is no turn in progress (fresh session, never messaged)', async () => {
@@ -541,79 +629,274 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
     const created = await createSession(app);
 
     const response = await app.request(
-      `/api/chat/sessions/${created.id}/stream`,
+      `/api/chat/conversations/${created.id}/stream`,
     );
     expect(response.status).toBe(200);
     expect(await response.text()).toBe('');
   });
 
-  it('GET .../stream closes immediately after replaying a since-finished turn’s history (no live wait hangs around)', async () => {
+  it('GET .../stream called while a turn is active replays the turn-start user MessageFrame (already persisted before the connection opened) plus the live chunk feed; a later GET .../stream (after the turn has finished) instead replays all its messages as MessageFrames, the now-GC’d chunk frames gone', async () => {
     const app = buildApp(() => stopOnlyModel('unused'));
     const created = await createSession(app);
 
     const fake = createControllableSession();
-    startTurn({ db, sessionId: created.id, session: fake, text: 'hi' });
-    fake.finish({ items: [], finalResponse: 'ok', usage: {} });
+    startTurn({
+      db,
+      conversationId: created.id,
+      session: fake,
+      text: 'hi',
+      priorMessageCount: 0,
+    });
 
-    // First call: still catches the (already-registered, now-finishing) turn.
-    const first = await app.request(`/api/chat/sessions/${created.id}/stream`);
-    const firstEnvelopes = parseEnvelopes(await first.text());
-    expect(firstEnvelopes.map((e) => e.event.type)).toEqual([
-      'user.message',
-      'turn.result',
-    ]);
-
-    // Second call, after the first has already observed `turn.result`: no
-    // turn is active anymore and nothing new was persisted — must close
-    // right after an empty replay, not hang waiting for a live event.
-    const lastSeq = firstEnvelopes.at(-1)?.seq ?? 0;
-    const second = await app.request(
-      `/api/chat/sessions/${created.id}/stream?after=${String(lastSeq)}`,
+    // First call: opened *while the turn is still active* — startTurn
+    // already ran (above), so this connection's own replay picks up the
+    // turn-start user MessageFrame it missed live; its live tail then sees
+    // the chunk, and closes once the turn ends.
+    const first = await app.request(
+      `/api/chat/conversations/${created.id}/stream`,
     );
-    expect(second.status).toBe(200);
-    expect(await second.text()).toBe('');
+    const reader = createIncrementalReader(first);
+    fake.pushChunk({ type: 'start', messageId: 'm1' });
+    await reader.readUntil((frames) =>
+      chunksOnly(frames).some((c) => c.type === 'start'),
+    );
+    fake.setState({
+      id: 'nimbo-sess-1',
+      turn: 1,
+      createdAt: 1000,
+      messages: [
+        { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hi' }] },
+        {
+          id: 'm1',
+          role: 'assistant',
+          parts: [{ type: 'text', text: 'ok', state: 'done' }],
+        },
+      ],
+    });
+    fake.finish({ finalResponse: 'ok', usage: {} });
+    const firstFrames = await reader.drainToClose();
+    expect(chunksOnly(firstFrames).map((c) => c.type)).toEqual(['start']);
+    expect(messageFrames(firstFrames)).toHaveLength(1);
+    expect(messageFrames(firstFrames)[0]?.message.role).toBe('user');
+
+    // Second call: a brand-new connection, opened only now that turn-runner
+    // has finished — this is a pure replay, and the chunk row from above has
+    // been GC'd, replaced by the finalized message rows (the turn-start user
+    // message plus the assistant reply).
+    const second = await app.request(
+      `/api/chat/conversations/${created.id}/stream`,
+    );
+    const secondFrames = parseFrames(await second.text());
+    expect(chunksOnly(secondFrames)).toEqual([]);
+    expect(messagesOnly(secondFrames).map((m) => m.role)).toEqual([
+      'user',
+      'assistant',
+    ]);
   });
 
-  it('GET .../stream replays a turn-runner-level turn.failed sentinel (unexpected exception, not a yielded SessionEvent) correctly', async () => {
+  it('GET .../stream replays the turn-start user MessageFrame plus the turn-runner’s synthetic failed message-metadata chunk after an unexpected exception — the chunk is crash residue, never GC’d (finalizeTurnPersistence never ran, so it never got the chance); the conversations nimbo header stays untouched', async () => {
     const app = buildApp(() => stopOnlyModel('unused'));
     const created = await createSession(app);
 
     const fake = createControllableSession();
-    startTurn({ db, sessionId: created.id, session: fake, text: 'boom' });
+    startTurn({
+      db,
+      conversationId: created.id,
+      session: fake,
+      text: 'boom',
+      priorMessageCount: 0,
+    });
     fake.fail(new Error('provider exploded'));
 
     const response = await app.request(
-      `/api/chat/sessions/${created.id}/stream`,
+      `/api/chat/conversations/${created.id}/stream`,
     );
-    const envelopes = parseEnvelopes(await response.text());
-    expect(envelopes.map((e) => e.event.type)).toEqual([
-      'user.message',
-      'turn.failed',
+    const frames = parseFrames(await response.text());
+    expect(chunksOnly(frames)).toEqual([
+      {
+        type: 'message-metadata',
+        messageMetadata: {
+          turn: 1,
+          usage: {},
+          status: 'failed',
+          error: { code: 'provider_error', message: 'provider exploded' },
+        },
+      },
     ]);
-    expect(envelopes.at(-1)?.event).toEqual({
-      type: 'turn.failed',
-      code: 'internal_error',
-      message: 'provider exploded',
+    // The turn-start user message survives the crash — driveTurn's catch
+    // branch never runs finalizeTurnPersistence, so nothing GCs it.
+    expect(messageFrames(frames)).toHaveLength(1);
+    expect(messageFrames(frames)[0]?.message.role).toBe('user');
+    expect(collectText(messageFrames(frames)[0]?.message)).toBe('boom');
+
+    const row = getConversation(db, created.id, USER_ID);
+    expect(row?.agentSessionId).toBeNull();
+  });
+
+  // -------------------------------------------------------------------------
+  // Durable/ephemeral split (docs/tech/single-ledger.md §5 单-3) — the stream route's own half
+  // of `createEmitWire`'s split: the `replayDone` guard in `subscribeTurn`'s
+  // callback (drop an ephemeral tick that arrives before the replay has
+  // finished flushing) and `flushBuffered`'s no-`maxSentSeq` forwarding for
+  // ephemeral frames once it has.
+  // -------------------------------------------------------------------------
+
+  describe('durable/ephemeral split — GET .../stream', () => {
+    it('an ephemeral text-delta that arrives before the replay has finished flushing is dropped — it never reaches this connection’s SSE output', async () => {
+      const app = buildApp(() => stopOnlyModel('unused'));
+      const created = await createSession(app);
+
+      const fake = createControllableSession();
+      startTurn({
+        db,
+        conversationId: created.id,
+        session: fake,
+        text: 'hi',
+        priorMessageCount: 0,
+      });
+      fake.pushChunk({ type: 'text-start', id: 't1' }); // seq 2 (seq 1 is the turn-start user message, persisted synchronously by startTurn above)
+      await flushMicrotasks();
+      // A second already-persisted durable row (so the replay loop below has
+      // to write *multiple* times — the underlying TransformStream's default
+      // queuing strategy lets exactly one write buffer without a reader
+      // present, so a single-row replay would already be "done" by the time
+      // this test gets to push the ephemeral tick below; several rows is
+      // what actually exercises the backpressure window).
+      fake.pushChunk({ type: 'reasoning-start', id: 'r1' }); // seq 3
+      await flushMicrotasks();
+      expect(
+        listConversationEvents(db, created.id).map((row) =>
+          row.kind === 'message' ?
+            'message'
+          : (JSON.parse(row.payloadJson) as { type?: string }).type,
+        ),
+      ).toEqual(['message', 'text-start', 'reasoning-start']);
+
+      // Open the stream but deliberately don't read its body yet. The route's
+      // replay loop writes each persisted row via `stream.writeSSE()`, which
+      // is backed by a `TransformStream` whose default queuing strategy means
+      // a `write()` doesn't resolve until *some* `read()` has been issued on
+      // the consumer side (verified empirically for this exact helper stack —
+      // see `createIncrementalReader`'s own doc comment above). So at this
+      // point `subscribeTurn` has already registered (it runs synchronously,
+      // before the replay loop's first `await`), but the replay loop itself —
+      // and therefore `replayDone` — is still stuck partway through its two
+      // persisted-row writes.
+      const response = await app.request(
+        `/api/chat/conversations/${created.id}/stream`,
+      );
+
+      // This lands squarely in that window: the route's subscribeTurn
+      // callback runs synchronously off this emit, sees `replayDone` still
+      // false, and drops it before it's ever buffered.
+      fake.pushChunk({
+        type: 'text-delta',
+        id: 't1',
+        delta: 'stale half-typed text',
+      });
+      await flushMicrotasks();
+
+      // Now actually drain the response — this is what relieves the
+      // backpressure and lets the replay (and then the live tail) proceed.
+      const reader = createIncrementalReader(response);
+      fake.pushChunk({ type: 'text-end', id: 't1' }); // seq 4
+      await reader.readUntil((frames) =>
+        chunksOnly(frames).some((c) => c.type === 'text-end'),
+      );
+      fake.setState({
+        id: 'nimbo-sess-1',
+        turn: 1,
+        createdAt: 1000,
+        messages: [],
+      });
+      fake.finish({ finalResponse: 'done', usage: {} });
+      const frames = await reader.drainToClose();
+
+      expect(chunksOnly(frames).some((c) => c.type === 'text-delta')).toBe(
+        false,
+      );
+      expect(chunksOnly(frames).map((c) => c.type)).toEqual([
+        'text-start',
+        'reasoning-start',
+        'text-end',
+      ]);
+      expect(messageFrames(frames)).toHaveLength(1); // the turn-start message, replayed first
+      expect(chunkFrames(frames).map((f) => f.seq)).toEqual([2, 3, 4]);
     });
 
-    const row = getChatSession(db, created.id, USER_ID);
-    expect(row?.nimboStateJson).toBeNull();
+    it('a live-phase ephemeral text-delta (after the replay has fully flushed) is forwarded with no `seq` field, and the surrounding durable frames still dedupe correctly — the ephemeral frame never bumps maxSentSeq', async () => {
+      const app = buildApp(() => stopOnlyModel('unused'));
+      const created = await createSession(app);
+
+      const fake = createControllableSession();
+      startTurn({
+        db,
+        conversationId: created.id,
+        session: fake,
+        text: 'hi',
+        priorMessageCount: 0,
+      });
+      fake.pushChunk({ type: 'text-start', id: 't1' }); // seq 2 (seq 1 is the turn-start user message)
+
+      const response = await app.request(
+        `/api/chat/conversations/${created.id}/stream`,
+      );
+      const reader = createIncrementalReader(response);
+      await reader.readUntil((frames) =>
+        chunksOnly(frames).some((c) => c.type === 'text-start'),
+      );
+      // The single persisted row has now been flushed and acknowledged by the
+      // reader above — `replayDone` is true and the route is in its live-wait
+      // loop from here on.
+
+      fake.pushChunk({ type: 'text-delta', id: 't1', delta: 'typing...' });
+      const afterDelta = await reader.readUntil((frames) =>
+        chunksOnly(frames).some((c) => c.type === 'text-delta'),
+      );
+      const deltaFrame = chunkFrames(afterDelta).find(
+        (f) => f.chunk.type === 'text-delta',
+      );
+      expect(deltaFrame).toBeDefined();
+      expect(deltaFrame !== undefined && 'seq' in deltaFrame).toBe(false);
+
+      fake.pushChunk({ type: 'text-end', id: 't1' }); // seq 3
+      await reader.readUntil((frames) =>
+        chunksOnly(frames).some((c) => c.type === 'text-end'),
+      );
+
+      fake.setState({
+        id: 'nimbo-sess-1',
+        turn: 1,
+        createdAt: 1000,
+        messages: [],
+      });
+      fake.finish({ finalResponse: 'done', usage: {} });
+      const frames = await reader.drainToClose();
+
+      expect(chunksOnly(frames).map((c) => c.type)).toEqual([
+        'text-start',
+        'text-delta',
+        'text-end',
+      ]);
+      const durableFrames = chunkFrames(frames).filter(
+        (f) => f.chunk.type !== 'text-delta',
+      );
+      expect(durableFrames.map((f) => f.seq)).toEqual([2, 3]); // no gaps/dups
+    });
   });
 
   // -------------------------------------------------------------------------
   // End-to-end (real mock model) — POST to start, GET .../stream to observe
-  // the whole turn regardless of whether it had already finished by the time
-  // the tail request lands (both paths are exercised by the route the same
-  // way — see the dedicated controllable-session tests above for the exact
-  // ordering guarantees).
+  // the live chunk feed, GET .../events (post-hoc) to observe the finished
+  // messages.
   // -------------------------------------------------------------------------
 
-  it('POST + GET .../stream end-to-end: user.message first, then the turn’s events, ending with turn.result — all persisted with a monotonic seq, replayable via GET .../events', async () => {
+  it('POST + GET .../stream end-to-end: the live tail is a pure durable-chunk sequence (start…finish…message-metadata), monotonically seq’d, ephemeral text-delta unseq’d; GET .../events afterward replays the finished user+assistant messages instead', async () => {
     const app = buildApp(() => stopOnlyModel('Hello there!'));
     const created = await createSession(app);
 
     const postResponse = await app.request(
-      `/api/chat/sessions/${created.id}/messages`,
+      `/api/chat/conversations/${created.id}/messages`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -623,124 +906,246 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
     expect(postResponse.status).toBe(202);
 
     const streamResponse = await app.request(
-      `/api/chat/sessions/${created.id}/stream`,
+      `/api/chat/conversations/${created.id}/stream`,
     );
-    const body = await streamResponse.text();
-    const envelopes = parseEnvelopes(body);
-    const types = envelopes.map((e) => e.event.type);
+    const frames = parseFrames(await streamResponse.text());
+    const chunks = chunksOnly(frames);
+    const types = chunks.map((c) => c.type);
 
-    expect(types[0]).toBe('user.message');
-    expect(envelopes[0]?.event.text).toBe('你好');
-    expect(types).toContain('session.started');
-    expect(types).toContain('turn.started');
-    expect(types).toContain('turn.completed');
-    expect(types.at(-1)).toBe('turn.result');
-    expect(envelopes.map((e) => e.seq)).toEqual(envelopes.map((_, i) => i + 1));
+    expect(types).toEqual([
+      'start',
+      'start-step',
+      'text-start',
+      'text-delta',
+      'text-end',
+      'finish-step',
+      'finish',
+      'message-metadata',
+    ]);
+    const last = chunks.at(-1);
+    expect(
+      last?.type === 'message-metadata' ?
+        last.messageMetadata.status
+      : undefined,
+    ).toBe('completed');
 
-    const turnResult = envelopes.at(-1)?.event;
-    expect(turnResult?.finalResponse).toBe('Hello there!');
+    // This connection's very first frame is the turn-start user MessageFrame
+    // (POST .../messages already ran startTurn, which persisted+broadcast it
+    // synchronously before ever returning the 202 — this GET call only ever
+    // catches it via replay).
+    expect(messageFrames(frames)).toHaveLength(1);
+    expect(messageFrames(frames)[0]?.seq).toBe(1);
+
+    // durable frames carry a strictly-increasing seq (continuing from seq 2,
+    // past the turn-start message's own seq 1); the ephemeral text-delta
+    // carries none.
+    const durable = chunkFrames(frames).filter(
+      (f) => f.chunk.type !== 'text-delta',
+    );
+    expect(durable.map((f) => f.seq)).toEqual(durable.map((_, i) => i + 2));
+    const deltaFrame = chunkFrames(frames).find(
+      (f) => f.chunk.type === 'text-delta',
+    );
+    expect(deltaFrame !== undefined && 'seq' in deltaFrame).toBe(false);
 
     // acquire() ran twice total (session creation + this message), touch() once.
     expect(sandboxManager.acquireCalls).toHaveLength(2);
     expect(sandboxManager.touchCalls).toEqual([created.id]);
 
-    const persisted = listAgentEvents(db, created.id);
-    expect(persisted.map((row) => row.seq)).toEqual(
-      envelopes.map((e) => e.seq),
+    // Now GET .../events (post-hoc): the durable chunk rows this turn wrote
+    // have all been GC'd, replaced by 2 message rows.
+    const eventsResponse = await app.request(
+      `/api/chat/conversations/${created.id}/events`,
     );
-    expect(persisted.map((row) => row.type)).toEqual(types);
+    const replay = ConversationEventsListSchema.parse(
+      await eventsResponse.json(),
+    );
+    const messages = messagesOnly(replay.frames);
+    expect(messages.map((m) => m.role)).toEqual(['user', 'assistant']);
+    expect(collectText(messages[0])).toBe('你好');
+    expect(collectText(messages[1])).toBe('Hello there!');
 
-    const replay = (await (
-      await app.request(`/api/chat/sessions/${created.id}/events`)
-    ).json()) as { events: ParsedEnvelope[] };
-    expect(replay.events.map((e) => e.event.type)).toEqual(types);
-
-    const row = getChatSession(db, created.id, USER_ID);
-    expect(row?.nimboStateJson).not.toBeNull();
-    const state = JSON.parse(row?.nimboStateJson ?? '{}') as {
-      turn: number;
-      messages: unknown[];
-    };
-    expect(state.turn).toBe(1);
-    expect(state.messages.length).toBeGreaterThan(0);
+    const row = getConversation(db, created.id, USER_ID);
+    expect(row?.agentSessionId).not.toBeNull();
+    expect(row?.agentSessionTurn).toBe(1);
   });
 
-  it('GET .../events replays exactly what was persisted, and supports after= to page from a given seq', async () => {
+  it('GET .../events replays exactly what was persisted (message rows, post-hoc), and supports after= to page from a given seq', async () => {
     const app = buildApp(() => stopOnlyModel('ok'));
     const created = await createSession(app);
 
-    await app.request(`/api/chat/sessions/${created.id}/messages`, {
+    await app.request(`/api/chat/conversations/${created.id}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text: 'hi' }),
     });
     // Drain the tail to make sure the turn has actually finished landing rows
-    // before the assertions below run (same role the old SSE `.text()` drain
-    // played pre-P12-4).
-    await (await app.request(`/api/chat/sessions/${created.id}/stream`)).text();
+    // before the assertions below run.
+    await (
+      await app.request(`/api/chat/conversations/${created.id}/stream`)
+    ).text();
 
     const allEventsResponse = await app.request(
-      `/api/chat/sessions/${created.id}/events`,
+      `/api/chat/conversations/${created.id}/events`,
     );
     expect(allEventsResponse.status).toBe(200);
-    const allBody = (await allEventsResponse.json()) as {
-      events: ParsedEnvelope[];
-    };
-    const all = allBody.events;
-    expect(all.length).toBeGreaterThan(2);
-    expect(all[0]?.event.type).toBe('user.message');
+    const all = ConversationEventsListSchema.parse(
+      await allEventsResponse.json(),
+    ).frames;
+    expect(all.length).toBe(2);
+    expect(chunkFrames(all)).toEqual([]); // both this turn's chunk rows were GC'd — only message rows remain
+    expect(messagesOnly(all)[0]?.role).toBe('user');
+
+    const afterSeq = messageFrames(all)[0]?.seq;
+    expect(afterSeq).toBeDefined();
 
     const afterResponse = await app.request(
-      `/api/chat/sessions/${created.id}/events?after=${String(all[0]?.seq)}`,
+      `/api/chat/conversations/${created.id}/events?after=${String(afterSeq)}`,
     );
-    const afterBody = (await afterResponse.json()) as {
-      events: ParsedEnvelope[];
-    };
-    expect(afterBody.events).toEqual(all.slice(1));
+    const after = ConversationEventsListSchema.parse(
+      await afterResponse.json(),
+    ).frames;
+    expect(after).toEqual(all.slice(1));
   });
 
-  it('a second message on the same session resumes message history (turn increments, prior messages retained), seq climbing across turns', async () => {
+  it('a second message on the same session resumes message history (turn increments, prior messages retained)', async () => {
     const app = buildApp(() => stopOnlyModel('reply'));
     const created = await createSession(app);
 
-    await app.request(`/api/chat/sessions/${created.id}/messages`, {
+    await app.request(`/api/chat/conversations/${created.id}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text: 'first' }),
     });
-    await (await app.request(`/api/chat/sessions/${created.id}/stream`)).text();
-    const firstState = JSON.parse(
-      getChatSession(db, created.id, USER_ID)?.nimboStateJson ?? '{}',
-    ) as { turn: number; messages: unknown[] };
+    await (
+      await app.request(`/api/chat/conversations/${created.id}/stream`)
+    ).text();
+    const firstRow = getConversation(db, created.id, USER_ID);
+    const firstMessageCount = listConversationEvents(db, created.id).filter(
+      (r) => r.kind === 'message',
+    ).length;
 
-    await app.request(`/api/chat/sessions/${created.id}/messages`, {
+    await app.request(`/api/chat/conversations/${created.id}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text: 'second' }),
     });
-    await (await app.request(`/api/chat/sessions/${created.id}/stream`)).text();
-    const secondState = JSON.parse(
-      getChatSession(db, created.id, USER_ID)?.nimboStateJson ?? '{}',
-    ) as { turn: number; messages: unknown[] };
+    await (
+      await app.request(`/api/chat/conversations/${created.id}/stream`)
+    ).text();
+    const secondRow = getConversation(db, created.id, USER_ID);
+    const secondMessageCount = listConversationEvents(db, created.id).filter(
+      (r) => r.kind === 'message',
+    ).length;
 
-    expect(secondState.turn).toBe(firstState.turn + 1);
-    expect(secondState.messages.length).toBeGreaterThan(
-      firstState.messages.length,
+    expect(secondRow?.agentSessionTurn).toBe(
+      (firstRow?.agentSessionTurn ?? 0) + 1,
     );
+    expect(secondMessageCount).toBeGreaterThan(firstMessageCount);
 
-    const persisted = listAgentEvents(db, created.id);
-    expect(persisted.at(0)?.seq).toBe(1);
-    expect(
-      persisted.every((row, i) =>
-        i === 0 ? true : row.seq === (persisted[i - 1]?.seq ?? 0) + 1,
-      ),
-    ).toBe(true);
+    const persisted = listConversationEvents(db, created.id);
+    expect(persisted.every((r) => r.kind === 'message')).toBe(true); // both turns' chunk rows are GC'd
   });
 
-  it('a turn with a tool call also streams/persists a tool_call item.* sequence', async () => {
+  it('a first turn that CRASHED (user message row persisted, nimbo header never written) still resumes its user message into the next turn’s model context — UI and model agree, no "user sees it but agent forgot it" split (loadResumeState regression)', async () => {
+    // Turn 1 crashes: drive a controllable session straight through
+    // turn-runner and fail it — the turn-start 'boom' user message lands as a
+    // `kind='message'` row, but `finalizeTurnPersistence` never runs so the
+    // `agent_session_id` header stays null (the exact state the old
+    // `agentSessionId === null` short-circuit dropped from resume).
+    const { model, captured } = capturingModel('reply');
+    const app = buildApp(() => model);
+    const created = await createSession(app);
+
+    const fake = createControllableSession();
+    startTurn({
+      db,
+      conversationId: created.id,
+      session: fake,
+      text: 'boom',
+      priorMessageCount: 0,
+    });
+    fake.fail(new Error('provider exploded'));
+    await (
+      await app.request(`/api/chat/conversations/${created.id}/stream`)
+    ).text();
+
+    const crashedRow = getConversation(db, created.id, USER_ID);
+    expect(crashedRow?.agentSessionId).toBeNull(); // header never written
+    expect(
+      listConversationEvents(db, created.id).filter(
+        (r) => r.kind === 'message',
+      ),
+    ).toHaveLength(1); // but the crashed user message is persisted
+
+    // Turn 2 runs a real turn through the route — its model must have been
+    // handed the crashed 'boom' message as prior context.
+    await app.request(`/api/chat/conversations/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'second' }),
+    });
+    await (
+      await app.request(`/api/chat/conversations/${created.id}/stream`)
+    ).text();
+
+    expect(captured.length).toBeGreaterThan(0);
+    const promptText = JSON.stringify(captured[0]);
+    expect(promptText).toContain('boom'); // model saw the crashed turn's request
+    expect(promptText).toContain('second');
+  });
+
+  it('after two sequential turns, GET .../events replays [user, assistant, user, assistant] in strict send order, with seq strictly increasing throughout (no reordering, no duplicates — numeric gaps from GC’d chunk rows are expected and fine)', async () => {
+    const app = buildApp(() => stopOnlyModel('reply'));
+    const created = await createSession(app);
+
+    await app.request(`/api/chat/conversations/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'first' }),
+    });
+    await (
+      await app.request(`/api/chat/conversations/${created.id}/stream`)
+    ).text();
+
+    await app.request(`/api/chat/conversations/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'second' }),
+    });
+    await (
+      await app.request(`/api/chat/conversations/${created.id}/stream`)
+    ).text();
+
+    const eventsResponse = await app.request(
+      `/api/chat/conversations/${created.id}/events`,
+    );
+    const replay = ConversationEventsListSchema.parse(
+      await eventsResponse.json(),
+    );
+    expect(chunkFrames(replay.frames)).toEqual([]); // both turns' chunk rows are fully GC'd
+
+    const messages = messagesOnly(replay.frames);
+    expect(messages.map((m) => m.role)).toEqual([
+      'user',
+      'assistant',
+      'user',
+      'assistant',
+    ]);
+    expect(collectText(messages[0])).toBe('first');
+    expect(collectText(messages[1])).toBe('reply');
+    expect(collectText(messages[2])).toBe('second');
+    expect(collectText(messages[3])).toBe('reply');
+
+    const seqs = messageFrames(replay.frames).map((f) => f.seq);
+    expect(seqs).toHaveLength(4);
+    expect(seqs.every((s, i) => i === 0 || s > (seqs[i - 1] ?? 0))).toBe(true); // strictly increasing send order, no gaps in delivery (even though the underlying integers skip over GC'd chunk seqs)
+  });
+
+  it('a turn with a tool call streams tool-input-available → tool-output-available (plus data-file-change) on the live tail, and both the tool_call and file-change data part show up on the finished assistant message', async () => {
     const app = buildApp(() =>
       toolCallThenStopModel(
-        'write_file',
+        'write-file',
         { path: '/notes.txt', content: 'hi' },
         'call_1',
         'wrote it',
@@ -748,48 +1153,62 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
     );
     const created = await createSession(app);
 
-    await app.request(`/api/chat/sessions/${created.id}/messages`, {
+    await app.request(`/api/chat/conversations/${created.id}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text: 'write a file' }),
     });
     const body = await (
-      await app.request(`/api/chat/sessions/${created.id}/stream`)
+      await app.request(`/api/chat/conversations/${created.id}/stream`)
     ).text();
-    const envelopes = parseEnvelopes(body);
-    const toolCallCompleted = envelopes.find(
-      (e) =>
-        e.event.type === 'item.completed' &&
-        (e.event as { item?: { type?: string } }).item?.type === 'tool_call',
+    const frames = parseFrames(body);
+    const chunks = chunksOnly(frames);
+
+    expect(
+      findByToolCallId(chunks, 'tool-input-available', 'call_1'),
+    ).toBeDefined();
+    expect(
+      findByToolCallId(chunks, 'tool-output-available', 'call_1'),
+    ).toBeDefined();
+    expect(chunks.some((c) => c.type === 'data-file-change')).toBe(true);
+
+    const eventsResponse = await app.request(
+      `/api/chat/conversations/${created.id}/events`,
     );
-    expect(toolCallCompleted).toBeDefined();
-    const fileChangeCompleted = envelopes.find(
-      (e) =>
-        e.event.type === 'item.completed' &&
-        (e.event as { item?: { type?: string } }).item?.type === 'file_change',
+    const replay = ConversationEventsListSchema.parse(
+      await eventsResponse.json(),
     );
-    expect(fileChangeCompleted).toBeDefined();
+    const assistantMessage = messagesOnly(replay.frames).find(
+      (m) => m.role === 'assistant',
+    );
+    expect(assistantMessage).toBeDefined();
+    const toolPart =
+      assistantMessage !== undefined ?
+        allToolParts([assistantMessage]).find(
+          (part) => part.type === 'tool-write-file',
+        )
+      : undefined;
+    expect(toolPart?.state).toBe('output-available');
   });
 
   // -------------------------------------------------------------------------
   // STEER-3B: POST .../messages while a turn is in progress steers it
   // instead of starting a new one. Real mock model + real @nimbo/sdk
-  // session (not a ControllableSession fake) — a real `write_file` tool_call
+  // session (not a ControllableSession fake) — a real `write-file` tool_call
   // step is held open (buildHoldableWorkspace) so the second POST lands
-  // squarely mid-turn, exercising the actual Session.steer() wiring that
-  // produces a real `user_message` item (packages/core/test/steer.test.ts
-  // already covers that wiring in isolation; this is the end-to-end route
-  // regression for it).
+  // squarely mid-turn, exercising the actual Session.steer() wiring
+  // (packages/core/test/steer.test.ts already covers that wiring in
+  // isolation; this is the end-to-end route regression for it).
   // -------------------------------------------------------------------------
 
-  it('a second POST while a turn is in progress steers it (202 mode "steered"): no extra user.message echo, and a real user_message item.completed appears in the stream', async () => {
+  it('a second POST while a turn is in progress steers it (202 mode "steered"): the steered text streams as its own start(steered:true)…finish sequence, and both messages persist correctly once the turn ends', async () => {
     const holdableSandboxManager = createHoldableSandboxManager();
     const app = createChatApp({
       db,
       sandboxManager: holdableSandboxManager,
       resolveModel: () =>
         toolCallThenStopModel(
-          'write_file',
+          'write-file',
           { path: '/notes.txt', content: 'hi' },
           'call_1',
           'wrote it and replied',
@@ -799,7 +1218,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
     const created = await createSession(app);
 
     const firstResponse = await app.request(
-      `/api/chat/sessions/${created.id}/messages`,
+      `/api/chat/conversations/${created.id}/messages`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -807,17 +1226,14 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       },
     );
     expect(firstResponse.status).toBe(202);
-    expect(await firstResponse.json()).toEqual({
-      ok: true,
-      mode: 'started',
-    });
+    expect(await firstResponse.json()).toEqual({ ok: true, mode: 'started' });
 
-    // Deterministic hold point: the real write_file tool call is now paused
+    // Deterministic hold point: the real write-file tool call is now paused
     // inside fs.writeFile() — nothing time-based, no sleep/race.
     await holdableSandboxManager.writeCalled;
 
     const secondResponse = await app.request(
-      `/api/chat/sessions/${created.id}/messages`,
+      `/api/chat/conversations/${created.id}/messages`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -825,52 +1241,67 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       },
     );
     expect(secondResponse.status).toBe(202);
-    expect(await secondResponse.json()).toEqual({
-      ok: true,
-      mode: 'steered',
-    });
+    expect(await secondResponse.json()).toEqual({ ok: true, mode: 'steered' });
 
     holdableSandboxManager.releaseWrite();
 
     const body = await (
-      await app.request(`/api/chat/sessions/${created.id}/stream`)
+      await app.request(`/api/chat/conversations/${created.id}/stream`)
     ).text();
-    const envelopes = parseEnvelopes(body);
+    const chunks = chunksOnly(parseFrames(body));
 
-    // exactly one user.message echo (the turn-starting message) — the
-    // steered message is never echoed (docs/08 §2.2 "契约细化" #3: its one
-    // persisted record is the user_message item nimbo's own loop produces).
-    const userMessageEchoes = envelopes.filter(
-      (e) => e.event.type === 'user.message',
+    // The steered message's own start/text/finish sequence, distinguishable
+    // by messageMetadata.steered (loop.ts's drainSteerMessages) — this GET
+    // .../stream call typically lands late enough (several real async hops
+    // after releaseWrite()) that it only ever *replays* this bracket from
+    // already-persisted durable rows; the steered text's own text-delta is
+    // ephemeral (never persisted, live-only, docs/tech/single-ledger.md §5 单-3) and — by the
+    // same "只直播不落盘" design P13-1 already established — is simply gone
+    // for a connection that wasn't listening live at the moment it streamed.
+    // The bracket (start…text-start…text-end…finish) still proves the loop
+    // treated it as a steer injection rather than silently dropping it; the
+    // actual *content* is verified below via the durable, replay-safe
+    // GET .../events (the finished NimboUIMessage's own `parts`).
+    const steeredStartIndex = chunks.findIndex(
+      (c) => c.type === 'start' && c.messageMetadata?.steered === true,
     );
-    expect(userMessageEchoes).toHaveLength(1);
-    expect(userMessageEchoes[0]?.event.text).toBe('explore the repo');
+    expect(steeredStartIndex).toBeGreaterThanOrEqual(0);
 
-    const steeredItem = envelopes.find(
-      (e) =>
-        e.event.type === 'item.completed' &&
-        (e.event as { item?: { type?: string } }).item?.type === 'user_message',
-    );
-    expect(steeredItem).toBeDefined();
-    expect(
-      (steeredItem?.event as { item?: { text?: string } }).item?.text,
-    ).toBe('also check the API timeout');
-
-    // both requests still rolled the sandbox's idle timeout forward — the
+    // Both requests still rolled the sandbox's idle timeout forward — the
     // steered branch calls touch() too (routes/chat.ts), not just the
     // normal-start branch.
     expect(holdableSandboxManager.touchCalls).toEqual([created.id, created.id]);
+
+    const eventsResponse = await app.request(
+      `/api/chat/conversations/${created.id}/events`,
+    );
+    const replay = ConversationEventsListSchema.parse(
+      await eventsResponse.json(),
+    );
+    const messages = messagesOnly(replay.frames);
+    const userMessages = messages.filter((m) => m.role === 'user');
+    expect(userMessages).toHaveLength(2);
+    expect(collectText(userMessages[0])).toBe('explore the repo');
+    expect(collectText(userMessages[1])).toBe('also check the API timeout');
+    expect(userMessages[1]?.metadata?.steered).toBe(true);
+    expect(userMessages[0]?.metadata?.steered).toBeUndefined();
   });
 
   // -------------------------------------------------------------------------
-  // Approval chain + ask_user (docs/08 §2.2c（审批链）) — end-to-end through
-  // the real routes, a mock model driving a bash/ask_user tool call, and the
-  // in-process turn-runner bridge (no fakes for any of that machinery, only
-  // the sandbox/model are mocked, same as the rest of this file).
+  // Approval chain + ask-user (docs/tech/chat-webapp.md §2.2c（审批链）, docs/tech/single-ledger.md §6) —
+  // end-to-end through the real routes, a mock model driving a bash/ask-user
+  // tool call, and the in-process turn-runner bridge (no fakes for any of
+  // that machinery, only the sandbox/model are mocked, same as the rest of
+  // this file). `tool-approval-request` carries only `approvalId`/`toolCallId`
+  // (no toolName/input, unlike the retired `approval.requested` event) — a
+  // real client correlates it against the earlier `tool-input-available`
+  // chunk sharing the same `toolCallId`; these tests use the mock model's
+  // fixed `toolCallId` ('call_1') directly, same as a client that already
+  // tracked it from that earlier chunk.
   // -------------------------------------------------------------------------
 
-  describe('approval chain + ask_user (docs/08 §2.2c（审批链）)', () => {
-    it('a safe bash command under the default (dangerous) approval mode runs straight through — no approval.requested is ever emitted', async () => {
+  describe('approval chain + ask-user (docs/tech/single-ledger.md §6)', () => {
+    it('a safe bash command under the default (dangerous) approval mode runs straight through — no tool-approval-request/-response chunk is ever emitted', async () => {
       const app = buildApp(() =>
         toolCallThenStopModel(
           'bash',
@@ -881,29 +1312,29 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       );
       const created = await createSession(app);
 
-      await app.request(`/api/chat/sessions/${created.id}/messages`, {
+      await app.request(`/api/chat/conversations/${created.id}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: 'list files' }),
       });
       const body = await (
-        await app.request(`/api/chat/sessions/${created.id}/stream`)
+        await app.request(`/api/chat/conversations/${created.id}/stream`)
       ).text();
-      const envelopes = parseEnvelopes(body);
+      const chunks = chunksOnly(parseFrames(body));
 
-      expect(envelopes.some((e) => e.event.type === 'approval.requested')).toBe(
+      expect(chunks.some((c) => c.type === 'tool-approval-request')).toBe(
         false,
       );
-      expect(envelopes.some((e) => e.event.type === 'approval.resolved')).toBe(
+      expect(chunks.some((c) => c.type === 'tool-approval-response')).toBe(
         false,
       );
-      expect(envelopes.at(-1)?.event.type).toBe('turn.result');
-
-      const toolCall = findCompletedToolCall(envelopes, 'bash');
-      expect(toolCall?.status).toBe('completed');
+      expect(chunks.at(-1)?.type).toBe('message-metadata');
+      expect(
+        findByToolCallId(chunks, 'tool-output-available', 'call_1'),
+      ).toBeDefined();
     });
 
-    it('a dangerous bash command escalates to a human: approval.requested appears on the stream; allow lets the turn continue through to turn.result', async () => {
+    it('a dangerous bash command escalates to a human: tool-approval-request appears on the live tail; allow lets the turn continue through to a completed message-metadata', async () => {
       const app = buildApp(() =>
         toolCallThenStopModel(
           'bash',
@@ -914,28 +1345,30 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       );
       const created = await createSession(app);
 
-      await app.request(`/api/chat/sessions/${created.id}/messages`, {
+      await app.request(`/api/chat/conversations/${created.id}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: 'push my branch' }),
       });
 
       const streamResponse = await app.request(
-        `/api/chat/sessions/${created.id}/stream`,
+        `/api/chat/conversations/${created.id}/stream`,
       );
       const reader = createIncrementalReader(streamResponse);
-      const requested = await reader.readUntil((envs) =>
-        envs.some((e) => e.event.type === 'approval.requested'),
+      const requested = await reader.readUntil((frames) =>
+        chunksOnly(frames).some((c) => c.type === 'tool-approval-request'),
       );
-      const requestedEvent = requested.find(
-        (e) => e.event.type === 'approval.requested',
+      const requestChunk = chunksOnly(requested).find(
+        (c) => c.type === 'tool-approval-request',
       );
-      expect(requestedEvent).toBeDefined();
-      expect(requestedEvent?.event.toolName).toBe('bash');
-      const callId = extractStringField(requestedEvent?.event ?? {}, 'callId');
+      expect(
+        requestChunk?.type === 'tool-approval-request' ?
+          requestChunk.approvalId
+        : undefined,
+      ).toBe('call_1');
 
       const approveResponse = await app.request(
-        `/api/chat/sessions/${created.id}/approvals/${callId}`,
+        `/api/chat/conversations/${created.id}/approvals/call_1`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -945,22 +1378,84 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       expect(approveResponse.status).toBe(200);
       expect(await approveResponse.json()).toEqual({ ok: true });
 
-      const envelopes = await reader.drainToClose();
-      const resolvedEvent = envelopes.find(
-        (e) => e.event.type === 'approval.resolved',
+      const frames = await reader.drainToClose();
+      const chunks = chunksOnly(frames);
+      const responseChunk = chunks.find(
+        (c) => c.type === 'tool-approval-response',
       );
-      expect(resolvedEvent?.event).toEqual({
-        type: 'approval.resolved',
-        callId,
-        behavior: 'allow',
+      expect(responseChunk).toEqual({
+        type: 'tool-approval-response',
+        approvalId: 'call_1',
+        approved: true,
       });
-      expect(envelopes.at(-1)?.event.type).toBe('turn.result');
-
-      const toolCall = findCompletedToolCall(envelopes, 'bash');
-      expect(toolCall?.status).toBe('completed');
+      expect(chunks.at(-1)?.type).toBe('message-metadata');
+      expect(
+        findByToolCallId(chunks, 'tool-output-available', 'call_1'),
+      ).toBeDefined();
     });
 
-    it('a dangerous bash command escalates to a human: deny resolves approval.resolved(deny) and the tool_call item completes with status "denied", the turn still reaching turn.result', async () => {
+    it('allow-session 记会话级授权：批准后同一会话内完全相同的调用直接放行，第二轮不再出 tool-approval-request（docs/terms.md §四）', async () => {
+      // 每轮发同一条危险命令；toolCallId 逐轮不同（call_1 / call_2）。
+      let turn = 0;
+      const app = buildApp(() => {
+        turn += 1;
+        return toolCallThenStopModel(
+          'bash',
+          { command: 'git push origin main' },
+          `call_${String(turn)}`,
+          'pushed',
+        );
+      });
+      const created = await createSession(app);
+
+      // ---- 第 1 轮：危险 bash → 弹审批 → allow-session ----
+      await app.request(`/api/chat/conversations/${created.id}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'push my branch' }),
+      });
+      const stream1 = await app.request(
+        `/api/chat/conversations/${created.id}/stream`,
+      );
+      const reader1 = createIncrementalReader(stream1);
+      await reader1.readUntil((frames) =>
+        chunksOnly(frames).some((c) => c.type === 'tool-approval-request'),
+      );
+      const grantResponse = await app.request(
+        `/api/chat/conversations/${created.id}/approvals/call_1`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ behavior: 'allow-session' }),
+        },
+      );
+      expect(grantResponse.status).toBe(200);
+      await reader1.drainToClose(); // 第 1 轮跑完
+
+      // ---- 第 2 轮：完全相同的命令 → 直接放行、不再弹审批 ----
+      await app.request(`/api/chat/conversations/${created.id}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'push again' }),
+      });
+      const stream2 = await app.request(
+        `/api/chat/conversations/${created.id}/stream`,
+      );
+      const chunks2 = chunksOnly(parseFrames(await stream2.text()));
+      // 会话级授权命中 → onApproval 短路成 allow → 全程无审批请求/响应。
+      expect(chunks2.some((c) => c.type === 'tool-approval-request')).toBe(
+        false,
+      );
+      expect(chunks2.some((c) => c.type === 'tool-approval-response')).toBe(
+        false,
+      );
+      // 工具照常执行到有输出（call_2 是第 2 轮的调用）。
+      expect(
+        findByToolCallId(chunks2, 'tool-output-available', 'call_2'),
+      ).toBeDefined();
+    });
+
+    it('a dangerous bash command escalates to a human: deny resolves tool-approval-response(approved:false) and the tool_call settles output-denied, the turn still reaching a completed message-metadata', async () => {
       const app = buildApp(() =>
         toolCallThenStopModel(
           'bash',
@@ -971,26 +1466,22 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       );
       const created = await createSession(app);
 
-      await app.request(`/api/chat/sessions/${created.id}/messages`, {
+      await app.request(`/api/chat/conversations/${created.id}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: 'clean the build dir' }),
       });
 
       const streamResponse = await app.request(
-        `/api/chat/sessions/${created.id}/stream`,
+        `/api/chat/conversations/${created.id}/stream`,
       );
       const reader = createIncrementalReader(streamResponse);
-      const requested = await reader.readUntil((envs) =>
-        envs.some((e) => e.event.type === 'approval.requested'),
+      await reader.readUntil((frames) =>
+        chunksOnly(frames).some((c) => c.type === 'tool-approval-request'),
       );
-      const requestedEvent = requested.find(
-        (e) => e.event.type === 'approval.requested',
-      );
-      const callId = extractStringField(requestedEvent?.event ?? {}, 'callId');
 
       const denyResponse = await app.request(
-        `/api/chat/sessions/${created.id}/approvals/${callId}`,
+        `/api/chat/conversations/${created.id}/approvals/call_1`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -999,27 +1490,52 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       );
       expect(denyResponse.status).toBe(200);
 
-      const envelopes = await reader.drainToClose();
-      const resolvedEvent = envelopes.find(
-        (e) => e.event.type === 'approval.resolved',
+      const frames = await reader.drainToClose();
+      const chunks = chunksOnly(frames);
+      const responseChunk = chunks.find(
+        (c) => c.type === 'tool-approval-response',
       );
-      expect(resolvedEvent?.event).toEqual({
-        type: 'approval.resolved',
-        callId,
-        behavior: 'deny',
-        message: 'too risky',
+      expect(responseChunk).toEqual({
+        type: 'tool-approval-response',
+        approvalId: 'call_1',
+        approved: false,
+        reason: 'too risky',
       });
-      expect(envelopes.at(-1)?.event.type).toBe('turn.result');
+      const deniedChunk = findByToolCallId(
+        chunks,
+        'tool-output-denied',
+        'call_1',
+      );
+      expect(deniedChunk).toBeDefined();
+      expect(chunks.at(-1)?.type).toBe('message-metadata');
 
-      const toolCall = findCompletedToolCall(envelopes, 'bash');
-      expect(toolCall?.status).toBe('denied');
-      expect(toolCall?.output).toBe('too risky');
+      const eventsResponse = await app.request(
+        `/api/chat/conversations/${created.id}/events`,
+      );
+      const replay = ConversationEventsListSchema.parse(
+        await eventsResponse.json(),
+      );
+      const assistantMessage = messagesOnly(replay.frames).find(
+        (m) => m.role === 'assistant',
+      );
+      const toolPart =
+        assistantMessage !== undefined ?
+          allToolParts([assistantMessage]).find(
+            (part) => part.type === 'tool-bash',
+          )
+        : undefined;
+      expect(toolPart?.state).toBe('output-denied');
+      expect(
+        toolPart?.state === 'output-denied' ?
+          toolPart.approval.reason
+        : undefined,
+      ).toBe('too risky');
     });
 
-    it('ask_user: question.asked appears on the stream; POST .../questions/:callId answers it and the turn continues through to turn.result', async () => {
+    it('ask-user: tool-input-available (state input-available) appears on the stream; POST .../questions/:callId answers it and the turn continues through to a completed message-metadata', async () => {
       const app = buildApp(() =>
         toolCallThenStopModel(
-          'ask_user',
+          'ask-user',
           {
             question: 'which environment should I target?',
             options: ['staging', 'prod'],
@@ -1030,30 +1546,32 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       );
       const created = await createSession(app);
 
-      await app.request(`/api/chat/sessions/${created.id}/messages`, {
+      await app.request(`/api/chat/conversations/${created.id}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: 'deploy it' }),
       });
 
       const streamResponse = await app.request(
-        `/api/chat/sessions/${created.id}/stream`,
+        `/api/chat/conversations/${created.id}/stream`,
       );
       const reader = createIncrementalReader(streamResponse);
-      const asked = await reader.readUntil((envs) =>
-        envs.some((e) => e.event.type === 'question.asked'),
+      const asked = await reader.readUntil((frames) =>
+        chunksOnly(frames).some(
+          (c) => c.type === 'tool-input-available' && c.toolName === 'ask-user',
+        ),
       );
-      const askedEvent = asked.find((e) => e.event.type === 'question.asked');
-      expect(askedEvent?.event).toEqual({
-        type: 'question.asked',
-        callId: expect.any(String),
-        question: 'which environment should I target?',
-        options: ['staging', 'prod'],
-      });
-      const callId = extractStringField(askedEvent?.event ?? {}, 'callId');
+      const inputChunk = chunksOnly(asked).find(
+        (c) => c.type === 'tool-input-available' && c.toolName === 'ask-user',
+      );
+      expect(
+        inputChunk?.type === 'tool-input-available' ?
+          inputChunk.toolCallId
+        : undefined,
+      ).toBe('call_1');
 
       const answerResponse = await app.request(
-        `/api/chat/sessions/${created.id}/questions/${callId}`,
+        `/api/chat/conversations/${created.id}/questions/call_1`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1063,21 +1581,19 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       expect(answerResponse.status).toBe(200);
       expect(await answerResponse.json()).toEqual({ ok: true });
 
-      const envelopes = await reader.drainToClose();
-      const answeredEvent = envelopes.find(
-        (e) => e.event.type === 'question.answered',
+      const frames = await reader.drainToClose();
+      const chunks = chunksOnly(frames);
+      const outputChunk = findByToolCallId(
+        chunks,
+        'tool-output-available',
+        'call_1',
       );
-      expect(answeredEvent?.event).toEqual({
-        type: 'question.answered',
-        callId,
-        outcome: 'answered',
-        answer: 'staging',
-      });
-      expect(envelopes.at(-1)?.event.type).toBe('turn.result');
-
-      const toolCall = findCompletedToolCall(envelopes, 'ask_user');
-      expect(toolCall?.status).toBe('completed');
-      expect(toolCall?.output).toBe('staging');
+      expect(
+        outputChunk?.type === 'tool-output-available' ?
+          outputChunk.output
+        : undefined,
+      ).toBe('staging');
+      expect(chunks.at(-1)?.type).toBe('message-metadata');
     });
 
     it('POST .../approvals/:callId 404s: an unknown session id, another user’s session, and a callId with no pending approval (including re-deciding an already-resolved callId)', async () => {
@@ -1093,7 +1609,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
 
       // 1. unknown session id
       const unknownSessionResponse = await app.request(
-        `/api/chat/sessions/does-not-exist/approvals/call_1`,
+        `/api/chat/conversations/does-not-exist/approvals/call_1`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1108,7 +1624,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
         'someone-else',
       );
       const otherUserResponse = await otherUserApp.request(
-        `/api/chat/sessions/${created.id}/approvals/call_1`,
+        `/api/chat/conversations/${created.id}/approvals/call_1`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1119,7 +1635,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
 
       // 3. callId with no pending approval at all (nothing has been posted yet)
       const noPendingResponse = await app.request(
-        `/api/chat/sessions/${created.id}/approvals/never-requested`,
+        `/api/chat/conversations/${created.id}/approvals/never-requested`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1129,25 +1645,21 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       expect(noPendingResponse.status).toBe(404);
 
       // 3b. re-deciding an already-resolved callId also 404s
-      await app.request(`/api/chat/sessions/${created.id}/messages`, {
+      await app.request(`/api/chat/conversations/${created.id}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: 'push it' }),
       });
       const streamResponse = await app.request(
-        `/api/chat/sessions/${created.id}/stream`,
+        `/api/chat/conversations/${created.id}/stream`,
       );
       const reader = createIncrementalReader(streamResponse);
-      const requested = await reader.readUntil((envs) =>
-        envs.some((e) => e.event.type === 'approval.requested'),
+      await reader.readUntil((frames) =>
+        chunksOnly(frames).some((c) => c.type === 'tool-approval-request'),
       );
-      const requestedEvent = requested.find(
-        (e) => e.event.type === 'approval.requested',
-      );
-      const callId = extractStringField(requestedEvent?.event ?? {}, 'callId');
 
       const firstDecision = await app.request(
-        `/api/chat/sessions/${created.id}/approvals/${callId}`,
+        `/api/chat/conversations/${created.id}/approvals/call_1`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1157,7 +1669,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       expect(firstDecision.status).toBe(200);
 
       const secondDecision = await app.request(
-        `/api/chat/sessions/${created.id}/approvals/${callId}`,
+        `/api/chat/conversations/${created.id}/approvals/call_1`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1172,7 +1684,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
     it('POST .../questions/:callId 404s the same three ways (unknown session, another user’s session, no pending question); an empty answer 400s at the zod validation layer', async () => {
       const app = buildApp(() =>
         toolCallThenStopModel(
-          'ask_user',
+          'ask-user',
           { question: 'continue?' },
           'call_1',
           'ok',
@@ -1181,7 +1693,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       const created = await createSession(app);
 
       const unknownSessionResponse = await app.request(
-        `/api/chat/sessions/does-not-exist/questions/call_1`,
+        `/api/chat/conversations/does-not-exist/questions/call_1`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1195,7 +1707,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
         'someone-else',
       );
       const otherUserResponse = await otherUserApp.request(
-        `/api/chat/sessions/${created.id}/questions/call_1`,
+        `/api/chat/conversations/${created.id}/questions/call_1`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1205,7 +1717,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       expect(otherUserResponse.status).toBe(404);
 
       const noPendingResponse = await app.request(
-        `/api/chat/sessions/${created.id}/questions/never-asked`,
+        `/api/chat/conversations/${created.id}/questions/never-asked`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1216,7 +1728,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
 
       // Empty answer never even reaches resolveUserAnswer — PostAnswerInputSchema requires min(1).
       const emptyAnswerResponse = await app.request(
-        `/api/chat/sessions/${created.id}/questions/never-asked`,
+        `/api/chat/conversations/${created.id}/questions/never-asked`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1226,7 +1738,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       expect(emptyAnswerResponse.status).toBe(400);
     });
 
-    it('an approval "allow" decision still succeeds (200 + approval.resolved still emitted) even when sandboxManager.touch rejects', async () => {
+    it('an approval "allow" decision still succeeds (200 + tool-approval-response still emitted) even when sandboxManager.touch rejects', async () => {
       const failingTouchSandboxManager =
         createSandboxManagerWithFailingTouchAfterFirst();
       const app = createChatApp({
@@ -1245,28 +1757,24 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
 
       // This first message-triggered touch() call succeeds (see the fake's
       // own doc comment) — otherwise session creation itself would 500.
-      await app.request(`/api/chat/sessions/${created.id}/messages`, {
+      await app.request(`/api/chat/conversations/${created.id}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: 'push it' }),
       });
 
       const streamResponse = await app.request(
-        `/api/chat/sessions/${created.id}/stream`,
+        `/api/chat/conversations/${created.id}/stream`,
       );
       const reader = createIncrementalReader(streamResponse);
-      const requested = await reader.readUntil((envs) =>
-        envs.some((e) => e.event.type === 'approval.requested'),
+      await reader.readUntil((frames) =>
+        chunksOnly(frames).some((c) => c.type === 'tool-approval-request'),
       );
-      const requestedEvent = requested.find(
-        (e) => e.event.type === 'approval.requested',
-      );
-      const callId = extractStringField(requestedEvent?.event ?? {}, 'callId');
 
       // This is the second touch() call — it rejects internally, but the
       // route must swallow it and still resolve the approval.
       const approveResponse = await app.request(
-        `/api/chat/sessions/${created.id}/approvals/${callId}`,
+        `/api/chat/conversations/${created.id}/approvals/call_1`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1276,16 +1784,96 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       expect(approveResponse.status).toBe(200);
       expect(await approveResponse.json()).toEqual({ ok: true });
 
-      const envelopes = await reader.drainToClose();
-      const resolvedEvent = envelopes.find(
-        (e) => e.event.type === 'approval.resolved',
-      );
-      expect(resolvedEvent?.event).toEqual({
-        type: 'approval.resolved',
-        callId,
-        behavior: 'allow',
+      const frames = await reader.drainToClose();
+      const chunks = chunksOnly(frames);
+      expect(chunks.find((c) => c.type === 'tool-approval-response')).toEqual({
+        type: 'tool-approval-response',
+        approvalId: 'call_1',
+        approved: true,
       });
-      expect(envelopes.at(-1)?.event.type).toBe('turn.result');
+      expect(chunks.at(-1)?.type).toBe('message-metadata');
+    });
+  });
+
+  describe('GET /api/chat/conversations/{id}/turns/{turn}/telemetry (docs/tech/chat-webapp.md §11.4)', () => {
+    it('404s for a session the user does not own / does not exist', async () => {
+      const app = buildApp(() => stopOnlyModel('hi'));
+      const response = await app.request(
+        '/api/chat/conversations/nope/turns/1/telemetry',
+      );
+      expect(response.status).toBe(404);
+    });
+
+    it('returns an empty list (not an error) when no telemetryStore is configured', async () => {
+      const app = buildApp(() => stopOnlyModel('hi'));
+      const session = await createSession(app);
+      const response = await app.request(
+        `/api/chat/conversations/${session.id}/turns/1/telemetry`,
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ events: [] });
+    });
+
+    it('returns an empty list while the session has no nimbo header yet (no gracefully-finished turn)', async () => {
+      const store = createTelemetryStore(':memory:');
+      const app = createChatApp({
+        db,
+        sandboxManager,
+        resolveModel: () => stopOnlyModel('hi'),
+        authMiddleware: fakeAuthMiddleware(USER_ID),
+        telemetryStore: store,
+      });
+      const session = await createSession(app);
+      const response = await app.request(
+        `/api/chat/conversations/${session.id}/turns/1/telemetry`,
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ events: [] });
+      store.close();
+    });
+
+    it('maps the chat row to its nimbo session id (functionId 前半段) and returns that turn’s events in write order', async () => {
+      const store = createTelemetryStore(':memory:');
+      const app = createChatApp({
+        db,
+        sandboxManager,
+        resolveModel: () => stopOnlyModel('hi'),
+        authMiddleware: fakeAuthMiddleware(USER_ID),
+        telemetryStore: store,
+      });
+      const session = await createSession(app);
+      // 首轮优雅收尾会写 nimbo header（turn-runner 的 finalizeTurnPersistence）
+      // ——这里直接落 header，避免测试依赖后台 turn 的时序。
+      updateConversation(db, session.id, {
+        status: 'active',
+        lastActiveAt: new Date(),
+        agentSessionHeader: {
+          conversationId: 'nimbo-s1',
+          createdAt: new Date(),
+          turn: 1,
+        },
+      });
+      store.record('model-call-end', 'nimbo-s1#1', {
+        usage: { inputTokens: 5 },
+      });
+      store.record('end', 'nimbo-s1#1', {});
+      store.record('model-call-end', 'nimbo-s1#2', {}); // 别的 turn，不该出现
+
+      const response = await app.request(
+        `/api/chat/conversations/${session.id}/turns/1/telemetry`,
+      );
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        events: { eventType: string; ts: number; payloadJson: string }[];
+      };
+      expect(body.events.map((e) => e.eventType)).toEqual([
+        'model-call-end',
+        'end',
+      ]);
+      expect(JSON.parse(body.events[0]?.payloadJson ?? '{}')).toMatchObject({
+        usage: { inputTokens: 5 },
+      });
+      store.close();
     });
   });
 });

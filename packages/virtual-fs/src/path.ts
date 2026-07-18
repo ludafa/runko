@@ -1,5 +1,5 @@
 /**
- * 虚拟路径规范化与 glob 匹配（tech-spec §4.4："路径规范：POSIX 风格虚拟绝对路径；
+ * 虚拟路径规范化与 glob 匹配（docs/tech/core-sdk.md §4.4："路径规范：POSIX 风格虚拟绝对路径；
  * `..` 越界在 FS 层直接拒绝——安全边界在 FS 不在工具"）。
  *
  * 本文件不依赖任何具体 FS 实现，纯字符串运算，供 memory.ts/overlay.ts/dir.ts 共用。
@@ -99,4 +99,21 @@ export function globToRegExp(pattern: string): RegExp {
 
 export function matchesGlob(pattern: string, path: string): boolean {
   return globToRegExp(pattern).test(path);
+}
+
+/**
+ * `patterns` 命中 `path` 自身或其任一祖先目录即视为整棵子树忽略——与 `DirFS`
+ * 构造期编译的 `ignorePatterns` 同一套前缀扫描算法（`dir.ts` 的
+ * `isIgnored` 私有方法），抽成独立函数供 grep/glob 工具的默认忽略
+ * （`.git`/`node_modules`）复用，避免重复维护同一段前缀扫描逻辑。
+ */
+export function isIgnoredPath(path: string, patterns: RegExp[]): boolean {
+  if (patterns.length === 0) return false;
+  const segments = path.split("/").filter((s) => s.length > 0);
+  let prefix = "";
+  for (const segment of segments) {
+    prefix += `/${segment}`;
+    if (patterns.some((re) => re.test(prefix))) return true;
+  }
+  return false;
 }

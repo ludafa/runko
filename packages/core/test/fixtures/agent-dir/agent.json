@@ -3,5 +3,5 @@
   "maxTurnsPerRun": 7,
   "maxOutputTokens": 512,
   "maxContextTokens": 8000,
-  "builtinTools": ["read_file", "grep"]
+  "builtinTools": ["read-file", "grep"]
 }

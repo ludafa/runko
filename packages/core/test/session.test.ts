@@ -1,3 +1,11 @@
+/**
+ * P13-5-2（docs/tech/single-ledger.md）迁移：`session.stream()`/
+ * `session.send()` 产出/消费 `NimboChunk`/`NimboUIMessage` 而不是退役的
+ * `SessionEvent`/`SessionItem`；"emits session.started only on the very
+ * first stream()/send() call" 一节随 `session.started`/`turn.started` 事件
+ * 整体退役直接删除（`session.ts` 文件头：两者不再有对应 chunk，没有"重发
+ * 抑制"这回事——同 `serialize.test.ts` 的"hasStarted"一节）。
+ */
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
@@ -6,8 +14,8 @@ import { defineAgent } from "../src/agent.js";
 import { createSession, NimboSessionError } from "../src/session.js";
 import type { Session, SessionOptions } from "../src/session.js";
 import type { AgentDefinition } from "../src/agent.js";
-import type { SessionEvent, SessionItem } from "../src/events.js";
 import type { Tool } from "../src/types.js";
+import { allToolParts, drainTurn, fingerprintMessage } from "./helpers/nimbo-chunks.js";
 
 /** Same shape as `loop.test.ts`/`model/step.test.ts` — see those files for why the callback form. */
 function mockModel(buildOptions: () => ConstructorParameters<typeof MockLanguageModelV4>[0]): MockLanguageModelV4 {
@@ -94,82 +102,24 @@ function baseAgent(model: MockLanguageModelV4, overrides: Partial<AgentDefinitio
   return defineAgent({ model, ...overrides });
 }
 
-async function drainStream(gen: AsyncGenerator<SessionEvent, unknown>): Promise<SessionEvent[]> {
-  const events: SessionEvent[] = [];
-  let next = await gen.next();
-  while (!next.done) {
-    events.push(next.value);
-    next = await gen.next();
-  }
-  return events;
-}
-
-function isItemCompleted(event: SessionEvent): event is { type: "item.completed"; item: SessionItem } {
-  return event.type === "item.completed";
-}
-function isToolCallItem(item: SessionItem): item is Extract<SessionItem, { type: "tool_call" }> {
-  return item.type === "tool_call";
-}
-
 describe("createSession", () => {
-  it("emits session.started only on the very first stream()/send() call, not on later ones", async () => {
-    const session = createSession(baseAgent(stopModel("first")));
+  it("send()/stream() consistency: draining stream() by hand produces the exact same ledger shape as an independent, equivalent send()", async () => {
+    const session = createSession(baseAgent(toolCallThenStopModel("update-plan", { items: [{ text: "a", completed: false }] }, "done")));
 
-    const firstEvents = await drainStream(session.stream("hello"));
-    expect(firstEvents[0]).toEqual({ type: "session.started", sessionId: session.id });
-    expect(firstEvents[1]).toEqual({ type: "turn.started", turn: 1 });
+    const { result: streamResult } = await drainTurn(session.stream("plan it"));
+    const streamLedger = session.toJSON().messages;
 
-    // second call needs its own doStream response — build a fresh session sharing config instead of
-    // reusing the same one-shot mock, since MockLanguageModelV4's array cycles by call count already
-    // used up in the first stream(); wire a second-call response by re-creating the mock inline here.
-    const secondModel = mockModel(() => ({
-      doStream: [
-        {
-          stream: simulateReadableStream({
-            chunks: [{ type: "stream-start", warnings: [] }, { type: "finish", finishReason: { unified: "stop", raw: undefined }, usage }],
-            initialDelayInMs: null,
-            chunkDelayInMs: null,
-          }),
-        },
-        {
-          stream: simulateReadableStream({
-            chunks: [{ type: "stream-start", warnings: [] }, { type: "finish", finishReason: { unified: "stop", raw: undefined }, usage }],
-            initialDelayInMs: null,
-            chunkDelayInMs: null,
-          }),
-        },
-      ],
-    }));
-    const twoTurnSession = createSession(baseAgent(secondModel));
-    const firstTurnEvents = await drainStream(twoTurnSession.stream("one"));
-    const secondTurnEvents = await drainStream(twoTurnSession.stream("two"));
-
-    expect(firstTurnEvents[0]).toEqual({ type: "session.started", sessionId: twoTurnSession.id });
-    expect(secondTurnEvents.some((e) => e.type === "session.started")).toBe(false);
-    expect(secondTurnEvents[0]).toEqual({ type: "turn.started", turn: 2 });
-  });
-
-  it("send()/stream() consistency: a stream()'s own TurnResult.items equals its buffered item.completed items (send() is just this return value)", async () => {
-    const session = createSession(baseAgent(toolCallThenStopModel("update_plan", { items: [{ text: "a", completed: false }] }, "done")));
-
-    const gen = session.stream("plan it");
-    const events: SessionEvent[] = [];
-    let next = await gen.next();
-    while (!next.done) {
-      events.push(next.value);
-      next = await gen.next();
-    }
-    const turnResult = next.value;
-    const bufferedItems = events.filter(isItemCompleted).map((e) => e.item);
-
-    expect(turnResult.items).toEqual(bufferedItems);
-
-    // an independent session's send() over an equivalent turn lands on the same shape
-    // (module the random per-turn item ids, which aren't part of the consistency contract).
-    const sendSession = createSession(baseAgent(toolCallThenStopModel("update_plan", { items: [{ text: "a", completed: false }] }, "done")));
+    // an independent session's send() over an equivalent turn lands on the same shape (modulo
+    // the random per-message ids, which aren't part of the consistency contract) — send() is
+    // implemented as draining stream() internally (session.ts's `send`), so this is the
+    // black-box confirmation that the two call styles are observably equivalent.
+    const sendSession = createSession(baseAgent(toolCallThenStopModel("update-plan", { items: [{ text: "a", completed: false }] }, "done")));
     const sendResult = await sendSession.send("plan it");
-    expect(sendResult.items.map((item) => item.type)).toEqual(turnResult.items.map((item) => item.type));
-    expect(sendResult.finalResponse).toBe(turnResult.finalResponse);
+    const sendLedger = sendSession.toJSON().messages;
+
+    expect(sendLedger.map(fingerprintMessage)).toEqual(streamLedger.map(fingerprintMessage));
+    expect(sendResult.finalResponse).toBe(streamResult.finalResponse);
+    expect(sendResult.usage).toEqual(streamResult.usage);
   });
 
   it("turn.failed causes send() to throw NimboSessionError carrying the same code", async () => {
@@ -195,39 +145,42 @@ describe("createSession", () => {
     await expect(session.send("hi", { signal: controller.signal })).rejects.toMatchObject({ code: "aborted" });
   });
 
-  describe("update_plan builtin wiring", () => {
+  describe("update-plan builtin wiring", () => {
     it("is present by default (builtinTools unset)", async () => {
-      const session = createSession(baseAgent(toolCallThenStopModel("update_plan", { items: [] }, "done")));
-      const events = await drainStream(session.stream("plan"));
-      const completed = events.filter(isItemCompleted).map((e) => e.item).filter(isToolCallItem);
-      expect(completed[0]?.status).toBe("completed");
+      const session = createSession(baseAgent(toolCallThenStopModel("update-plan", { items: [] }, "done")));
+      await drainTurn(session.stream("plan"));
+      const settled = allToolParts(session.toJSON().messages);
+      expect(settled[0]).toMatchObject({ state: "output-available" });
     });
 
     it("is absent when builtinTools: false", async () => {
-      const agent = baseAgent(toolCallThenStopModel("update_plan", { items: [] }, "done"), { builtinTools: false });
-      const events = await drainStream(createSession(agent).stream("plan"));
-      const completed = events.filter(isItemCompleted).map((e) => e.item).filter(isToolCallItem);
-      expect(completed[0]?.status).toBe("failed");
-      expect(typeof completed[0]?.output === "string" ? completed[0]?.output : "").toContain("Unknown tool");
+      const agent = baseAgent(toolCallThenStopModel("update-plan", { items: [] }, "done"), { builtinTools: false });
+      const session = createSession(agent);
+      await drainTurn(session.stream("plan"));
+      const settled = allToolParts(session.toJSON().messages);
+      expect(settled[0]).toMatchObject({ state: "output-error" });
+      expect(settled[0]?.errorText).toContain("update-plan");
     });
 
     it("is absent when builtinTools is a curated list without it", async () => {
-      const agent = baseAgent(toolCallThenStopModel("update_plan", { items: [] }, "done"), { builtinTools: ["read_file"] });
-      const events = await drainStream(createSession(agent).stream("plan"));
-      const completed = events.filter(isItemCompleted).map((e) => e.item).filter(isToolCallItem);
-      expect(completed[0]?.status).toBe("failed");
+      const agent = baseAgent(toolCallThenStopModel("update-plan", { items: [] }, "done"), { builtinTools: ["read-file"] });
+      const session = createSession(agent);
+      await drainTurn(session.stream("plan"));
+      const settled = allToolParts(session.toJSON().messages);
+      expect(settled[0]).toMatchObject({ state: "output-error" });
     });
 
-    it("a host-provided tools.update_plan overrides the builtin implementation", async () => {
+    it("a host-provided tools.update-plan overrides the builtin implementation", async () => {
       const hostTool: Tool = {
         description: "custom",
         inputSchema: z.object({ items: z.array(z.object({ text: z.string(), completed: z.boolean() })) }),
         execute: () => "custom plan handled",
       };
-      const agent = baseAgent(toolCallThenStopModel("update_plan", { items: [] }, "done"), { tools: { update_plan: hostTool } });
-      const events = await drainStream(createSession(agent).stream("plan"));
-      const completed = events.filter(isItemCompleted).map((e) => e.item).filter(isToolCallItem);
-      expect(completed[0]?.output).toBe("custom plan handled");
+      const agent = baseAgent(toolCallThenStopModel("update-plan", { items: [] }, "done"), { tools: { "update-plan": hostTool } });
+      const session = createSession(agent);
+      await drainTurn(session.stream("plan"));
+      const settled = allToolParts(session.toJSON().messages);
+      expect(settled[0]).toMatchObject({ state: "output-available", output: "custom plan handled" });
     });
   });
 
@@ -237,7 +190,7 @@ describe("createSession", () => {
     const opts: SessionOptions = { instructions: { append: "Always answer in English." } };
     const session = createSession(agent, opts);
 
-    await drainStream(session.stream("hi"));
+    await drainTurn(session.stream("hi"));
 
     expect(model.doStreamCalls[0]?.prompt[0]).toMatchObject({ role: "system", content: "Be terse.\n\nAlways answer in English." });
   });
@@ -245,28 +198,28 @@ describe("createSession", () => {
   it("system prompt falls back to just agent.instructions when instructions.append isn't set", async () => {
     const model = stopModel("ok");
     const session = createSession(baseAgent(model, { instructions: "Be terse." }));
-    await drainStream(session.stream("hi"));
+    await drainTurn(session.stream("hi"));
     expect(model.doStreamCalls[0]?.prompt[0]).toMatchObject({ role: "system", content: "Be terse." });
   });
 
   it("system prompt falls back to just instructions.append when agent.instructions isn't set", async () => {
     const model = stopModel("ok");
     const session = createSession(baseAgent(model), { instructions: { append: "Always answer in English." } });
-    await drainStream(session.stream("hi"));
+    await drainTurn(session.stream("hi"));
     expect(model.doStreamCalls[0]?.prompt[0]).toMatchObject({ role: "system", content: "Always answer in English." });
   });
 
   it("no system prompt at all when neither agent.instructions nor instructions.append is set", async () => {
     const model = stopModel("ok");
     const session = createSession(baseAgent(model));
-    await drainStream(session.stream("hi"));
+    await drainTurn(session.stream("hi"));
     expect(model.doStreamCalls[0]?.prompt[0]).not.toMatchObject({ role: "system" });
   });
 
   it("accepts InputBlock[] input (text + image) and converts it to a user ModelMessage content array", async () => {
     const model = stopModel("ok");
     const session = createSession(baseAgent(model));
-    await drainStream(session.stream([{ type: "text", text: "what's in this image?" }, { type: "image", data: "base64data", mediaType: "image/png" }]));
+    await drainTurn(session.stream([{ type: "text", text: "what's in this image?" }, { type: "image", data: "base64data", mediaType: "image/png" }]));
 
     expect(model.doStreamCalls[0]?.prompt).toContainEqual(
       expect.objectContaining({

@@ -1,5 +1,5 @@
 /**
- * L2 运行层：`createSession`/`Session`（tech-spec §4.2 全节 / §4.8 终止与恢复
+ * L2 运行层：`createSession`/`Session`（docs/tech/core-sdk.md §4.2 全节 / §4.8 终止与恢复
  * 边界）。持有一个会话跨 turn 的全部持久状态，把"给定状态跑一个 turn"的活
  * 委派给 `loop.ts` 的 `runTurn`——本文件只做状态的所有权与生命周期、输入/
  * 输出的组装、以及 `send()` 相对 `stream()` 的缓冲语义。
@@ -10,7 +10,7 @@
  *   见下方"结构化输出 + 序列化/恢复（P7-2）"一节。默认 `MemoryFS` 装配仍归
  *   `@nimbo/sdk`（P7-3 起）——本文件不 import `@nimbo/virtual-fs`，理由同下一条。
  * - 文件工具八件套的实例化：归 `@nimbo/sdk` 默认装配——本文件只认
- *   `agent.tools` 里已经存在的工具 + 自己拼的 `update_plan`，不 import
+ *   `agent.tools` 里已经存在的工具 + 自己拼的 `update-plan`，不 import
  *   `@nimbo/virtual-fs`（那会在 core ↔ virtual-fs 之间成环，virtual-fs 的
  *   `createFileTools` 反过来依赖 `@nimbo/core` 的类型）。集成测试改为宿主
  *   姿态：外部调用方自己 `createFileTools({ readState: session.readState, ... })`
@@ -19,10 +19,10 @@
  *   `SessionReadState`，不需要跨包导入类型，纯粹靠结构类型兼容）。
  *
  *   这条链路还缺一环："宿主构造的 `createFileTools({ onFileChange })` 怎么让
- *   `write_file` 的变更最终长成一个 `file_change` `SessionItem`？"——派生数据
+ *   `write-file` 的变更最终长成一个 `file_change` `SessionItem`？"——派生数据
  *   要落进 `loop.ts` 执行期间读取的**同一个** `DerivedDataCollector`
  *   （`executeToolCall` 的 `derivedData` 选项），而这个收集器是 session 内部
- *   状态，`update_plan` 能这样接是因为 `assembleTools` 在 session 内部就把
+ *   状态，`update-plan` 能这样接是因为 `assembleTools` 在 session 内部就把
  *   `onPlanUpdate` 接上了它；文件工具在 session 外部构造，没有这条内部通路。
  *   因此这里再暴露一份 `derivedData`（`SessionDerivedDataRecorder`，
  *   `DerivedDataCollector` 去掉 `drain` 的窄接口——宿主只应该"上报"，`drain`
@@ -40,10 +40,10 @@
  * 得到"注入 fs，或改用 @nimbo/sdk"的错误消息；`@nimbo/sdk` 是允许依赖两者的
  * 门面包，默认 `MemoryFS` 装配归 P7 落在那里。
  *
- * ---- exec/workspace 与 bash 的条件内置（P6-2 施工回填，tech-spec §4.5a） ----
+ * ---- exec/workspace 与 bash 的条件内置（P6-2 施工回填，docs/tech/core-sdk.md §4.5a） ----
  *
  * `SessionOptions.exec?: NimboExec` 注入才会在 `assembleTools` 里出现内置
- * `bash` 工具——与 `load_skill` 由 `agent.skills` 隐式控制是同一族"条件内置"
+ * `bash` 工具——与 `load-skill` 由 `agent.skills` 隐式控制是同一族"条件内置"
  * 机制（`assembleTools` 里 `exec !== undefined` 的分支），只是触发条件是
  * "这次 session 有没有命令执行面"而非"有没有配置 skills"。不注入 `exec` 时
  * 工具列表里没有 `bash`，默认安全不变（spec §4.5a"激活"原文）。
@@ -58,7 +58,7 @@
  * 却又传了别的 fs/exec，实际生效的是哪个"的隐性歧义。判断与报错落在
  * `resolveExecutionSurfaces`。
  *
- * ---- 结构化输出 + 序列化/恢复（P7-2，tech-spec §4.2/§4.8） ----
+ * ---- 结构化输出 + 序列化/恢复（P7-2，docs/tech/core-sdk.md §4.2/§4.8） ----
  *
  * `send<T>(...outputSchema)` 的实际生成逻辑（`generateText`+`Output`+重试）
  * 全部在 `structured.ts`；本文件只做"正常 turn 收尾后要不要多走一轮"的调度
@@ -83,37 +83,49 @@
  * 就是"信任声明"，不需要也无法在这里被结构验证（与 `state.ts` 的
  * `isModelMessage` 同款受控模式）。
  *
- * `resume` 经 `sessionStateSchema`（P1-1，`state.ts`）校验；`hasStarted` 的
- * 恢复语义（工单原文"恢复后 session.started 不再重发"，裁量点）：把
- * `hasStarted` 初始化为 `resumedState !== undefined`——即"resume 意味着这个
- * session 之前已经跑过至少一轮"，不区分"resume 的 state 里 turn 是否为 0"这种
- * 边界（`turn: 0` 且仍传了 `resume` 是调用方在传一个从未真正 send 过的
- * `SessionState`，属于误用场景，`hasStarted: true` 在这种误用下的代价——少发一次
- * `session.started`——小于"resume 之后又意外重发一次 `session.started`"的代价，
- * 后者更容易让宿主的事件消费逻辑重复初始化状态。
+ * `resume` 经 `sessionStateSchema`（`state.ts`）校验——浅层结构校验，理由见
+ * `state.ts` 头注释；messages 的深层语义校验（`validateSessionMessages()`，
+ * ai 官方 `validateUIMessages()`，天生异步）不能在这个同步函数里跑完，做法
+ * 同 `skillFilesMounted`：`createSession` 里同步发起校验（不 await），
+ * `messages` 先用浅层校验通过的原始账本 scaffold，`stream()`/`send()` 顶部
+ * `await` 校验结果后用 ai 收窄/规范化过的账本整体替换——保证"任何工具真正
+ * 执行前、任何 `convertToModelMessages()` 调用前，账本已经过深层校验"，代价
+ * 是"resume 数据结构合法但深层语义不合法"这类错误不再在 `createSession(...)`
+ * 调用的当下同步抛出，而是推迟到第一次 `stream()`/`send()` 时才 reject——这是
+ * `validateUIMessages()` 天生异步带来的、`createSession` 保持同步函数签名下
+ * 无法避免的行为变化（工单未要求 `createSession` 变成 `Promise`，理由与
+ * `mountSkillFiles` 一节相同：那会是破坏性签名变更）。
+ *
+ * `session.started`/`turn.started`（旧 `SessionEvent`）不再有对应 chunk——
+ * docs/tech/single-ledger.md §2.2a 原文"session.started / seq 时钟 | 不需要部件"，`turn.started`
+ * 同理（没有分配 data 部件/metadata 承载它，调用方发起 `stream()` 本身就是
+ * "新一轮开始"的信号）；`hasStarted`/`session.started` 重发抑制机制随之整体
+ * 移除，不再需要"resume 后不重发"的裁量。
  */
 import { randomUUID } from "node:crypto";
-import type { FilePart, LanguageModel, ModelMessage, TextPart, UserModelMessage } from "ai";
+import { convertToModelMessages } from "ai";
+import type { FileUIPart, LanguageModel, TextUIPart } from "ai";
 import type { z } from "zod";
 import type { AgentDefinition, BuiltinToolName } from "./agent.js";
 import { createOnceApprovalMemory } from "./approval.js";
 import { runTurn } from "./loop.js";
+import type { SessionTelemetry } from "./loop.js";
 import { createDerivedDataCollector } from "./runtime.js";
 import type { DerivedDataCollector } from "./runtime.js";
 import type { Skill } from "./skill.js";
 import { buildAvailableSkillsBlock, createGetSkill, mountSkillFiles } from "./skills/registry.js";
-import { sessionStateSchema } from "./state.js";
-import type { SessionState } from "./state.js";
+import { sessionStateSchema, validateSessionMessages } from "./state.js";
+import type { NimboChunk, NimboMessageMetadata, NimboUIMessage, SessionState } from "./state.js";
 import { generateStructuredOutput } from "./structured.js";
 import { createBashTool } from "./tools/builtin/bash.js";
 import { createLoadSkillTool } from "./tools/builtin/load-skill.js";
 import { createPlanStore, createUpdatePlanTool } from "./tools/builtin/update-plan.js";
 import type { PlanStore } from "./tools/builtin/update-plan.js";
 import { jsonValueSchema } from "./types.js";
-import type { ApprovalPolicy, DirEntry, FileStat, JsonValue, NimboExec, NimboFS, Tool } from "./types.js";
-import type { NimboError, SessionEvent, SessionItem, Usage } from "./events.js";
+import type { ApprovalPolicy, ApprovalReviewer, DirEntry, FileStat, JsonValue, NimboExec, NimboFS, Tool } from "./types.js";
+import type { NimboError, Usage } from "./events.js";
 
-// ---- Input / InputBlock（tech-spec §4.2） ----
+// ---- Input / InputBlock（docs/tech/core-sdk.md §4.2） ----
 
 export type InputBlock =
   | { type: "text"; text: string }
@@ -121,14 +133,23 @@ export type InputBlock =
 
 export type Input = string | InputBlock[];
 
-// ---- TurnOptions / TurnResult（tech-spec §4.2；outputSchema 见本文件头"结构化输出"一节） ----
+// ---- TurnOptions / TurnResult（docs/tech/core-sdk.md §4.2；outputSchema 见本文件头"结构化输出"一节） ----
 
 export interface TurnOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * `items: SessionItem[]` 已随 `SessionItem` 退役而移除（docs/tech/single-ledger.md §5 单-2）——"这个 turn 发生了什么"现在读账本本身
+ * （`Session.toJSON().messages`，`NimboUIMessage[]` 的部件/metadata），不再
+ * 有一份平行的 item 列表。`finalResponse`/`usage` 两个字段的类型与语义不变
+ * （工单原文"TurnResult 形状不变"，这里按二者仍逐字保留的意思落实；`items`
+ * 字段本身随其元素类型一起退役，工单未给出替代字段，属本次迁移的裁量点，
+ * 已在工单回报中列出）：`finalResponse` = 该轮最后一次产出非空文本的
+ * assistant 消息里全部 `text` 部件拼接（`loop.ts` 的 `collectMessageText`），
+ * `usage` 语义不变（该轮累计 token 用量）。
+ */
 export interface TurnResult {
-  items: SessionItem[];
   finalResponse: string;
   usage: Usage;
 }
@@ -156,7 +177,7 @@ export function createSessionReadState(): SessionReadState {
   };
 }
 
-// ---- SessionOptions（tech-spec §4.2；exec/workspace 见下方字段注释） ----
+// ---- SessionOptions（docs/tech/core-sdk.md §4.2；exec/workspace 见下方字段注释） ----
 
 export interface SessionOptions {
   fs?: NimboFS;
@@ -164,7 +185,16 @@ export interface SessionOptions {
   exec?: NimboExec;
   /** 语法糖：同源工作区一次注入 fs + exec（§4.5a 模式 A）；与 `fs`/`exec` 互斥，理由见本文件头。 */
   workspace?: NimboFS & NimboExec;
+  /** 审批分类器（docs/tech/single-ledger.md §6.2，取代旧的 `shouldAutoAllow`）——per-tool 升级到这里的兜底判定，见 `@nimbo/core/approval.js` 头注释。 */
   onApproval?: ApprovalPolicy;
+  /**
+   * 人审通道（docs/tech/single-ledger.md §6.4 P13-5-2c 新增，`ApprovalReviewer`，types.ts）：
+   * `evaluateApproval` 解析出 `review` 后，`loop.ts` 先 yield
+   * `tool-approval-request` chunk 再 `await` 这个函数拿到人工裁决——与
+   * `onApproval`（同步的三值分类）是两个独立的注入点。未注入时 `review`
+   * 视同无仲裁者 deny（附指导文案）。
+   */
+  onReview?: ApprovalReviewer;
   /** 在 agent 定义的 instructions 之上追加（§4.2，多租户注入场景）。 */
   instructions?: { append: string };
   /**
@@ -195,6 +225,13 @@ export interface SessionOptions {
   readState?: SessionReadState;
   /** 同上，用于外部工具的派生数据（`file_change`/`plan_update`）上报通道。 */
   derivedData?: DerivedDataCollector;
+  /**
+   * telemetry 事件集成透传（`SessionTelemetry`，loop.ts）：注入后每次
+   * `streamText` 的生命周期事件（step/model call 的 usage、performance 等）
+   * 发给这些集成，事件自带 `functionId = "<sessionId>#<turn>"` 关联键。
+   * 不注入 = 无事件（loop 只留 functionId 元数据，零开销）。
+   */
+  telemetry?: SessionTelemetry;
 }
 
 /**
@@ -204,7 +241,7 @@ export interface SessionOptions {
  */
 export type SessionDerivedDataRecorder = Pick<DerivedDataCollector, "recordFileChange" | "recordPlanUpdate">;
 
-// ---- Session（tech-spec §4.2） ----
+// ---- Session（docs/tech/core-sdk.md §4.2） ----
 
 export interface Session {
   readonly id: string;
@@ -216,9 +253,10 @@ export interface Session {
   send(input: Input, opts?: TurnOptions): Promise<TurnResult>;
   /** 结构化输出（§4.8；实现见本文件头"结构化输出"一节 / `structured.ts`）。 */
   send<T>(input: Input, opts: TurnOptions & { outputSchema: z.ZodType<T> }): Promise<TurnResult & { structuredOutput: T }>;
-  stream(input: Input, opts?: TurnOptions): AsyncGenerator<SessionEvent, TurnResult>;
+  /** ai 的 UIMessageChunk 词汇表（对 `NimboUIMessage` 实例化，`state.ts` 的 `NimboChunk`）——任何 AI SDK 兼容客户端可直接消费（docs/tech/single-ledger.md §5 单-2 目标架构 2）。 */
+  stream(input: Input, opts?: TurnOptions): AsyncGenerator<NimboChunk, TurnResult>;
   /**
-   * 软 steer（STEER-1，tech-spec §4.2）：turn 进行中调用则把 `input` 排队、在
+   * 软 steer（STEER-1，docs/tech/core-sdk.md §4.2）：turn 进行中调用则把 `input` 排队、在
    * 下一个 step checkpoint 注入为一条 user 消息（不打断进行中的模型流式输出
    * 或工具执行）并返回 `true`；没有进行中的 turn（尚未 `send`/`stream`，或上
    * 一个 turn 已经收尾）返回 `false`——调用方此时应改用 `send`/`stream` 发起
@@ -273,7 +311,7 @@ function createUnconfiguredFS(): NimboFS {
 
 /**
  * P5 补充：`agent.skills` 非空时在 instructions 之后追加 `<available_skills>`
- * 段（tech-spec §4.6 第 1 点）。拼装顺序是"人写的 instructions 在前、skills 元
+ * 段（docs/tech/core-sdk.md §4.6 第 1 点）。拼装顺序是"人写的 instructions 在前、skills 元
  * 数据在后"——后者是运行时派生的补充信息，不是 instructions 本文的一部分。
  */
 function buildSystemPrompt(agent: AgentDefinition, opts: SessionOptions): string | undefined {
@@ -287,31 +325,37 @@ function buildSystemPrompt(agent: AgentDefinition, opts: SessionOptions): string
 }
 
 /**
- * `InputBlock`'s `image` variant maps onto AI SDK's `FilePart` with `mediaType`, not the
- * `ImagePart` type its field names (`data`/`mediaType`) otherwise resemble — `ImagePart` is
- * `@deprecated` in `ai@7` (superseded by `FilePart` with an image `mediaType`), and using it
- * emits a runtime deprecation warning on every image turn. `FilePart.data` accepts a bare
- * `DataContent` (`string | Uint8Array | ...`), which `InputBlock`'s `data` field already is.
+ * `InputBlock`'s `image` variant maps onto UIMessage's `FileUIPart`——unlike
+ * `ModelMessage`'s `FilePart` (which took `DataContent` directly), `FileUIPart.url`
+ * is always a URL string (a `data:` URL for inline bytes); `convertToModelMessages()`
+ * turns that back into a `FilePart` with `data: {type:'url', url: new URL(part.url)}`
+ * for the model (confirmed against `ai@7.0.20`'s conversion source). A raw `string`
+ * `InputBlock.data` is treated as already-base64 (the established `ModelMessage`
+ * `DataContent` convention this type carried over); `Uint8Array` is base64-encoded
+ * here (same `Buffer.from(...).toString("base64")` used elsewhere in this monorepo,
+ * e.g. `@nimbo/virtual-fs`'s `memory.ts`).
  */
-function toUserModelMessage(input: Input): UserModelMessage {
-  if (typeof input === "string") return { role: "user", content: input };
-  return {
-    role: "user",
-    content: input.map((block): TextPart | FilePart =>
-      block.type === "text" ? { type: "text", text: block.text } : { type: "file", data: block.data, mediaType: block.mediaType },
-    ),
-  };
+function toUserUIMessagePart(block: InputBlock): TextUIPart | FileUIPart {
+  if (block.type === "text") return { type: "text", text: block.text };
+  const base64 = typeof block.data === "string" ? block.data : Buffer.from(block.data).toString("base64");
+  return { type: "file", mediaType: block.mediaType, url: `data:${block.mediaType};base64,${base64}` };
 }
 
-/** `builtinTools` 是否包含 `update_plan`（默认全开；`false` 全关；数组按成员判断）。 */
+/** `Input` → 一条 user `NimboUIMessage`——初始 turn 输入与 steer 插话共用（`metadata` 由调用方决定，steer 传 `{steered:true}`）。 */
+function toUserUIMessage(input: Input, metadata?: NimboMessageMetadata): NimboUIMessage {
+  const parts: (TextUIPart | FileUIPart)[] = typeof input === "string" ? [{ type: "text", text: input }] : input.map(toUserUIMessagePart);
+  return { id: randomUUID(), role: "user", parts, metadata };
+}
+
+/** `builtinTools` 是否包含 `update-plan`（默认全开；`false` 全关；数组按成员判断）。 */
 function isUpdatePlanEnabled(builtinTools: BuiltinToolName[] | false | undefined): boolean {
   if (builtinTools === false) return false;
   if (builtinTools === undefined) return true;
-  return builtinTools.includes("update_plan");
+  return builtinTools.includes("update-plan");
 }
 
 /**
- * `load_skill` 是条件内置（04-builtin-tools.md §1.9 / §3 括注）：不经
+ * `load-skill` 是条件内置（docs/tech/builtin-tools.md §1.9 / §3 括注）：不经
  * `builtinTools` 裁剪，只看 `agent.skills` 是否配置了至少一个 skill——与
  * `bash` 由 `NimboExec` 注入触发是同一族"条件内置"机制，但触发条件各自独立。
  */
@@ -320,20 +364,20 @@ function isLoadSkillEnabled(skills: Skill[] | undefined): boolean {
 }
 
 /**
- * `agent.tools` + core 自带的内置工具（`update_plan` 恒定、`load_skill`/
+ * `agent.tools` + core 自带的内置工具（`update-plan` 恒定、`load-skill`/
  * `bash` 条件内置，文件工具八件套归 P7）。宿主同名工具覆盖内置实现
- * （04-builtin-tools.md §3），因此展开顺序是内置在前、`agent.tools` 在后。
+ * （docs/tech/builtin-tools.md §3），因此展开顺序是内置在前、`agent.tools` 在后。
  */
 function assembleTools(agent: AgentDefinition, planStore: PlanStore, derivedData: DerivedDataCollector, exec: NimboExec | undefined): Record<string, Tool> {
   const builtins: Record<string, Tool> = {};
   if (isUpdatePlanEnabled(agent.builtinTools)) {
-    builtins.update_plan = createUpdatePlanTool({
+    builtins["update-plan"] = createUpdatePlanTool({
       store: planStore,
       onPlanUpdate: (items) => derivedData.recordPlanUpdate(items),
     });
   }
   if (isLoadSkillEnabled(agent.skills)) {
-    builtins.load_skill = createLoadSkillTool({ skills: agent.skills ?? [] });
+    builtins["load-skill"] = createLoadSkillTool({ skills: agent.skills ?? [] });
   }
   if (exec !== undefined) {
     builtins.bash = createBashTool({ exec });
@@ -343,7 +387,7 @@ function assembleTools(agent: AgentDefinition, planStore: PlanStore, derivedData
 
 const WORKSPACE_EXCLUSIVITY_MESSAGE =
   "SessionOptions.workspace is mutually exclusive with fs/exec — workspace (NimboFS & NimboExec) already " +
-  "provides both from a single same-source object (tech-spec §4.5a mode A). Pass either { workspace } alone, " +
+  "provides both from a single same-source object (docs/tech/core-sdk.md §4.5a mode A). Pass either { workspace } alone, " +
   "or { fs, exec } (either or both) without workspace — mixing the two leaves it ambiguous which fs/exec " +
   "actually took effect.";
 
@@ -412,10 +456,11 @@ const FS_RESTORE_NOT_SUPPORTED_MESSAGE =
   "without fsSnapshot.";
 
 /**
- * `resume` 经 `sessionStateSchema` 校验（P1-1）——同步抛错，理由同
+ * `resume` 经 `sessionStateSchema` 校验——同步抛错，理由同
  * `resolveExecutionSurfaces`：一次性的、纯静态的装配期输入校验，值得在
- * `createSession(...)` 调用的当下立刻失败，不留到后续某次 `send()`/`stream()`
- * 才暴露"resume 的数据其实是坏的"。
+ * `createSession(...)` 调用的当下立刻失败。这只是**浅层**校验（`state.ts`
+ * 头注释）——深层的 `validateSessionMessages()` 异步跑在 `createSession` 内部
+ * （不 await），`stream()`/`send()` 顶部才真正等它，理由见本文件头。
  */
 function resolveResumedState(resume: SessionState | undefined): SessionState | undefined {
   if (resume === undefined) return undefined;
@@ -444,7 +489,20 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
   const maxContextTokens = agent.maxContextTokens;
   const maxOutputTokens = agent.maxOutputTokens;
 
-  const messages: ModelMessage[] = resumedState !== undefined ? [...resumedState.messages] : [];
+  /**
+   * `messages` 先用浅层校验（`resolveResumedState`）通过的原始账本 scaffold；
+   * `messagesReady` 在下面异步跑深层校验（ai 的 `validateUIMessages()`），成功
+   * 后整体替换成收窄/规范化过的账本——`stream()`/`send()` 顶部 `await` 它，
+   * 理由见本文件头"结构化输出 + 序列化/恢复"一节。未 resume 时无需校验，
+   * `messagesReady` 是一个已 resolve 的 no-op。
+   */
+  let messages: NimboUIMessage[] = resumedState !== undefined ? [...resumedState.messages] : [];
+  const messagesReady: Promise<void> =
+    resumedState !== undefined
+      ? validateSessionMessages(resumedState.messages).then((validated) => {
+          messages = validated;
+        })
+      : Promise.resolve();
   const readState = opts.readState ?? createSessionReadState();
   const onceMemory = createOnceApprovalMemory();
   const derivedData = opts.derivedData ?? createDerivedDataCollector();
@@ -452,7 +510,7 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
   const tools = assembleTools(agent, planStore, derivedData, exec);
   const getSkill = createGetSkill(agent.skills ?? []);
   /**
-   * P5：附属文件挂载"createSession 时"触发（tech-spec §4.6 第 3 点原文）——
+   * P5：附属文件挂载"createSession 时"触发（docs/tech/core-sdk.md §4.6 第 3 点原文）——
    * `mountSkillFiles(...)` 在这里被调用（不是等到第一次 `stream()`），只是它的
    * 完成（`await`）挪到 `stream()` 顶部，理由是 `createSession` 本身是同步函数、
    * 不能在这里 `await` 一个可能真异步的 `NimboFS.writeFile`（真实沙盒实现）；
@@ -462,11 +520,6 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
   const skillFilesMounted = mountSkillFiles(fs, agent.skills ?? []);
 
   let turn = resumedState?.turn ?? 0;
-  /**
-   * resume 后不再重发 `session.started`（工单原文；裁量理由见本文件头
-   * "结构化输出 + 序列化/恢复"一节）。
-   */
-  let hasStarted = resumedState !== undefined;
 
   /**
    * STEER-1：turn 作用域的 steer 队列 + 活动标志。`stream()` 生成器体开头置
@@ -476,36 +529,30 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
    * （经下面 `drainSteers` 回调传入）。
    */
   let turnActive = false;
-  let pendingSteers: UserModelMessage[] = [];
+  let pendingSteers: NimboUIMessage[] = [];
 
   /**
-   * `steer()`'s known gap (STEER-1 §4.2 / STEER-1F): a `turn.failed` raised
+   * `steer()`'s known gap (STEER-1 §4.2 / STEER-1F): a turn-failure raised
    * by the model or tool-execution error paths (`aborted`/`provider_error`
    * catches in `loop.ts`) doesn't drain the queue first — content queued
    * during that in-flight model call/tool execution is dropped when the turn
    * fails that way, not injected. Not fixed by this method; see loop.ts's
-   * `runTurn` header and docs/02 §4.2 for the up-to-date list of which
+   * `runTurn` header and docs/tech/core-sdk.md §4.2 for the up-to-date list of which
    * termination paths do drain.
    */
   function steer(input: Input): boolean {
     if (!turnActive) return false;
-    pendingSteers.push(toUserModelMessage(input));
+    pendingSteers.push(toUserUIMessage(input, { steered: true }));
     return true;
   }
 
-  async function* stream(input: Input, turnOpts: TurnOptions = {}): AsyncGenerator<SessionEvent, TurnResult> {
+  async function* stream(input: Input, turnOpts: TurnOptions = {}): AsyncGenerator<NimboChunk, TurnResult> {
     turnActive = true;
     try {
-      await skillFilesMounted;
+      await Promise.all([skillFilesMounted, messagesReady]);
 
       turn += 1;
-      if (!hasStarted) {
-        hasStarted = true;
-        yield { type: "session.started", sessionId: id };
-      }
-      yield { type: "turn.started", turn };
-
-      messages.push(toUserModelMessage(input));
+      messages.push(toUserUIMessage(input));
 
       const turnGen = runTurn({
         model,
@@ -519,31 +566,34 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
         session: { id, turn },
         signal: turnOpts.signal,
         onApproval: opts.onApproval,
+        onReview: opts.onReview,
         onceMemory,
         derivedData,
         getSkill,
         drainSteers: () => pendingSteers.splice(0, pendingSteers.length),
+        telemetry: opts.telemetry,
       });
 
       /**
        * STEER-3A Finding 4 (§4.2): manual delegation instead of a bare
-       * `yield* turnGen` — `turn.completed`/`turn.failed` are the terminal
-       * events `runTurn` ends on, but a plain `yield*` only lets the
-       * consumer observe one *after* it's already been produced, at which
-       * point `steer()` would still (incorrectly) report an in-flight turn.
-       * Flipping `turnActive = false` the instant one of those two arrives —
-       * strictly *before* yielding it onward — makes a `steer()` call made
-       * in reaction to seeing the terminal event honestly return `false`,
-       * instead of `true` immediately followed by the content being
-       * silently dropped by the `finally` block below.
+       * `yield* turnGen` — the `message-metadata` chunk `runTurn` always ends
+       * on (`loop.ts`'s `finalizeTurn`, exactly once per turn) is the
+       * terminal signal, but a plain `yield*` only lets the consumer observe
+       * it *after* it's already been produced, at which point `steer()`
+       * would still (incorrectly) report an in-flight turn. Flipping
+       * `turnActive = false` the instant that chunk arrives — strictly
+       * *before* yielding it onward — makes a `steer()` call made in
+       * reaction to seeing it honestly return `false`, instead of `true`
+       * immediately followed by the content being silently dropped by the
+       * `finally` block below.
        */
       let next = await turnGen.next();
       while (!next.done) {
-        const event = next.value;
-        if (event.type === "turn.completed" || event.type === "turn.failed") {
+        const chunk = next.value;
+        if (chunk.type === "message-metadata") {
           turnActive = false;
         }
-        yield event;
+        yield chunk;
         next = await turnGen.next();
       }
       return next.value;
@@ -566,7 +616,14 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
     let failure: NimboError | undefined;
     let step = await gen.next();
     while (!step.done) {
-      if (step.value.type === "turn.failed") failure = step.value.error;
+      // `finalizeTurn`（loop.ts）writes exactly one `message-metadata` chunk
+      // per turn, carrying `{turn, usage, status, error?}` — `error` present
+      // is the ground truth for "this turn failed" (regardless of which of
+      // the three failure `status` labels it got), same as the old
+      // `turn.failed` event's role.
+      if (step.value.type === "message-metadata" && step.value.messageMetadata.error !== undefined) {
+        failure = step.value.messageMetadata.error;
+      }
       step = await gen.next();
     }
     if (failure !== undefined) throw new NimboSessionError(failure);
@@ -574,10 +631,11 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
     const turnResult = step.value;
     if (turnOpts.outputSchema === undefined) return turnResult;
 
+    const requestMessages = await convertToModelMessages(messages);
     const structuredOutput = await generateStructuredOutput({
       model,
       system,
-      messages,
+      messages: requestMessages,
       outputSchema: turnOpts.outputSchema,
       maxOutputTokens,
       signal: turnOpts.signal,

@@ -1,5 +1,5 @@
 /**
- * `move_file`（04-builtin-tools.md §1.5）：重命名/移动；`to` 已存在且未
+ * `move-file`（docs/tech/builtin-tools.md §1.5）：重命名/移动；`to` 已存在且未
  * `overwrite` → 拒绝；事件为 `delete(from)` + `add(to)`（v1 不引入 rename kind）。
  *
  * 目录内含 reference 条目时拒绝整体移动而不是静默丢弃——设计裁量：`NimboFS`
@@ -68,7 +68,7 @@ export function createMoveFileTool(opts: CreateFileToolsOptions): Tool {
         const referenceEntry = entries.find((entry) => entry.stat.type === "reference");
         if (referenceEntry !== undefined) {
           return errorResult(
-            `"${from}" contains a reference entry at "${referenceEntry.path}" that move_file cannot relocate ` +
+            `"${from}" contains a reference entry at "${referenceEntry.path}" that move-file cannot relocate ` +
               "(there is no generic way to copy a reference entry's metadata through the NimboFS interface). " +
               "Move the regular files individually instead, or leave this subtree where it is.",
           );
@@ -89,7 +89,7 @@ export function createMoveFileTool(opts: CreateFileToolsOptions): Tool {
         } catch (error) {
           if (error instanceof ReferenceNotResolvable) {
             return errorResult(
-              `"${from}" is a reference entry with no resolvable local content (href=${error.href}); move_file ` +
+              `"${from}" is a reference entry with no resolvable local content (href=${error.href}); move-file ` +
                 "cannot relocate it (no generic way to copy a reference entry's metadata through the NimboFS interface).",
             );
           }

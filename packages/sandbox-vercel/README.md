@@ -1,6 +1,6 @@
 # @nimbo/sandbox-vercel
 
-把一个已创建好的 [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox)（真实 Amazon Linux 2023 Firecracker microVM）实例包成 `NimboFS & NimboExec`，一次注入 `createSession(agent, { workspace })`——"模式 A 同源工作区"落在真实云沙盒上的实现（对照 [docs/02-tech-spec.md §4.5a](../../docs/02-tech-spec.md) / [docs/06-sandbox-workspace-research.md §8](../../docs/06-sandbox-workspace-research.md)）。
+把一个已创建好的 [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox)（真实 Amazon Linux 2023 Firecracker microVM）实例包成 `NimboFS & NimboExec`，一次注入 `createSession(agent, { workspace })`——"模式 A 同源工作区"落在真实云沙盒上的实现（对照 [docs/tech/core-sdk.md §4.5a](../../docs/tech/core-sdk.md) / [docs/tech/sandbox.md §8](../../docs/tech/sandbox.md)）。
 
 ## 安装
 
@@ -45,7 +45,7 @@ function vercelWorkspace(sandbox: VercelSandboxLike, opts?: { root?: string }): 
 - **BYO 实例**是唯一入口：`vercelWorkspace()` 不创建、不销毁沙盒——创建（`Sandbox.create()`）、超时延长、`stop()` 完全由宿主自己管理。
 - `opts.root`（默认 `/vercel/sandbox`，Vercel Sandbox 的默认工作目录）：虚拟绝对路径 `/` 锚定到的沙盒内真实目录；FS 七方法仍拒绝 `..` 越出这个 root（与 `MemoryFS`/`DirFS` 同一套边界语义），但 `bash` 本身不受此限制（见下）。
 
-## 已知限制（docs/06 §8.2 / docs/03-construction-plan.md P10-2 实际改动，如实照抄不发明）
+## 已知限制（docs/tech/sandbox.md §8.2 / docs/plans/core-sdk.md P10-2 实际改动，如实照抄不发明）
 
 - **非递归删除目录走 `fs.rmdir()` 而非 `fs.rm()`**：实测推翻了调研文档"`fs.rm(path, {recursive})` 原生对齐"的假设——`@vercel/sandbox` 的 `fs.rm(path)`（非递归）对**任何**目录都抛 `ERR_FS_EISDIR`，不区分空/非空；真正带"空则成功、非空则 `ENOTEMPTY`"语义的是 `fs.rmdir()`。适配器按目标类型分流：文件走 `fs.rm()`，非递归删目录走 `fs.rmdir()`，`{recursive: true}` 统一走 `fs.rm(path, {recursive:true, force:true})`——代价是非递归删目录多一次 `stat` 判断类型。
 - **bash 越出工作区根**：文件工具锚定在 `root` 之下并拒绝 `..` 越界，但 `bash -lc "<script>"` 是沙盒里的真实 shell（默认用户有免密 sudo），能读写/`cd` 到磁盘任何位置——绝对路径的 bash 命令（如 `cat /notes.txt`）落在沙盒真实文件系统根，而不是 `root`；同一份文件要在文件工具和 bash 之间互通，bash 侧要用相对路径。

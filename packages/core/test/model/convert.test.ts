@@ -32,7 +32,7 @@ describe("convertTool", () => {
 
   it("does not carry over outputSchema/approval — those are nimbo-only concerns", () => {
     const aiTool = convertTool(
-      makeNimboTool({ outputSchema: z.string(), approval: "always" }),
+      makeNimboTool({ outputSchema: z.string(), approval: "review" }),
     );
 
     expect("outputSchema" in aiTool).toBe(false);
@@ -50,16 +50,16 @@ describe("convertTools", () => {
     const searchSchema = z.object({ query: z.string() });
 
     const toolSet = convertTools({
-      read_file: makeNimboTool({ description: "read", inputSchema: readSchema }),
+      "read-file": makeNimboTool({ description: "read", inputSchema: readSchema }),
       search: makeNimboTool({ description: "search", inputSchema: searchSchema }),
     });
 
-    expect(Object.keys(toolSet).sort()).toEqual(["read_file", "search"]);
-    expect(toolSet["read_file"]?.description).toBe("read");
-    expect(toolSet["read_file"]?.inputSchema).toBe(readSchema);
+    expect(Object.keys(toolSet).sort()).toEqual(["read-file", "search"]);
+    expect(toolSet["read-file"]?.description).toBe("read");
+    expect(toolSet["read-file"]?.inputSchema).toBe(readSchema);
     expect(toolSet["search"]?.description).toBe("search");
     expect(toolSet["search"]?.inputSchema).toBe(searchSchema);
-    expect("execute" in (toolSet["read_file"] ?? {})).toBe(false);
+    expect("execute" in (toolSet["read-file"] ?? {})).toBe(false);
     expect("execute" in (toolSet["search"] ?? {})).toBe(false);
   });
 });

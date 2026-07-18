@@ -10,15 +10,15 @@ model: claude-sonnet-5
 
 nimbo 是可嵌入 Node.js 的轻量 agent SDK（pnpm monorepo：`@nimbo/sdk` 门面 / `@nimbo/core` / `@nimbo/virtual-fs` / `@nimbo/mini-bash`；apps：`@nimbo-chat/server` / `@nimbo-chat/web` 聊天应用）。开工前按需精读工单指向的章节：
 
-- `docs/02-tech-spec.md` —— 接口与架构的唯一事实来源，断言行为以它为准
-- `docs/04-builtin-tools.md` —— 内置工具的行为规格与验收要点
+- `docs/tech/core-sdk.md` —— 接口与架构的唯一事实来源，断言行为以它为准（技术面按功能拆分见 docs/tech/*）
+- `docs/tech/builtin-tools.md` —— 内置工具的行为规格与验收要点
 
 工具链：typescript@7（tsgo）、vitest@4、pnpm workspace。
 
 ## 职责
 
 - **单测/集成测试**：按工单的验收标准编写与维护 vitest 用例，覆盖正常路径、错误路径与边界（截断、越界、空输入）；跟随各包既有的测试目录与命名约定。
-- **端到端实测**：用 chrome-devtools MCP 或 agent-browser skill 在真实浏览器里跑通 chat 应用关键流程，定位并复现前端交互 bug，验证修复后回归。启动方式：根目录 `pnpm chat:server` + `pnpm chat:web`（首次先 `pnpm chat:bootstrap`）。
+- **端到端实测**：用 chrome-devtools MCP 或 agent-browser skill 在真实浏览器里跑通 chat 应用关键流程，定位并复现前端交互 bug，验证修复后回归。启动方式：根目录 `pnpm chat:server` + `pnpm chat:web`（首次先 `pnpm chat:bootstrap`）。**实测收尾必须清理浏览器会话**：`agent-browser close --all`；chrome-devtools MCP 用完关掉打开的页面/浏览器，别把实例留着（残留会一直占进程，需要主线程事后手动清）。自己起的 dev/server 进程按 PID 收掉，不按端口猜杀。
 
 ## 测试规范（违反即返工）
 

@@ -3,7 +3,7 @@ import { MemoryFS, fromMemory } from "../../src/memory.js";
 import { createWriteFileTool } from "../../src/tools/write-file.js";
 import { createMapReadStateStore, createOnFileChangeMock, expectError, expectText, makeCtx, readMtime } from "./helpers.js";
 
-describe("write_file", () => {
+describe("write-file", () => {
   it("creates a new file, auto-creating missing parent directories, and reports kind:add", async () => {
     const fs = new MemoryFS();
     const readState = createMapReadStateStore();
@@ -22,7 +22,7 @@ describe("write_file", () => {
     const tool = createWriteFileTool({ readState: createMapReadStateStore(), onFileChange });
 
     const content = expectError(await tool.execute({ path: "/a.txt", content: "new" }, makeCtx(fs)));
-    expect(content).toContain("read_file");
+    expect(content).toContain("read-file");
     expect(new TextDecoder().decode(await fs.readFile("/a.txt"))).toBe("old"); // unchanged
     expect(onFileChange).not.toHaveBeenCalled();
   });
@@ -51,7 +51,7 @@ describe("write_file", () => {
     const tool = createWriteFileTool({ readState });
     const content = expectError(await tool.execute({ path: "/a.txt", content: "v3" }, makeCtx(fs)));
     expect(content).toContain("changed since it was last read");
-    expect(content).toContain("read_file");
+    expect(content).toContain("read-file");
   });
 
   it("registers readState with the post-write mtime, so a subsequent overwrite needs no extra read", async () => {

@@ -3,7 +3,7 @@ import { MemoryFS, fromMemory } from "../../src/memory.js";
 import { createListDirTool } from "../../src/tools/list-dir.js";
 import { expectError, expectText, makeCtx } from "./helpers.js";
 
-describe("list_dir", () => {
+describe("list-dir", () => {
   it("defaults to the root at depth 1: immediate children only, subdirectories not expanded", async () => {
     const fs = fromMemory({ "a.txt": "1", "dir/b.txt": "2" });
     const tool = createListDirTool();
@@ -74,7 +74,7 @@ describe("list_dir", () => {
     const tool = createListDirTool();
 
     const content = expectError(await tool.execute({ path: "/a.txt" }, makeCtx(fs)));
-    expect(content).toContain("read_file");
+    expect(content).toContain("read-file");
   });
 
   it("errors when the path does not exist", async () => {

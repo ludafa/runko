@@ -31,7 +31,7 @@ describe("@nimbo/sdk re-exports @nimbo/core's L0/L1/L2 surface", () => {
   });
 
   it("builtinTools constants: BuiltinToolName + READ_ONLY_TOOLS", () => {
-    expect(sdk.READ_ONLY_TOOLS).toEqual(["read_file", "list_dir", "glob", "grep"]);
+    expect(sdk.READ_ONLY_TOOLS).toEqual(["read-file", "list-dir", "glob", "grep"]);
   });
 
   it("L2 runtime helpers: createSessionReadState/createDerivedDataCollector/NimboSessionError", () => {
@@ -61,7 +61,7 @@ describe("@nimbo/sdk re-exports @nimbo/virtual-fs's surface", () => {
     const readState = sdk.createSessionReadState();
     const tools = sdk.createFileTools({ readState });
     const names = Object.keys(tools).sort();
-    expect(names).toEqual(["delete_file", "edit_file", "glob", "grep", "list_dir", "move_file", "read_file", "write_file"]);
+    expect(names).toEqual(["delete-file", "edit-file", "glob", "grep", "list-dir", "move-file", "read-file", "write-file"]);
   });
 
   it("diff/mime/path helpers", () => {
@@ -76,7 +76,7 @@ describe("@nimbo/sdk re-exports @nimbo/mini-bash's surface", () => {
     expect(typeof sdk.miniBash).toBe("function");
     const fs = sdk.fromMemory({ "a.txt": "hello" });
     const exec = sdk.miniBash(fs);
-    expect(exec.defaultApproval).toBe("never");
+    expect(exec.defaultApproval).toBe("allow");
   });
 });
 
@@ -99,8 +99,8 @@ describe("type-level export surface (compiles => passes; verified by typecheck, 
   });
 
   it("virtual-fs's FileToolName type is importable from the single barrel", () => {
-    const name: FileToolName = "read_file";
-    expect(name).toBe("read_file");
+    const name: FileToolName = "read-file";
+    expect(name).toBe("read-file");
   });
 
   it("Skill (type) and Session<F> (sdk-local generic) both resolve without a cast", () => {

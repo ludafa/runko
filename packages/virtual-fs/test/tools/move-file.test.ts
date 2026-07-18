@@ -4,7 +4,7 @@ import { OverlayFS } from "../../src/overlay.js";
 import { createMoveFileTool } from "../../src/tools/move-file.js";
 import { createMapReadStateStore, createOnFileChangeMock, expectError, expectText, makeCtx } from "./helpers.js";
 
-describe("move_file", () => {
+describe("move-file", () => {
   it("moves a single file, producing a delete(from)+add(to) file_change pair in that order", async () => {
     const fs = fromMemory({ "a.txt": "content" });
     const onFileChange = createOnFileChangeMock();

@@ -1,5 +1,5 @@
 /**
- * `list_dir`（04-builtin-tools.md §1.6）：目录树文本，默认根/depth 1；行尾标注
+ * `list-dir`（docs/tech/builtin-tools.md §1.6）：目录树文本，默认根/depth 1；行尾标注
  * 非文本文件的 mimeType、reference 的 `→ href`、annotations.description；
  * 500 条目上限。
  */
@@ -63,6 +63,7 @@ export function createListDirTool(): Tool {
       "reference entries with '→ href', and entries with a host-provided description get it appended. Capped at " +
       "500 entries — narrow with a deeper path or use glob for a flat, pattern-filtered listing instead.",
     inputSchema,
+    readOnly: true,
     execute: async (input, ctx): Promise<ToolReturn> => {
       const path = input.path ?? "/";
       const depth = input.depth ?? 1;
@@ -77,7 +78,7 @@ export function createListDirTool(): Tool {
         return errorResult(`Failed to stat "${path}": ${describeError(error)}.`);
       }
       if (stat.type === "file") {
-        return errorResult(`"${path}" is a file, not a directory. Use read_file to view it.`);
+        return errorResult(`"${path}" is a file, not a directory. Use read-file to view it.`);
       }
       if (stat.type === "reference") {
         return errorResult(`"${path}" is a reference entry, not a directory.`);

@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createOnceApprovalMemory } from "../src/approval.js";
-import { createDerivedDataCollector, executeToolCall } from "../src/runtime.js";
-import type { ExecuteToolCallOptions } from "../src/runtime.js";
+import { createDerivedDataCollector, executeToolCall, resolveToolCallApproval } from "../src/runtime.js";
+import type { ExecuteToolCallOptions, ResolveToolCallApprovalOptions } from "../src/runtime.js";
 import { createPlanStore, createUpdatePlanTool } from "../src/tools/builtin/update-plan.js";
-import type { ApprovalDecision, JsonValue, NimboFS, Tool, ToolContext, ToolReturn } from "../src/types.js";
+import type { ApprovalOutcome, JsonValue, NimboFS, Tool, ToolContext, ToolReturn } from "../src/types.js";
 
 /**
  * `ToolCallResult.output` is `ToolReturn` (`string | JsonValue`); several assertions here need
@@ -40,106 +40,121 @@ function baseOptions(overrides: Partial<ExecuteToolCallOptions> = {}): Omit<Exec
   };
 }
 
-describe("executeToolCall", () => {
-  describe("input validation (tool.inputSchema.safeParse)", () => {
-    it("returns failed with a guidance message on malformed input, without calling execute", async () => {
-      const execute = vi.fn(() => "unused");
-      const tool: Tool = { description: "d", inputSchema: z.object({ path: z.string() }), execute };
+function baseApprovalOptions(
+  overrides: Partial<ResolveToolCallApprovalOptions> = {},
+): Omit<ResolveToolCallApprovalOptions, "tool" | "input"> {
+  return {
+    toolName: "test_tool",
+    callId: "call_1",
+    session: { id: "sess_1", turn: 0 },
+    ...overrides,
+  };
+}
 
-      const result = await executeToolCall({ ...baseOptions(), tool, input: { path: 42 } });
+/**
+ * P13-5-2c (docs/tech/single-ledger.md §6.4) split the old atomic `executeToolCall`
+ * (validate → approve → execute) into two independent steps so `loop.ts` can yield a
+ * `tool-approval-request` chunk *before* awaiting a human reviewer — `resolveToolCallApproval`
+ * (input validation + the approval chain, no execution) and `executeToolCall` (execution only,
+ * input already validated/approved). `evaluateApproval`'s own matrix (per-tool/session
+ * combinations, once-memory, no-arbiter deny) is exhaustively covered in approval.test.ts; the
+ * tests here only lock the wiring — that `resolveToolCallApproval` calls `inputSchema.safeParse`
+ * first and then threads `tool.approval`/`onApproval`/`onceMemory` into `evaluateApproval`
+ * correctly, mapping its `ApprovalResolution` onto `ToolCallApprovalOutcome`.
+ */
+describe("resolveToolCallApproval", () => {
+  describe("input validation (tool.inputSchema.safeParse) — happens before the approval chain", () => {
+    it("returns status:'invalid' with a guidance message on malformed input, without evaluating approval (even for a 'deny' tool)", async () => {
+      const tool: Tool = {
+        description: "d",
+        inputSchema: z.object({ path: z.string() }),
+        approval: "deny",
+        execute: () => "unused",
+      };
 
-      expect(result.status).toBe("failed");
-      expect(expectStringOutput(result.output)).toContain('"test_tool"');
-      expect(execute).not.toHaveBeenCalled();
-      expect(result.derived).toEqual({ changes: [] });
+      const outcome = await resolveToolCallApproval({ ...baseApprovalOptions(), tool, input: { path: 42 } });
+
+      expect(outcome.status).toBe("invalid");
+      expect(outcome.status === "invalid" ? outcome.message : "").toContain('"test_tool"');
     });
 
     it("does not throw — a malformed call resolves normally instead of rejecting", async () => {
       const tool: Tool = { description: "d", inputSchema: z.object({ path: z.string() }), execute: () => "unused" };
-      await expect(executeToolCall({ ...baseOptions(), tool, input: null })).resolves.toMatchObject({
-        status: "failed",
+      await expect(resolveToolCallApproval({ ...baseApprovalOptions(), tool, input: null })).resolves.toMatchObject({
+        status: "invalid",
       });
     });
   });
 
-  describe("approval chain integration", () => {
-    it("denies and puts the rejection reason in the backfill output", async () => {
-      const execute = vi.fn(() => "unused");
-      const tool: Tool = {
-        description: "d",
-        inputSchema: z.object({}),
-        approval: (): ApprovalDecision => ({ behavior: "deny", message: "no bash in prod" }),
-        execute,
-      };
-
-      const result = await executeToolCall({ ...baseOptions(), tool, input: {} });
-
-      expect(result.status).toBe("denied");
-      expect(result.output).toBe("no bash in prod");
-      expect(execute).not.toHaveBeenCalled();
+  describe("approval chain wiring (delegates to approval.ts's evaluateApproval — see approval.test.ts for the exhaustive outcome matrix)", () => {
+    it("status:'allow' carries the validated input through, via the default policy ('allow' when unconfigured)", async () => {
+      const tool: Tool = { description: "d", inputSchema: z.object({}), execute: () => "unused" };
+      const outcome = await resolveToolCallApproval({ ...baseApprovalOptions(), tool, input: {} });
+      expect(outcome).toEqual({ status: "allow", input: {} });
     });
 
-    it("falls back to a default deny message when the decision carries none", async () => {
-      const tool: Tool = {
-        description: "d",
-        inputSchema: z.object({}),
-        approval: (): ApprovalDecision => ({ behavior: "deny" }),
-        execute: () => "unused",
-      };
-
-      const result = await executeToolCall({ ...baseOptions(), tool, input: {} });
-      expect(result.status).toBe("denied");
-      expect(result.output).toBe("Tool call denied.");
+    it("status:'deny' carries the resolved reason from a per-tool 'deny' policy", async () => {
+      const tool: Tool = { description: "d", inputSchema: z.object({}), approval: "deny", execute: () => "unused" };
+      const outcome = await resolveToolCallApproval({ ...baseApprovalOptions(), tool, input: {} });
+      expect(outcome).toEqual({ status: "deny", reason: "Tool call denied." });
     });
 
-    it("denies 'always' with no session onApproval configured, with guidance", async () => {
-      const execute = vi.fn(() => "unused");
-      const tool: Tool = { description: "d", inputSchema: z.object({}), approval: "always", execute };
-
-      const result = await executeToolCall({ ...baseOptions(), tool, input: {} });
-
-      expect(result.status).toBe("denied");
-      expect(expectStringOutput(result.output)).toContain("onApproval");
-      expect(execute).not.toHaveBeenCalled();
+    it("status:'deny' with no-arbiter guidance when per-tool is 'review' and no session classifier is configured", async () => {
+      const tool: Tool = { description: "d", inputSchema: z.object({}), approval: "review", execute: () => "unused" };
+      const outcome = await resolveToolCallApproval({ ...baseApprovalOptions(), tool, input: {} });
+      expect(outcome.status).toBe("deny");
+      expect(outcome.status === "deny" ? outcome.reason : "").toContain("no approver configured");
     });
 
-    it("executes when the approval chain allows ('never' default)", async () => {
-      const execute = vi.fn(() => "ok");
-      const tool: Tool = { description: "d", inputSchema: z.object({}), execute };
+    it("status:'review' carries the validated input and markOnceOnApprove:false when a session classifier callback itself resolves to 'review'", async () => {
+      const tool: Tool = { description: "d", inputSchema: z.object({ command: z.string() }), approval: "review", execute: () => "unused" };
+      const onApproval = (): ApprovalOutcome => "review";
 
-      const result = await executeToolCall({ ...baseOptions(), tool, input: {} });
+      const outcome = await resolveToolCallApproval({
+        ...baseApprovalOptions(),
+        tool,
+        input: { command: "rm -rf /" },
+        onApproval,
+      });
 
-      expect(result.status).toBe("completed");
-      expect(result.output).toBe("ok");
-      expect(execute).toHaveBeenCalledTimes(1);
+      expect(outcome).toEqual({ status: "review", input: { command: "rm -rf /" }, markOnceOnApprove: false });
     });
 
-    it("replaces the input with updatedInput from an allow decision before calling execute", async () => {
-      const execute = vi.fn((input: JsonValue) => input);
-      const tool: Tool = {
-        description: "d",
-        inputSchema: z.object({ path: z.string() }),
-        approval: (): ApprovalDecision => ({ behavior: "allow", updatedInput: { path: "/sanitized.txt" } }),
-        execute,
-      };
-
-      const result = await executeToolCall({ ...baseOptions(), tool, input: { path: "/../etc/passwd" } });
-
-      expect(result.status).toBe("completed");
-      expect(execute).toHaveBeenCalledWith({ path: "/sanitized.txt" }, expect.anything());
-      expect(result.output).toEqual({ path: "/sanitized.txt" });
-    });
-
-    it("threads onceMemory through so a session-level 'once' onApproval is asked only once", async () => {
-      const onApproval = vi.fn(() => ({ behavior: "allow" }) satisfies ApprovalDecision);
+    it("threads onceMemory through so a 'review-once' policy is escalated only once (second call short-circuits to allow without calling onApproval again)", async () => {
+      const onApproval = vi.fn((): ApprovalOutcome => "allow");
       const onceMemory = createOnceApprovalMemory();
-      const tool: Tool = { description: "d", inputSchema: z.object({}), approval: "once", execute: () => "ok" };
+      const tool: Tool = { description: "d", inputSchema: z.object({}), approval: "review-once", execute: () => "ok" };
 
-      await executeToolCall({ ...baseOptions(), tool, input: {}, onApproval, onceMemory });
-      const second = await executeToolCall({ ...baseOptions(), tool, input: {}, onApproval, onceMemory });
+      const first = await resolveToolCallApproval({ ...baseApprovalOptions(), tool, input: {}, onApproval, onceMemory });
+      const second = await resolveToolCallApproval({ ...baseApprovalOptions(), tool, input: {}, onApproval, onceMemory });
 
-      expect(second.status).toBe("completed");
+      expect(first).toEqual({ status: "allow", input: {} });
+      expect(second).toEqual({ status: "allow", input: {} });
       expect(onApproval).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+describe("executeToolCall", () => {
+  describe("does not validate input or evaluate approval — that is resolveToolCallApproval's job (P13-5-2c split, docs/tech/single-ledger.md §6.4)", () => {
+    it("passes input straight to execute() even when it does not satisfy the tool's own inputSchema", async () => {
+      const execute = vi.fn(() => "ran anyway");
+      const tool: Tool = { description: "d", inputSchema: z.object({ path: z.string() }), execute };
+
+      const result = await executeToolCall({ ...baseOptions(), tool, input: { path: 42 } });
+
+      expect(result.status).toBe("completed");
+      expect(execute).toHaveBeenCalledWith({ path: 42 }, expect.anything());
+    });
+
+    it("ignores tool.approval entirely — a 'deny'-policy tool still executes when called directly", async () => {
+      const execute = vi.fn(() => "ran");
+      const tool: Tool = { description: "d", inputSchema: z.object({}), approval: "deny", execute };
+
+      const result = await executeToolCall({ ...baseOptions(), tool, input: {} });
+
+      expect(result.status).toBe("completed");
+      expect(execute).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -328,7 +343,7 @@ describe("executeToolCall", () => {
       expect(result.derived).toEqual({ changes: [] });
     });
 
-    it("integrates end-to-end with the real update_plan tool: derived.items matches the request", async () => {
+    it("integrates end-to-end with the real update-plan tool: derived.items matches the request", async () => {
       const collector = createDerivedDataCollector();
       const store = createPlanStore();
       const tool = createUpdatePlanTool({ store, onPlanUpdate: collector.recordPlanUpdate });
@@ -338,7 +353,7 @@ describe("executeToolCall", () => {
         { text: "write runtime.ts", completed: false },
       ];
       const result = await executeToolCall({
-        ...baseOptions({ toolName: "update_plan" }),
+        ...baseOptions({ toolName: "update-plan" }),
         tool,
         input: { items },
         derivedData: collector,

@@ -1,5 +1,5 @@
 /**
- * `NimboFS` → just-bash `IFileSystem` 适配器（tech-spec §4.5b 降级表）。
+ * `NimboFS` → just-bash `IFileSystem` 适配器（docs/tech/core-sdk.md §4.5b 降级表）。
  *
  * 逐行对应降级表：
  *   - readFile/readFileBuffer/writeFile/mkdir/readdir/rm/stat/exists：NimboFS

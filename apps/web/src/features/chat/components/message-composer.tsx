@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 
 /**
- * `streaming` no longer disables the composer (STEER-3B, docs/08 §2.2
+ * `streaming` no longer disables the composer (STEER-3B, docs/tech/chat-webapp.md §2.2
  * "契约细化" #3): a send while a turn is already in progress steers it
  * instead of starting a new one (`use-chat-messages.ts`'s `sendMessage`
  * picks the branch — this component doesn't need to know which). The

@@ -1,6 +1,6 @@
 /**
  * 08-just-bash — the "full-syntax bash" upgrade path from
- * docs/02-tech-spec.md §4.5b: `@nimbo/mini-bash`'s six read-only commands
+ * docs/tech/core-sdk.md §4.5b: `@nimbo/mini-bash`'s six read-only commands
  * can't carry a Claude-style model's high-frequency `if`/`for`/`while`/
  * `case` scripts, so nimbo ships a second, *optional* `NimboExec`
  * implementation — `@nimbo/just-bash`, an adapter over
@@ -21,7 +21,7 @@
  *
  * Same mode-A "same-source workspace" story as 04: `justBash(fs)` and the
  * file tools share one `NimboFS`, so a file the agent writes through
- * `write_file` is immediately visible to the script, and vice versa —
+ * `write-file` is immediately visible to the script, and vice versa —
  * nothing to keep in sync (§4.5a mode A).
  *
  * Known, as-documented limitations this example does **not** paper over
@@ -119,7 +119,7 @@ async function modelDrivenSection(): Promise<void> {
   console.log("finalResponse:", result.finalResponse);
   console.log(
     "tool_call items:",
-    result.items.filter((item) => item.type === "tool_call"),
+    session.toJSON().messages.flatMap((m) => m.parts).filter((p) => p.type.startsWith("tool-")),
   );
 }
 

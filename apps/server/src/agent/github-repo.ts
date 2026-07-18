@@ -1,4 +1,4 @@
-// GITHUB_REPO SSH/HTTPS normalization (docs/07-sandbox-e2e-design-example.md
+// GITHUB_REPO SSH/HTTPS normalization (docs/tech/sandbox.md
 // §8.3): re-implemented here (not imported — examples/ isn't a package) with
 // the same rules as examples/12-vercel-sandbox-real-project.e2e.test.ts's
 // `normalizeGitHubRepo`. Both `sandbox-manager.ts` (clone URL for

@@ -1,19 +1,26 @@
 /**
  * End-to-end wiring: mock model drives a real `createSession` + `justBash`
- * bash tool (tech-spec §4.5b "端到端两件套" 验收点). Mirrors
+ * bash tool (docs/tech/core-sdk.md §4.5b "端到端两件套" 验收点). Mirrors
  * `@nimbo/core`'s `test/e2e-minibash.test.ts` pattern one-for-one, swapped to
  * the full-syntax interpreter:
  *   a) a mock model tool-calls `bash` to run an if/for/case script, and the
- *      tool_call item comes back completed with the expected output;
+ *      tool part comes back settled (`state: "output-available"`) with the
+ *      expected output;
  *   b) bypass proof — `bash` writes through a real shell redirect
  *      (`echo x > /f.txt`), which invalidates `readState` for that path (the
  *      §4.5a mode A rule 2 "readState invalidation" mechanism) so a
- *      subsequent `edit_file` is rejected until the path is re-read.
+ *      subsequent `edit-file` is rejected until the path is re-read.
+ *
+ * P13-5-2（docs/tech/single-ledger.md）迁移：断言从 `SessionEvent`/
+ * `SessionItem`（`.status`）改为 `NimboChunk`/账本工具部件（`.state`）——同
+ * `@nimbo/core`'s `test/e2e-minibash.test.ts` 的迁移，一比一对应；辅助函数
+ * 就地内联（不跨包 import 测试辅助，沿两包既有"各自 test 文件自包含"的风格）。
  */
 import { createFileTools, fromMemory } from "@nimbo/virtual-fs";
 import { createDerivedDataCollector, createSession, createSessionReadState, defineAgent } from "@nimbo/core";
-import type { AgentDefinition, SessionEvent, SessionItem } from "@nimbo/core";
-import { simulateReadableStream } from "ai";
+import type { AgentDefinition, NimboChunk, NimboUIMessage } from "@nimbo/core";
+import { isToolUIPart, simulateReadableStream } from "ai";
+import type { ToolUIPart, UITools } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { justBash } from "../src/index.js";
@@ -59,34 +66,43 @@ function mockModel(steps: Step[]): MockLanguageModelV4 {
   return new MockLanguageModelV4({ doStream: steps });
 }
 
-async function drainStream(gen: AsyncGenerator<SessionEvent, unknown>): Promise<SessionEvent[]> {
-  const events: SessionEvent[] = [];
+async function drainStream(gen: AsyncGenerator<NimboChunk, unknown>): Promise<NimboChunk[]> {
+  const chunks: NimboChunk[] = [];
   let next = await gen.next();
   while (!next.done) {
-    events.push(next.value);
+    chunks.push(next.value);
     next = await gen.next();
   }
-  return events;
+  return chunks;
 }
 
-function isItemCompleted(event: SessionEvent): event is { type: "item.completed"; item: SessionItem } {
-  return event.type === "item.completed";
+/** 一条消息里全部工具部件（`tool-<名字>`，排除理论上不会出现的 `dynamic-tool`）。 */
+function toolPartsOf(message: NimboUIMessage): ToolUIPart<UITools>[] {
+  const result: ToolUIPart<UITools>[] = [];
+  for (const part of message.parts) {
+    if (isToolUIPart<UITools>(part) && part.type !== "dynamic-tool") result.push(part);
+  }
+  return result;
 }
-function isToolCallItem(item: SessionItem): item is Extract<SessionItem, { type: "tool_call" }> {
-  return item.type === "tool_call";
+
+/** 账本级查找：全部消息里的全部工具部件 flatMap——同一 toolCallId 只记结算态，理应各出现一次。 */
+function toolCallItems(messages: NimboUIMessage[]): ToolUIPart<UITools>[] {
+  return messages.flatMap(toolPartsOf);
 }
-function stringOutput(output: Extract<SessionItem, { type: "tool_call" }>["output"]): string {
+
+function stringOutput(output: unknown): string {
   return typeof output === "string" ? output : "";
 }
 /** Same `{ isError, content }` narrowing pattern as core's `integration.test.ts`. */
-function errorResultContent(output: Extract<SessionItem, { type: "tool_call" }>["output"]): string {
+function errorResultContent(output: unknown): string {
   if (typeof output !== "object" || output === null || Array.isArray(output)) return "";
-  if (output.isError !== true) return "";
+  if (!("isError" in output) || output.isError !== true) return "";
+  if (!("content" in output)) return "";
   return typeof output.content === "string" ? output.content : "";
 }
 
 describe("a) mock model drives bash through a real if/for/case script", () => {
-  it("bash runs the script via justBash and the tool_call completes with the expected output", async () => {
+  it("bash runs the script via justBash and the tool part settles output-available with the expected output", async () => {
     const fs = fromMemory({});
     const exec = justBash(fs);
     const script = [
@@ -103,10 +119,10 @@ describe("a) mock model drives bash through a real if/for/case script", () => {
     const model = mockModel([toolCallStep("call_1", "bash", { command: script }), stopStep("done")]);
     const session = createSession(defineAgent({ model }), { fs, exec });
 
-    const events = await drainStream(session.stream("run the control-flow script"));
-    const toolCalls = events.filter(isItemCompleted).map((e) => e.item).filter(isToolCallItem);
+    await drainStream(session.stream("run the control-flow script"));
+    const toolCalls = toolCallItems(session.toJSON().messages);
 
-    expect(toolCalls[0]?.status).toBe("completed");
+    expect(toolCalls[0]).toMatchObject({ state: "output-available" });
     const output = stringOutput(toolCalls[0]?.output);
     expect(output).toContain("found-b");
     expect(output).toContain("last-is-c");
@@ -127,34 +143,34 @@ describe("b) bypass proof: bash's real redirect write invalidates readState (§4
     return createSession(agent, { fs, exec, readState, derivedData });
   }
 
-  it("read_file, then a bash redirect write, then edit_file is rejected until the path is re-read — and re-reading unblocks it", async () => {
+  it("read-file, then a bash redirect write, then edit-file is rejected until the path is re-read — and re-reading unblocks it", async () => {
     const fs = fromMemory({ "/f.txt": "hello" });
     const model = mockModel([
-      toolCallStep("call_1", "read_file", { path: "/f.txt" }),
+      toolCallStep("call_1", "read-file", { path: "/f.txt" }),
       toolCallStep("call_2", "bash", { command: "echo -n changed-by-bash > /f.txt" }),
-      toolCallStep("call_3", "edit_file", { path: "/f.txt", old_string: "hello", new_string: "nope" }),
-      toolCallStep("call_4", "read_file", { path: "/f.txt" }),
-      toolCallStep("call_5", "edit_file", { path: "/f.txt", old_string: "changed-by-bash", new_string: "edited-after-reread" }),
+      toolCallStep("call_3", "edit-file", { path: "/f.txt", old_string: "hello", new_string: "nope" }),
+      toolCallStep("call_4", "read-file", { path: "/f.txt" }),
+      toolCallStep("call_5", "edit-file", { path: "/f.txt", old_string: "changed-by-bash", new_string: "edited-after-reread" }),
       stopStep("done"),
     ]);
     const session = assembleFileToolsSession(model, fs);
 
-    const events = await drainStream(session.stream("read, bash-write, try to edit (denied), reread, edit (allowed)"));
-    const toolCalls = events.filter(isItemCompleted).map((e) => e.item).filter(isToolCallItem);
+    await drainStream(session.stream("read, bash-write, try to edit (denied), reread, edit (allowed)"));
+    const toolCalls = toolCallItems(session.toJSON().messages);
 
-    expect(toolCalls[0]?.status).toBe("completed"); // read_file
-    expect(toolCalls[1]?.status).toBe("completed"); // bash redirect write, real just-bash, real exit 0
+    expect(toolCalls[0]).toMatchObject({ state: "output-available" }); // read-file
+    expect(toolCalls[1]).toMatchObject({ state: "output-available" }); // bash redirect write, real just-bash, real exit 0
     expect(stringOutput(toolCalls[1]?.output)).toContain("exit code: 0");
 
-    // edit_file's execute() itself returns normally with an { isError: true, content } value (04 §0.5) —
-    // status stays "completed", the rejection shows up in output.
-    expect(toolCalls[2]?.status).toBe("completed");
+    // edit-file's execute() itself returns normally with an { isError: true, content } value (docs/tech/builtin-tools.md §0.5) —
+    // state stays "output-available", the rejection shows up in output.
+    expect(toolCalls[2]).toMatchObject({ state: "output-available" });
     expect(errorResultContent(toolCalls[2]?.output)).toContain("changed since it was last read");
 
-    expect(toolCalls[3]?.status).toBe("completed"); // read_file again picks up bash's write
+    expect(toolCalls[3]).toMatchObject({ state: "output-available" }); // read-file again picks up bash's write
     expect(stringOutput(toolCalls[3]?.output)).toContain("changed-by-bash");
 
-    expect(toolCalls[4]?.status).toBe("completed"); // edit_file now succeeds
+    expect(toolCalls[4]).toMatchObject({ state: "output-available" }); // edit-file now succeeds
     expect(new TextDecoder().decode(await fs.readFile("/f.txt"))).toBe("edited-after-reread");
   });
 });

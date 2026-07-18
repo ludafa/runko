@@ -1,5 +1,5 @@
 /**
- * @nimbo/virtual-fs 公共入口（tech-spec §4.4）：MemoryFS/OverlayFS/DirFS 三个
+ * @nimbo/virtual-fs 公共入口（docs/tech/core-sdk.md §4.4）：MemoryFS/OverlayFS/DirFS 三个
  * NimboFS 实现，mime 推断，diff/patch，reference 条目相关类型与错误。
  *
  * 工厂函数是独立导出的 fromMemory/fromDirectory，不是 `NimboFS.fromMemory` 这种

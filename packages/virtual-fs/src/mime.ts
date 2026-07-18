@@ -1,5 +1,5 @@
 /**
- * mime 类型推断（tech-spec §4.4："v1 类型推断仅按扩展名；magic-bytes 嗅探...列 v2"）。
+ * mime 类型推断（docs/tech/core-sdk.md §4.4："v1 类型推断仅按扩展名；magic-bytes 嗅探...列 v2"）。
  * MemoryFS/OverlayFS/DirFS 的 stat()/readdir() 在实现未显式指定 mimeType 时兜底调用。
  */
 

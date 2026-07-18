@@ -20,7 +20,11 @@ allowBuilds:
 
 # P12：seed 项目的 vite 版本钉子（apps/web 用 rolldown-vite；packages/* 无 vite 依赖，不受影响）
 overrides:
-  vite: npm:rolldown-vite@7.2.5
+  # 全项目统一 Node 24：连同传递依赖/可选 peer（如 vite 的 @types/node 可选
+  # peer）一并钉在 24.x，避免残留更高大版本的 Node 类型（与 catalog 同源）。
+  "@types/node": ^24.13.3
+  # 注：旧的 `vite: npm:rolldown-vite@7.2.5` 已移除——Rolldown 自 Vite 8（2026-03
+  # 稳定）起为默认打包器，直接用真 vite ^8 即内置 Rolldown，无需别名 override。
 
 catalog:
   typescript: ^7.0.2
@@ -32,7 +36,7 @@ catalog:
   "@vitest/coverage-v8": ^4.1.10
   # P1-1 引入：spec §4.1/§4.5a 的 AbortSignal 等 Node 全局环境类型需要它才能
   # typecheck 通过（此前 P0 脚手架未涉及任何 Node 全局类型，故未装）。
-  "@types/node": ^24.12.2
+  "@types/node": ^24.13.3
   # P9-1 引入：@nimbo/just-bash 的 NimboExec 全语法档实现（tech-spec §4.5b）。
   just-bash: ^3.1.0
   # P10 引入（docs/06 §8.1）：三个云沙盒 provider SDK 均为 devDependencies——

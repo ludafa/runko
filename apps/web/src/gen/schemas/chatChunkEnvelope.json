@@ -1,0 +1,5 @@
+{
+  "type": "object",
+  "properties": { "seq": { "type": "integer" }, "chunk": {} },
+  "x-readme-ref-name": "ChatChunkEnvelope"
+}

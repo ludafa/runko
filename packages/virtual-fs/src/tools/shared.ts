@@ -1,5 +1,5 @@
 /**
- * 文件工具八件套的横切类型与辅助函数（04-builtin-tools.md §0 横切规则，
+ * 文件工具八件套的横切类型与辅助函数（docs/tech/builtin-tools.md §0 横切规则，
  * 消费于 §1.1–§1.8 各工具）。
  *
  * ---- P4 接缝设计说明（工单要求写清理由） ----
@@ -22,12 +22,13 @@
  *
  * `FileChange.kind` 用 `add|update|delete`，是刻意与 `diff.ts` 的
  * `FileDiff.kind`（`created|modified|deleted`）不同的一个表面——前者对应
- * tech-spec §4.2 `SessionItem` 的 `file_change` 事件面，后者是
+ * docs/tech/core-sdk.md §4.2 `SessionItem` 的 `file_change` 事件面，后者是
  * `diff()/writeBack()` 的宿主导出面；两者语义相邻但服务不同消费者，P2-1 已在
- * tech-spec §4.4"语义澄清"里定过一次，这里是 P2-2 侧的落地（orchitector 补充 a）。
+ * docs/tech/core-sdk.md §4.4"语义澄清"里定过一次，这里是 P2-2 侧的落地（orchitector 补充 a）。
  */
 import type { JsonValue, NimboFS } from "@nimbo/core";
 import { DEFAULT_MIME_TYPE } from "../mime.js";
+import { globToRegExp, isIgnoredPath } from "../path.js";
 
 /** session 范围的"路径 → 上次读取版本"存储；version 判据是 `stat().mtime`（§0.4）。 */
 export interface ReadStateStore {
@@ -36,7 +37,7 @@ export interface ReadStateStore {
 }
 
 /**
- * file_change 派生数据的单条记录（tech-spec §4.2 `SessionItem` 的
+ * file_change 派生数据的单条记录（docs/tech/core-sdk.md §4.2 `SessionItem` 的
  * `file_change.changes[]`）。kind 集合是 add/update/delete——不要跟本包
  * `diff.ts` 的 `FileDiff.kind`（created/modified/deleted）混用，两者是刻意
  * 不同的表面（见本文件顶部注释）。
@@ -107,7 +108,7 @@ const BINARY_MIME_PREFIXES = ["image/", "audio/", "video/"];
  * `DEFAULT_MIME_TYPE` 兜底同时覆盖"真二进制/未知格式"和"没有可识别扩展名的
  * 常见文本文件"（Makefile/Dockerfile/.gitignore/.env 等，v1 只按扩展名推断，
  * 没有内容嗅探，两者无法区分，见 mime.ts 顶部注释）。这里选择乐观策略：把
- * 默认兜底类型当文本处理（read_file 直接尝试展示），只把明确识别的二进制
+ * 默认兜底类型当文本处理（read-file 直接尝试展示），只把明确识别的二进制
  * 格式（图片/音视频/pdf/压缩包/wasm/apk）当二进制——比"默认当二进制"更贴合
  * 真实代码库的常见情况，也是 Claude Code 的 Read 工具的实际行为。
  */
@@ -119,8 +120,8 @@ export function isTextMimeType(mimeType: string | undefined): boolean {
 }
 
 /**
- * write_file/edit_file/move_file 写成功后调用：把写入后的新 mtime 登记进
- * readState，使"连续编辑无需重读"成立（04-builtin-tools.md §4："read→edit→
+ * write-file/edit-file/move-file 写成功后调用：把写入后的新 mtime 登记进
+ * readState，使"连续编辑无需重读"成立（docs/tech/builtin-tools.md §4："read→edit→
  * 再 edit，第二次无需重读"）。
  */
 export async function registerWrite(fs: NimboFS, path: string, readState: ReadStateStore): Promise<void> {
@@ -129,19 +130,19 @@ export async function registerWrite(fs: NimboFS, path: string, readState: ReadSt
 }
 
 /**
- * read-before-write 强制（§0.4）：`write_file` 覆盖已存在文件、`edit_file`
+ * read-before-write 强制（§0.4）：`write-file` 覆盖已存在文件、`edit-file`
  * 都要过这一关。返回 `undefined` 表示放行；否则返回可直接塞进 `errorResult(...)`
  * 的指导性错误文案。
  */
 export function checkReadBeforeWrite(path: string, currentMtime: number | undefined, readState: ReadStateStore): string | undefined {
   const lastRead = readState.get(path);
   if (lastRead === undefined) {
-    return `"${path}" has not been read in this session yet. Call read_file on it first, then retry.`;
+    return `"${path}" has not been read in this session yet. Call read-file on it first, then retry.`;
   }
   if (currentMtime !== undefined && lastRead !== currentMtime) {
     return (
       `"${path}" has changed since it was last read (its mtime no longer matches what was read) — it was likely ` +
-      "modified outside this tool (e.g. by bash) or by a concurrent edit. Call read_file again to see the current content, then retry."
+      "modified outside this tool (e.g. by bash) or by a concurrent edit. Call read-file again to see the current content, then retry."
     );
   }
   return undefined;
@@ -159,10 +160,26 @@ export function truncationNotice(reason: string, hint: string): string {
   return `[truncated: ${reason}] ${hint}`;
 }
 
-// ---- 输出预算常量（04-builtin-tools.md §1.1–§1.8 逐条给出的数字） ----
+// ---- 输出预算常量（docs/tech/builtin-tools.md §1.1–§1.8 逐条给出的数字） ----
 export const READ_FILE_MAX_LINES = 2000;
 export const READ_FILE_MAX_BYTES = 256 * 1024;
 export const LIST_DIR_MAX_ENTRIES = 500;
 export const GLOB_MAX_MATCHES = 1000;
 export const GREP_MAX_FILES = 100;
 export const GREP_MAX_LINES = 500;
+
+/**
+ * grep/glob 的默认忽略集合（docs/tech/sandbox.md §4 原生搜索接缝）：`.git` 元数据
+ * 与 `node_modules` 依赖树体积大、几乎从不是模型想搜的目标，两条路径
+ * （native 适配器 / JS 回退）都要应用同一份默认值，保证行为一致。
+ */
+export const DEFAULT_SEARCH_IGNORE: string[] = ["**/.git", "**/node_modules"];
+
+/**
+ * 计算某次 grep/glob 调用生效的默认忽略集合：`path` 若显式指向某个默认忽略
+ * 目录本身或其内部（ancestor-or-self 命中），说明模型明确要搜进去，对应的
+ * 默认项就此放行——默认忽略只是省心的缺省值，不是安全边界，模型可以覆盖。
+ */
+export function resolveDefaultIgnore(base: string): string[] {
+  return DEFAULT_SEARCH_IGNORE.filter((pattern) => !isIgnoredPath(base, [globToRegExp(pattern)]));
+}

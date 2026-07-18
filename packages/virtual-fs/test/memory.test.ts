@@ -3,6 +3,7 @@ import * as nodePath from "node:path";
 import * as os from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { jsonValueSchema } from "@nimbo/core";
+import type { NimboFS } from "@nimbo/core";
 import {
   DirectoryNotEmptyError,
   MemoryFS,
@@ -315,5 +316,16 @@ describe("MemoryFS.snapshot()/restore()", () => {
       const snap = fs.snapshot();
       expect(snap.files["/img.png"]).toMatchObject({ kind: "file", mimeType: "image/png" });
     });
+  });
+});
+
+describe("MemoryFS native search seam (docs/tech/sandbox.md §4)", () => {
+  it("does not implement searchFiles/searchContent — grep/glob must always fall back to JS scanning against it", () => {
+    // typed as the NimboFS interface (not the concrete class) — searchFiles/searchContent are
+    // optional members of the interface, not members of MemoryFS's own declared shape, so accessing
+    // them off a bare `MemoryFS`-typed value wouldn't even type-check.
+    const fs: NimboFS = new MemoryFS();
+    expect(fs.searchFiles).toBeUndefined();
+    expect(fs.searchContent).toBeUndefined();
   });
 });

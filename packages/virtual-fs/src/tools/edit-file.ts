@@ -1,5 +1,5 @@
 /**
- * `edit_file`（04-builtin-tools.md §1.3）：精确子串替换，唯一命中或
+ * `edit-file`（docs/tech/builtin-tools.md §1.3）：精确子串替换，唯一命中或
  * `replace_all`；未命中/多命中返回指导性错误；要求先读且 mtime 一致（§0.4）。
  */
 import { z } from "zod";
@@ -34,12 +34,12 @@ function replaceFirst(text: string, needle: string, replacement: string): string
 export function createEditFileTool(opts: CreateFileToolsOptions): Tool {
   return defineTool({
     description:
-      "Replace an exact-match substring (old_string) with new_string in a file already read_file'd in this " +
+      "Replace an exact-match substring (old_string) with new_string in a file already read-file'd in this " +
       "session. old_string must match exactly once unless replace_all is set — include enough surrounding " +
       "context (e.g. a full line or more) to make it unique. The file must be unchanged since it was last read " +
-      "(mtime-checked); if it may have changed (e.g. an earlier edit_file call, or a bash command), read_file it " +
+      "(mtime-checked); if it may have changed (e.g. an earlier edit-file call, or a bash command), read-file it " +
       "again first, except that this tool itself keeps the file 'known' after a successful edit, so consecutive " +
-      "edit_file calls do not require re-reading in between.",
+      "edit-file calls do not require re-reading in between.",
     inputSchema,
     execute: async (input, ctx): Promise<ToolReturn> => {
       if (input.old_string === input.new_string) {
@@ -51,13 +51,13 @@ export function createEditFileTool(opts: CreateFileToolsOptions): Tool {
         stat = await ctx.fs.stat(input.path);
       } catch (error) {
         if (error instanceof NotFoundError) {
-          return errorResult(`"${input.path}" does not exist. Use write_file to create a new file instead of edit_file.`);
+          return errorResult(`"${input.path}" does not exist. Use write-file to create a new file instead of edit-file.`);
         }
         return errorResult(`Failed to stat "${input.path}": ${describeError(error)}.`);
       }
 
       if (stat.type === "dir") {
-        return errorResult(`"${input.path}" is a directory; edit_file only operates on files.`);
+        return errorResult(`"${input.path}" is a directory; edit-file only operates on files.`);
       }
 
       const failure = checkReadBeforeWrite(input.path, stat.mtime, opts.readState);
@@ -70,7 +70,7 @@ export function createEditFileTool(opts: CreateFileToolsOptions): Tool {
         if (error instanceof ReferenceNotResolvable) {
           return errorResult(
             `"${input.path}" is a reference entry with no resolvable local content (href=${error.href}); ` +
-              "edit_file cannot edit it. Inject a resolveReference() to read it, or edit a different path.",
+              "edit-file cannot edit it. Inject a resolveReference() to read it, or edit a different path.",
           );
         }
         return errorResult(`Failed to read "${input.path}": ${describeError(error)}.`);
@@ -80,7 +80,7 @@ export function createEditFileTool(opts: CreateFileToolsOptions): Tool {
       if (occurrences === 0) {
         return errorResult(
           `old_string was not found in "${input.path}". It must match the file's current content exactly, ` +
-            "including whitespace and line breaks. Call read_file again to see the exact current text, then " +
+            "including whitespace and line breaks. Call read-file again to see the exact current text, then " +
             "copy old_string from there.",
         );
       }

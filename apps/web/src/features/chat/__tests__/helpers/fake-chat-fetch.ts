@@ -1,0 +1,201 @@
+/**
+ * A route-aware `fetch` fake for `use-chat-messages.test.ts` — the hook
+ * itself is never mocked (only the true network boundary, `global.fetch`, is
+ * — same posture `api.test.ts` already uses via `vi.stubGlobal('fetch', ...)`
+ * for the real `./api.ts` functions this hook calls). Gives each test fine
+ * control over: (a) the `POST .../messages` response status, (b) a queue of
+ * controllable SSE bodies for successive `GET .../stream` calls (so a test
+ * can push frames on its own schedule and later close/error the stream to
+ * simulate a disconnect), and (c) `POST .../approvals/:id` /
+ * `.../questions/:id` response statuses.
+ */
+import type { NimboChunk, NimboUIMessage } from '@nimbo/core';
+
+import type { ChatReplayFrame } from '../../schema';
+
+/** One controllable `text/event-stream` body — push SSE-framed lines on demand, close or error it whenever the test wants. */
+export class ControllableSSEStream {
+  private controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+  private readonly encoder = new TextEncoder();
+  readonly body: ReadableStream<Uint8Array>;
+
+  constructor() {
+    this.body = new ReadableStream<Uint8Array>({
+      start: (controller) => {
+        this.controller = controller;
+      },
+    });
+  }
+
+  private pushRaw(text: string): void {
+    this.controller?.enqueue(this.encoder.encode(text));
+  }
+
+  pushFrame(frame: ChatReplayFrame): void {
+    this.pushRaw(`data: ${JSON.stringify(frame)}\n\n`);
+  }
+
+  pushChunk(chunk: NimboChunk, seq?: number): void {
+    this.pushFrame(seq === undefined ? { chunk } : { seq, chunk });
+  }
+
+  pushMessage(seq: number, message: NimboUIMessage): void {
+    this.pushFrame({ seq, message });
+  }
+
+  /** No-op if already closed/errored (e.g. the hook itself already aborted this stream) — test cleanup calls this unconditionally. */
+  close(): void {
+    try {
+      this.controller?.close();
+    } catch {
+      /* already closed/errored — fine, this is best-effort cleanup */
+    }
+  }
+
+  error(reason: unknown): void {
+    this.controller?.error(reason);
+  }
+}
+
+interface QueuedStreamError {
+  status: number;
+}
+
+type QueuedStream = ControllableSSEStream | QueuedStreamError;
+
+function isQueuedStreamError(entry: QueuedStream): entry is QueuedStreamError {
+  return 'status' in entry;
+}
+
+export interface RecordedPost {
+  conversationId: string;
+  body: unknown;
+}
+
+export interface RecordedStreamRequest {
+  conversationId: string;
+  after: number;
+  signal: AbortSignal | undefined;
+}
+
+/**
+ * `fetch` fake, routed by method + path shape (`.../messages`,
+ * `.../stream`, `.../approvals/:id`, `.../questions/:id`) — install via
+ * `vi.stubGlobal('fetch', fake.fetch)`.
+ */
+export class FakeChatFetch {
+  readonly messagePosts: RecordedPost[] = [];
+  readonly approvalPosts: RecordedPost[] = [];
+  readonly answerPosts: RecordedPost[] = [];
+  readonly streamRequests: RecordedStreamRequest[] = [];
+
+  private messagePostStatus = 202;
+  private approvalStatus = 200;
+  private answerStatus = 200;
+  private readonly streamQueue: QueuedStream[] = [];
+
+  setMessagePostStatus(status: number): void {
+    this.messagePostStatus = status;
+  }
+
+  setApprovalStatus(status: number): void {
+    this.approvalStatus = status;
+  }
+
+  setAnswerStatus(status: number): void {
+    this.answerStatus = status;
+  }
+
+  /** Queues a controllable stream for the *next* `GET .../stream` call — returns it so the test can push/close/error it. */
+  queueStream(): ControllableSSEStream {
+    const stream = new ControllableSSEStream();
+    this.streamQueue.push(stream);
+    return stream;
+  }
+
+  /** Queues a non-2xx response for the *next* `GET .../stream` call. */
+  queueStreamError(status: number): void {
+    this.streamQueue.push({ status });
+  }
+
+  private parseBody(init: RequestInit | undefined): unknown {
+    const body = init?.body;
+    if (typeof body !== 'string') return undefined;
+    return JSON.parse(body) as unknown;
+  }
+
+  fetch = (
+    input: string | URL | Request,
+    init?: RequestInit,
+  ): Promise<Response> => {
+    const url = String(input);
+    const method = init?.method ?? 'GET';
+    const path = url.split('?')[0] ?? url;
+    const segments = path.split('/').filter((s) => s.length > 0);
+    // .../conversations/:id/messages|stream|approvals/:cid|questions/:cid
+    const conversationsIndex = segments.indexOf('conversations');
+    const conversationId = segments[conversationsIndex + 1] ?? '';
+    const kind = segments[conversationsIndex + 2] ?? '';
+
+    if (method === 'POST' && kind === 'messages') {
+      this.messagePosts.push({ conversationId, body: this.parseBody(init) });
+      return Promise.resolve(
+        new Response(JSON.stringify({ ok: true }), {
+          status: this.messagePostStatus,
+        }),
+      );
+    }
+
+    if (method === 'GET' && kind === 'stream') {
+      const query = new URLSearchParams(url.split('?')[1] ?? '');
+      const after = Number(query.get('after') ?? '0');
+      this.streamRequests.push({
+        conversationId,
+        after,
+        signal: init?.signal ?? undefined,
+      });
+      const next = this.streamQueue.shift();
+      if (next === undefined) {
+        return Promise.resolve(
+          new Response('no stream queued', { status: 500 }),
+        );
+      }
+      if (isQueuedStreamError(next)) {
+        return Promise.resolve(
+          new Response('stream error', { status: next.status }),
+        );
+      }
+      const signal = init?.signal;
+      if (signal !== undefined && signal !== null) {
+        signal.addEventListener('abort', () => {
+          next.error(new DOMException('aborted', 'AbortError'));
+        });
+      }
+      return Promise.resolve(new Response(next.body, { status: 200 }));
+    }
+
+    if (method === 'POST' && kind === 'approvals') {
+      this.approvalPosts.push({ conversationId, body: this.parseBody(init) });
+      return Promise.resolve(
+        new Response(JSON.stringify({ ok: true }), {
+          status: this.approvalStatus,
+        }),
+      );
+    }
+
+    if (method === 'POST' && kind === 'questions') {
+      this.answerPosts.push({ conversationId, body: this.parseBody(init) });
+      return Promise.resolve(
+        new Response(JSON.stringify({ ok: true }), {
+          status: this.answerStatus,
+        }),
+      );
+    }
+
+    return Promise.resolve(
+      new Response(`FakeChatFetch: unhandled ${method} ${url}`, {
+        status: 500,
+      }),
+    );
+  };
+}

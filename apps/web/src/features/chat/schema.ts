@@ -1,26 +1,36 @@
 /**
- * Wire-level schemas for the chat agent API (docs/08-chat-agent-webapp.md
- * §2.2). `@nimbo/core` only ships types for `SessionEvent`/`SessionItem`
- * (events.ts's file header: "纯类型，不含...运行时实现") — there is no zod
- * schema to import, so this file re-declares the same shapes at the wire
- * boundary and validates every JSON payload against them with
- * `.parse()`/`.safeParse()` before it ever touches app state (project rule:
- * no `any`/`as` at network boundaries).
+ * Wire-level schemas for the chat agent API (docs/tech/chat-webapp.md
+ * §2.2, docs/tech/single-ledger.md §5/§6 "UIMessage 单账本" — P13-5-4
+ * migration). The old `SessionEvent`/`SessionItem` mirror (`sessionItemSchema`/
+ * `sessionEventSchema`) plus every server-invented wire sentinel built on top
+ * of it (`user.message`, `turn.result`/`turn.failed`,
+ * `approval.requested`/`approval.resolved`, `question.asked`/
+ * `question.answered`) are retired — `@nimbo/core` no longer exports
+ * `SessionEvent`/`SessionItem` at all (see that package's `state.ts`), and
+ * `apps/server`'s own `schemas/chat.ts` (already migrated, P13-5-3) confirms
+ * there's nothing left to mirror them with.
  *
- * `sessionItemSchema`/`sessionEventSchema` are kept assignable to
- * `@nimbo/core`'s `SessionItem`/`SessionEvent` — not just "by hand", but
- * compiler-checked: `z.infer<...>`'s output position is covariant, so a
- * schema *missing* a variant would otherwise still type-check silently (this
- * bit `apps/server`'s mirror of the same union once already — `user_message`
- * went missing without `tsc` catching it). The `_...CoversAllVariants`
- * identity functions right after each schema are the actual enforcement:
- * every real variant must be assignable to the schema's inferred output,
- * which fails to compile the moment a variant is missing or narrower.
+ * The wire is now a stream of `ChatReplayFrame`s — a `ChunkEnvelope`
+ * (`{ seq?, chunk }`, `seq` present ⇔ durable/replayable) or a `MessageFrame`
+ * (`{ seq, message }`, only ever appears in replay, a finished
+ * `NimboUIMessage` verbatim) — see `apps/server/src/schemas/chat.ts`'s own
+ * file header for the full rationale (this file's frame shapes are a
+ * hand-written mirror of that server-side zod, not the kubb-generated
+ * `gen/zod/chatChunkEnvelopeSchema.ts`/`chatMessageFrameSchema.ts`: kubb
+ * infers `chunk`/`message` as bare `z.any()` from the OpenAPI `{}` schema
+ * `apps/server` emits for them — see that file's own "controlled exception"
+ * comment for why no schema exists to generate from — with no `seq`/`chunk`
+ * `required` list either, which is looser than the real wire shape; this file
+ * follows this repo's existing convention of hand-rolling schemas that need
+ * more precision than kubb's OpenAPI-derived output can express, same as
+ * before this migration).
  */
-import type { SessionEvent, SessionItem } from '@nimbo/core';
+import type { NimboChunk, NimboUIMessage } from '@nimbo/core';
 import { z } from 'zod';
 
-// ---- JsonValue (packages/core/src/types.ts) ----
+// ---- JsonValue (packages/core/src/types.ts) — still useful client-side for
+// narrowing a tool part's `unknown` input/output (see `timeline.ts`'s
+// `parseJsonValue`) ----
 
 export type JsonValue =
   string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
@@ -36,258 +46,92 @@ export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   ]),
 );
 
-// ---- Usage / NimboError (packages/core/src/events.ts) ----
-
-export const usageSchema = z.object({
-  inputTokens: z.number().optional(),
-  outputTokens: z.number().optional(),
-  totalTokens: z.number().optional(),
-  // 缓存命中的输入 token（见 @nimbo/core 的 Usage.cachedInputTokens）
-  cachedInputTokens: z.number().optional(),
-});
-
-export const nimboErrorSchema = z.object({
-  code: z.enum(['max_turns', 'context_overflow', 'provider_error', 'aborted']),
-  message: z.string(),
-});
-
-// ---- SessionItem (packages/core/src/events.ts) ----
-
-export const sessionItemSchema = z.discriminatedUnion('type', [
-  z.object({
-    id: z.string(),
-    type: z.literal('agent_message'),
-    text: z.string(),
-  }),
-  z.object({ id: z.string(), type: z.literal('reasoning'), text: z.string() }),
-  z.object({
-    id: z.string(),
-    type: z.literal('user_message'),
-    text: z.string(),
-  }),
-  z.object({
-    id: z.string(),
-    type: z.literal('tool_call'),
-    toolName: z.string(),
-    input: jsonValueSchema,
-    output: jsonValueSchema.optional(),
-    status: z.enum(['in_progress', 'completed', 'failed', 'denied']),
-  }),
-  z.object({
-    id: z.string(),
-    type: z.literal('file_change'),
-    changes: z.array(
-      z.object({ path: z.string(), kind: z.enum(['add', 'update', 'delete']) }),
-    ),
-  }),
-  z.object({
-    id: z.string(),
-    type: z.literal('plan_update'),
-    items: z.array(z.object({ text: z.string(), completed: z.boolean() })),
-  }),
-  z.object({ id: z.string(), type: z.literal('error'), message: z.string() }),
-]);
+// ---- ChatReplayFrame (apps/server's `schemas/chat.ts`) ----
 
 /**
- * Coverage enforcement (see file header): every `SessionItem` variant must
- * be assignable to `z.infer<typeof sessionItemSchema>` — this identity
- * function *is* that assignment, so a schema missing a variant (or narrower
- * than the real one) fails to compile here instead of silently type-checking.
+ * Controlled exception (same rationale as `apps/server/src/schemas/chat.ts`'s
+ * own `nimboChunkSchema`/`nimboUIMessageSchema`): `NimboChunk`/`NimboUIMessage`
+ * (ai's `UIMessageChunk`/`UIMessage`, instantiated in `@nimbo/core`'s
+ * `state.ts`) have no zod schema this file can reuse — `z.any()` is the same
+ * escape hatch this file has always used for structurally-unschemaable
+ * external types (`jsonValueSchema` above didn't need it, but this repo's
+ * `apps/server` established the pattern for exactly this case), contained by
+ * a `z.ZodType<T>` annotation so every consumer of the exported schema still
+ * sees the precise TypeScript type — `any` never leaks past this one
+ * declaration. Both only ever parse a value that has already round-tripped
+ * through `JSON.parse()` (an SSE `data:` payload, or a fetched
+ * `GET .../events` JSON body) — the server already validated the real
+ * `NimboChunk`/`NimboUIMessage` shape before ever serializing it, so this
+ * boundary only needs "is this JSON, structurally, in the right envelope
+ * shape" — not a redundant re-implementation of `@nimbo/core`'s own
+ * `validateSessionMessages()`/ai's `validateUIMessages()`.
  */
-const _sessionItemSchemaCoversAllVariants: (
-  item: SessionItem,
-) => z.infer<typeof sessionItemSchema> = (item) => item;
-// `noUnusedLocals` (tsconfig.app.json) doesn't exempt underscore-prefixed
-// locals the way `noUnusedParameters` exempts underscore-prefixed params —
-// this `void` is what keeps the check itself from being flagged as dead code.
-void _sessionItemSchemaCoversAllVariants;
+const nimboChunkSchema: z.ZodType<NimboChunk> = z.any();
 
-// ---- SessionEvent (packages/core/src/events.ts) ----
-//
-// Core groups item.started/item.updated/item.completed into one union arm
-// with `type: "item.started" | "item.updated" | "item.completed"`. zod's
-// discriminatedUnion needs one literal per branch, so this is split into
-// three branches with an identical shape — structurally that's a subtype of
-// core's single wider arm (each branch is narrower), so values parsed here
-// stay assignable to `@nimbo/core`'s `SessionEvent` without a cast.
-
-export const sessionEventSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('session.started'), sessionId: z.string() }),
-  z.object({ type: z.literal('turn.started'), turn: z.number() }),
-  z.object({ type: z.literal('item.started'), item: sessionItemSchema }),
-  z.object({ type: z.literal('item.updated'), item: sessionItemSchema }),
-  z.object({ type: z.literal('item.completed'), item: sessionItemSchema }),
-  z.object({ type: z.literal('turn.completed'), usage: usageSchema }),
-  z.object({ type: z.literal('turn.failed'), error: nimboErrorSchema }),
-]);
+/** Same rationale as `nimboChunkSchema` above, for `NimboUIMessage` (`MessageFrame.message`). */
+const nimboUIMessageSchema: z.ZodType<NimboUIMessage> = z.any();
 
 /**
- * Coverage enforcement (see file header), same pattern as
- * `_sessionItemSchemaCoversAllVariants` — every `SessionEvent` variant must
- * be assignable to `z.infer<typeof sessionEventSchema>`. TypeScript
- * distributes a union-valued discriminant property (`item.*`'s combined
- * `type: "item.started" | "item.updated" | "item.completed"` arm above) over
- * the three split branches here, so the split doesn't need a workaround.
+ * `{ seq?, chunk }` — the live tail's own wire shape (`seq` present ⇔
+ * durable/replayable, absent ⇔ ephemeral — `text-delta`/`reasoning-delta`/any
+ * `transient: true` data part, docs/tech/single-ledger.md §5 单-3), also reused with `seq`
+ * always present for a replayed `kind = 'chunk'` row (the in-progress or
+ * crashed turn's durable chunks).
  */
-const _sessionEventSchemaCoversAllVariants: (
-  event: SessionEvent,
-) => z.infer<typeof sessionEventSchema> = (event) => event;
-void _sessionEventSchemaCoversAllVariants;
-
-// ---- turn.result sentinel (docs/08 §2.2: not a core SessionEvent — it's the
-// synthesized wrapper around the stream's TurnResult return value, pushed as
-// the last envelope of a turn) ----
-
-export const turnResultEventSchema = z.object({
-  type: z.literal('turn.result'),
-  finalResponse: z.string(),
-  usage: usageSchema,
+export const chunkEnvelopeSchema = z.object({
+  seq: z.number().int().optional(),
+  chunk: nimboChunkSchema,
 });
 
-// ---- user.message sentinel (docs/08 §2.2 "契约细化" #1: not a core
-// SessionEvent either — the user's own text, echoed back by the server as
-// the first envelope of the turn it kicks off, with a real `seq` so it
-// replays from `GET events` like everything else) ----
-
-export const userMessageEventSchema = z.object({
-  type: z.literal('user.message'),
-  text: z.string(),
-});
-
-// ---- turn-runner's own turn.failed sentinel (docs/08 §2.2b: apps/server's
-// turn-runner.ts) — emitted *instead of* turn.result when the whole
-// in-process turn driver throws unexpectedly, so no TurnResult was ever
-// reached. Deliberately shares the `turn.failed` literal with
-// `sessionEventSchema`'s own member above (that one is a graceful mid-stream
-// item — the turn still reaches a normal turn.result afterwards) but has a
-// different, flatter shape (`code`+`message`, no nested `error`); tell them
-// apart by field presence (`'error' in event`), same as `timeline.ts` does. ----
-
-export const turnRunnerFailedEventSchema = z.object({
-  type: z.literal('turn.failed'),
-  code: z.string(),
-  message: z.string(),
-});
-
-export type TurnRunnerFailedEvent = z.infer<typeof turnRunnerFailedEventSchema>;
-
-// ---- approval/ask_user bridge events (docs/08 §2.2c（审批链）) — four more
-// wire-only members, same "not a core SessionEvent, defined only here"
-// discipline as `userMessageEventSchema`/`turnResultEventSchema` above.
-// `turn-runner.ts`'s `requestApproval`/`resolveApproval` and
-// `requestUserAnswer`/`resolveUserAnswer` register-then-emit (so a
-// `*.requested`/`*.asked` always precedes its `*.resolved`/`*.answered`, same
-// ordering guarantee `turn.started` before `turn.completed` relies on) and
-// are persisted like every other event — a reconnecting client tells a still-
-// pending request apart from a settled one by whether the matching
-// resolved/answered event has arrived yet (`timeline.ts` folds the pair). ----
-
-export const approvalRequestedEventSchema = z.object({
-  type: z.literal('approval.requested'),
-  callId: z.string(),
-  toolName: z.string(),
-  input: jsonValueSchema,
-});
-
-export type ApprovalRequestedEvent = z.infer<
-  typeof approvalRequestedEventSchema
->;
-
-/** `message` is deny-only (a human's rejection reason, or the timeout's own explanatory text) — an `allow` never carries one. */
-export const approvalResolvedEventSchema = z.object({
-  type: z.literal('approval.resolved'),
-  callId: z.string(),
-  behavior: z.enum(['allow', 'deny']),
-  message: z.string().optional(),
-});
-
-export type ApprovalResolvedEvent = z.infer<typeof approvalResolvedEventSchema>;
-
-/** `options`, when the model supplied any, are quick-reply suggestions — not a closed set (a free-text answer is always valid too). */
-export const questionAskedEventSchema = z.object({
-  type: z.literal('question.asked'),
-  callId: z.string(),
-  question: z.string(),
-  options: z.array(z.string()).optional(),
-});
-
-export type QuestionAskedEvent = z.infer<typeof questionAskedEventSchema>;
-
-/** `answer` only appears when `outcome === 'answered'`; a `'timeout'` outcome never carries one, mirroring `approval.resolved`'s deny-only `message`. */
-export const questionAnsweredEventSchema = z.object({
-  type: z.literal('question.answered'),
-  callId: z.string(),
-  outcome: z.enum(['answered', 'timeout']),
-  answer: z.string().optional(),
-});
-
-export type QuestionAnsweredEvent = z.infer<typeof questionAnsweredEventSchema>;
-
-export const chatTimelineEventSchema = z.union([
-  sessionEventSchema,
-  turnResultEventSchema,
-  userMessageEventSchema,
-  turnRunnerFailedEventSchema,
-  approvalRequestedEventSchema,
-  approvalResolvedEventSchema,
-  questionAskedEventSchema,
-  questionAnsweredEventSchema,
-]);
-
-export type ChatTimelineEvent = z.infer<typeof chatTimelineEventSchema>;
-
-// ---- `{ seq, event }` envelope (docs/08 §2.2/§2.3) ----
-
-export const chatStreamEnvelopeSchema = z.object({
-  seq: z.number(),
-  event: chatTimelineEventSchema,
-});
-
-export type ChatStreamEnvelope = z.infer<typeof chatStreamEnvelopeSchema>;
-
-export const chatEventsPageSchema = z.object({
-  events: z.array(chatStreamEnvelopeSchema),
-});
-
-export type ChatEventsPage = z.infer<typeof chatEventsPageSchema>;
-
-// ---- ChatSession (apps/server's `chat_sessions` row, camelCase over the
-// wire — matches this repo's existing kubb-generated convention, e.g.
-// `gen/types/Note.ts`'s `createdAt`) ----
-
-export const chatSessionStatusSchema = z.enum([
-  'active',
-  'sleeping',
-  'expired',
-]);
-
-export type ChatSessionStatus = z.infer<typeof chatSessionStatusSchema>;
-
-export const chatSessionSchema = z.object({
-  id: z.string(),
-  title: z.string().nullable(),
-  repo: z.string(),
-  branchName: z.string(),
-  sandboxName: z.string(),
-  status: chatSessionStatusSchema,
-  lastActiveAt: z.string(),
-  createdAt: z.string(),
-});
-
-export type ChatSession = z.infer<typeof chatSessionSchema>;
-
-export const chatSessionListSchema = z.array(chatSessionSchema);
+export type ChunkEnvelope = z.infer<typeof chunkEnvelopeSchema>;
 
 /**
- * Parses one SSE `data:` payload's JSON text into a `ChatStreamEnvelope`.
+ * `{ seq, message }` — replay-only: a finished `NimboUIMessage`, read back
+ * verbatim from a `kind = 'message'` row. Never appears on the live tail's
+ * own broadcast path (a message row is only ever written once a turn has
+ * already finished).
+ */
+export const messageFrameSchema = z.object({
+  seq: z.number().int(),
+  message: nimboUIMessageSchema,
+});
+
+export type MessageFrame = z.infer<typeof messageFrameSchema>;
+
+/**
+ * Every wire frame this app can ever receive is *either* a `ChunkEnvelope`
+ * *or* a `MessageFrame` — told apart structurally (which of `chunk`/`message`
+ * the object actually carries), same discipline `apps/server`'s own
+ * `chatReplayFrameSchema` uses (no shared literal discriminant field).
+ */
+export const chatReplayFrameSchema = z.union([
+  chunkEnvelopeSchema,
+  messageFrameSchema,
+]);
+
+export type ChatReplayFrame = ChunkEnvelope | MessageFrame;
+
+export function isMessageFrame(frame: ChatReplayFrame): frame is MessageFrame {
+  return 'message' in frame;
+}
+
+/** `GET .../events` response shape — `{ frames: ChatReplayFrame[] }`, not a bare array (docs/tech/chat-webapp.md §2.2 "契约细化"). */
+export const conversationEventsListSchema = z.object({
+  frames: z.array(chatReplayFrameSchema),
+});
+
+export type ChatEventsList = z.infer<typeof conversationEventsListSchema>;
+
+/**
+ * Parses one SSE `data:` payload's JSON text into a `ChatReplayFrame`.
  * `JSON.parse`'s stdlib return type is `any` — contained to this one
  * expression by assigning straight into a `zod.safeParse()` call rather than
  * a typed variable, so no `any` value ever escapes this function.
  */
-export type ParsedEnvelopeResult =
-  { ok: true; envelope: ChatStreamEnvelope } | { ok: false; error: string };
+export type ParsedFrameResult =
+  { ok: true; frame: ChatReplayFrame } | { ok: false; error: string };
 
-export function parseChatStreamEnvelope(raw: string): ParsedEnvelopeResult {
+export function parseChatReplayFrame(raw: string): ParsedFrameResult {
   let parsedJson: unknown;
   try {
     parsedJson = JSON.parse(raw);
@@ -297,9 +141,50 @@ export function parseChatStreamEnvelope(raw: string): ParsedEnvelopeResult {
       error: `invalid JSON in SSE data: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
-  const result = chatStreamEnvelopeSchema.safeParse(parsedJson);
+  const result = chatReplayFrameSchema.safeParse(parsedJson);
   if (!result.success) {
     return { ok: false, error: result.error.message };
   }
-  return { ok: true, envelope: result.data };
+  return { ok: true, frame: result.data };
 }
+
+// ---- Conversation (apps/server's `conversations` row, camelCase over the
+// wire — unaffected by the UIMessage-ledger migration) ----
+
+export const conversationStatusSchema = z.enum([
+  'active',
+  'sleeping',
+  'expired',
+]);
+
+export type ConversationStatus = z.infer<typeof conversationStatusSchema>;
+
+export const conversationSchema = z.object({
+  id: z.string(),
+  title: z.string().nullable(),
+  repo: z.string(),
+  branchName: z.string(),
+  sandboxName: z.string(),
+  status: conversationStatusSchema,
+  lastActiveAt: z.string(),
+  createdAt: z.string(),
+});
+
+export type Conversation = z.infer<typeof conversationSchema>;
+
+export const conversationListSchema = z.array(conversationSchema);
+
+// ---- turn 遥测明细（docs/tech/chat-webapp.md §11.4，GET .../turns/{turn}/telemetry） ----
+
+/** 一条遥测事件：`payloadJson` 是服务端收敛后的事件 JSON 原文（形状随 ai 小版本演化，前端按需解析、缺字段跳过，不在这里深度建模）。 */
+export const turnTelemetryEventSchema = z.object({
+  eventType: z.string(),
+  ts: z.number(),
+  payloadJson: z.string(),
+});
+
+export type TurnTelemetryEvent = z.infer<typeof turnTelemetryEventSchema>;
+
+export const turnTelemetrySchema = z.object({
+  events: z.array(turnTelemetryEventSchema),
+});

@@ -64,6 +64,27 @@ export function stopOnlyModel(text: string): MockLanguageModelV4 {
   return new MockLanguageModelV4({ doStream: stopChunk(text) });
 }
 
+/**
+ * A `stopOnlyModel` that also records every `prompt` (the `ModelMessage[]`
+ * `convertToModelMessages` derived and handed to the provider) it's asked to
+ * stream — for asserting *what the model actually saw*, e.g. that a resumed
+ * turn's context includes a prior turn's user message (`captured` is shared
+ * by reference, read it after the turn drains).
+ */
+export function capturingModel(text: string): {
+  model: MockLanguageModelV4;
+  captured: unknown[][];
+} {
+  const captured: unknown[][] = [];
+  const model = new MockLanguageModelV4({
+    doStream: (options) => {
+      captured.push(options.prompt as unknown[]);
+      return Promise.resolve(stopChunk(text));
+    },
+  });
+  return { model, captured };
+}
+
 /** A two-step turn: one tool call, then a stop reply — for exercising `tool_call`/`file_change` events. */
 export function toolCallThenStopModel(
   toolName: string,

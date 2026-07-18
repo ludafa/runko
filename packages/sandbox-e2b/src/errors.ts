@@ -1,5 +1,5 @@
 /**
- * e2b 错误的结构判别（docs/06 §8.1："错误识别一律结构判别不用 instanceof"——
+ * e2b 错误的结构判别（docs/tech/sandbox.md §8.1："错误识别一律结构判别不用 instanceof"——
  * 宿主与本包各自安装的 `e2b` 副本类不同一，`instanceof` 天然不可靠）。
  * `instanceof Error` 本身没问题（`Error` 是当前 realm 的全局内置类，不是
  * e2b 的导出类），只有对 e2b 自家导出的错误类才不能用 instanceof。

@@ -1,5 +1,5 @@
 /**
- * Shared Streamdown wrapper for chat content (agent_message + reasoning).
+ * Shared Streamdown wrapper for chat content (text parts + reasoning parts).
  *
  * `linkSafety.enabled: false` is load-bearing: Streamdown's default link
  * renderer wraps each link in a "link safety" confirmation popover whose body
@@ -7,7 +7,7 @@
  * inline inside a paragraph `<p>`, that popover nests a `<p>` inside a `<p>` —
  * an invalid-DOM hydration error ("<p> cannot be a descendant of <p>").
  * Disabling it renders links as plain anchors. Centralised here so both
- * call sites (item-card, reasoning-block) stay consistent.
+ * call sites (message-entry, reasoning-block) stay consistent.
  */
 import { Streamdown } from 'streamdown';
 

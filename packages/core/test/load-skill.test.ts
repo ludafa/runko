@@ -1,8 +1,11 @@
 /**
- * P5 skills, session-level wiring: `load_skill` tool (unit + conditional
+ * P5 skills, session-level wiring: `load-skill` tool (unit + conditional
  * presence), `<available_skills>` system prompt injection, attached-file
  * mounting to `/.skills/<name>/`, and end-to-end `ctx.getSkill()` from a
  * host-provided tool. Loader/registry unit tests live in `test/skills.test.ts`.
+ *
+ * P13-5-2（docs/tech/single-ledger.md）迁移：断言从 `SessionEvent`/
+ * `SessionItem` 改为读账本（`session.toJSON().messages` 的工具部件）。
  */
 import { describe, expect, it } from "vitest";
 import { simulateReadableStream } from "ai";
@@ -15,8 +18,8 @@ import { defineSkill } from "../src/skill.js";
 import { createSession } from "../src/session.js";
 import type { AgentDefinition } from "../src/agent.js";
 import type { Skill } from "../src/skill.js";
-import type { SessionEvent, SessionItem } from "../src/events.js";
 import type { Tool, ToolContext } from "../src/types.js";
+import { allToolParts, chunksOfType, drainTurn } from "./helpers/nimbo-chunks.js";
 
 // ---- shared mock-model helpers (same shape as session.test.ts / loop.test.ts) ----
 
@@ -82,23 +85,6 @@ function baseAgent(model: MockLanguageModelV4, overrides: Partial<AgentDefinitio
   return defineAgent({ model, ...overrides });
 }
 
-async function drainStream(gen: AsyncGenerator<SessionEvent, unknown>): Promise<SessionEvent[]> {
-  const events: SessionEvent[] = [];
-  let next = await gen.next();
-  while (!next.done) {
-    events.push(next.value);
-    next = await gen.next();
-  }
-  return events;
-}
-
-function isItemCompleted(event: SessionEvent): event is { type: "item.completed"; item: SessionItem } {
-  return event.type === "item.completed";
-}
-function isToolCallItem(item: SessionItem): item is Extract<SessionItem, { type: "tool_call" }> {
-  return item.type === "tool_call";
-}
-
 const pdfFillSkill: Skill = defineSkill({
   name: "pdf-fill",
   description: "fills PDF forms",
@@ -124,7 +110,7 @@ describe("createLoadSkillTool", () => {
     expect(text).toContain("# PDF Fill");
     expect(text).toContain("Attached files");
     expect(text).toContain("/.skills/pdf-fill/reference.md");
-    expect(text).toContain("read_file");
+    expect(text).toContain("read-file");
   });
 
   it("returns a guidance { isError: true, content } result for an unknown skill name", async () => {
@@ -170,13 +156,13 @@ function fakeCtx(): ToolContext {
 
 // ---- session-level wiring ----
 
-describe("session wiring: <available_skills> + load_skill conditional tool", () => {
+describe("session wiring: <available_skills> + load-skill conditional tool", () => {
   it("appends <available_skills> to the system prompt when agent.skills is non-empty", async () => {
     const model = stopModel("ok");
     const agent = baseAgent(model, { instructions: "Be terse.", skills: [pdfFillSkill] });
     const session = createSession(agent, { fs: fromMemory({}) });
 
-    await drainStream(session.stream("hi"));
+    await drainTurn(session.stream("hi"));
 
     expect(model.doStreamCalls[0]?.prompt[0]).toMatchObject({
       role: "system",
@@ -187,40 +173,44 @@ describe("session wiring: <available_skills> + load_skill conditional tool", () 
   it("does NOT append <available_skills> when agent.skills is unset or empty", async () => {
     const model = stopModel("ok");
     const session = createSession(baseAgent(model, { instructions: "Be terse." }));
-    await drainStream(session.stream("hi"));
+    await drainTurn(session.stream("hi"));
     expect(model.doStreamCalls[0]?.prompt[0]).toMatchObject({ role: "system", content: "Be terse." });
   });
 
-  it("load_skill is absent from the tool list when agent.skills is unset (unknown tool → failed)", async () => {
-    const agent = baseAgent(toolCallThenStopModel("load_skill", { name: "pdf-fill" }, "done"));
-    const events = await drainStream(createSession(agent).stream("load it"));
-    const completed = events.filter(isItemCompleted).map((e) => e.item).filter(isToolCallItem);
-    expect(completed[0]?.status).toBe("failed");
-    expect(typeof completed[0]?.output === "string" ? completed[0]?.output : "").toContain("Unknown tool");
+  it("load-skill is absent from the tool list when agent.skills is unset (never declared to the model → direct output-error, no tool-input-available first — see loop.test.ts's 'unknown tool name'/'malformed dynamic call' tests for the mechanism)", async () => {
+    const agent = baseAgent(toolCallThenStopModel("load-skill", { name: "pdf-fill" }, "done"));
+    const session = createSession(agent);
+    const { chunks } = await drainTurn(session.stream("load it"));
+
+    expect(chunksOfType(chunks, "tool-input-available")).toHaveLength(0);
+    const settled = allToolParts(session.toJSON().messages);
+    expect(settled[0]).toMatchObject({ state: "output-error" });
+    expect(settled[0]?.errorText).toContain("load-skill");
   });
 
-  it("load_skill is present and returns markdown + attached files when agent.skills is non-empty", async () => {
-    const agent = baseAgent(toolCallThenStopModel("load_skill", { name: "pdf-fill" }, "done"), { skills: [pdfFillSkill] });
+  it("load-skill is present and returns markdown + attached files when agent.skills is non-empty", async () => {
+    const agent = baseAgent(toolCallThenStopModel("load-skill", { name: "pdf-fill" }, "done"), { skills: [pdfFillSkill] });
     const session = createSession(agent, { fs: fromMemory({}) });
-    const events = await drainStream(session.stream("load it"));
+    await drainTurn(session.stream("load it"));
 
-    const completed = events.filter(isItemCompleted).map((e) => e.item).filter(isToolCallItem);
-    expect(completed[0]?.status).toBe("completed");
-    const output = completed[0]?.output;
+    const settled = allToolParts(session.toJSON().messages);
+    expect(settled[0]).toMatchObject({ state: "output-available" });
+    const output = settled[0]?.output;
     const text = typeof output === "string" ? output : "";
     expect(text).toContain("# PDF Fill");
     expect(text).toContain("/.skills/pdf-fill/reference.md");
   });
 
-  it("a host-provided tools.load_skill overrides the builtin implementation", async () => {
-    const hostTool: Tool = { description: "custom", inputSchema: z.object({ name: z.string() }), execute: () => "custom load_skill handled" };
-    const agent = baseAgent(toolCallThenStopModel("load_skill", { name: "pdf-fill" }, "done"), {
+  it("a host-provided tools.load-skill overrides the builtin implementation", async () => {
+    const hostTool: Tool = { description: "custom", inputSchema: z.object({ name: z.string() }), execute: () => "custom load-skill handled" };
+    const agent = baseAgent(toolCallThenStopModel("load-skill", { name: "pdf-fill" }, "done"), {
       skills: [pdfFillSkill],
-      tools: { load_skill: hostTool },
+      tools: { "load-skill": hostTool },
     });
-    const events = await drainStream(createSession(agent, { fs: fromMemory({}) }).stream("load it"));
-    const completed = events.filter(isItemCompleted).map((e) => e.item).filter(isToolCallItem);
-    expect(completed[0]?.output).toBe("custom load_skill handled");
+    const session = createSession(agent, { fs: fromMemory({}) });
+    await drainTurn(session.stream("load it"));
+    const settled = allToolParts(session.toJSON().messages);
+    expect(settled[0]).toMatchObject({ state: "output-available", output: "custom load-skill handled" });
   });
 });
 
@@ -229,7 +219,7 @@ describe("session wiring: attached-file mounting to /.skills/<name>/", () => {
     const fs = fromMemory({});
     const session = createSession(baseAgent(stopModel("ok"), { skills: [pdfFillSkill] }), { fs });
 
-    await drainStream(session.stream("hi")); // mounting happens before the first turn's tool calls run
+    await drainTurn(session.stream("hi")); // mounting happens before the first turn's tool calls run
 
     expect(new TextDecoder().decode(await fs.readFile("/.skills/pdf-fill/reference.md"))).toBe("field docs");
   });
@@ -264,11 +254,11 @@ describe("session wiring: ctx.getSkill() end-to-end from a host-provided tool", 
       tools: { read_skill: readSkillTool },
     });
     const session = createSession(agent, { fs: fromMemory({}) });
-    const events = await drainStream(session.stream("go"));
+    await drainTurn(session.stream("go"));
 
     expect(capturedText).toEqual(["field docs"]);
-    const completed = events.filter(isItemCompleted).map((e) => e.item).filter(isToolCallItem);
-    expect(completed[0]?.status).toBe("completed");
+    const settled = allToolParts(session.toJSON().messages);
+    expect(settled[0]).toMatchObject({ state: "output-available" });
   });
 
   it("ctx.getSkill() for an unknown skill name gives a guidance error surfaced through the tool's failure", async () => {
@@ -285,11 +275,10 @@ describe("session wiring: ctx.getSkill() end-to-end from a host-provided tool", 
       tools: { failing_tool: failingTool },
     });
     const session = createSession(agent, { fs: fromMemory({}) });
-    const events = await drainStream(session.stream("go"));
+    await drainTurn(session.stream("go"));
 
-    const completed = events.filter(isItemCompleted).map((e) => e.item).filter(isToolCallItem);
-    expect(completed[0]?.status).toBe("failed");
-    const output = completed[0]?.output;
-    expect(typeof output === "string" ? output : "").toContain("does-not-exist");
+    const settled = allToolParts(session.toJSON().messages);
+    expect(settled[0]).toMatchObject({ state: "output-error" });
+    expect(settled[0]?.errorText).toContain("does-not-exist");
   });
 });

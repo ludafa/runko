@@ -1,5 +1,5 @@
 /**
- * `nimbo/load` 子路径的落地（tech-spec §4.7 原文 `// nimbo/load` 注释——spec 写的
+ * `nimbo/load` 子路径的落地（docs/tech/core-sdk.md §4.7 原文 `// nimbo/load` 注释——spec 写的
  * 是一个假想的裸包名子路径；P7-3 工单裁量为 `@nimbo/core` 的 `./load` subpath
  * export，见 `package.json`/`tsdown.config.ts`）。这里只是一个薄 barrel，真实实现
  * 在 `./load/load-agent.js`（`loadAgent`，任务 2）与 `./load/load-agent-fs.js`

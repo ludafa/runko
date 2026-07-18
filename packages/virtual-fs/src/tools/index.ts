@@ -1,5 +1,5 @@
 /**
- * 文件工具八件套的工厂入口（04-builtin-tools.md §1.1–§1.8, §4；tech-spec §4.5）。
+ * 文件工具八件套的工厂入口（docs/tech/builtin-tools.md §1.1–§1.8, §4；docs/tech/core-sdk.md §4.5）。
  * `createFileTools(opts)` 是 P4（core session/ToolRuntime）落地前的可注入接缝——
  * 设计理由见 `shared.ts` 顶部注释。
  */
@@ -16,17 +16,17 @@ import { createWriteFileTool } from "./write-file.js";
 
 export type { CreateFileToolsOptions, FileChange, ReadStateStore } from "./shared.js";
 
-/** 八件套的工具名集合：`BuiltinToolName` 去掉 `update_plan`（那个归 core/P4）。 */
-export type FileToolName = Exclude<BuiltinToolName, "update_plan">;
+/** 八件套的工具名集合：`BuiltinToolName` 去掉 `update-plan`（那个归 core/P4）。 */
+export type FileToolName = Exclude<BuiltinToolName, "update-plan">;
 
 export function createFileTools(opts: CreateFileToolsOptions): Record<FileToolName, Tool> {
   return {
-    read_file: createReadFileTool(opts),
-    write_file: createWriteFileTool(opts),
-    edit_file: createEditFileTool(opts),
-    delete_file: createDeleteFileTool(opts),
-    move_file: createMoveFileTool(opts),
-    list_dir: createListDirTool(),
+    "read-file": createReadFileTool(opts),
+    "write-file": createWriteFileTool(opts),
+    "edit-file": createEditFileTool(opts),
+    "delete-file": createDeleteFileTool(opts),
+    "move-file": createMoveFileTool(opts),
+    "list-dir": createListDirTool(),
     glob: createGlobTool(),
     grep: createGrepTool(),
   };

@@ -58,6 +58,6 @@ console.log(result.finalResponse, await session.fs.diff());
 | 本机命令执行 | `localExec()`（出厂审批 `"always"`；`{ materialize: true, fs }` 物化模式） | @nimbo/core |
 | eve 布局目录加载 | `loadAgent(dir)` / `loadAgentFromFS(fs, dir)`（`@nimbo/core/load` 子路径同样可达） | @nimbo/core |
 
-**bash 分档**：`@nimbo/mini-bash` 随本包 re-export，开箱可用，定位安全默认/测试演示；`@nimbo/just-bash`（vercel-labs/just-bash 适配器）因依赖树含 wasm 大件（sql.js、quickjs-emscripten 等）**不进本包依赖**，强制打包违背门面轻量默认——需要全语法档的宿主显式安装该包后按上表用法注入（见 [docs/02-tech-spec.md §4.5b](../../docs/02-tech-spec.md)）。
+**bash 分档**：`@nimbo/mini-bash` 随本包 re-export，开箱可用，定位安全默认/测试演示；`@nimbo/just-bash`（vercel-labs/just-bash 适配器）因依赖树含 wasm 大件（sql.js、quickjs-emscripten 等）**不进本包依赖**，强制打包违背门面轻量默认——需要全语法档的宿主显式安装该包后按上表用法注入（见 [docs/tech/core-sdk.md §4.5b](../../docs/tech/core-sdk.md)）。
 
 可运行示例见 [examples/](../../examples/README.md)（含 [08-just-bash.ts](../../examples/08-just-bash.ts)）。

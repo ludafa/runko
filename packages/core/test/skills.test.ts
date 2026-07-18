@@ -1,7 +1,7 @@
 /**
  * P5 skills：三加载器（`Skill.fromDirectory`/`fromFS`/`fromMarkdown`）+
  * registry 三件事（`buildAvailableSkillsBlock`/`createGetSkill`/
- * `mountSkillFiles`）。Session-level 接线（system prompt 注入、`load_skill`
+ * `mountSkillFiles`）。Session-level 接线（system prompt 注入、`load-skill`
  * 条件内置、挂载后 fs 可读、`getSkill` 端到端）在 `test/load-skill.test.ts`。
  *
  * `@nimbo/virtual-fs`（devDependency，非运行时依赖，同 `test/integration.test.ts`

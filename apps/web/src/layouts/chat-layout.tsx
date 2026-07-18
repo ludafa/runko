@@ -2,9 +2,9 @@ import { useNavigate } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 
-import { createChatSession, listChatSessions } from '@/features/chat/api';
-import { SessionList } from '@/features/chat/components/session-list';
-import type { ChatSession } from '@/features/chat/schema';
+import { createConversation, listConversations } from '@/features/chat/api';
+import { SessionList } from '@/features/chat/components/conversation-list';
+import type { Conversation } from '@/features/chat/schema';
 
 export function ChatLayout({
   children,
@@ -14,14 +14,14 @@ export function ChatLayout({
   activeSessionId: string | undefined;
 }) {
   const navigate = useNavigate();
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
-    listChatSessions(controller.signal)
-      .then(setSessions)
+    listConversations(controller.signal)
+      .then(setConversations)
       .catch(() => {
         /* left as an empty list; SessionList already handles the empty state */
       })
@@ -32,13 +32,13 @@ export function ChatLayout({
   async function handleCreate(title: string) {
     setCreating(true);
     try {
-      const session = await createChatSession(
+      const conversation = await createConversation(
         title.length > 0 ? { title } : {},
       );
-      setSessions((prev) => [session, ...prev]);
+      setConversations((prev) => [conversation, ...prev]);
       await navigate({
-        to: '/chat/$sessionId',
-        params: { sessionId: session.id },
+        to: '/chat/$conversationId',
+        params: { conversationId: conversation.id },
       });
     } finally {
       setCreating(false);
@@ -53,7 +53,7 @@ export function ChatLayout({
             加载中…
           </p>
         : <SessionList
-            sessions={sessions}
+            conversations={conversations}
             activeSessionId={activeSessionId}
             onCreate={handleCreate}
             creating={creating}

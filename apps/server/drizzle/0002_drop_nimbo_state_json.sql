@@ -1,0 +1,1 @@
+ALTER TABLE `chat_sessions` DROP COLUMN `nimbo_state_json`;

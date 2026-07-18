@@ -1,5 +1,5 @@
 /**
- * `read_file`（04-builtin-tools.md §1.1）：cat -n 风格带行号文本；2000 行/256KB
+ * `read-file`（docs/tech/builtin-tools.md §1.1）：cat -n 风格带行号文本；2000 行/256KB
  * 预算 + offset/limit 分页；二进制与 reference 返回结构化指引而非裸错误；
  * 读取后登记 readState。
  */
@@ -101,26 +101,27 @@ function formatTextContent(text: string, offset: number, limit: number | undefin
 export function createReadFileTool(opts: CreateFileToolsOptions): Tool {
   return defineTool({
     description:
-      "Read a file's text content, cat -n style (line numbers are the anchor edit_file uses to locate text). " +
+      "Read a file's text content, cat -n style (line numbers are the anchor edit-file uses to locate text). " +
       "Defaults to the whole file, capped at 2000 lines / 256KB per call — use offset/limit (both in lines) to " +
       "page through larger files. Reading registers the file as 'known' for this session, which is required " +
-      "before write_file (overwrite) or edit_file can touch it. Binary files and unresolved reference entries " +
+      "before write-file (overwrite) or edit-file can touch it. Binary files and unresolved reference entries " +
       "are not returned as text: instead you get a small structured description (mimeType/size/href/description) " +
       "explaining what the entry is.",
     inputSchema,
+    readOnly: true,
     execute: async (input, ctx): Promise<ToolReturn> => {
       let stat;
       try {
         stat = await ctx.fs.stat(input.path);
       } catch (error) {
         if (error instanceof NotFoundError) {
-          return errorResult(`"${input.path}" does not exist. Check the path with list_dir or glob before retrying.`);
+          return errorResult(`"${input.path}" does not exist. Check the path with list-dir or glob before retrying.`);
         }
         return errorResult(`Failed to stat "${input.path}": ${describeError(error)}.`);
       }
 
       if (stat.type === "dir") {
-        return errorResult(`"${input.path}" is a directory, not a file. Use list_dir to see its contents.`);
+        return errorResult(`"${input.path}" is a directory, not a file. Use list-dir to see its contents.`);
       }
 
       if (stat.type === "reference") {
@@ -158,7 +159,7 @@ export function createReadFileTool(opts: CreateFileToolsOptions): Tool {
           mimeType,
           ...(stat.size !== undefined ? { size: stat.size } : {}),
           ...(description !== undefined ? { description } : {}),
-          hint: `Binary file (${mimeType}${stat.size !== undefined ? `, ${stat.size} bytes` : ""}) cannot be shown as text by read_file.`,
+          hint: `Binary file (${mimeType}${stat.size !== undefined ? `, ${stat.size} bytes` : ""}) cannot be shown as text by read-file.`,
         };
       }
 

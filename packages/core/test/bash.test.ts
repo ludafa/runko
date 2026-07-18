@@ -68,24 +68,24 @@ describe("createBashTool", () => {
     });
   });
 
-  describe("approval default (§1.10 取 exec.defaultApproval)", () => {
-    it("uses exec.defaultApproval verbatim when declared 'never'", () => {
-      const tool = createBashTool({ exec: fakeExec({ defaultApproval: "never" }) });
-      expect(tool.approval).toBe("never");
+  describe("approval default (§1.10 取 exec.defaultApproval; docs/tech/single-ledger.md §6.1 三值重构 never→allow / always→review)", () => {
+    it("uses exec.defaultApproval verbatim when declared 'allow'", () => {
+      const tool = createBashTool({ exec: fakeExec({ defaultApproval: "allow" }) });
+      expect(tool.approval).toBe("allow");
     });
 
-    it("uses exec.defaultApproval verbatim when declared 'always'", () => {
-      const tool = createBashTool({ exec: fakeExec({ defaultApproval: "always" }) });
-      expect(tool.approval).toBe("always");
+    it("uses exec.defaultApproval verbatim when declared 'review'", () => {
+      const tool = createBashTool({ exec: fakeExec({ defaultApproval: "review" }) });
+      expect(tool.approval).toBe("review");
     });
 
-    it("falls back to the conservative default 'always' when the implementation declares no defaultApproval", () => {
+    it("falls back to the conservative default 'review' when the implementation declares no defaultApproval", () => {
       const tool = createBashTool({ exec: fakeExec({}) });
-      expect(tool.approval).toBe("always");
+      expect(tool.approval).toBe("review");
     });
   });
 
-  describe("execute(): timeout/non-zero exit are normal results, not thrown errors (§1.10 / 04 §4)", () => {
+  describe("execute(): timeout/non-zero exit are normal results, not thrown errors (§1.10 / docs/tech/builtin-tools.md §4)", () => {
     it("formats a successful (exit 0) run with stdout and the exit code", async () => {
       const tool = createBashTool({ exec: fakeExec({ result: resultOf(0, "hello\n", "") }) });
       const output = await tool.execute({ command: "echo hello" }, makeCtx());
@@ -149,7 +149,7 @@ describe("createBashTool", () => {
     });
   });
 
-  describe("onOutput → ctx.update() (§1.10 / 04 §4)", () => {
+  describe("onOutput → ctx.update() (§1.10 / docs/tech/builtin-tools.md §4)", () => {
     it("forwards every onOutput chunk's data to ctx.update, in order", async () => {
       const update = vi.fn();
       const tool = createBashTool({

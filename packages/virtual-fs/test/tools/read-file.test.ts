@@ -3,7 +3,7 @@ import { fromMemory } from "../../src/memory.js";
 import { createReadFileTool } from "../../src/tools/read-file.js";
 import { createMapReadStateStore, expectError, expectText, makeCtx } from "./helpers.js";
 
-describe("read_file", () => {
+describe("read-file", () => {
   it("reads a small file cat -n style, 1-indexed line numbers", async () => {
     const fs = fromMemory({ "a.txt": "line1\nline2\nline3" });
     const readState = createMapReadStateStore();
@@ -79,7 +79,7 @@ describe("read_file", () => {
 
     const content = expectError(await tool.execute({ path: "/dir" }, makeCtx(fs)));
     expect(content).toContain("directory");
-    expect(content).toContain("list_dir");
+    expect(content).toContain("list-dir");
   });
 
   it("surfaces a path that escapes the virtual root as a guided error, without the tool re-implementing the check (§0.2: FS layer owns path safety)", async () => {

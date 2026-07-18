@@ -114,12 +114,12 @@ describe("runStep", () => {
         stream: simulateReadableStream({
           chunks: [
             { type: "stream-start", warnings: [] },
-            { type: "tool-input-start", id: "call_1", toolName: "read_file" },
+            { type: "tool-input-start", id: "call_1", toolName: "read-file" },
             { type: "tool-input-delta", id: "call_1", delta: '{"pa' },
             { type: "tool-input-delta", id: "call_1", delta: 'th":"a.' },
             { type: "tool-input-delta", id: "call_1", delta: 'txt"}' },
             { type: "tool-input-end", id: "call_1" },
-            { type: "tool-call", toolCallId: "call_1", toolName: "read_file", input: '{"path":"a.txt"}' },
+            { type: "tool-call", toolCallId: "call_1", toolName: "read-file", input: '{"path":"a.txt"}' },
             { type: "finish", finishReason: { unified: "tool-calls", raw: undefined }, usage },
           ],
           initialDelayInMs: null,
@@ -129,18 +129,18 @@ describe("runStep", () => {
     }));
 
     const { events, result } = await drain(
-      runStep({ model, messages: [{ role: "user", content: "read a.txt" }], tools: { read_file: readFile } }),
+      runStep({ model, messages: [{ role: "user", content: "read a.txt" }], tools: { "read-file": readFile } }),
     );
 
     expect(events).toEqual<StepEvent[]>([
       { type: "tool-input-delta", id: "call_1", delta: '{"pa' },
       { type: "tool-input-delta", id: "call_1", delta: 'th":"a.' },
       { type: "tool-input-delta", id: "call_1", delta: 'txt"}' },
-      { type: "tool-call", id: "call_1", toolName: "read_file", input: { path: "a.txt" } },
+      { type: "tool-call", id: "call_1", toolName: "read-file", input: { path: "a.txt" } },
     ]);
 
     expect(result.finishReason).toBe("tool-calls");
-    expect(result.toolCalls).toEqual([{ id: "call_1", toolName: "read_file", input: { path: "a.txt" } }]);
+    expect(result.toolCalls).toEqual([{ id: "call_1", toolName: "read-file", input: { path: "a.txt" } }]);
     expect(readFile.execute).not.toHaveBeenCalled();
   });
 
@@ -163,10 +163,10 @@ describe("runStep", () => {
       }),
     }));
 
-    await drain(runStep({ model, messages: [{ role: "user", content: "hi" }], tools: { read_file: readFile } }));
+    await drain(runStep({ model, messages: [{ role: "user", content: "hi" }], tools: { "read-file": readFile } }));
 
     const toolsSentToModel = model.doStreamCalls[0]?.tools;
-    const readFileToolSent = toolsSentToModel?.find((t) => t.type === "function" && t.name === "read_file");
+    const readFileToolSent = toolsSentToModel?.find((t) => t.type === "function" && t.name === "read-file");
     expect(readFileToolSent).toBeDefined();
   });
 

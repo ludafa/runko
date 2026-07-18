@@ -1,5 +1,5 @@
 /**
- * NimboExec 契约（docs/06 §3.2 / §8.2；工单验收点）：P6-1 全部失败路径 resolve
+ * NimboExec 契约（docs/tech/sandbox.md §3.2 / §8.2；工单验收点）：P6-1 全部失败路径 resolve
  * 而非 reject、超时/中止归一 124/130、`onOutput` 分片顺序、cwd 锚定、
  * `describe()`/`defaultApproval`。
  */
@@ -13,9 +13,9 @@ function neverAborts(): AbortSignal {
 }
 
 describe("NimboExec surface", () => {
-  it("defaultApproval is 'never' (isolation is the boundary, not approval)", () => {
+  it("defaultApproval is 'allow' (isolation is the boundary, not approval)", () => {
     const workspace = e2bWorkspace(createFakeE2bSandbox());
-    expect(workspace.defaultApproval).toBe("never");
+    expect(workspace.defaultApproval).toBe("allow");
   });
 
   it("describe() truthfully declares a real Firecracker VM, same-source workspace, and steers scans toward bash", () => {

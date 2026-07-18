@@ -24,7 +24,24 @@ export default defineConfig(({ mode }) => {
   );
 
   return {
-    plugins: [tanstackRouter(), react(), tailwindcss()],
+    plugins: [
+      ...[
+        isDev ?
+          [
+            {
+              name: 'inject-1p-ignore-dev',
+              apply: 'serve', // 只在 dev server 生效,build 时不运行
+              transformIndexHtml(html: string) {
+                return html.replace('<body', '<body data-1p-ignore');
+              },
+            },
+          ]
+        : null,
+      ],
+      tanstackRouter(),
+      react(),
+      tailwindcss(),
+    ],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),

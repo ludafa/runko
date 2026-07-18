@@ -10,7 +10,7 @@ dependencies are just `ai` (Vercel AI SDK, a peer dependency) + `zod`.
 ## Why it exists
 
 The gap in existing options (full write-up in
-[docs/01 product design](./docs/01-product-design.md)):
+[core-sdk product design](./docs/features/core-sdk.md)):
 
 - **CLI wrappers** (`@openai/codex-sdk`, `@anthropic-ai/claude-agent-sdk`): these
   spawn a platform binary — heavy, tied to one vendor, **no virtual filesystem**
@@ -60,7 +60,7 @@ unchanged and every change lives in `diff()`. Call `session.fs.writeBack()` to p
 pnpm add @nimbo/sdk ai
 ```
 
-> TODO: the npm bare name `nimbo` publishing decision is still open (docs/03 P7-1
+> TODO: the npm bare name `nimbo` publishing decision is still open (docs/plans/core-sdk.md P7-1
 > leftover) — everything uses `@nimbo/sdk` for now; once decided, the imports in
 > this README and the examples get swapped over.
 
@@ -168,7 +168,7 @@ separately. Per-package details are in the table below.
 
 **bash tiers**: the `bash` tool's execution environment (`NimboExec`) comes in two
 tiers, injected on demand and swappable in one line with zero loop/session changes
-([docs/02 §4.5b](./docs/02-tech-spec.md)):
+([tech/core-sdk §4.5b](./docs/tech/core-sdk.md)):
 
 - **`@nimbo/mini-bash` (zero-dep minimal tier)**: six read-only commands
   (`cat`/`grep`/`find`/`tail`/`head`/`echo`) + four control operators, bundled with
@@ -191,8 +191,9 @@ Three adapters put the agent's fs/bash inside a real cloud sandbox while the age
 itself runs on any Node machine — the same "mode-A same-source workspace" shape
 (one object implementing `NimboFS & NimboExec`, injected via `workspace`). The
 research and design decisions are in
-[docs/06 sandbox research](./docs/06-sandbox-workspace-research.md); E2B and Vercel
-are verified against real sandboxes, Cloudflare uses a self-hosted gateway.
+[sandbox feature](./docs/features/sandbox.md) / [tech](./docs/tech/sandbox.md) /
+[plan](./docs/plans/sandbox.md); E2B and Vercel are verified against real sandboxes,
+Cloudflare uses a self-hosted gateway.
 
 ## Example application: the chat agent webapp
 
@@ -204,7 +205,8 @@ active, snapshot-hibernated when idle, resumed with the branch code on the next
 message), resumable SSE streaming of the loop's every event to the frontend
 (survives refresh/HMR), SQLite persistence of the full transcript, streamdown
 markdown rendering, and per-turn token stats including cache hits. Design in
-[docs/08 chat webapp](./docs/08-chat-agent-webapp.md).
+[chat webapp feature](./docs/features/chat-webapp.md) /
+[tech](./docs/tech/chat-webapp.md) / [plan](./docs/plans/chat-webapp.md).
 
 ```sh
 cp .env.template .env         # fill in the required keys (see the template's comments)
@@ -224,15 +226,25 @@ pnpm chat:web                 # web dev server
   missing env/credential just runs the deterministic section and exits cleanly;
   the last script's real-run section, once fully configured, really modifies the
   target GitHub repo — read the notice in its header / examples/README first).
-- **Design docs**: [product design](./docs/01-product-design.md) ·
-  [tech spec](./docs/02-tech-spec.md) ·
-  [construction plan](./docs/03-construction-plan.md) ·
-  [built-in tools](./docs/04-builtin-tools.md) ·
-  [verification](./docs/05-verification.md) ·
-  [sandbox research](./docs/06-sandbox-workspace-research.md) ·
-  [e2e design example](./docs/07-sandbox-e2e-design-example.md) ·
-  [chat webapp](./docs/08-chat-agent-webapp.md) ·
-  [sandbox spec](./docs/nimbo-sandbox-spec.md)
+- **Design docs**: each feature is split into three views — feature (product /
+  usage), tech (design), plan (construction) — under `docs/features/` ·
+  `docs/tech/` · `docs/plans/`. In reading order:
+  1. **core-sdk** — [feature](./docs/features/core-sdk.md) ·
+     [tech](./docs/tech/core-sdk.md) · [plan](./docs/plans/core-sdk.md)
+  2. **builtin-tools** — [feature](./docs/features/builtin-tools.md) ·
+     [tech](./docs/tech/builtin-tools.md)
+  3. **sandbox** — [feature](./docs/features/sandbox.md) ·
+     [tech](./docs/tech/sandbox.md) · [plan](./docs/plans/sandbox.md)
+  4. **chat-webapp** — [feature](./docs/features/chat-webapp.md) ·
+     [tech](./docs/tech/chat-webapp.md) · [plan](./docs/plans/chat-webapp.md)
+  5. **turn-checkpoint** — [feature](./docs/features/turn-checkpoint.md) ·
+     [tech](./docs/tech/turn-checkpoint.md) · [plan](./docs/plans/turn-checkpoint.md)
+  6. **single-ledger** — [feature](./docs/features/single-ledger.md) ·
+     [tech](./docs/tech/single-ledger.md) · [plan](./docs/plans/single-ledger.md)
+  7. **compaction** — [feature](./docs/features/compaction.md) ·
+     [tech](./docs/tech/compaction.md) · [plan](./docs/plans/compaction.md)
+  8. **verification** — [plan](./docs/plans/verification.md) (plan view only)
+  - **Glossary**: [terms.md](./docs/terms.md)
 - **Development**: `corepack pnpm install && corepack pnpm build && corepack pnpm
   typecheck && corepack pnpm test` (build first — cross-package type resolution
   points at `dist` under the workspace's circular devDeps). Node ≥ 20 (examples and
