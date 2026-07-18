@@ -6,7 +6,7 @@
   "type": "module",
   "license": "ISC",
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "packageManager": "pnpm@11.11.0",
   "scripts": {
