@@ -1,421 +1,192 @@
 /**
- * Pure reducer: an ordered, seq-deduped `ChatStreamEnvelope[]` (history
- * replay + live stream, merged upstream by `useChatMessages`) → a flat list
- * of render-ready `TimelineEntry`s. Item lifecycle events
- * (`item.started`/`item.updated`/`item.completed`) collapse onto a single
- * slot per `item.id`, updated in place as later events for the same id
- * arrive — the rendering rule examples/12's `streamLive` applies for its
- * console timeline (one row per id, not one row per event); here it also
- * means no duplicate rows and no lost updates when React re-renders.
+ * Render-shaping helpers for the `NimboUIMessage[]` ledger `materialize.ts`
+ * produces (docs/tech/single-ledger.md §5/§6). Two concerns live
+ * here:
  *
- * `turn.completed` (a real `SessionEvent`, carries only `usage`) is folded
- * into the richer `turn.result` sentinel bar rather than getting its own
- * row — `turn.result` always follows it directly in the same turn and
- * carries the same `usage` plus `finalResponse`, so a separate row would be
- * a redundant duplicate of the same information (see final report's
- * ambiguity list).
- *
- * `user.message` (docs/08 §2.2 "契约细化" #1) is the server's echo of the
- * user's own outgoing text, pushed with a real `seq` as the first envelope
- * of the turn it kicks off — it replays from `GET events` like any other
- * event, so this reducer just slots it in at its `seq` position like every
- * other marker. `useChatMessages` additionally renders an *optimistic*
- * local copy the instant `sendMessage` is called (zero-latency echo) and
- * reconciles it against this real event once it arrives — see that file's
- * header for the dedup mechanics; this reducer only ever sees the
- * server-confirmed side of that merge.
- *
- * Approval/question bridge events (docs/08 §2.2c（审批链）) fold the same
- * way `item.*`'s lifecycle does: `approval.requested`/`question.asked`
- * upserts a `'pending'` slot keyed by `callId` (a different id space than
- * `item.id` — the wire's own `tool_call` item for the same call, if any,
- * gets its own separate row, see `ItemCard`'s ask_user suppression below),
- * and the matching `approval.resolved`/`question.answered` updates that same
- * slot in place to a terminal status, same "first-seen position, last-seen
- * content" rule as an `item`. Anything still `'pending'` when the turn's own
- * terminal sentinel (`turn.result`, or turn-runner's flat `turn.failed`)
- * arrives is swept to `'expired'` — a resolution that never made it onto the
- * wire (server crash, or turn-runner's own "deny residual pending but don't
- * emit" end-of-turn fallback) must not leave a card stuck offering buttons
- * for a decision the turn can no longer act on. Replay reruns this reducer
- * from scratch over the full persisted history, so a page reload folds the
- * exact same way live streaming did.
+ * - Interleaving `use-chat-messages.ts`'s short-lived optimistic user echoes
+ *   (`buildRenderEntries` — see that hook's own file header for why they're
+ *   only short-lived now, popped as soon as the real turn-start
+ *   `MessageFrame` arrives, not permanent) with the materialized messages, in
+ *   the position they were sent.
+ * - Narrowing a tool part's `input`/`output` (typed `unknown` — `NimboUIMessage`'s
+ *   `TOOLS` type parameter is necessarily the generic `UITools`, see
+ *   `@nimbo/core`'s `state.ts` own `NimboUIMessage` doc comment for why no
+ *   compile-time-known tool name union exists to do better) into the shapes
+ *   the tool-specific cards need (`bash`'s command, `ask-user`'s question).
  */
-import type { SessionItem, Usage } from '@nimbo/core';
+import type {
+  NimboDataParts,
+  NimboUIMessage,
+  ToolTimingData,
+} from '@nimbo/core';
+import type { ToolUIPart, UIMessagePart, UITools } from 'ai';
+import { getToolName, isToolUIPart } from 'ai';
+import { z } from 'zod';
 
-import type { ChatStreamEnvelope, JsonValue } from './schema';
+import type { JsonValue } from './schema';
+import { jsonValueSchema } from './schema';
 
-export type ItemLifecycle = 'started' | 'updated' | 'completed';
+// ---- optimistic user-message echo interleaving ----
 
-/**
- * `firstSeq`/`lastSeq` are `number | undefined` (docs/08 §2.2d): the only
- * envelope that can lack a `seq` is an ephemeral `item.updated` tick, and
- * `item` is the one entry kind those ticks fold into. `firstSeq` in practice
- * is always a real number the moment an item has an `item.started` behind it
- * (the entry's first-ever sighting), and `lastSeq` is `undefined` exactly
- * when the most recently folded event for this id was an ephemeral tick —
- * neither field drives ordering (`slotOrder`, below, does) or is read
- * outside this module, so the looser type costs nothing at the call sites
- * that actually render a `TimelineEntry`.
- */
-export interface ItemTimelineEntry {
-  kind: 'item';
-  id: string;
-  item: SessionItem;
-  lifecycle: ItemLifecycle;
-  firstSeq: number | undefined;
-  lastSeq: number | undefined;
-}
-
-export interface SessionStartedEntry {
-  kind: 'session-started';
-  sessionId: string;
-  seq: number;
-}
-
-export interface TurnStartedEntry {
-  kind: 'turn-started';
-  turn: number;
-  seq: number;
-}
-
-export interface UserMessageEntry {
-  kind: 'user-message';
+export interface PendingUserEcho {
+  /** Assigned in send order (`use-chat-messages.ts`'s `nextEchoIdRef`) — the tie-break `buildRenderEntries` sorts same-anchor echoes by, below. */
+  id: number;
   text: string;
-  seq: number;
+  /** `messages.length` at the moment this was sent (`use-chat-messages.ts`'s `sendMessage`) — anchors where it renders relative to the materialized ledger, since it briefly has no wire position of its own yet (until the real `MessageFrame` arrives and pops it — that hook's own file header). */
+  afterMessageCount: number;
 }
+
+export type RenderEntry =
+  | { kind: 'message'; message: NimboUIMessage }
+  | { kind: 'pending-echo'; echo: PendingUserEcho };
 
 /**
- * Widened from `@nimbo/core`'s `NimboError` on purpose: this entry has to
- * hold either that shape (a graceful mid-stream `turn.failed` `SessionEvent`
- * — `NimboError['code']`'s closed literal union) or apps/server's
- * turn-runner-level terminal sentinel (an open `string` `code`, e.g.
- * `"internal_error"`) — see `schema.ts`'s `turnRunnerFailedEventSchema`.
- * `NimboError` is structurally assignable into this wider shape with no
- * cast needed either way.
+ * Splices `pendingEchoes` into `messages` at each one's `afterMessageCount`
+ * anchor — stable under `messages` growing (new messages append past
+ * whatever index an echo was anchored at, never shifting it), so an echo
+ * sent mid-turn-1 still renders between turn 1 and turn 2 once turn 2 starts
+ * appending its own messages.
+ *
+ * Defensive tie-break for same-anchor echoes (`use-chat-messages.ts`'s own
+ * fix makes at most one echo pending at a time in the normal flow, but this
+ * stays correct even if a stale-closure race — the exact mechanism behind
+ * this codebase's original "连发两条消息乱序" bug report — ever produces two):
+ * `Array.prototype.sort` is stable, so a `b - a` (descending-anchor)
+ * comparator alone would, for a tie, insert the earlier-sent echo *first* —
+ * but each `splice(index, 0, …)` below pushes whatever was already at
+ * `index` one slot to the right, so inserting earlier-sent-first actually
+ * ends up placing it *after* the later-sent one once both share that same
+ * index (the exact reversal that used to surface as the bug). Breaking ties
+ * by `id` **descending** — the later-sent echo processed (and therefore
+ * inserted) first, so the earlier-sent one's later insertion at the same
+ * index pushes it back to the left — is what makes the final splice order
+ * come out ascending-`id` (send order), matching how `messages` itself is
+ * always in send order.
  */
-export interface TurnFailedErrorInfo {
-  code: string;
-  message: string;
-}
-
-export interface TurnFailedEntry {
-  kind: 'turn-failed';
-  error: TurnFailedErrorInfo;
-  seq: number;
-}
-
-export interface TurnResultEntry {
-  kind: 'turn-result';
-  finalResponse: string;
-  usage: Usage;
-  seq: number;
-}
-
-/**
- * `'pending'` — `approval.requested` seen, no resolution yet (interactive:
- * the card offers Allow/Deny). `'allowed'`/`'denied'` — a real
- * `approval.resolved` arrived (`message` only ever set on `'denied'`, mirrors
- * the wire event). `'expired'` — swept by the terminal-sweep (see file
- * header) *or* by `useChatMessages`'s own 404-on-submit fallback
- * (`buildTimeline`'s `locallyExpiredCallIds` option) when the server no
- * longer has this `callId` pending (already timed out / turn already ended)
- * by the time a human clicked a button.
- */
-export type ApprovalEntryStatus = 'pending' | 'allowed' | 'denied' | 'expired';
-
-export interface ApprovalTimelineEntry {
-  kind: 'approval';
-  callId: string;
-  toolName: string;
-  input: JsonValue;
-  status: ApprovalEntryStatus;
-  message?: string;
-  seq: number;
-}
-
-/** Same shape of states as `ApprovalEntryStatus`, for the `ask_user` bridge — `'timeout'` (not `'denied'`) is the wire's own outcome for a question nobody answered in time, and `answer` is only ever set on `'answered'`. */
-export type QuestionEntryStatus =
-  'pending' | 'answered' | 'timeout' | 'expired';
-
-export interface QuestionTimelineEntry {
-  kind: 'question';
-  callId: string;
-  question: string;
-  options?: string[];
-  status: QuestionEntryStatus;
-  answer?: string;
-  seq: number;
-}
-
-export type TimelineEntry =
-  | ItemTimelineEntry
-  | SessionStartedEntry
-  | TurnStartedEntry
-  | TurnFailedEntry
-  | TurnResultEntry
-  | UserMessageEntry
-  | ApprovalTimelineEntry
-  | QuestionTimelineEntry;
-
-function lifecycleOf(
-  eventType: 'item.started' | 'item.updated' | 'item.completed',
-): ItemLifecycle {
-  if (eventType === 'item.started') return 'started';
-  if (eventType === 'item.updated') return 'updated';
-  return 'completed';
-}
-
-/**
- * Every `ChatStreamEvent` other than `item.updated` is always persisted
- * (docs/08 §2.2d) — its envelope's `seq` is never `undefined`. This narrows
- * that contract at each non-`item.*` branch below instead of widening every
- * other `TimelineEntry`'s `seq` field to match `item`'s looser one: a thrown
- * error here is louder (and more honest) than silently falling back to a
- * fake `seq`, and it only ever fires if an upstream envelope broke the
- * contract this reducer relies on.
- */
-function persistedSeq(seq: number | undefined): number {
-  if (seq === undefined) {
-    throw new Error(
-      'buildTimeline: expected a persisted envelope (seq) for a non-ephemeral event',
-    );
+export function buildRenderEntries(
+  messages: readonly NimboUIMessage[],
+  pendingEchoes: readonly PendingUserEcho[],
+): RenderEntry[] {
+  const entries: RenderEntry[] = messages.map((message) => ({
+    kind: 'message',
+    message,
+  }));
+  // Insert from the highest anchor down so earlier insertions don't shift
+  // the index a later (smaller-anchor) one needs to splice at; ties broken
+  // by `id` descending (see doc comment above).
+  const sorted = [...pendingEchoes].sort(
+    (a, b) => b.afterMessageCount - a.afterMessageCount || b.id - a.id,
+  );
+  for (const echo of sorted) {
+    const index = Math.min(Math.max(echo.afterMessageCount, 0), entries.length);
+    entries.splice(index, 0, { kind: 'pending-echo', echo });
   }
-  return seq;
+  return entries;
 }
 
-/** `chat-agent.ts`'s literal registration name (docs/08 §2.2c（审批链）) — the one tool whose `tool_call` item is suppressed in favor of its `question` card, see the `item.*` branch below. */
-const ASK_USER_TOOL_NAME = 'ask_user';
+// ---- tool part narrowing (`input`/`output: unknown`, see file header) ----
 
-export interface BuildTimelineOptions {
-  /**
-   * `callId`s a human tried to act on (`useChatMessages`'s `submitApproval`/
-   * `submitAnswer`) that came back 404 — the server no longer has them
-   * pending (already timed out, or the turn already ended) even though no
-   * `approval.resolved`/`question.answered` (or terminal sentinel) ever made
-   * it onto this client's event log. Folded into `'expired'` the same way
-   * the terminal-sweep below is, just triggered by a failed submit instead
-   * of a `turn.result`/`turn.failed` arriving.
-   */
-  locallyExpiredCallIds?: ReadonlySet<string>;
+export type NimboToolPart = ToolUIPart<UITools>;
+
+/** `ai`'s own `isToolUIPart` also accepts a `DynamicToolUIPart` — nimbo never produces one (every tool part is a static `tool-${name}`, `@nimbo/core`'s `loop.ts`), so this narrows one step further to just the shape this app's cards render. */
+export function isNimboToolPart(
+  part: UIMessagePart<NimboDataParts, UITools>,
+): part is NimboToolPart {
+  return isToolUIPart(part) && part.type.startsWith('tool-');
 }
 
-export function buildTimeline(
-  envelopes: readonly ChatStreamEnvelope[],
-  options?: BuildTimelineOptions,
-): TimelineEntry[] {
-  const slots = new Map<string, TimelineEntry>();
-  const slotOrder: string[] = [];
+export function toolPartName(part: NimboToolPart): string {
+  return getToolName(part);
+}
 
-  function upsert(key: string, entry: TimelineEntry): void {
-    if (!slots.has(key)) slotOrder.push(key);
-    slots.set(key, entry);
+function parseUnknownJsonValue(value: unknown): JsonValue {
+  const parsed = jsonValueSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+/** `bash`'s own input shape (docs/tech/builtin-tools.md): `{ command: string, timeout_ms？ }`. */
+export function bashCommandFromInput(input: unknown): string | undefined {
+  const value = parseUnknownJsonValue(input);
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
   }
+  const { command } = value;
+  return typeof command === 'string' ? command : undefined;
+}
 
-  /** Terminal-sweep (see file header): every still-`'pending'` approval/question slot becomes `'expired'` — called once per terminal sentinel, and again at the end for `locallyExpiredCallIds`. */
-  function expirePending(shouldExpire: (callId: string) => boolean): void {
-    for (const key of slotOrder) {
-      const entry = slots.get(key);
-      if (entry === undefined) continue;
-      if (
-        (entry.kind === 'approval' || entry.kind === 'question') &&
-        entry.status === 'pending' &&
-        shouldExpire(entry.callId)
-      ) {
-        slots.set(key, { ...entry, status: 'expired' });
-      }
+const askUserInputSchema = z.object({
+  question: z.string(),
+  options: z.array(z.string()).optional(),
+});
+
+export type AskUserInput = z.infer<typeof askUserInputSchema>;
+
+/** `ask-user`'s own input shape (`apps/server/src/agent/chat-agent.ts`'s `askUserInputSchema`): `{ question, options？ }`. */
+export function askUserInputFrom(input: unknown): AskUserInput | undefined {
+  const result = askUserInputSchema.safeParse(input);
+  return result.success ? result.data : undefined;
+}
+
+/** `ask-user`'s `execute()` returns a plain string (the answer, or the timeout's fixed message) — `output: unknown` narrowed the same defensive way as `bashCommandFromInput`. */
+export function askUserAnswerFromOutput(output: unknown): string | undefined {
+  return typeof output === 'string' ? output : undefined;
+}
+
+export function prettyJson(value: unknown): string {
+  return JSON.stringify(parseUnknownJsonValue(value), null, 2);
+}
+
+export function summarizeJson(value: unknown): string {
+  const json = JSON.stringify(parseUnknownJsonValue(value));
+  return json.length > 120 ? `${json.slice(0, 120)}…` : json;
+}
+
+// ---- tool timing (`data-tool-timing`, `@nimbo/core`'s `state.ts` —
+// persistent, unlike `data-tool-progress`) ----
+
+/**
+ * Finds the `data-tool-timing` part matching `toolCallId` (its `id`, per
+ * `@nimbo/core`'s `loop.ts` `upsertToolTimingPart`) — never rendered as its
+ * own card (`message-entry.tsx`'s switch has no case for it, falling through
+ * to the generic tool-part guard, which rejects it), only joined into the
+ * matching tool-call entry's own card (`tool-call-card.tsx`). Absent for a
+ * tool part whose input is still streaming (`startToolTiming` only fires
+ * once `tool-input-available` has, `loop.ts`), or for a message persisted
+ * before this part existed.
+ */
+export function findToolTiming(
+  message: NimboUIMessage,
+  toolCallId: string,
+): ToolTimingData | undefined {
+  for (const part of message.parts) {
+    if (part.type === 'data-tool-timing' && part.id === toolCallId) {
+      return part.data;
     }
   }
+  return undefined;
+}
 
-  for (const envelope of envelopes) {
-    const { event } = envelope;
-    switch (event.type) {
-      case 'session.started': {
-        const seq = persistedSeq(envelope.seq);
-        upsert(`marker:${String(seq)}`, {
-          kind: 'session-started',
-          sessionId: event.sessionId,
-          seq,
-        });
-        break;
-      }
-      case 'user.message': {
-        const seq = persistedSeq(envelope.seq);
-        upsert(`marker:${String(seq)}`, {
-          kind: 'user-message',
-          text: event.text,
-          seq,
-        });
-        break;
-      }
-      case 'turn.started': {
-        const seq = persistedSeq(envelope.seq);
-        upsert(`marker:${String(seq)}`, {
-          kind: 'turn-started',
-          turn: event.turn,
-          seq,
-        });
-        break;
-      }
-      case 'turn.completed':
-        break; // folded into the turn.result sentinel, see file header
-      case 'turn.failed': {
-        const seq = persistedSeq(envelope.seq);
-        // Two structurally different wire shapes share this `type` literal
-        // (see schema.ts) — `'error' in event` tells apart the graceful
-        // mid-stream `SessionEvent` (nested `error: NimboError`, turn still
-        // completes normally afterwards — not terminal by itself) from
-        // turn-runner's own flat terminal sentinel (`code`+`message`
-        // directly on the event, which *is* terminal).
-        const isTurnRunnerSentinel = !('error' in event);
-        upsert(`marker:${String(seq)}`, {
-          kind: 'turn-failed',
-          error:
-            'error' in event ?
-              event.error
-            : { code: event.code, message: event.message },
-          seq,
-        });
-        if (isTurnRunnerSentinel) expirePending(() => true);
-        break;
-      }
-      case 'turn.result': {
-        const seq = persistedSeq(envelope.seq);
-        upsert(`marker:${String(seq)}`, {
-          kind: 'turn-result',
-          finalResponse: event.finalResponse,
-          usage: event.usage,
-          seq,
-        });
-        expirePending(() => true);
-        break;
-      }
-      case 'approval.requested': {
-        const seq = persistedSeq(envelope.seq);
-        upsert(`approval:${event.callId}`, {
-          kind: 'approval',
-          callId: event.callId,
-          toolName: event.toolName,
-          input: event.input,
-          status: 'pending',
-          seq,
-        });
-        break;
-      }
-      case 'approval.resolved': {
-        const seq = persistedSeq(envelope.seq);
-        const key = `approval:${event.callId}`;
-        const existing = slots.get(key);
-        // `approval.requested` always precedes `approval.resolved` for the
-        // same `callId` (register-then-emit, see file header) — the
-        // fallback empty/null values only matter for a partial envelope
-        // window that starts mid-way through a call's lifecycle, which
-        // `useChatMessages` never actually produces (it always merges the
-        // full replay + live tail).
-        const toolName =
-          existing !== undefined && existing.kind === 'approval' ?
-            existing.toolName
-          : '';
-        const input =
-          existing !== undefined && existing.kind === 'approval' ?
-            existing.input
-          : null;
-        upsert(key, {
-          kind: 'approval',
-          callId: event.callId,
-          toolName,
-          input,
-          status: event.behavior === 'allow' ? 'allowed' : 'denied',
-          message: event.message,
-          seq,
-        });
-        break;
-      }
-      case 'question.asked': {
-        const seq = persistedSeq(envelope.seq);
-        upsert(`question:${event.callId}`, {
-          kind: 'question',
-          callId: event.callId,
-          question: event.question,
-          options: event.options,
-          status: 'pending',
-          seq,
-        });
-        break;
-      }
-      case 'question.answered': {
-        const seq = persistedSeq(envelope.seq);
-        const key = `question:${event.callId}`;
-        const existing = slots.get(key);
-        const question =
-          existing !== undefined && existing.kind === 'question' ?
-            existing.question
-          : '';
-        const options =
-          existing !== undefined && existing.kind === 'question' ?
-            existing.options
-          : undefined;
-        upsert(key, {
-          kind: 'question',
-          callId: event.callId,
-          question,
-          options,
-          status: event.outcome === 'answered' ? 'answered' : 'timeout',
-          answer: event.answer,
-          seq,
-        });
-        break;
-      }
-      case 'item.started':
-      case 'item.updated':
-      case 'item.completed': {
-        // `envelope.seq` is `undefined` exactly for an ephemeral
-        // `item.updated` tick (docs/08 §2.2d) — `item.started`/
-        // `item.completed` are always persisted and always carry one.
-        const seq = envelope.seq;
-        const item = event.item;
-        // ask_user's own question card (above) is its normal rendering —
-        // the underlying tool_call item is only surfaced when it ended
-        // *without* a question card to show for it (failed before asking,
-        // or denied by an approval gate ahead of it); an in-progress/
-        // completed one would just be a noisy duplicate of the question
-        // card (docs/08 §2.2c（审批链）).
-        if (
-          item.type === 'tool_call' &&
-          item.toolName === ASK_USER_TOOL_NAME &&
-          item.status !== 'failed' &&
-          item.status !== 'denied'
-        ) {
-          break;
-        }
-        const key = `item:${item.id}`;
-        const existing = slots.get(key);
-        const firstSeq =
-          existing !== undefined && existing.kind === 'item' ?
-            existing.firstSeq
-          : seq;
-        upsert(key, {
-          kind: 'item',
-          id: item.id,
-          item,
-          lifecycle: lifecycleOf(event.type),
-          firstSeq,
-          lastSeq: seq,
-        });
-        break;
-      }
-    }
-  }
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
+}
 
-  const locallyExpiredCallIds = options?.locallyExpiredCallIds;
-  if (locallyExpiredCallIds !== undefined && locallyExpiredCallIds.size > 0) {
-    expirePending((callId) => locallyExpiredCallIds.has(callId));
-  }
+/** `HH:MM:SS`, local time — deliberately not `toLocaleTimeString()` (this repo's existing `count` precedent, `turn-stats-dialog.tsx`): keeps the rendered text independent of ICU data availability/locale. */
+export function formatClockTime(epochMs: number): string {
+  const date = new Date(epochMs);
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+}
 
-  return slotOrder.map((key) => {
-    const entry = slots.get(key);
-    if (entry === undefined)
-      throw new Error(`unreachable: timeline slot "${key}" vanished`);
-    return entry;
-  });
+/** `<1s` → ms, `<60s` → one decimal place of seconds, longer → `Xm Ys` — the one humanization ladder `tool-call-card.tsx` uses for both a settled duration and a still-running elapsed tick. Negative input (clock skew between `Date.now()` calls) clamps to zero rather than rendering a nonsensical negative duration. */
+export function formatDuration(ms: number): string {
+  const clamped = Math.max(0, ms);
+  if (clamped < 1000) return `${String(Math.round(clamped))}ms`;
+  // Rounds to the same one-decimal precision the render below uses before
+  // comparing against the 60s boundary — otherwise e.g. 59999ms would
+  // display as the nonsensical "60.0s" instead of rolling over to "1m 0s".
+  const roundedSeconds = Math.round(clamped / 100) / 10;
+  if (roundedSeconds < 60) return `${roundedSeconds.toFixed(1)}s`;
+  const totalSeconds = Math.round(clamped / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes)}m ${String(seconds)}s`;
 }
