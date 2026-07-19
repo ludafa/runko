@@ -132,10 +132,12 @@
 | **read-before-write（先读后写强制）** | 先读后改校验 | 写类工具的安全约束：edit-file 与覆盖式 write-file 前必须在本 session 读过该文件、且其 `stat().mtime` 与读取时一致（bash 或此前 edit 改过就要重读），否则拒绝并给出「先 read-file」的可行动错误，防止模型盲改/盲覆盖。 |
 | **文件变更项（file_change）** | — | 写类工具成功后由 ToolRuntime 派生的 SessionItem，kind 为 add/update/delete，让宿主实时看到文件系统改动；工具自身不发事件，只经 `onFileChange` 回调搬出数据。 |
 
-## 十、验证与示例脚本（见 docs/plans/verification.md）
+## 十、验证与示例脚本（见 docs/features/examples.md、docs/plans/verification.md）
 
 | 主术语 | 同义词（退役） | 大白话定义 |
 |---|---|---|
+| **示例集（examples，实验田）** | — | 仓库里的 `examples/` 目录：一块打开即用的 pnpm workspace 成员，十二个可独立运行的示例脚本各演示 nimbo 一块核心能力；用户根目录 `pnpm install` 后 `pnpm example <编号>` 即跑。「实验田」是它面向用户的定位——低门槛把玩各能力的地方。 |
+| **runner（示例分发器）** | — | `examples/run.ts`：`pnpm example <编号或名字前缀>` 背后的分发器，按前缀在 `src/` 下唯一匹配一个脚本、用当前 node 直跑（Node 原生 type stripping，无需编译）。是工具、不是示例；新增示例零维护。 |
 | **确定性段** | — | 示例脚本中不依赖模型/网络、零 key 即可确定性跑通的那一段（打印 JSON Schema、直调 exec/fs、fake 沙盒往返等），用来在无凭证下验证机制正确；与「模型驱动段」相对。 |
 | **模型驱动段** | — | 示例脚本中需真实模型（可能还需云凭证）才运行、用来验证 agent 端到端行为的那一段；与「确定性段」相对。 |
 | **gate（配置闸门）** | — | 示例脚本在发起任何模型调用/网络请求之前，按序检查所需环境变量/凭证；任一未配置就打印指引并干净退出或 return（exit 0），全程不创建沙盒、不发起模型调用、不产生副作用。 |

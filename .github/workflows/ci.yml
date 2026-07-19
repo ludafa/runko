@@ -31,14 +31,3 @@ jobs:
       - run: pnpm -r typecheck
 
       - run: pnpm -r test
-
-      # examples 不是 workspace 成员（演练发布后消费姿态，见 examples/README.md）；
-      # typecheck 纯静态零网络零 key，防 README/examples 随 API 演进腐烂（docs/03 P8-1 裁定）。
-      # examples 与 L3 动态加载需 Node ≥ 22.18 原生 TS，此步单独用 Node 24。
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
-      - run: node examples/setup-node-modules.mjs
-
-      - run: node examples/typecheck.mjs

@@ -1,0 +1,31 @@
+{
+  "name": "@nimbo/examples",
+  "version": "0.0.0",
+  "private": true,
+  "description": "nimbo 示例集（实验田）：可独立运行的演示脚本，`pnpm example <编号>` 一条命令即跑，展示 SDK 各项核心能力（不发布）",
+  "type": "module",
+  "license": "ISC",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "example": "node run.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nimbo/sdk": "workspace:*",
+    "@nimbo/just-bash": "workspace:*",
+    "@nimbo/sandbox-e2b": "workspace:*",
+    "@nimbo/sandbox-vercel": "workspace:*",
+    "@nimbo/sandbox-cloudflare": "workspace:*",
+    "@ai-sdk/deepseek": "^3.0.7",
+    "ai": "catalog:",
+    "zod": "catalog:",
+    "e2b": "catalog:",
+    "@vercel/sandbox": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}

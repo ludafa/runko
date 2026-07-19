@@ -95,9 +95,10 @@ function isEnoentError(error: unknown): boolean {
  * `<repo>/.env.template`.
  */
 function loadRootDotEnv(): void {
-  // shared/ -> examples/ -> repo root
+  // shared/ -> src/ -> examples/ -> repo root
   const dotEnvPath = join(
     dirname(fileURLToPath(import.meta.url)),
+    "..",
     "..",
     "..",
     ".env",

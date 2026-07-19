@@ -41,9 +41,9 @@
  * tool for a task that genuinely needs control flow (something mini-bash's
  * six commands could not express).
  *
- * Run: `node examples/08-just-bash.ts` (see examples/README.md for setup —
- * this example additionally needs `@nimbo/just-bash` linked, which
- * `examples/setup-node-modules.mjs` does for you).
+ * Run: `pnpm example 08` (or `node examples/src/08-just-bash.ts`; see
+ * examples/README.md for setup — this example additionally needs
+ * `@nimbo/just-bash`, which `pnpm install` sets up for you).
  *
  * Expected output shape:
  *   1. A deterministic section (no model, no env vars needed): prints

@@ -101,8 +101,8 @@
  * Pull requests R+W (+ auto Metadata R), scoped to one repo, short expiry,
  * revoke after the run — see .env.template's GITHUB_PAT comment.
  *
- * Run: `node examples/12-vercel-sandbox-real-project.e2e.test.ts` (see
- * examples/README.md for setup).
+ * Run: `pnpm example 12` (or `node examples/src/12-vercel-sandbox-real-project.ts`;
+ * see examples/README.md for setup).
  *
  * Expected output shape:
  *   1. A deterministic section (no model, no env vars, no network): prints

@@ -4,13 +4,23 @@ packages:
   # 依赖 @nimbo/* 的 workspace:* 协议（独立子 workspace 无法解析）；根管线不受
   # 影响——根脚本 filter 收窄到 ./packages/*，root vitest projects 本就只收 packages。
   - "apps/*"
+  # examples/：可运行的示例集，做成 workspace 成员为自管依赖
+  # （workspace:* 依赖 @nimbo/*、catalog: 依赖 zod/ai/e2b/@vercel/sandbox，
+  # pnpm install 自动搭好，取代旧的手工符号链接 setup-node-modules.mjs）。
+  # 源码在 examples/src/；examples/package.json 只定义 typecheck（tsc --noEmit，
+  # 只查 src/ 自身，靠 base 的 skipLibCheck 把 import 的 @nimbo/* 当黑盒、不下钻
+  # 依赖包）——随根管线的 pnpm -r typecheck 进 CI 质量门（ci.yml 直接跑
+  # `pnpm -r typecheck`，覆盖含 examples 的全部成员；注意根脚本 `pnpm typecheck`
+  # 是 `--filter ./packages/*`，本地只查核心包、不含 examples）；刻意不定义
+  # build/test，故 pnpm -r 的这两步扫到 examples 会自动跳过。
+  # 不带 /*——只收 examples 根，不递归收 examples/cloudflare-gateway/（独立
+  # wrangler 子项目，按其自身 README 单独 install）。
+  - "examples"
 
 # just-bash 的可选依赖（zstd/xz 压缩格式的原生绑定，tar/gzip 之外的小众格式）：
 # 不批准构建脚本——保持"零二进制依赖"（tech-spec §1 原则 1），未安装原生绑定时
 # 这两种压缩格式在 just-bash 里会优雅降级为不可用，不影响本包其余全部功能。
 allowBuilds:
-  '@mongodb-js/zstd': false
-  node-liblzma: false
   # P12 apps 侧（docs/08 §2.1）：零二进制原则约束的是发布的 @nimbo/* 包；
   # apps 是消费侧产品代码，seed 技术栈（drizzle+better-sqlite3 等）按需放行。
   better-sqlite3: true

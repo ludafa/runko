@@ -9,22 +9,22 @@
     // must name the real on-disk file: `./shared/model.ts`. This flag makes
     // tsc accept those `.ts`-suffixed imports (legal because noEmit is on).
     "allowImportingTsExtensions": true,
-    // examples/ is intentionally not a pnpm workspace member (see README.md
-    // "why examples/ isn't a workspace package") — it has no devDependency on
-    // `@types/node` of its own, so typeRoots points at a sibling package's
-    // copy (read-only; @nimbo/core already depends on it). Any package under
-    // packages/*/node_modules/@types would work equally well here.
-    "typeRoots": ["../packages/core/node_modules/@types"],
+    // examples/ is a workspace member and declares its own `@types/node`
+    // devDependency, so the default typeRoots (node_modules/@types) resolves
+    // it — no sibling-package hack needed. This examples package DOES carry a
+    // quality gate: its `typecheck` script (tsc --noEmit) is swept by the root
+    // `pnpm -r typecheck`, which CI runs (ci.yml) — so `src/` staying green is
+    // enforced. (The root `pnpm typecheck` shortcut is `--filter ./packages/*`
+    // and deliberately skips examples for a fast core-only local check.)
     "types": ["node"]
   },
-  "include": ["**/*.ts"],
-  // examples/cloudflare-gateway/ (P10-4) is a separate deployable `wrangler`
-  // project with its own package.json/tsconfig.json/node_modules (`npm
-  // install` + `npm run typecheck` inside that directory, per its README) —
-  // it depends on `@cloudflare/sandbox`, which this examples/ workspace
-  // deliberately never links (that package can only load inside workerd,
-  // see setup-node-modules.mjs's comment on the omission). Without this
-  // exclude, the bare `**/*.ts` include above would sweep its `src/index.ts`
-  // into this tsconfig and fail to resolve that import.
-  "exclude": ["cloudflare-gateway"]
+  // Narrowed to the runnable example sources + the `pnpm example` runner. This
+  // keeps two things out of the program automatically, no `exclude` needed:
+  //  - node_modules/ (pnpm populates a real one here: workspace symlinks +
+  //    third-party deps, whose bundled `.ts` sources must not be pulled in);
+  //  - cloudflare-gateway/ (a separate deployable `wrangler` project with its
+  //    own package.json/tsconfig.json, type-checked by its own README steps;
+  //    it depends on `@cloudflare/sandbox`, which loads only inside workerd and
+  //    this package never installs). Both sit outside `src/` and `run.ts`.
+  "include": ["src/**/*.ts", "run.ts"]
 }

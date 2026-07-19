@@ -2,7 +2,7 @@
  * `buildSession` (docs/tech/chat-webapp.md §2.2 `chat-agent.ts`): loads
  * the frontend-design skill straight from the sandbox's filesystem
  * (`Skill.fromFS`, same as
- * examples/12-vercel-sandbox-real-project.e2e.test.ts), builds instructions
+ * examples/src/12-vercel-sandbox-real-project.ts), builds instructions
  * with owner/repo/branch/defaultBranch baked in (the model is never asked to
  * guess them — same discipline as example 12's `buildInstructions`), and
  * hands the whole thing to `@nimbo/sdk`'s `createSession` — **not**
