@@ -1,7 +1,10 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
+  // No "$schema" here on purpose: wrangler init writes it as a relative path
+  // into node_modules/wrangler/, which this reference folder has none of (no
+  // package.json, no install). Copy this into your own wrangler project and
+  // that pointer resolves for editor autocomplete; it's optional for deploy.
   "name": "nimbo-sandbox-gateway",
-  "main": "src/index.ts",
+  "main": "index.ts",
   // nodejs_compat + a recent date: matches the assembly of the official
   // @cloudflare/sandbox minimal example (examples/minimal in cloudflare/sandbox-sdk).
   "compatibility_date": "2026-06-01",

@@ -41,7 +41,7 @@
 
 - **契约冒烟（2026-07-12 主线程亲测，用户授权凭证）**：examples 之外独立冒烟——scratchpad 脚本直连**真实** E2B microVM 与 Vercel Sandbox，对 `e2bWorkspace`/`vercelWorkspace` 逐条跑 20 项契约断言（FS 七方法含二进制 0x00 往返/mtime 抬升/glob/NotFoundError/DirectoryNotEmptyError、exec 含 P6-1 非零 resolve/onOutput 分片/stderr/timeoutMs→124 及时返回/bash 旁路写同源可见/describe/defaultApproval）。**两家均 20/20 全过**——fake 契约测试承载的全部假设经真机证实。**成本纪律**：创建均带 5min 超时保险 + try/finally kill()/stop()；收尾用 list API 审计——E2B 零残留；Vercel 用 `persistent:false` 并 `delete()` 清理意外遗留的持久快照，最终 `Sandbox.list()` 为 0。随手改进：examples/10 的 `Sandbox.create` 增加 `persistent:false`。
 - **examples 09/10 真机段（2026-07-12 意外触发）**：P10-4 执行期间用户往 `examples/.env` 追加真实 `E2B_API_KEY`/`VERCEL_TOKEN`+`VERCEL_TEAM_ID`+`VERCEL_PROJECT_ID`（工单未触碰该文件），09/10 复测自然进入真机状态：真实创建 E2B/Vercel 沙盒，DeepSeek 真实驱动「写文件 + bash 验证」任务，`finalResponse` 与写入一致，`sandbox.kill()`/`sandbox.stop()` 正常收尾——两个适配器的真机路径均**真实验证通过**。
-- **examples 11（Cloudflare）真机段**：**待用户部署网关后回填**——需先部署 `examples/cloudflare-gateway/`（Workers Paid，用户决策是否开通），再填 `examples/.env.template` 「Cloudflare Sandbox gateway」节；确定性段（client→网关→fake 沙盒完整协议进程内往返）已实测通过。
+- **examples 11（Cloudflare）真机段**：**待用户部署网关后回填**——需自备 CF 环境、按参考 `examples/cloudflare-gateway-ref/`（Workers Paid，用户决策是否开通）立一个网关，再填 `examples/.env.template` 「Cloudflare Sandbox gateway」节；确定性段（client→网关→fake 沙盒完整协议进程内往返）已实测通过。
 
 **09–11 云沙盒适配器验证矩阵（三态 gate：模型 + 云凭证）**：
 
@@ -115,6 +115,7 @@
 | 2026-07-12 | P10 真机契约冒烟（主线程，亲自执行） | scratchpad 脚本直连真实 E2B/Vercel，逐条 20 项契约断言 | 两家 20/20 全过；成本纪律双确认零残留 |
 | 2026-07-12 | P11 开工（用户立项，docs/tech/sandbox.md §8 定案） | 真实项目设计优化 e2e 示例；PAT v1 / npx skills+fromFS / Git 集成部署 / DeepSeek v4 pro / 无审批门 | — |
 | 2026-07-12 | P11-1 coder（亲自执行） | `examples/12-vercel-sandbox-real-project.e2e.test.ts` + 用例 4-6 + §3.2 四态矩阵 | 全部通过含真机部分；真实克隆 ludafa/Schulte-Grid → 设计优化 → 真实 PR #2；沙盒 stop 回收至 list()=0 |
+| 2026-07-19 | 主线程（用户提问触发重构） | 把 Cloudflare 网关从「可部署模板」重新定性为 example 11 的 **BYO 参考料**：`examples/cloudflare-gateway/` → `examples/cloudflare-gateway-ref/`，删掉 `package.json`/`tsconfig.json`（连带 `file:..` 自引用）、扁平化 `src/index.ts`→`index.ts`，README 改写为「自备 CF 环境、拷进你自己的 wrangler 项目部署」；同步 examples/包 README、11 号脚本注释、tsconfig/pnpm-workspace、docs features·tech·plan 全部引用 | 定性澄清：包对外交付且被测的是纯函数 `createSandboxGateway`（`./worker`），wrapper 只是测不了的 BYO 连接料，不由包发布/维护；包自足测试能力（约 48 用例，零 wrangler/真机）不受影响 |
 | 2026-07-12 | P11-2 主线程（用户两次追加指示） | 真机段 `session.stream()` 实时驱动 + `examples/shared/transcript-store.ts`（node:sqlite 零新依赖） | 真机自动验证通过：一轮 5.5min，SQLite 9861 事件，真实 PR #4，回收至 list()=0 |
 
 ## 施工基线（当前）

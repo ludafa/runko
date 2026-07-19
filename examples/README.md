@@ -23,7 +23,7 @@
 | [`08-just-bash.ts`](./src/08-just-bash.ts) | 同源工作区的全语法档 bash（`@nimbo/just-bash`，独立安装）：真实 if/for/函数/重定向脚本，非流式 `onOutput` 契约 | Claude 系模型高频产出的控制流脚本（mini-bash 六命令撑不住的场景） |
 | [`09-sandbox-e2b.ts`](./src/09-sandbox-e2b.ts) | NimboFS & NimboExec 适配 E2B 云沙盒（`@nimbo/sandbox-e2b`）：确定性段用几十行的进程内 fake 演示结构化接口，真机段驱动一个真实 E2B Firecracker microVM | 宿主想把 agent 的文件/命令面放进真实云沙盒而非虚拟内存 |
 | [`10-sandbox-vercel.ts`](./src/10-sandbox-vercel.ts) | NimboFS & NimboExec 适配 Vercel Sandbox（`@nimbo/sandbox-vercel`）：同 09 的确定性段/真机段结构，真机段驱动一个真实 Vercel Sandbox | 同上，选 Vercel 作为云沙盒提供商 |
-| [`11-sandbox-cloudflare.ts`](./src/11-sandbox-cloudflare.ts) | NimboFS & NimboExec 适配 Cloudflare Sandbox（`@nimbo/sandbox-cloudflare`，网关形态）：确定性段是本示例集的亮点——client → 网关 → fake 沙盒的完整协议往返全部在一个进程内跑通，零部署零网络；真机段驱动一个已部署的真实网关 | 同上，选 Cloudflare 作为云沙盒提供商（需额外部署一个网关，见 [`cloudflare-gateway/`](./cloudflare-gateway/README.md)） |
+| [`11-sandbox-cloudflare.ts`](./src/11-sandbox-cloudflare.ts) | NimboFS & NimboExec 适配 Cloudflare Sandbox（`@nimbo/sandbox-cloudflare`，网关形态）：确定性段是本示例集的亮点——client → 网关 → fake 沙盒的完整协议往返全部在一个进程内跑通，零部署零网络；真机段驱动一个已部署的真实网关 | 同上，选 Cloudflare 作为云沙盒提供商（真机段需自备 CF 环境、按参考立一个网关，见 [`cloudflare-gateway-ref/`](./cloudflare-gateway-ref/README.md)） |
 | [`12-vercel-sandbox-real-project.ts`](./src/12-vercel-sandbox-real-project.ts) 🧪 **demo** | 真实项目端到端：nimbo agent 在真实 Vercel Sandbox 里 clone 你自己的 GitHub 仓库、从沙盒文件系统装载官方 `frontend-design` skill（`Skill.fromFS`）、做一次聚焦的设计优化，并自主走完整 Git 工作流（建分支→commit→push→开 PR） | 让 agent 在你真实项目上做一次有 Git 工作流闭环的自主改动 |
 
 > 12 号是一个**演示（demo）**而非测试——它此前叫 `12-...e2e.test.ts`，但 `.e2e.test` 只是文件名、不是 vitest 用例，仍是 `node` 直跑的脚本；已正名为 `.ts`。
@@ -86,7 +86,7 @@ pnpm example 01
 
 `NIMBO_MODEL` 是 AI SDK Gateway 的 `"provider/model"` 字符串——`AgentDefinition.model` 的 `LanguageModel` 联合类型原生接受字符串，零 provider 依赖。两种方式都不想用的话，编辑 [`src/shared/model.ts`](./src/shared/model.ts) 直接构造 provider 实例（如 `@ai-sdk/anthropic` 的 `anthropic("claude-sonnet-5")`），任何 AI SDK `LanguageModel` 都可以。
 
-各云沙盒示例（09/10/11）真机段需要的凭证见仓库根 [`.env.template`](../.env.template)（`cp .env.template .env` 后按 E2B / Vercel Sandbox / GitHub 各节填写）；11 的真机段还需先部署一个网关，见 [`cloudflare-gateway/`](./cloudflare-gateway/README.md)。
+各云沙盒示例（09/10/11）真机段需要的凭证见仓库根 [`.env.template`](../.env.template)（`cp .env.template .env` 后按 E2B / Vercel Sandbox / GitHub 各节填写）；11 的真机段还需自备 CF 环境、按参考立一个网关，见 [`cloudflare-gateway-ref/`](./cloudflare-gateway-ref/README.md)。
 
 ## 类型检查
 
@@ -97,7 +97,7 @@ pnpm --filter @nimbo/examples typecheck   # 单独查 examples
 pnpm -r typecheck                          # 全 workspace（CI 跑的就是这条）
 ```
 
-`cloudflare-gateway/` 不在这个类型检查范围内——它是一个独立的、有自己 `package.json`/`tsconfig.json`/`node_modules` 的 wrangler 项目（依赖只在 workerd 里能加载的 `@cloudflare/sandbox`），按其自身 README 单独 `npm install && npm run typecheck`。
+[`cloudflare-gateway-ref/`](./cloudflare-gateway-ref/) **不进这个类型检查范围**——它不是一个项目，而是 11 号真机段的一份 BYO 参考料（`index.ts`+`wrangler.jsonc`+`Dockerfile`，无 `package.json`、不装依赖、不发布）。它 import 只在 workerd 里能加载的 `@cloudflare/sandbox`，本 workspace 从不安装；`tsconfig.json` 的 `include` 只收 `src/**`+`run.ts`，天然把它排除在外。要用它，自备 CF 环境、把文件拷进你自己的 wrangler 项目，见其自身 README。
 
 ## import 源说明
 
