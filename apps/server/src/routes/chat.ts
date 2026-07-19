@@ -26,8 +26,10 @@ import type {
   SandboxManager,
 } from '../agent/sandbox-manager.js';
 import {
+  createE2bProvider,
   createSandboxManager,
-  createVercelSandboxClient,
+  createVercelProvider,
+  resolveDefaultProvider,
   resolveIdleTimeoutMs,
 } from '../agent/sandbox-manager.js';
 import { hasSessionGrant } from '../agent/session-grants.js';
@@ -41,6 +43,7 @@ import {
   getConversation,
   listConversationEvents,
   listConversations,
+  updateConversation,
 } from '../agent/store.js';
 import type {
   AskUserOutcome,
@@ -127,6 +130,7 @@ function toConversationDto(row: ConversationRow): ConversationDto {
     repo: row.repo,
     branchName: row.branchName,
     sandboxName: row.sandboxName,
+    provider: row.provider,
     status: row.status === 'active' && idleElapsed ? 'sleeping' : row.status,
     lastActiveAt: row.lastActiveAt.toISOString(),
     createdAt: row.createdAt.toISOString(),
@@ -253,11 +257,16 @@ export function createChatApp(deps: ChatRouteDeps) {
     const conversationId = randomUUID();
     const sandboxName = generateSandboxName(conversationId);
     const branchName = generateBranchName(conversationId);
+    const provider = input.provider ?? resolveDefaultProvider();
 
+    let acquired: AcquiredSandbox;
     try {
-      await deps.sandboxManager.acquire({
+      acquired = await deps.sandboxManager.acquire({
         conversationId,
+        provider,
         sandboxName,
+        // Vercel resumes by its upfront-known name (keeps today's get()→404→create on the first acquire); E2B has no sandboxId yet → straight to create.
+        resumeToken: provider === 'e2b' ? undefined : sandboxName,
         branchName,
         repoCloneUrl: repoRef.cloneUrl,
         repoOwner: repoRef.owner,
@@ -275,6 +284,9 @@ export function createChatApp(deps: ChatRouteDeps) {
       repo: `${repoRef.owner}/${repoRef.repo}`,
       branchName,
       sandboxName,
+      provider,
+      // E2B's resume token is the server-assigned sandboxId (known only after create); Vercel resumes by name, so there's nothing to store.
+      sandboxId: provider === 'e2b' ? acquired.resumeToken : null,
     });
     return c.json(toConversationDto(row), 201);
   });
@@ -512,7 +524,13 @@ export function createChatApp(deps: ChatRouteDeps) {
     try {
       acquired = await deps.sandboxManager.acquire({
         conversationId: id,
+        provider: row.provider,
         sandboxName: row.sandboxName,
+        // Vercel resumes by name; E2B by its stored sandboxId (null → treated as brand-new and re-created).
+        resumeToken:
+          row.provider === 'e2b' ?
+            (row.sandboxId ?? undefined)
+          : row.sandboxName,
         branchName: row.branchName,
         repoCloneUrl: repoRef.cloneUrl,
         repoOwner: repoRef.owner,
@@ -522,6 +540,17 @@ export function createChatApp(deps: ChatRouteDeps) {
       await deps.sandboxManager.touch(id); // every user message rolls the sandbox's idle timeout forward — see docs/tech/chat-webapp.md §2.2
     } catch (error) {
       return c.json({ error: describeError(error) }, 500);
+    }
+
+    // E2B only: an expired snapshot forces a re-create, giving a *new*
+    // sandboxId — persist it so the next message resumes the right sandbox
+    // (docs/tech/sandbox-provider.md §3.1). Vercel resumes by the stable name,
+    // so its resume token never changes and this is a no-op.
+    if (
+      row.provider === 'e2b' &&
+      acquired.resumeToken !== (row.sandboxId ?? undefined)
+    ) {
+      updateConversation(deps.db, id, { sandboxId: acquired.resumeToken });
     }
 
     // docs/tech/chat-webapp.md §2.2c（审批链）, docs/tech/single-ledger.md §6.2/§6.4: the session-level 审批分类器
@@ -890,7 +919,10 @@ export function createChatApp(deps: ChatRouteDeps) {
 
 export const chatApp = createChatApp({
   db: defaultDb,
-  sandboxManager: createSandboxManager(createVercelSandboxClient()),
+  sandboxManager: createSandboxManager({
+    vercel: createVercelProvider(),
+    e2b: createE2bProvider(), // lazy — reads E2B_API_KEY only when an E2B conversation actually acquires (provider selection wired in SP-3)
+  }),
   resolveModel,
   authMiddleware: requireAuth,
   // getChatTelemetry* 自带 vitest 守卫（模块顶层求值——任何 import 本文件的

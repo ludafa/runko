@@ -6,6 +6,7 @@
     "repo": { "type": "string" },
     "branchName": { "type": "string" },
     "sandboxName": { "type": "string" },
+    "provider": { "type": "string", "enum": ["vercel", "e2b"] },
     "status": { "type": "string", "enum": ["active", "sleeping", "expired"] },
     "lastActiveAt": { "type": "string" },
     "createdAt": { "type": "string" }
@@ -16,6 +17,7 @@
     "repo",
     "branchName",
     "sandboxName",
+    "provider",
     "status",
     "lastActiveAt",
     "createdAt"

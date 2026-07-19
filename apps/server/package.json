@@ -22,6 +22,7 @@
     "@hono/swagger-ui": "^0.6.1",
     "@hono/zod-openapi": "^1.3.0",
     "@nimbo/core": "workspace:*",
+    "@nimbo/sandbox-e2b": "workspace:*",
     "@nimbo/sandbox-vercel": "workspace:*",
     "@nimbo/sdk": "workspace:*",
     "@vercel/sandbox": "catalog:",
@@ -29,6 +30,7 @@
     "better-auth": "^1.6.9",
     "better-sqlite3": "^12.9.0",
     "drizzle-orm": "^0.45.2",
+    "e2b": "catalog:",
     "hono": "^4.12.16",
     "yaml": "^2.8.3",
     "zod": "^4.4.2"

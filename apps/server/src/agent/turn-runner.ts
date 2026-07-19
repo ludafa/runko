@@ -13,7 +13,7 @@
  *
  * `TurnDrivenSession` is the one seam onto `@nimbo/sdk`'s `Session` — the
  * same "structural interface, not the concrete class" discipline as
- * `sandbox-manager.ts`'s `SandboxClient` — so `startTurn` can be driven by a
+ * `sandbox-manager.ts`'s `SandboxProvider` — so `startTurn` can be driven by a
  * fake `stream()`/`toJSON()` pair in tests, no real model/sandbox involved
  * (see test/agent/turn-runner.test.ts).
  *

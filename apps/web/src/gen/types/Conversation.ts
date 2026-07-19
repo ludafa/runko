@@ -3,6 +3,14 @@
  * Do not edit manually.
  */
 
+export const conversationProviderEnum = {
+  vercel: 'vercel',
+  e2b: 'e2b',
+} as const;
+
+export type ConversationProviderEnumKey =
+  (typeof conversationProviderEnum)[keyof typeof conversationProviderEnum];
+
 export const conversationStatusEnum = {
   active: 'active',
   sleeping: 'sleeping',
@@ -33,6 +41,10 @@ export type Conversation = {
    * @type string
    */
   sandboxName: string;
+  /**
+   * @type string
+   */
+  provider: ConversationProviderEnumKey;
   /**
    * @type string
    */

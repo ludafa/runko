@@ -85,6 +85,8 @@
 | **模式 C（完全解耦）** | — | 文件面与命令面互相看不见、各管各的逃生门模式；一致性由宿主自己保证，适合命令面与文件面本就无关的场景。 |
 | **沙盒适配器（sandbox adapter）** | — | 把某家厂商的沙盒 SDK 忠实翻译成 NimboFS/NimboExec 两个接口的独立可选包（如 `@nimbo/sandbox-vercel`）；只包视图、不管生命周期，运行时不 import 厂商 SDK。 |
 | **网关形态（gateway form）** | — | 沙盒 SDK 无法在普通 Node 进程直连时（如 Cloudflare）的接入方式：自部署一个 HTTP 网关把七个文件方法与 exec 映射成端点，nimbo 侧用纯 fetch 客户端连它。 |
+| **沙盒 provider（sandbox provider）** | 沙盒厂商 | 一次会话选用哪家云沙盒（`vercel` / `e2b`）的选择项。决定 server 端 `sandbox-manager` 接哪个沙盒适配器、走哪套生命周期实现（建盒拉码方式、重连方式、休眠机制）。与会话 1:1 绑定，创建时选定即固定、运行中不切换。 |
+| **重连令牌（resume token）** | — | server 为一次会话持久化、下次唤醒沙盒时用来指名恢复的字符串。因 provider 而异：Vercel 是创建时用户自选的确定性[沙盒名](../terms.md)（由 conversationId 派生，无需额外落库），E2B 是**建盒后**服务端分配的 `sandboxId`（必须落 `conversations.sandbox_id` 才能跨进程 `Sandbox.connect` 恢复）。 |
 | **心跳（keepalive heartbeat）** | — | turn 期间每 idleTimeout/2（默认 150 秒）触发一次 `ensureLifetime(idleTimeout)` 的定时器，turn 注册时启动、收尾（含异常）时停止，用「补足」语义把沙盒剩余存活时间维持在恒定水位。 |
 | **上次存档** | — | 最近一次 turn 正常收尾时成对写下的「模型上下文 + 代码快照」，是崩溃恢复时判断两本账是否对齐的基准。 |
 | **crash ref（事故留底引用）** | — | `refs/nimbo/crash/<sessionId>`，turn-runner catch 分支把崩溃残局尽力推到的 git 引用；恢复流程永不读取它，仅供人工打捞。 |

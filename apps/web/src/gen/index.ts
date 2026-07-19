@@ -4,10 +4,14 @@ export type { ChatChunkEnvelope } from './types/ChatChunkEnvelope.ts';
 export type { ChatMessageFrame } from './types/ChatMessageFrame.ts';
 export type {
   Conversation,
+  ConversationProviderEnumKey,
   ConversationStatusEnumKey,
 } from './types/Conversation.ts';
 export type { ConversationEventsList } from './types/ConversationEventsList.ts';
-export type { CreateConversationInput } from './types/CreateConversationInput.ts';
+export type {
+  CreateConversationInput,
+  CreateConversationInputProviderEnumKey,
+} from './types/CreateConversationInput.ts';
 export type { CreateNoteInput } from './types/CreateNoteInput.ts';
 export type {
   GetApiChatConversations200,
@@ -125,7 +129,9 @@ export { postApiChatConversationsIdMessages } from './clients/postApiChatConvers
 export { postApiChatConversationsIdQuestionsCallid } from './clients/postApiChatConversationsIdQuestionsCallid.ts';
 export { postApiNotes } from './clients/postApiNotes.ts';
 export { approvalAckOkEnum } from './types/ApprovalAck.ts';
+export { conversationProviderEnum } from './types/Conversation.ts';
 export { conversationStatusEnum } from './types/Conversation.ts';
+export { createConversationInputProviderEnum } from './types/CreateConversationInput.ts';
 export { postApprovalInputBehaviorEnum } from './types/PostApprovalInput.ts';
 export { startTurnAckModeEnum } from './types/StartTurnAck.ts';
 export { startTurnAckOkEnum } from './types/StartTurnAck.ts';

@@ -11,6 +11,7 @@ export const conversationSchema = z.object({
   repo: z.string(),
   branchName: z.string(),
   sandboxName: z.string(),
+  provider: z.enum(['vercel', 'e2b']),
   status: z.enum(['active', 'sleeping', 'expired']),
   lastActiveAt: z.string(),
   createdAt: z.string(),

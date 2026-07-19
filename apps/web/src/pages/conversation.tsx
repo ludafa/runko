@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { fetchConversationEvents, getConversation } from '@/features/chat/api';
 import { MessageComposer } from '@/features/chat/components/message-composer';
+import { ProviderBadge } from '@/features/chat/components/provider-badge';
 import { TimelineView } from '@/features/chat/components/timeline-view';
 import type { ChatReplayFrame, Conversation } from '@/features/chat/schema';
 import { useChatMessages } from '@/features/chat/use-chat-messages';
@@ -25,7 +26,9 @@ function HistoryLoadingSkeleton() {
 }
 
 function ConversationContent({ conversationId }: { conversationId: string }) {
-  const [conversation, setConversation] = useState<Conversation | undefined>(undefined);
+  const [conversation, setConversation] = useState<Conversation | undefined>(
+    undefined,
+  );
   const [initialFrames, setInitialFrames] = useState<
     ChatReplayFrame[] | undefined
   >(undefined);
@@ -91,9 +94,12 @@ function ConversationTimeline({
         <h1 className="font-display text-xl italic">
           {conversation.title ?? '(未命名会话)'}
         </h1>
-        <span className="text-muted-foreground font-mono text-xs">
-          {conversation.branchName}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground font-mono text-xs">
+            {conversation.branchName}
+          </span>
+          <ProviderBadge provider={conversation.provider} />
+        </div>
       </header>
 
       {wasSleeping && chat.awaitingFirstEvent && (
@@ -133,12 +139,19 @@ function ConversationTimeline({
   );
 }
 
-export function ConversationPage({ conversationId }: { conversationId: string }) {
+export function ConversationPage({
+  conversationId,
+}: {
+  conversationId: string;
+}) {
   return (
     <ChatLayout activeSessionId={conversationId}>
       {/* `key` forces a fresh mount per conversation — resets conversation/history/error state without an
           effect synchronously calling setState to clear it first (see file header). */}
-      <ConversationContent key={conversationId} conversationId={conversationId} />
+      <ConversationContent
+        key={conversationId}
+        conversationId={conversationId}
+      />
     </ChatLayout>
   );
 }

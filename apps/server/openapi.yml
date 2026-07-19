@@ -55,6 +55,11 @@ components:
           type: string
         sandboxName:
           type: string
+        provider:
+          type: string
+          enum:
+            - vercel
+            - e2b
         status:
           type: string
           enum:
@@ -71,6 +76,7 @@ components:
         - repo
         - branchName
         - sandboxName
+        - provider
         - status
         - lastActiveAt
         - createdAt
@@ -81,6 +87,11 @@ components:
           type: string
           minLength: 1
           maxLength: 255
+        provider:
+          type: string
+          enum:
+            - vercel
+            - e2b
     ConversationEventsList:
       type: object
       properties:

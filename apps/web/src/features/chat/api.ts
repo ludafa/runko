@@ -12,6 +12,7 @@ import {
   type Conversation,
   conversationEventsListSchema,
   conversationListSchema,
+  type ConversationProvider,
   conversationSchema,
   parseChatReplayFrame,
   type TurnTelemetryEvent,
@@ -60,7 +61,7 @@ export async function listConversations(
 }
 
 export async function createConversation(
-  input: { title?: string },
+  input: { title?: string; provider?: ConversationProvider },
   signal?: AbortSignal,
 ): Promise<Conversation> {
   const json = await requestJson('/api/chat/conversations', {

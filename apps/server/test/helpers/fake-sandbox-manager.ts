@@ -40,6 +40,16 @@ export interface FakeSandboxManager extends SandboxManager {
   readonly acquireCalls: AcquireInput[];
   readonly touchCalls: string[];
   readonly releaseCalls: string[];
+  /**
+   * When set, the *next* `acquire()` call returns this string as
+   * `resumeToken` instead of the default (`input.resumeToken ??
+   * input.sandboxName`), then resets to `undefined` — lets a test simulate an
+   * E2B "resume unavailable → re-create" that mints a brand-new `sandboxId`
+   * on a specific acquire (docs/tech/sandbox-provider.md §3.1), so
+   * `routes/chat.ts`'s POST .../messages rewrite-on-change branch can be
+   * exercised without a real/fake `SandboxProvider`.
+   */
+  nextResumeToken?: string;
 }
 
 export function createFakeSandboxManager(
@@ -50,15 +60,20 @@ export function createFakeSandboxManager(
   const releaseCalls: string[] = [];
   const workspacePromise = buildFakeWorkspace();
 
-  return {
+  const manager: FakeSandboxManager = {
     acquireCalls,
     touchCalls,
     releaseCalls,
+    nextResumeToken: undefined,
     async acquire(input: AcquireInput): Promise<AcquiredSandbox> {
       acquireCalls.push(input);
+      const resumeToken =
+        manager.nextResumeToken ?? input.resumeToken ?? input.sandboxName;
+      manager.nextResumeToken = undefined;
       return {
         workspace: await workspacePromise,
         defaultBranch: opts.defaultBranch ?? 'main',
+        resumeToken,
       };
     },
     async touch(conversationId: string): Promise<void> {
@@ -68,4 +83,5 @@ export function createFakeSandboxManager(
       releaseCalls.push(conversationId);
     },
   };
+  return manager;
 }

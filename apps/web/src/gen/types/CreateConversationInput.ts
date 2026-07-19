@@ -3,6 +3,14 @@
  * Do not edit manually.
  */
 
+export const createConversationInputProviderEnum = {
+  vercel: 'vercel',
+  e2b: 'e2b',
+} as const;
+
+export type CreateConversationInputProviderEnumKey =
+  (typeof createConversationInputProviderEnum)[keyof typeof createConversationInputProviderEnum];
+
 export type CreateConversationInput = {
   /**
    * @minLength 1
@@ -10,4 +18,8 @@ export type CreateConversationInput = {
    * @type string | undefined
    */
   title?: string;
+  /**
+   * @type string | undefined
+   */
+  provider?: CreateConversationInputProviderEnumKey;
 };

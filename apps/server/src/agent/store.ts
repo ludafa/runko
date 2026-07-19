@@ -40,6 +40,10 @@ export interface CreateConversationInput {
   repo: string;
   branchName: string;
   sandboxName: string;
+  /** 沙盒 provider（docs/tech/sandbox-provider.md）。省略时默认 `'vercel'`，与列默认一致——路由侧始终显式传，省略仅便于测试夹具。 */
+  provider?: ConversationRow['provider'];
+  /** E2B 的[重连令牌](docs/terms.md) sandboxId（建盒后由路由回填）；Vercel/建会话初始为 null。 */
+  sandboxId?: string | null;
 }
 
 export function createConversation(
@@ -54,6 +58,8 @@ export function createConversation(
     repo: input.repo,
     branchName: input.branchName,
     sandboxName: input.sandboxName,
+    provider: input.provider ?? 'vercel',
+    sandboxId: input.sandboxId ?? null,
     status: 'active',
     lastActiveAt: now,
     agentSessionId: null,
@@ -89,6 +95,8 @@ export function getConversation(
 export interface ConversationPatch {
   status?: ConversationStatus;
   lastActiveAt?: Date;
+  /** E2B 的[重连令牌](docs/terms.md) sandboxId——首建落库、或过期重建后换了新 sandbox 时由路由回写（docs/tech/sandbox-provider.md §3.1）。 */
+  sandboxId?: string;
   /**
    * The nimbo session-scalar header (docs/tech/single-ledger.md §5 单-3, schema.ts's own doc
    * comment) — all three always written together, at the end of every turn
@@ -96,7 +104,11 @@ export interface ConversationPatch {
    * There is no partial-update case, so this is one combined optional group
    * rather than three independent optional fields.
    */
-  agentSessionHeader?: { conversationId: string; createdAt: Date; turn: number };
+  agentSessionHeader?: {
+    conversationId: string;
+    createdAt: Date;
+    turn: number;
+  };
 }
 
 export function updateConversation(
@@ -170,7 +182,10 @@ export function listConversationEvents(
 ): ConversationEventRow[] {
   const condition =
     afterSeq !== undefined ?
-      and(eq(conversationEvents.conversationId, conversationId), gt(conversationEvents.seq, afterSeq))
+      and(
+        eq(conversationEvents.conversationId, conversationId),
+        gt(conversationEvents.seq, afterSeq),
+      )
     : eq(conversationEvents.conversationId, conversationId);
   return db
     .select()

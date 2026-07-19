@@ -159,12 +159,18 @@ export const conversationStatusSchema = z.enum([
 
 export type ConversationStatus = z.infer<typeof conversationStatusSchema>;
 
+/** 沙盒 provider（docs/tech/sandbox-provider.md）——这次会话跑在哪家云沙盒上，建会话时选定、1:1 绑定。 */
+export const conversationProviderSchema = z.enum(['vercel', 'e2b']);
+
+export type ConversationProvider = z.infer<typeof conversationProviderSchema>;
+
 export const conversationSchema = z.object({
   id: z.string(),
   title: z.string().nullable(),
   repo: z.string(),
   branchName: z.string(),
   sandboxName: z.string(),
+  provider: conversationProviderSchema,
   status: conversationStatusSchema,
   lastActiveAt: z.string(),
   createdAt: z.string(),

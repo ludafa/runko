@@ -45,12 +45,77 @@ describe('agent/store', () => {
       sandboxName: 'nimbo-chat-sess-2',
     });
 
-    expect(listConversations(db, 'user-1').map((r) => r.id)).toEqual(['sess-1']);
-    expect(listConversations(db, 'user-2').map((r) => r.id)).toEqual(['sess-2']);
+    expect(listConversations(db, 'user-1').map((r) => r.id)).toEqual([
+      'sess-1',
+    ]);
+    expect(listConversations(db, 'user-2').map((r) => r.id)).toEqual([
+      'sess-2',
+    ]);
 
     expect(getConversation(db, 'sess-1', 'user-1')?.id).toBe('sess-1');
     expect(getConversation(db, 'sess-1', 'user-2')).toBeUndefined(); // not this user's session
     expect(getConversation(db, 'does-not-exist', 'user-1')).toBeUndefined();
+  });
+
+  it('createConversation: provider/sandboxId default to vercel/null when omitted (docs/tech/sandbox-provider.md §2)', () => {
+    const row = createConversation(db, {
+      id: 'sess-1',
+      userId: 'user-1',
+      title: 'My session',
+      repo: 'acme/demo',
+      branchName: 'nimbo/chat-sess-1',
+      sandboxName: 'nimbo-chat-sess-1',
+    });
+    expect(row.provider).toBe('vercel');
+    expect(row.sandboxId).toBeNull();
+  });
+
+  it('createConversation: an explicit provider/sandboxId (E2B) are persisted as given', () => {
+    const row = createConversation(db, {
+      id: 'sess-e2b',
+      userId: 'user-1',
+      title: 'E2B session',
+      repo: 'acme/demo',
+      branchName: 'nimbo/chat-sess-e2b',
+      sandboxName: 'nimbo-chat-sess-e2b',
+      provider: 'e2b',
+      sandboxId: 'sbx_123',
+    });
+    expect(row.provider).toBe('e2b');
+    expect(row.sandboxId).toBe('sbx_123');
+  });
+
+  it('updateConversation: a sandboxId-only patch persists in isolation — status/lastActiveAt and the nimbo header columns are untouched (docs/tech/sandbox-provider.md §3.1)', () => {
+    createConversation(db, {
+      id: 'sess-1',
+      userId: 'user-1',
+      title: 'My session',
+      repo: 'acme/demo',
+      branchName: 'nimbo/chat-sess-1',
+      sandboxName: 'nimbo-chat-sess-1',
+      provider: 'e2b',
+    });
+    const before = getConversation(db, 'sess-1', 'user-1');
+    expect(before?.sandboxId).toBeNull();
+
+    updateConversation(db, 'sess-1', { sandboxId: 'sbx_new' });
+
+    const after = getConversation(db, 'sess-1', 'user-1');
+    expect(after?.sandboxId).toBe('sbx_new');
+    // Unrelated columns untouched by a sandboxId-only patch.
+    expect(after?.status).toBe(before?.status);
+    expect(after?.lastActiveAt.toISOString()).toBe(
+      before?.lastActiveAt.toISOString(),
+    );
+    expect(after?.agentSessionId).toBeNull();
+    expect(after?.agentSessionCreatedAt).toBeNull();
+    expect(after?.agentSessionTurn).toBeNull();
+
+    // A second patch overwrites it again (e.g. a further rebuild).
+    updateConversation(db, 'sess-1', { sandboxId: 'sbx_newer' });
+    expect(getConversation(db, 'sess-1', 'user-1')?.sandboxId).toBe(
+      'sbx_newer',
+    );
   });
 
   it('updateConversation: status/lastActiveAt patch independently of the nimbo header (agentSessionHeader omitted leaves the header columns untouched)', () => {
@@ -90,7 +155,11 @@ describe('agent/store', () => {
     const createdAt = new Date('2026-01-02T00:00:00.000Z');
     updateConversation(db, 'sess-1', {
       status: 'active',
-      agentSessionHeader: { conversationId: 'nimbo-sess-abc', createdAt, turn: 1 },
+      agentSessionHeader: {
+        conversationId: 'nimbo-sess-abc',
+        createdAt,
+        turn: 1,
+      },
     });
 
     const updated = getConversation(db, 'sess-1', 'user-1');
@@ -102,7 +171,11 @@ describe('agent/store', () => {
 
     // A second patch (turn 2, same session id/createdAt as a real "resumed" turn would send) overwrites all three again.
     updateConversation(db, 'sess-1', {
-      agentSessionHeader: { conversationId: 'nimbo-sess-abc', createdAt, turn: 2 },
+      agentSessionHeader: {
+        conversationId: 'nimbo-sess-abc',
+        createdAt,
+        turn: 2,
+      },
     });
     expect(getConversation(db, 'sess-1', 'user-1')?.agentSessionTurn).toBe(2);
   });
@@ -181,7 +254,9 @@ describe('agent/store', () => {
     expect(rows.map((r) => r.seq)).toEqual([1, 2, 3]);
     expect(rows.map((r) => r.kind)).toEqual(['chunk', 'chunk', 'message']);
 
-    expect(listConversationEvents(db, 'sess-1', 1).map((r) => r.seq)).toEqual([2, 3]);
+    expect(listConversationEvents(db, 'sess-1', 1).map((r) => r.seq)).toEqual([
+      2, 3,
+    ]);
     expect(listConversationEvents(db, 'sess-1', 3)).toEqual([]);
   });
 

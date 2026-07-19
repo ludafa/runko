@@ -91,6 +91,12 @@ export const conversations = sqliteTable('conversations', {
   repo: text('repo').notNull(),
   branchName: text('branch_name').notNull(),
   sandboxName: text('sandbox_name').notNull(),
+  /** 沙盒 provider（docs/tech/sandbox-provider.md）：这次会话跑在哪家云沙盒上，建会话时选定、1:1 绑定、运行中不切换。存量行迁移回填 'vercel'。 */
+  provider: text('provider', { enum: ['vercel', 'e2b'] })
+    .notNull()
+    .default('vercel'),
+  /** E2B 的[重连令牌](docs/terms.md)：服务端分配的 sandboxId，建盒后落库、下次 `Sandbox.connect` 用它恢复。Vercel 恒 null（它按确定性 `sandbox_name` 恢复，不需要）。 */
+  sandboxId: text('sandbox_id'),
   status: text('status', { enum: ['active', 'sleeping', 'expired'] })
     .notNull()
     .default('active'),

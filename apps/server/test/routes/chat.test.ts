@@ -274,8 +274,12 @@ function createHoldableSandboxManager(): SandboxManager & {
     writeCalled,
     releaseWrite,
     touchCalls,
-    async acquire(_input: AcquireInput): Promise<AcquiredSandbox> {
-      return { workspace: await workspacePromise, defaultBranch: 'main' };
+    async acquire(input: AcquireInput): Promise<AcquiredSandbox> {
+      return {
+        workspace: await workspacePromise,
+        defaultBranch: 'main',
+        resumeToken: input.resumeToken ?? input.sandboxName,
+      };
     },
     async touch(conversationId: string): Promise<void> {
       touchCalls.push(conversationId);
@@ -352,6 +356,17 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
     return ConversationSchema.parse(await response.json());
   }
 
+  async function createE2bSession(
+    app: ReturnType<typeof buildApp>,
+  ): Promise<ConversationDto> {
+    const response = await app.request('/api/chat/conversations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: 'e2b' }),
+    });
+    return ConversationSchema.parse(await response.json());
+  }
+
   it('POST /api/chat/conversations provisions a sandbox (via acquire) and persists a conversations row with a null nimbo header (never turned yet)', async () => {
     const app = buildApp(() => stopOnlyModel('hi'));
 
@@ -380,6 +395,45 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
     expect(row?.agentSessionTurn).toBeNull();
   });
 
+  it('POST /api/chat/conversations defaults provider to vercel (no SANDBOX_PROVIDER) and carries it through acquire + DTO; no sandboxId stored', async () => {
+    const app = buildApp(() => stopOnlyModel('hi'));
+
+    const created = await createSession(app);
+
+    expect(created.provider).toBe('vercel');
+    expect(sandboxManager.acquireCalls[0]?.provider).toBe('vercel');
+    // Vercel resumes by its stable name, so first acquire still carries the name as the resume token.
+    expect(sandboxManager.acquireCalls[0]?.resumeToken).toBe(
+      created.sandboxName,
+    );
+
+    const row = getConversation(db, created.id, USER_ID);
+    expect(row?.provider).toBe('vercel');
+    expect(row?.sandboxId).toBeNull(); // Vercel has no sandboxId — it resumes by name
+  });
+
+  it('POST /api/chat/conversations honors provider:"e2b": acquires with no prior resume token and persists the E2B sandboxId', async () => {
+    const app = buildApp(() => stopOnlyModel('hi'));
+
+    const response = await app.request('/api/chat/conversations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: 'e2b' }),
+    });
+    expect(response.status).toBe(201);
+    const created = ConversationSchema.parse(await response.json());
+    expect(created.provider).toBe('e2b');
+
+    const acq = sandboxManager.acquireCalls[0];
+    expect(acq?.provider).toBe('e2b');
+    expect(acq?.resumeToken).toBeUndefined(); // brand-new E2B conversation → straight to create, no id yet
+
+    const row = getConversation(db, created.id, USER_ID);
+    expect(row?.provider).toBe('e2b');
+    // The fake acquire returns the sandbox name as the resume token; the route persists it as the E2B sandboxId.
+    expect(row?.sandboxId).toBe(row?.sandboxName);
+  });
+
   it('POST /api/chat/conversations defaults the title and 500s when GITHUB_REPO is unset', async () => {
     const app = buildApp(() => stopOnlyModel('hi'));
     const noTitleResponse = await app.request('/api/chat/conversations', {
@@ -400,6 +454,119 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       body: JSON.stringify({}),
     });
     expect(response.status).toBe(500);
+  });
+
+  // -------------------------------------------------------------------------
+  // E2B resumeToken rebuild persistence (docs/tech/sandbox-provider.md §3.1,
+  // §5 "E2B 令牌落库时机"): a resume-unavailable→re-create acquire mints a
+  // *new* sandboxId; POST .../messages must rewrite it back to
+  // `conversations.sandbox_id` so the next message resumes the right
+  // sandbox. `sandboxManager.nextResumeToken` (fake-sandbox-manager.ts) lets
+  // these tests force that exact acquire() outcome without a real/fake
+  // `SandboxProvider`.
+  // -------------------------------------------------------------------------
+
+  describe('E2B resumeToken rebuild — POST .../messages persists a new sandbox_id (docs/tech/sandbox-provider.md §3.1)', () => {
+    it('a rebuilt E2B sandbox (acquire() returns a resumeToken different from the stored one) is persisted back to conversations.sandbox_id', async () => {
+      const app = buildApp(() => stopOnlyModel('hi'));
+      const created = await createE2bSession(app);
+      const tokenA = created.sandboxName;
+      // First acquire (brand-new E2B conversation) had no prior resumeToken —
+      // the fake echoed back sandboxName, which the route persisted as the
+      // initial sandboxId (already asserted by the "honors provider:e2b" test
+      // above; re-confirmed here as this test's own starting state).
+      expect(getConversation(db, created.id, USER_ID)?.sandboxId).toBe(tokenA);
+
+      // Force the *next* acquire (this message) to report a brand-new token —
+      // simulating "resume(tokenA) unavailable → create() minted sbx_rebuilt".
+      sandboxManager.nextResumeToken = 'sbx_rebuilt';
+
+      const response = await app.request(
+        `/api/chat/conversations/${created.id}/messages`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: 'hi' }),
+        },
+      );
+      expect(response.status).toBe(202);
+
+      // acquire() was asked to resume the previously-persisted token...
+      const messageAcquire = sandboxManager.acquireCalls.at(-1);
+      expect(messageAcquire?.provider).toBe('e2b');
+      expect(messageAcquire?.resumeToken).toBe(tokenA);
+
+      // ...but the route persists whatever acquire() actually came back with.
+      const row = getConversation(db, created.id, USER_ID);
+      expect(row?.sandboxId).toBe('sbx_rebuilt');
+    });
+
+    it('a Vercel session never rewrites sandbox_id even when acquire() returns a different resumeToken — the rewrite is gated on provider === "e2b"', async () => {
+      const app = buildApp(() => stopOnlyModel('hi'));
+      const created = await createSession(app); // no provider → defaults to vercel
+      expect(created.provider).toBe('vercel');
+      expect(getConversation(db, created.id, USER_ID)?.sandboxId).toBeNull();
+
+      // Same "different token" stimulus as the E2B test above — irrelevant
+      // for Vercel, since the route only ever reads acquired.resumeToken for
+      // an 'e2b' row.
+      sandboxManager.nextResumeToken = 'some-other-name';
+
+      const response = await app.request(
+        `/api/chat/conversations/${created.id}/messages`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: 'hi' }),
+        },
+      );
+      expect(response.status).toBe(202);
+
+      const row = getConversation(db, created.id, USER_ID);
+      expect(row?.sandboxId).toBeNull(); // untouched
+    });
+
+    it('an E2B session whose resumeToken is unchanged issues no DB write for it (no-op — avoids a redundant updateConversation call)', async () => {
+      const app = buildApp(() => stopOnlyModel('hi'));
+      const created = await createE2bSession(app);
+      const tokenA = created.sandboxName;
+      expect(getConversation(db, created.id, USER_ID)?.sandboxId).toBe(tokenA);
+      // sandboxManager.nextResumeToken deliberately left unset — the fake's
+      // default acquire() echoes back the resumeToken it was handed, which
+      // equals the stored sandboxId (tokenA): acquired.resumeToken ===
+      // row.sandboxId, so routes/chat.ts's rewrite branch must not fire.
+
+      // `conversations` has exactly one writer method on this `Db` instance
+      // (store.ts's `updateConversation`, via `db.update`) — spying on it
+      // catches *any* write, not just this specific patch. Checked
+      // immediately after the POST's own promise resolves, before the
+      // turn's background completion (finalizeTurnPersistence's own header
+      // write) has had a chance to run — same ordering this file's other
+      // tests rely on when they explicitly drain the stream first to
+      // observe turn-completion writes (e.g. the "second message... resumes"
+      // test above waits on `GET .../stream` before reading the row).
+      const updateSpy = vi.spyOn(db, 'update');
+
+      const response = await app.request(
+        `/api/chat/conversations/${created.id}/messages`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: 'hi' }),
+        },
+      );
+      expect(response.status).toBe(202);
+      expect(updateSpy).not.toHaveBeenCalled();
+
+      const row = getConversation(db, created.id, USER_ID);
+      expect(row?.sandboxId).toBe(tokenA); // unchanged
+
+      updateSpy.mockRestore();
+      // Drain the tail so the background turn doesn't leak past this test.
+      await (
+        await app.request(`/api/chat/conversations/${created.id}/stream`)
+      ).text();
+    });
   });
 
   it('GET /api/chat/conversations only lists the current user’s sessions; GET .../:id and .../events and .../stream 404 for another user’s session', async () => {

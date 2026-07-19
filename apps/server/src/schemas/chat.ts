@@ -187,6 +187,8 @@ export const ConversationSchema = z
     repo: z.string(),
     branchName: z.string(),
     sandboxName: z.string(),
+    /** 沙盒 provider（docs/tech/sandbox-provider.md）——前端据此渲染 provider 徽标。 */
+    provider: z.enum(['vercel', 'e2b']),
     status: z.enum(['active', 'sleeping', 'expired']),
     lastActiveAt: z.string(),
     createdAt: z.string(),
@@ -198,6 +200,8 @@ export type ConversationDto = z.infer<typeof ConversationSchema>;
 export const CreateConversationInputSchema = z
   .object({
     title: z.string().min(1).max(255).optional(),
+    /** 这次会话用哪家沙盒；省略时落服务端默认 `SANDBOX_PROVIDER`（未配则 `vercel`）。docs/tech/sandbox-provider.md §6。 */
+    provider: z.enum(['vercel', 'e2b']).optional(),
   })
   .openapi('CreateConversationInput');
 

@@ -4,7 +4,10 @@ import { useEffect, useState } from 'react';
 
 import { createConversation, listConversations } from '@/features/chat/api';
 import { SessionList } from '@/features/chat/components/conversation-list';
-import type { Conversation } from '@/features/chat/schema';
+import type {
+  Conversation,
+  ConversationProvider,
+} from '@/features/chat/schema';
 
 export function ChatLayout({
   children,
@@ -29,12 +32,13 @@ export function ChatLayout({
     return () => controller.abort();
   }, []);
 
-  async function handleCreate(title: string) {
+  async function handleCreate(title: string, provider: ConversationProvider) {
     setCreating(true);
     try {
-      const conversation = await createConversation(
-        title.length > 0 ? { title } : {},
-      );
+      const conversation = await createConversation({
+        ...(title.length > 0 ? { title } : {}),
+        provider,
+      });
       setConversations((prev) => [conversation, ...prev]);
       await navigate({
         to: '/chat/$conversationId',
