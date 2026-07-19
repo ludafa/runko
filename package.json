@@ -16,10 +16,15 @@
     "coverage": "vitest run --coverage",
     "chat:bootstrap": "pnpm --filter @nimbo-chat/server run db:generate && pnpm --filter @nimbo-chat/server run db:migrate && pnpm --filter @nimbo-chat/server run generate:openapi && pnpm --filter @nimbo-chat/web run generate:api",
     "chat:server": "pnpm --filter @nimbo-chat/server run dev",
-    "chat:web": "pnpm --filter @nimbo-chat/web run dev"
+    "chat:web": "pnpm --filter @nimbo-chat/web run dev",
+    "prepare": "husky"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.31.1",
+    "@commitlint/cli": "^21.2.1",
+    "@commitlint/config-conventional": "^21.2.0",
     "@vitest/coverage-v8": "catalog:",
+    "husky": "^9.1.7",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }
