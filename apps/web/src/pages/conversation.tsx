@@ -89,7 +89,10 @@ function ConversationTimeline({
   const wasSleeping = conversation.status === 'sleeping';
 
   return (
-    <div className="flex h-[calc(100vh-8rem)] flex-col gap-3">
+    // 高度来自 ChatLayout 的 grid（section 是 flex 列），不再写死
+    // h-[calc(100vh-8rem)]——那个魔数假设了 header + main 内边距正好 8rem，实际是
+    // 8rem+45px，多出来的部分让文档整体可滚动，就成了「双滚动条 + 底部空白」。
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       <header className="flex items-center justify-between">
         <h1 className="font-display text-xl italic">
           {conversation.title ?? '(未命名会话)'}

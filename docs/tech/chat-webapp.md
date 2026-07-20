@@ -195,6 +195,33 @@ P13-5 后的现行机制（三值审批 + 原生 chunk，取代旧的四对 wire
 - 会话状态徽标：active / sleeping（下一条消息自动唤醒，UI 提示「沙盒恢复中…」）。
 - **kubb 重生成**：服务端契约改后用 [kubb 重生成](../terms.md)前端类型/客户端。
 
+### 8.1 页面滚动模型（唯一滚动容器）
+
+整个应用外壳是**一屏高的 flex 列**，全站**只有一个页面级滚动容器**：
+
+```
+div.h-screen.flex.flex-col.overflow-hidden   ← 文档永不滚动
+├── header (shrink-0)                        ← 定高，不再需要 sticky
+└── main.flex-1.min-h-0.overflow-y-auto      ← 唯一的页面级滚动容器
+    └── div.min-h-full.flex.flex-col         ← 内边距/最大宽度
+        └── 聊天页：grid.flex-1.min-h-0 → section → 消息列表（内部滚动）
+```
+
+两条必须一起满足的约束，改动时容易只顾一边：
+
+- **普通页面（如 Notes）内容超一屏要能滚**——所以内容包裹层用 `min-h-full` 而**不是** `flex-1`。写成 `flex-1` 时子元素会被 flex 压缩成一屏高（默认 `flex-shrink: 1`），页面变成「挤扁」而不是滚动。
+- **聊天页要恰好一屏、由消息列表内部滚**——聊天栅格用 `flex-1 min-h-0`，其假想主轴尺寸为 0，于是包裹层高度由 `min-h-full` 兜底成恰好一屏，栅格再撑满，拿到确定高度后内部滚动才生效。
+
+**不要用 `h-[calc(100vh-XXrem)]` 这类魔数**给聊天页定高：它把 header 高度和 main 内边距硬编码进来，任何一处改了就会与视口对不齐——历史上正是这个魔数（假设 8rem，实际 8rem+45px）让文档整体多出 45px 可滚动区域，表现为**窗口滚动条与消息滚动条并存的「双滚动条」**，且能把整页向下拖出一片空白。
+
+**消息列表容器（`conversation.tsx`）**——`StickToBottom` 真正的滚动容器是库内部那层 `scrollRef` div（库在 layout effect 里把它的 `overflow` 设成 `auto`），外层只是定位壳：
+
+- 外层**不加 `overflow-*`**（否则多套一个滚动容器），改用 `min-h-0` 让它作为 flex item 能收缩到比内容矮。
+- 内层滚动容器（`scrollClassName`）必须加 **`relative`**。消息里的 `sr-only` 文案（如 TurnStatsButton 的「统计」）是 `position: absolute`；滚动容器自身若不是定位元素，它们的包含块会落到外层那个 `relative` 壳上——于是**既不跟着滚动、也不被滚动容器裁剪**，停在「未滚动时的静态位置」把外层 `scrollHeight` 撑出上千像素空白（实测 1797px）。这正是「最后一条消息之后还能滚出大片空白」+ 第二条滚动条的成因。
+- 顺带加 `overscroll-contain`，滚到消息列表两端时不把滚动续传给外层 `main`。
+
+**回归自查**：任意页面任意视口下，`document.documentElement` 与 `main` 的 `scrollHeight - clientHeight` 都应为 0（聊天页）；页面上「实际可滚动的元素」应当只有消息列表本身（会话列表侧栏若溢出则另算一个，两者是并排独立面板，不是层叠）。
+
 ## 9. 风险与已知取舍
 
 1. **恢复语义的兜底链**：快照恢复（快）→ 快照过期重 clone + checkout 已 push 分支 → 分支从未 push 则重建分支（**未提交工作丢失**，UI 如实提示）——最后一档是 Vercel 快照 TTL 的客观约束。[turn-checkpoint](../features/turn-checkpoint.md) 拟用[代码快照](../terms.md)推[快照引用](../terms.md)补掉这个窗口。

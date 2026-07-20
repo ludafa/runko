@@ -84,7 +84,7 @@ export function DashboardPage() {
         }
       </section>
 
-      <aside className="md:sticky md:top-24 md:self-start">
+      <aside className="md:sticky md:top-0 md:self-start">
         <form
           onSubmit={handleCreate}
           className="border-foreground/10 bg-card/70 hover:border-foreground/15 group flex flex-col gap-4 rounded-2xl border p-5 backdrop-blur-sm transition-colors"

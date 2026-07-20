@@ -19,7 +19,11 @@ export type ConversationProps = ComponentProps<typeof StickToBottom>;
 export function Conversation({ className, ...props }: ConversationProps) {
   return (
     <StickToBottom
-      className={cn('relative flex-1 overflow-y-auto', className)}
+      // 这里刻意不加 overflow-*：StickToBottom 真正的滚动容器是它内部那层
+      // `scrollRef` div（库在 layout effect 里把它的 overflow 设成 auto），外层
+      // 再来一个 overflow-y-auto 只是多套了一个滚动容器。改用 min-h-0 让这个
+      // flex item 能收缩到比内容矮——原先是靠 overflow 把 min-height:auto 压成 0。
+      className={cn('relative min-h-0 flex-1', className)}
       initial="smooth"
       resize="smooth"
       role="log"
@@ -34,10 +38,19 @@ export type ConversationContentProps = ComponentProps<
 
 export function ConversationContent({
   className,
+  scrollClassName,
   ...props
 }: ConversationContentProps) {
   return (
     <StickToBottom.Content
+      // relative 是修「最后一条消息之后还能滚出大片空白」的关键：消息里的
+      // `sr-only` 文案（如 TurnStatsButton 的「统计」）是 position:absolute，
+      // 若滚动容器自身不是定位元素，它们的包含块会落到外层那个 `relative` div
+      // 上——于是既不跟着滚动、也不被滚动容器裁剪，而是停在「未滚动时的静态
+      // 位置」上，把外层的 scrollHeight 撑出上千像素的空白。把滚动容器本身设为
+      // 定位元素，这些绝对定位后代就回到它内部，正常被裁剪。
+      // overscroll-contain：滚到消息列表两端时不要把滚动「续传」给外层 main。
+      scrollClassName={cn('relative overscroll-contain', scrollClassName)}
       // `min-h-full justify-end`：会话短于滚动视口时把消息锚定到底部（最新
       // 消息贴着输入框，空白挪到顶部——聊天惯例），而不是顶对齐、下方留一大片
       // 空白到 composer。内容溢出时 min-h-full 由内容自身满足、justify-end 空转，
