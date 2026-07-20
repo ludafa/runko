@@ -7,18 +7,18 @@
  * `approval.requested`/`approval.resolved`, `question.asked`/
  * `question.answered`) are retired — `@nimbo/core` no longer exports
  * `SessionEvent`/`SessionItem` at all (see that package's `state.ts`), and
- * `apps/server`'s own `schemas/chat.ts` (already migrated, P13-5-3) confirms
+ * `apps/node-server`'s own `schemas/chat.ts` (already migrated, P13-5-3) confirms
  * there's nothing left to mirror them with.
  *
  * The wire is now a stream of `ChatReplayFrame`s — a `ChunkEnvelope`
  * (`{ seq?, chunk }`, `seq` present ⇔ durable/replayable) or a `MessageFrame`
  * (`{ seq, message }`, only ever appears in replay, a finished
- * `NimboUIMessage` verbatim) — see `apps/server/src/schemas/chat.ts`'s own
+ * `NimboUIMessage` verbatim) — see `apps/node-server/src/schemas/chat.ts`'s own
  * file header for the full rationale (this file's frame shapes are a
  * hand-written mirror of that server-side zod, not the kubb-generated
  * `gen/zod/chatChunkEnvelopeSchema.ts`/`chatMessageFrameSchema.ts`: kubb
  * infers `chunk`/`message` as bare `z.any()` from the OpenAPI `{}` schema
- * `apps/server` emits for them — see that file's own "controlled exception"
+ * `apps/node-server` emits for them — see that file's own "controlled exception"
  * comment for why no schema exists to generate from — with no `seq`/`chunk`
  * `required` list either, which is looser than the real wire shape; this file
  * follows this repo's existing convention of hand-rolling schemas that need
@@ -46,16 +46,16 @@ export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   ]),
 );
 
-// ---- ChatReplayFrame (apps/server's `schemas/chat.ts`) ----
+// ---- ChatReplayFrame (apps/node-server's `schemas/chat.ts`) ----
 
 /**
- * Controlled exception (same rationale as `apps/server/src/schemas/chat.ts`'s
+ * Controlled exception (same rationale as `apps/node-server/src/schemas/chat.ts`'s
  * own `nimboChunkSchema`/`nimboUIMessageSchema`): `NimboChunk`/`NimboUIMessage`
  * (ai's `UIMessageChunk`/`UIMessage`, instantiated in `@nimbo/core`'s
  * `state.ts`) have no zod schema this file can reuse — `z.any()` is the same
  * escape hatch this file has always used for structurally-unschemaable
  * external types (`jsonValueSchema` above didn't need it, but this repo's
- * `apps/server` established the pattern for exactly this case), contained by
+ * `apps/node-server` established the pattern for exactly this case), contained by
  * a `z.ZodType<T>` annotation so every consumer of the exported schema still
  * sees the precise TypeScript type — `any` never leaks past this one
  * declaration. Both only ever parse a value that has already round-tripped
@@ -101,7 +101,7 @@ export type MessageFrame = z.infer<typeof messageFrameSchema>;
 /**
  * Every wire frame this app can ever receive is *either* a `ChunkEnvelope`
  * *or* a `MessageFrame` — told apart structurally (which of `chunk`/`message`
- * the object actually carries), same discipline `apps/server`'s own
+ * the object actually carries), same discipline `apps/node-server`'s own
  * `chatReplayFrameSchema` uses (no shared literal discriminant field).
  */
 export const chatReplayFrameSchema = z.union([
@@ -148,7 +148,7 @@ export function parseChatReplayFrame(raw: string): ParsedFrameResult {
   return { ok: true, frame: result.data };
 }
 
-// ---- Conversation (apps/server's `conversations` row, camelCase over the
+// ---- Conversation (apps/node-server's `conversations` row, camelCase over the
 // wire — unaffected by the UIMessage-ledger migration) ----
 
 export const conversationStatusSchema = z.enum([

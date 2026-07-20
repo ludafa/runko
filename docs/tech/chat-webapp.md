@@ -10,14 +10,14 @@
 
 ## 1. 布局与工作区（结构性决策）
 
-- seed 的 `apps/client` 更名为 **`apps/web`**，`apps/server` 保留；`apps/docs` 不引入。包名 `@nimbo-chat/web`、`@nimbo-chat/server`。
+- seed 的 `apps/client` 更名为 **`apps/web`**，seed 的 `apps/server` 保留（2026-07-20 更名为 **`apps/node-server`**，与 [`apps/cloudflare-worker-server`](./cloudflare-worker-server.md) 形成 node/worker 两个服务端形态的对称命名）；`apps/docs` 不引入。包名 `@nimbo-chat/web`、`@nimbo-chat/node-server`。
 - **apps/\* 并入 nimbo 根 pnpm workspace**（`packages: ["packages/*", "apps/*"]`）——server 依赖 `@nimbo/sdk`/`@nimbo/sandbox-vercel`（`workspace:*`）。独立子 workspace 无法解析 workspace 协议（`file:` 安装会因包内 `workspace:*` 依赖失败），examples 的纯符号链接方案又与 apps 必需的 `pnpm install` 冲突——并入根 workspace 是唯一自洽解。
-- **根管线保持不变**：根 `package.json` 的 build/typecheck/test/coverage 脚本 filter 收窄为 `./packages/*`——CI 与 885 用例基线零扰动；apps 用自己的脚本（`pnpm -F @nimbo-chat/server dev` 等）。root vitest projects 本就只收 `packages/*`。
+- **根管线保持不变**：根 `package.json` 的 build/typecheck/test/coverage 脚本 filter 收窄为 `./packages/*`——CI 与 885 用例基线零扰动；apps 用自己的脚本（`pnpm -F @nimbo-chat/node-server dev` 等）。root vitest projects 本就只收 `packages/*`。
 - seed 的 `pnpm.overrides`（vite→rolldown-vite）与原生构建放行（better-sqlite3/esbuild/msw）合入根 workspace 配置。**零二进制原则的边界澄清**：它约束的是发布的 `@nimbo/*` 包，apps 是消费侧产品代码，不受限。
 
 ## 2. 业务数据领域图
 
-两张应用表（`apps/server/src/db/schema.ts`），外加 better-auth 的 `user` 表。字段与 P13-5 后的形态一致：`conversations` 携带 **nimbo 标量 header**（`agent_session_id`/`agent_session_created_at`/`agent_session_turn`，取代旧的 `nimbo_state_json` 整块 JSON），`conversation_events` 用 **`kind`** 区分 `message`/`chunk` 两类条目、共享一条按会话单调递增的 `seq`。
+两张应用表（`apps/node-server/src/db/schema.ts`），外加 better-auth 的 `user` 表。字段与 P13-5 后的形态一致：`conversations` 携带 **nimbo 标量 header**（`agent_session_id`/`agent_session_created_at`/`agent_session_turn`，取代旧的 `nimbo_state_json` 整块 JSON），`conversation_events` 用 **`kind`** 区分 `message`/`chunk` 两类条目、共享一条按会话单调递增的 `seq`。
 
 ```mermaid
 erDiagram
@@ -122,7 +122,7 @@ sequenceDiagram
 - **回放期 ephemeral 丢弃（tail 的回归竞态）**：`GET /stream` 缓冲里可能出现「比回放已送出的耐久 chunk 更旧的 ephemeral tick」——转发它会把该消息打回半截且不再有耐久帧收尾。规则：**回放阶段结束前到达的 ephemeral 一律丢弃**（对该连接只有 live 价值，丢弃无损）；回放结束后到达的必属仍在进行的消息，照常转发。
 - **turn-start 用户消息只落一次**：`driveTurn` 在消费 `session.stream()` 之前先合成一条用户 `NimboUIMessage`（自己的 id、单 text 部件）落盘+广播为本轮首帧；nimbo core 自己的 `Session.stream()` 也会往内部账本推一条结构相同、id 不同的副本——`finalizeTurnPersistence` 用 `priorMessageCount + 1` 跳过 core 的那份，保证只写一次。
 
-## 4. 服务端模块（apps/server/src/agent/ + routes/）
+## 4. 服务端模块（apps/node-server/src/agent/ + routes/）
 
 在 seed 骨架上叠加：
 
@@ -215,7 +215,7 @@ P13-5 后的现行机制（三值审批 + 原生 chunk，取代旧的四对 wire
 
 **动机**：turn/step/工具调用的过程此前只有界面能看，运维排障缺服务端结构化日志；同时用户在工具卡片上感受不到「这次调用花了多久」（尤其是走了人审的调用，等待时长完全不可见）。两件事分头解决，但共享同一个约束：`finalizeTurnPersistence` 落盘的 message 必须与 `session.toJSON().messages` 字节一致（§6），**server 不能私自往 message 里塞时间戳**——所以工具起止时间必须由 core 的 loop 在写账本时就地产生，作为一个持久 data 部件随消息存档（见 [tech/single-ledger](./single-ledger.md) §3.2 的 `data-tool-timing`），刷新/回放不丢；server 日志只是这个部件的一个只读消费方。
 
-### 11.1 零依赖分级 logger（`apps/server/src/logger.ts`）
+### 11.1 零依赖分级 logger（`apps/node-server/src/logger.ts`）
 
 - `createLogger(opts)`：支持 `level`（`debug`/`info`/`warn`/`error`）与注入 `sink`（测试用，捕获行而非写 stdout）；默认单例写 stdout，`LOG_LEVEL` 环境变量覆盖默认级别（未设为 `info`）。
 - 单行格式：ISO 时间戳 + 级别 + `[scope]` + 消息 + 结构化字段（对象 JSON 化；长字符串走截断助手，如 turn 文本预览 120 字符、工具 input 预览 200 字符）。

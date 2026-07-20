@@ -20,7 +20,7 @@ chat 的账本数据（[single-ledger](./single-ledger.md)）已经提供轮级�
 
 ## 我们怎么提供
 
-**默认开启、零配置。** chat server 启动即采集，数据落在 `apps/server/telemetry.db`（与聊天数据库 `data.db` 相互独立）。两个环境变量：`TELEMETRY_DISABLED=1` 整体关闭；`TELEMETRY_DB_PATH` 改存放位置。
+**默认开启、零配置。** chat server 启动即采集，数据落在 `apps/node-server/telemetry.db`（与聊天数据库 `data.db` 相互独立）。两个环境变量：`TELEMETRY_DISABLED=1` 整体关闭；`TELEMETRY_DB_PATH` 改存放位置。
 
 三个消费入口，按使用频率排序：
 

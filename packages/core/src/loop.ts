@@ -30,7 +30,7 @@
  *
  * single-ledger 参考实现（原 `examples/13-uimessage-single-ledger.e2e.test.ts`——已随
  * examples 梳理移除：其离线结构断言迁至
- * `apps/server/test/agent/uimessage-single-ledger.test.ts`，手写真机 loop 见 git 历史）里每次
+ * `apps/node-server/test/agent/uimessage-single-ledger.test.ts`，手写真机 loop 见 git 历史）里每次
  * `runOneStep` 都新建一条 assistant 消息 push 进账本，不是把多步折进一条消息
  * 用内部 `step-start` 分隔——`convertToModelMessages()` 按 `step-start` 分块产出
  * `assistant → tool → assistant → …` 的方式对两种账本组织完全等价（每条

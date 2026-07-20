@@ -87,7 +87,7 @@ export async function getConversation(
 /**
  * `GET .../events?after=<seq>` (docs/tech/chat-webapp.md §2.2, docs/tech/single-ledger.md §5 单-3): the full
  * persisted history, in seq order — `{ frames: ChatReplayFrame[] }`, not a
- * bare/paginated array (`apps/server`'s `schemas/chat.ts` `ChatEventsListSchema`
+ * bare/paginated array (`apps/node-server`'s `schemas/chat.ts` `ChatEventsListSchema`
  * doc comment: GC already keeps this bounded to "finished message history +
  * the in-progress/crashed turn's durable chunks", no pagination needed).
  */

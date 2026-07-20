@@ -6,7 +6,7 @@
  * (`message-metadata`'s `turn`/`status`), so a start divider could only ever
  * be rendered retroactively, which isn't useful enough to keep. `TurnFailedBar`
  * now takes the real `@nimbo/core` `NimboError` directly — the retired
- * `TurnFailedErrorInfo` widening existed only to also cover apps/server
+ * `TurnFailedErrorInfo` widening existed only to also cover apps/node-server
  * turn-runner's old open-ended-`code: string` flat sentinel, which no longer
  * exists (its replacement, `driveTurn`'s generator-threw catch branch,
  * reuses the exact same `NimboError` shape as a graceful degrade — `code:

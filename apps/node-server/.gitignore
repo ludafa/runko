@@ -12,5 +12,5 @@ dist
 *.db-wal
 
 # `openapi.yml` is committed — it's the contract that the client's Kubb
-# codegen consumes. Regenerate with `pnpm --filter @nimbo-chat/server
+# codegen consumes. Regenerate with `pnpm --filter @nimbo-chat/node-server
 # run generate:openapi`.

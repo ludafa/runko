@@ -75,7 +75,7 @@ sequenceDiagram
 
 `examples/13-uimessage-single-ledger.e2e.test.ts` 曾是 [single-ledger](../../docs/features/single-ledger.md) 的验证实验（见 [plans/single-ledger §2](../plans/single-ledger.md)），是示例集里**唯一**一个真正的 e2e 测试而非演示。本次梳理把它移出示例集：
 
-- **离线结构断言段**改写成 3 个常规 vitest 用例，迁至 `apps/server/test/agent/uimessage-single-ledger.test.ts`（转换器丢弃 data 部件 / assistant-tool 分组 / transient 纪律），随 server 测试进 CI。
+- **离线结构断言段**改写成 3 个常规 vitest 用例，迁至 `apps/node-server/test/agent/uimessage-single-ledger.test.ts`（转换器丢弃 data 部件 / assistant-tool 分组 / transient 纪律），随 server 测试进 CI。
 - **真机 DeepSeek 验证段**（一次性人工实验、CI 永久 skip 无回归价值，且会给 server 引入首个真机网络测试、污染其全离线测试哲学）不迁移，完整版留在 git 历史。
 - `packages/core/src/loop.ts` 对 13 旧路径的注释引用已更新指向新位置、并注明真机段见 git 历史。
 

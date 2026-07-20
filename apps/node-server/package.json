@@ -1,5 +1,5 @@
 {
-  "name": "@nimbo-chat/server",
+  "name": "@nimbo-chat/node-server",
   "version": "0.0.0",
   "private": true,
   "type": "module",

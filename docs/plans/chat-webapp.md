@@ -50,8 +50,9 @@
 
 ## 变更记录
 
-- **2026-07-12 立项**：用户 `/goal` 直接立项 chat agent webapp（apps/web + apps/server）。
-- **2026-07-12 配置整合**：全部配置（原 `examples/.env` + `apps/server/.env` + 端口/URL）统一收进**仓库根 `.env`**，唯一事实来源，`.env.template` 全量列出。apps/server 经 dev 脚本 `--env-file-if-exists=../../.env` 读取；apps/web(vite) 与 examples 同读。不再有 `examples/.env` 或 `apps/server/.env`。
+- **2026-07-20 `apps/server` → `apps/node-server`（✅）**：包名同步 `@nimbo-chat/server` → `@nimbo-chat/node-server`。动机是与新落地的 [`apps/cloudflare-worker-server`](../tech/cloudflare-worker-server.md) 形成对称命名——「server」这个名字在有了第二个服务端形态之后就不再自明了（一个跑 Node，一个跑 workerd）。改动是纯重命名：目录 `git mv`、包名、根 `package.json` 的 `chat:bootstrap`/`chat:server` 脚本 filter、`apps/web/kubb.config.ts` 的 `../server/openapi.yml` 路径，以及全库注释/文档里的路径引用。**已发布的 `CHANGELOG.md` 历史条目按仓库惯例保留旧名如实记录**（同 2026-07-17 表/列更名那次的处理）。验证：node-server typecheck exit 0、243 用例全绿；web 160 用例全绿。
+- **2026-07-12 立项**：用户 `/goal` 直接立项 chat agent webapp（apps/web + apps/node-server）。
+- **2026-07-12 配置整合**：全部配置（原 `examples/.env` + `apps/node-server/.env` + 端口/URL）统一收进**仓库根 `.env`**，唯一事实来源，`.env.template` 全量列出。apps/node-server 经 dev 脚本 `--env-file-if-exists=../../.env` 读取；apps/web(vite) 与 examples 同读。不再有 `examples/.env` 或 `apps/node-server/.env`。
 - **P12-2 契约细化（两端定案）**：`agent_events` 落「信封事件」而非仅 `SessionEvent`（补 `user.message`/`turn.result` 使回放能重建完整对话）；JSON 一律 camelCase；`GET events` 返回 `{ events }`（非裸数组）；引入 STEER-3B（`POST messages` 先试 steer，202 body 带 `mode`）。
 - **P12-4 断线可续**：turn registry（`turn-runner.ts`）+ 后台驱动 + `GET .../stream?after=<seq>` 可续传 tail；`GET events` 一次性补齐路径删除（被 tail 取代）；客户端改「命令/订阅分离」，挂载即开 tail。
 - **P12-5 人在环上（2026-07-13 立项）**：bash 审批链（`gateWorkspace` + `approval-policy.ts`）+ ask-user 工具 + 裁决路由 + wire 契约。

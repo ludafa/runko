@@ -56,4 +56,4 @@ chat 应用的沙盒工作区是 `@nimbo/sandbox-vercel` 的远端 microVM；内
 | 2026-07-16 | 文档回填（coder） | `terms.md` 新增「原生搜索」术语；`tech/{builtin-tools,sandbox,core-sdk}.md` 同步接口契约、工具行为与已知限制；新建本文件建立拆单 | 待拆单 #3/#4 完工后回填「验收结论」栏 |
 | 2026-07-16 | 第 1 轮返工（coder） | 修复 `staticPrefixDir` 对无通配符精确路径把叶子文件当起始目录导致的恒空结果缺陷 | 4 个回归用例转绿 |
 | 2026-07-16 | 第 2 轮独立验收（orchestrator） | 三包 typecheck/build/test 亲自跑绿（389/193/70）；抽查双路径、缓存语义、类型逃逸、对拍真实性 | 通过（pass-with-notes），遗留见「验收结论」 |
-| 2026-07-16 | 线上事故修复（主线程） | chat 应用 grep 依旧十几秒：`apps/server` 的 `gateWorkspace`（chat-agent.ts）逐方法重建 workspace 时只转发了 `NimboFS` 七个必选方法，可选的 `searchFiles`/`searchContent` 被剥掉，原生搜索在 chat 应用里从未生效（验收范围只到 packages，未覆盖这层集成包装）。已补转发 + 2 个回归用例锁定（server 194/194 绿） | 教训：`NimboFS` 新增可选能力方法时，所有"显式逐方法转发"的包装层必须同步；`gateWorkspace` 注释已加警示 |
+| 2026-07-16 | 线上事故修复（主线程） | chat 应用 grep 依旧十几秒：`apps/node-server` 的 `gateWorkspace`（chat-agent.ts）逐方法重建 workspace 时只转发了 `NimboFS` 七个必选方法，可选的 `searchFiles`/`searchContent` 被剥掉，原生搜索在 chat 应用里从未生效（验收范围只到 packages，未覆盖这层集成包装）。已补转发 + 2 个回归用例锁定（server 194/194 绿） | 教训：`NimboFS` 新增可选能力方法时，所有"显式逐方法转发"的包装层必须同步；`gateWorkspace` 注释已加警示 |

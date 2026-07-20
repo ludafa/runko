@@ -9,7 +9,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 ## 项目背景
 
-nimbo：可嵌入 Node.js 的轻量 agent SDK。pnpm monorepo：`@nimbo/core`（接口+loop）、`@nimbo/virtual-fs`（FS 实现+文件工具）、`@nimbo/mini-bash`（NimboExec 纯 TS 解释器）、`@nimbo/sdk`（门面）；apps：`@nimbo-chat/server` / `@nimbo-chat/web`（chat 应用）。事实来源（按工单指向精读，别全文通读浪费上下文）：
+nimbo：可嵌入 Node.js 的轻量 agent SDK。pnpm monorepo：`@nimbo/core`（接口+loop）、`@nimbo/virtual-fs`（FS 实现+文件工具）、`@nimbo/mini-bash`（NimboExec 纯 TS 解释器）、`@nimbo/sdk`（门面）；apps：`@nimbo-chat/node-server` / `@nimbo-chat/web`（chat 应用）。事实来源（按工单指向精读，别全文通读浪费上下文）：
 
 - `docs/terms.md` —— 术语表，主术语为准
 - `docs/tech/*.md`（如 `core-sdk.md`/`builtin-tools.md`）—— 验收对照的技术规格

@@ -6,7 +6,7 @@ import { pluginZod } from '@kubb/plugin-zod';
 
 export default defineConfig({
   input: {
-    path: '../server/openapi.yml',
+    path: '../node-server/openapi.yml',
   },
   output: {
     path: './src/gen',

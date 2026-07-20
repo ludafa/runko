@@ -9,10 +9,10 @@ chat server 目前只有界面能看到 turn/step/工具调用的过程，运维
 
 ## 设计定案摘要（主线程拍板，2026-07-16）
 
-核心约束（决定了架构）：`apps/server` 的 `finalizeTurnPersistence`（`turn-runner.ts`）落盘的 message 必须与 `session.toJSON().messages` 字节一致——**server 不能私自往 message 里塞时间戳**。所以工具起止时间必须由 `@nimbo/core` 的 loop 在写账本时就地产生，作为一个**持久 data 部件**随消息存档，刷新/回放不丢。
+核心约束（决定了架构）：`apps/node-server` 的 `finalizeTurnPersistence`（`turn-runner.ts`）落盘的 message 必须与 `session.toJSON().messages` 字节一致——**server 不能私自往 message 里塞时间戳**。所以工具起止时间必须由 `@nimbo/core` 的 loop 在写账本时就地产生，作为一个**持久 data 部件**随消息存档，刷新/回放不丢。
 
 1. **core**：`NimboDataParts` 新增持久部件 `tool-timing`（`{ toolCallId, startedAt, completedAt? }`，epoch ms），`id = toolCallId`，同 id 覆盖，物化方式照 `data-plan-update` 先例。`tool-input-available` 后立刻打 `startedAt`；每个结算 chunk（`tool-output-available`/`tool-output-error`/`tool-output-denied`，含审批 deny 分支）后立刻补 `completedAt`。**耗时含审批等待**——这是 chat 界面上用户真实感受到的等待时长；审批本身单独等了多久在 server 日志里另外可见。
-2. **server**：零依赖分级 logger（`apps/server/src/logger.ts`，不引第三方）+ `turn-runner.ts` 打点（纯旁路 tap，绝不改变 chunk 流转/持久化行为）；`tool-output-available` 日志的耗时读 `data-tool-timing` chunk（单一来源），不另掐计时器。
+2. **server**：零依赖分级 logger（`apps/node-server/src/logger.ts`，不引第三方）+ `turn-runner.ts` 打点（纯旁路 tap，绝不改变 chunk 流转/持久化行为）；`tool-output-available` 日志的耗时读 `data-tool-timing` chunk（单一来源），不另掐计时器。
 3. **web**：`schema.ts`/`use-chat-messages.ts` 同步 wire 形状与 upsert；`timeline.ts` 把 `data-tool-timing` join 进对应工具调用条目（不独立成卡片）；`tool-call-card.tsx` 展示启动/完成时间与人性化耗时，运行中逐秒跳动、崩溃残留态显示「—」。
 
 **术语纪律核查**：未引入新术语——`data-tool-timing` 沿用既有「data 部件」概念（与 `file-change`/`plan-update` 等同级，均未单独立词条），「日志分级」为通用工程词汇，不登记进 `docs/terms.md`。
@@ -36,11 +36,11 @@ chat server 目前只有界面能看到 turn/step/工具调用的过程，运维
 - server 日志是**纯旁路**：拔掉 logger 调用（或注入 no-op sink）不改变任何 chunk 流转/持久化行为；`tool-output-available` 日志的耗时来自 `data-tool-timing` chunk，不是 turn-runner 自己另起的计时器。
 - `LOG_LEVEL` 未设时默认 `info`；长字符串（text/input 预览）按约定字符数截断，不整段打印。
 - web：运行中的工具调用卡片耗时每秒跳动，结算或组件卸载后清理定时器；回放且 `completedAt` 始终缺席（turn 中途崩溃残留）时耗时位置显示「—」、不永远跳动。
-- 测试基线不得回归：`@nimbo/core` 389、`@nimbo-chat/server` 158、`@nimbo-chat/web` 125（另 `@nimbo/virtual-fs` 193、`@nimbo/sandbox-vercel` 70 与本工单无关，不得变红）。
+- 测试基线不得回归：`@nimbo/core` 389、`@nimbo-chat/node-server` 158、`@nimbo-chat/web` 125（另 `@nimbo/virtual-fs` 193、`@nimbo/sandbox-vercel` 70 与本工单无关，不得变红）。
 
 ## 验收结论
 
-**第 1 轮独立验收：通过（2026-07-16，orchestrator 亲自复跑）。** 五包 typecheck + test 全绿：`@nimbo/core` 409（基线 389 +20）、`@nimbo-chat/server` 192（+34）、`@nimbo-chat/web` 148（+23）、`@nimbo/virtual-fs` 193、`@nimbo/sandbox-vercel` 70（后两者未回归）。核验要点逐条落实：
+**第 1 轮独立验收：通过（2026-07-16，orchestrator 亲自复跑）。** 五包 typecheck + test 全绿：`@nimbo/core` 409（基线 389 +20）、`@nimbo-chat/node-server` 192（+34）、`@nimbo-chat/web` 148（+23）、`@nimbo/virtual-fs` 193、`@nimbo/sandbox-vercel` 70（后两者未回归）。核验要点逐条落实：
 
 - core 打点覆盖全部 7 处结算路径（`settleExecution` 的 output-available/output-error 两支 + `settleToolCall` 的未知工具/invalid/deny/无仲裁者 deny/人审 deny 五支），`startToolTiming` 落在 `tool-input-available` 之后；`tool-input-error`（畸形调用，未进管线）不打点，符合 `startedAt` 语义。
 - 「message 与 `session.toJSON().messages` 字节一致」不变量成立——`finalizeTurnPersistence` 原样 `JSON.stringify(message)` 落盘，只新增 `log` 参数与一行 DEBUG，未私自改 message；时间戳全部由 core loop 就地产出进账本。

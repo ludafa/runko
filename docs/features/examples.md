@@ -43,7 +43,7 @@ pnpm --filter @nimbo/examples example 01        # 跑 01 号（或 cd examples &
 
 - **是什么**：一块给人**手动把玩**的实验田；一份「nimbo 各能力长什么样」的可运行参照。
 - **不是什么**：
-  - **不是自动化测试套件**。示例脚本不进 vitest、不做断言式回归——它们的价值是「跑起来看效果」。（真正的回归测试在各包 `test/` 下。原 13 号是唯一一个 e2e 测试，已迁至 `@nimbo-chat/server`，见 [tech/examples §5](../tech/examples.md)。）
+  - **不是自动化测试套件**。示例脚本不进 vitest、不做断言式回归——它们的价值是「跑起来看效果」。（真正的回归测试在各包 `test/` 下。原 13 号是唯一一个 e2e 测试，已迁至 `@nimbo-chat/node-server`，见 [tech/examples §5](../tech/examples.md)。）
   - **不再追求「发布后消费姿态」的严格复刻**。旧 `setup-node-modules.mjs` 想用手工符号链接模拟 `pnpm add @nimbo/sdk` 的最终布局；现放弃这个目标，换成真实 workspace 成员化——import 语句本身仍是裸名 `@nimbo/sdk`（消费姿态在 import 层面保留），但依赖搭建交给 pnpm。
   - **不为 Cloudflare 提供"拎走即部署"的网关模板**。11 号真机段要连真实 CF 沙盒确实得先立一个 Worker（CF 沙盒只能从 Worker 内访问），但那是**自备环境（BYO）**：我们只给一份参考实现 [`examples/cloudflare-gateway-ref/`](../../examples/cloudflare-gateway-ref/README.md)（`index.ts`+`wrangler.jsonc`+`Dockerfile`，无 `package.json`、不安装/不发布），你自备 CF 账号、拷进自己的 wrangler 项目部署。不追求一个由我们维护、可原地 `wrangler deploy` 的产品化模板。
 

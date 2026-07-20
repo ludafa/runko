@@ -20,7 +20,7 @@
 
 ## 领域模型：compaction 作为账本第三类条目
 
-账本落在 server 的 `conversation_events` 表（`apps/server/src/db/schema.ts`）。今天该表的 `kind` 只有两类——`'message'`（一条已完成的 `NimboUIMessage`）与 `'chunk'`（进行中/崩溃 turn 的 durable `NimboChunk`）。本功能引入**并列的第三类** `'compaction'`。
+账本落在 server 的 `conversation_events` 表（`apps/node-server/src/db/schema.ts`）。今天该表的 `kind` 只有两类——`'message'`（一条已完成的 `NimboUIMessage`）与 `'chunk'`（进行中/崩溃 turn 的 durable `NimboChunk`）。本功能引入**并列的第三类** `'compaction'`。
 
 ```mermaid
 erDiagram
@@ -61,7 +61,7 @@ erDiagram
 
 > **读图说明**：`COMPACTION_META` **不是一张表**，而是 `kind='compaction'` 那一行 `payloadJson` 里 `metadata.compaction` 的形状。切点等簿记字段随 UIMessage 一起落在 `payloadJson`，不新增表列。
 >
-> **与当前 schema 的差异（P14 待落地）**：`apps/server/src/db/schema.ts` 现在的 `kind` 枚举是 `['message', 'chunk']`，`metadata.compaction` 也尚未加入 `NimboMessageMetadata`（`packages/core/src/state.ts`）。本图画的是**目标态**：`kind` 扩到三值、`NimboMessageMetadata` 增补 `compaction` 字段、并新增 `(conversation_id, upToSeq)` 唯一约束（见下）。
+> **与当前 schema 的差异（P14 待落地）**：`apps/node-server/src/db/schema.ts` 现在的 `kind` 枚举是 `['message', 'chunk']`，`metadata.compaction` 也尚未加入 `NimboMessageMetadata`（`packages/core/src/state.ts`）。本图画的是**目标态**：`kind` 扩到三值、`NimboMessageMetadata` 增补 `compaction` 字段、并新增 `(conversation_id, upToSeq)` 唯一约束（见下）。
 
 ### compaction 条目的 payload 形状
 
@@ -94,7 +94,7 @@ payload: 一条 UIMessage：
 
 ## 推导算法（server 组装恢复输入时）
 
-推导发生在 `apps/server/src/routes/chat.ts` 的 `loadResumeState`——今天它把账本里 `kind === 'message'` 的行取出、`JSON.parse(payloadJson)` 后组装成 `SessionState`。本功能在这里**加一段切点过滤**：
+推导发生在 `apps/node-server/src/routes/chat.ts` 的 `loadResumeState`——今天它把账本里 `kind === 'message'` 的行取出、`JSON.parse(payloadJson)` 后组装成 `SessionState`。本功能在这里**加一段切点过滤**：
 
 ```ts
 const rows = loadLedger(sessionId);                        // 按 seq 升序

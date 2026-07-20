@@ -28,7 +28,7 @@ nimbo 的 [loop](../terms.md) 改用「[UIMessage](../terms.md) 数组」作为�
 - `SessionState = { id, turn, messages: NimboUIMessage[], createdAt, fsSnapshot? }`——恢复用可序列化快照。
 - 恢复校验分两层：`sessionStateSchema`（zod，浅层结构判别）+ `validateSessionMessages()`（ai 的 `validateUIMessages()`，深层语义校验 part/metadata/data 部件形状）。
 
-### 2.2 落盘 schema（`apps/server/src/db/schema.ts`）
+### 2.2 落盘 schema（`apps/node-server/src/db/schema.ts`）
 
 `conversations`（2026-07-17 由 `chat_sessions` 更名，解开 "session" 三重超载；同批 `agent_events` → `conversation_events`、`nimbo_*` 列 → `agent_session_*`——库表命名不带产品名）：一行一个对话，1:1 绑定沙盒（`sandboxName`）与专用 git 分支（`branchName`）。SDK 的 `SessionState` 不整块存 JSON——它的 `messages` 落到 `conversation_events` 的 `message` 条目，它的三个标量（`id`/`createdAt`/`turn`）落到三个 `agent_session_*` 列，是一个小小的**「agent 会话 header」**，不是整份账本。三个 `agent_session_*` 值在本对话第一轮真正完成前都是 `null`。
 

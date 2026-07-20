@@ -121,7 +121,7 @@ const askUserInputSchema = z.object({
 
 export type AskUserInput = z.infer<typeof askUserInputSchema>;
 
-/** `ask-user`'s own input shape (`apps/server/src/agent/chat-agent.ts`'s `askUserInputSchema`): `{ question, options？ }`. */
+/** `ask-user`'s own input shape (`apps/node-server/src/agent/chat-agent.ts`'s `askUserInputSchema`): `{ question, options？ }`. */
 export function askUserInputFrom(input: unknown): AskUserInput | undefined {
   const result = askUserInputSchema.safeParse(input);
   return result.success ? result.data : undefined;

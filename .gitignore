@@ -9,8 +9,8 @@ coverage/
 !.env.template
 # Local agent transcripts (examples/shared/transcript-store.ts) — dev data, never committed
 .transcripts/
-# apps/server dev sqlite (drizzle/better-sqlite3)
-apps/server/data.db
+# apps/node-server dev sqlite (drizzle/better-sqlite3)
+apps/node-server/data.db
 # lantai 本地工具数据（判断日志 + 上传游标）—— 由本地 lantai dev server 存储，不入库
 .lantie_history
 .lantie_state.json

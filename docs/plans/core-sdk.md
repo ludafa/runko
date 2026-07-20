@@ -130,7 +130,7 @@ core-sdk v1/v1.1 收官后，仓库继续演进；下列阶段深度依赖或改
 
 - **P10 · 云沙盒工作区三接入包**（v1.2）：`@nimbo/sandbox-{e2b,vercel,cloudflare}`，三家均以模式 A 同源工作区（`NimboFS & NimboExec`）交付，均不进 sdk 依赖。→ 见 [sandbox 施工进展](../plans/sandbox.md)。
 - **P11 · 真实项目端到端示例**：Vercel 沙盒内 frontend-design skill 驱动设计优化 + Git 工作流（clone→装 skill→分支→改→commit→push→PR）。→ 见 [chat-webapp 施工进展](../plans/chat-webapp.md)。
-- **P12 · Chat Agent Web 应用**（apps/web + apps/server）：对话驱动 nimbo agent 在沙盒里改代码/开 PR；含 P12-5 人在回路、P13-1 transcript 减量、P12-4 断线可续。→ 见 [chat-webapp 施工进展](../plans/chat-webapp.md)。
+- **P12 · Chat Agent Web 应用**（apps/web + apps/node-server）：对话驱动 nimbo agent 在沙盒里改代码/开 PR；含 P12-5 人在回路、P13-1 transcript 减量、P12-4 断线可续。→ 见 [chat-webapp 施工进展](../plans/chat-webapp.md)。
 - **P13-5 · UIMessage 单账本 + 三值审批 + 工具改名**（2026-07-15 立项）：**深改 core**——① 内置工具名 snake_case→kebab-case（`read-file`/…，`bash`/`glob`/`grep` 不变）；② core 账本迁移（`SessionState.messages`→`NimboUIMessage[]`、`convertToModelMessages` 现场推导、`session.stream()` 吐 ai `UIMessageChunk` + nimbo data 部件、`SessionEvent`/`SessionItem`/`TurnResult.items` 退役、`nimbo_state_json` 取消）；②c 审批三值重构（`ApprovalPolicy` allow/review/review-once/deny + `ApprovalOutcome`/`HumanDecision`、删 `ApprovalDecision.updatedInput`、`review` 先发 `tool-approval-request` chunk 再阻塞经 `onReview` 等裁决、审批分类器 `onApproval` 取代 shouldAutoAllow）。**本页 tech/features 已按 P13-5 落地状态书写**（对应 `packages/core/src/{session,loop,runtime,approval,types}.ts` 当前实现）。定案与完成状态见 [single-ledger 施工进展](../plans/single-ledger.md)。
 
 ## 变更记录
@@ -143,7 +143,7 @@ core-sdk v1/v1.1 收官后，仓库继续演进；下列阶段深度依赖或改
 | 2026-07-14 | P13 | **P13-1 transcript 减量**（持久化分析后用户逐项确认）：`item.updated` tick 改 ephemeral——只广播、不落库、**不占 seq**（信封 seq 变可选：有 seq ⇔ 持久可回放）。动机：tick 携带累积全文，落库量为消息长度平方级（实证 98% 行是 tick）。持久流因 ephemeral 不占号而**无空洞**，崩溃后 seq 续起无漂移。取舍：turn 中崩溃后半截打字机不可回放。server 102→113、web 112→117 |
 | 2026-07-13 | P12 | **P12-5 人在环上**（用户立项）：① bash 审批链——gateWorkspace 包装沙盒 workspace（defaultApproval "allow"）+ session onApproval 桥（approval-policy 三档：dangerous 默认/all/off），turn-runner 审批桥（pendingApprovals + `approval.requested/resolved` wire 事件落库可回放 + 240s 超时自动 deny）+ `POST .../approvals/:callId` 裁决路由；② **ask-user 工具**——onAskUser 注入即注册，`question.asked/answered` 事件对 + `POST .../questions/:callId`；③ web 端 approval/question 独立时间线卡片。nimbo core 零改动（onApproval 本就是可 await 回调）。server 40→102、web 54→112 用例 |
 | 2026-07-12 | P12 | **P12 完成**（用户立项）：chat agent webapp；apps 并入根 workspace（根管线 filter 收窄保 CI 不变）；沙盒生命周期 = persistent + extendTimeout 滚动续期 + 快照休眠/恢复。四需求真机实证 + 浏览器端到端回归揪修 2 个 curl/fake 盲区 bug |
-| 2026-07-12 | P12 | **配置整合**（用户追加）：examples/.env + apps/server/.env + 根.env 全并入**仓库根 .env 单一事实来源**（15 唯一键）；删三个旧 .env/template |
+| 2026-07-12 | P12 | **配置整合**（用户追加）：examples/.env + apps/node-server/.env + 根.env 全并入**仓库根 .env 单一事实来源**（15 唯一键）；删三个旧 .env/template |
 | 2026-07-12 | P12 | **P12 后续增强**（用户逐条追加）：① transcript store 迁 .transcripts/；② streamdown 渲染 agent_message + reasoning；③ 修 composer 错位；④ **P12-4 断线可续实时流**（turn registry 解耦 turn 与连接 + GET /stream?after 可续传 tail + 客户端挂载即续接） |
 | 2026-07-12 | P11 | **P11 开工**（用户立项）：真实项目设计优化 e2e 示例；PAT v1 / npx skills+fromFS / Git 集成部署 / DeepSeek v4 pro / 无审批门。真机段实跑通过并产出真实 PR（ludafa/Schulte-Grid#2、#4） |
 | 2026-07-11 | P10 | **P10 开工**（用户立项）：三沙盒接入包 @nimbo/sandbox-{e2b,vercel,cloudflare}；provider SDK 仅类型依赖；CF 网关形态；真机验证待用户凭证。E2B/Vercel 真机已验证，Cloudflare 待部署 |

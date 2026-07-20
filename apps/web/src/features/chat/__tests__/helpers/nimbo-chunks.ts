@@ -1,5 +1,5 @@
 /**
- * Web-side counterpart to `apps/server/test/helpers/nimbo-chunks.ts` /
+ * Web-side counterpart to `apps/node-server/test/helpers/nimbo-chunks.ts` /
  * `packages/core/test/helpers/nimbo-chunks.ts` (docs/tech/single-ledger.md §5/§6, P13-5-5): small factories for `NimboChunk`s and the wire's
  * `ChatReplayFrame` envelopes around them, trimmed to what this package's own
  * tests need (`MessageLedger`/`useChatMessages`/component fixtures) — no
@@ -185,7 +185,7 @@ export function dataToolTimingChunk(
 
 // ---------------------------------------------------------------------------
 // Frame envelopes — `ChatReplayFrame` wrapping around the chunk factories
-// above, plus the durable/ephemeral seq-assignment rule `apps/server`'s
+// above, plus the durable/ephemeral seq-assignment rule `apps/node-server`'s
 // `turn-runner.ts` (`isDurableChunk`) actually applies, so a hand-assembled
 // chunk sequence can be turned into a realistic wire frame sequence (`seq`
 // only on durable chunks) in one call.
@@ -203,7 +203,7 @@ export function messageFrame(
 }
 
 /**
- * `apps/server/src/agent/turn-runner.ts`'s `isDurableChunk`: `text-delta`/
+ * `apps/node-server/src/agent/turn-runner.ts`'s `isDurableChunk`: `text-delta`/
  * `reasoning-delta` and anything `transient: true` never consume a `seq`;
  * every other chunk does.
  */
@@ -377,7 +377,7 @@ export function toReplayFrames(
 
 // ---------------------------------------------------------------------------
 // Message extractors — reading a materialized `NimboUIMessage` back out
-// (mirrors `apps/server/test/helpers/nimbo-chunks.ts`'s own extractor set).
+// (mirrors `apps/node-server/test/helpers/nimbo-chunks.ts`'s own extractor set).
 // ---------------------------------------------------------------------------
 
 /** Every tool part on one message (excludes the never-produced-by-nimbo `dynamic-tool`). */

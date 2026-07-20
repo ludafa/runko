@@ -6,7 +6,7 @@
 
 ## 1. 核心判断：差异全在 server，不在适配器包
 
-[沙盒适配器](../terms.md)（`@nimbo/sandbox-vercel` / `@nimbo/sandbox-e2b`）按设计**只做 [NimboFS/NimboExec](../terms.md) 视图层**、刻意不管生命周期（[BYO 实例](../terms.md)）——创建、拉码、重连、超时、休眠全归宿主。所以「支持两家沙盒」要改的**只有一个文件**：`apps/server/src/agent/sandbox-manager.ts`（现状 100% 绑 Vercel）。routes/chat-agent 继续只见 `SandboxManager` 接口，零改动。
+[沙盒适配器](../terms.md)（`@nimbo/sandbox-vercel` / `@nimbo/sandbox-e2b`）按设计**只做 [NimboFS/NimboExec](../terms.md) 视图层**、刻意不管生命周期（[BYO 实例](../terms.md)）——创建、拉码、重连、超时、休眠全归宿主。所以「支持两家沙盒」要改的**只有一个文件**：`apps/node-server/src/agent/sandbox-manager.ts`（现状 100% 绑 Vercel）。routes/chat-agent 继续只见 `SandboxManager` 接口，零改动。
 
 E2B 与 Vercel 的结构性差异（决定抽象缝在哪）：
 

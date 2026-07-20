@@ -9,7 +9,7 @@
  * Unlike the retired `QuestionTimelineEntry`, there is no distinct
  * `'timeout'` outcome any more — the `ask-user` tool's `execute()` just
  * returns a plain string either way (the real answer, or the fixed timeout
- * message, `apps/server`'s `chat-agent.ts`), so an `output-available` state
+ * message, `apps/node-server`'s `chat-agent.ts`), so an `output-available` state
  * always renders as "answered" (this app deliberately does not string-sniff
  * the fixed timeout text to recover the old distinction).
  */

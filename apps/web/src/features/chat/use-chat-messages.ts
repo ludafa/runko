@@ -21,7 +21,7 @@
  *
  * ---- optimistic user echo (short-lived — this ticket's fix) ----
  *
- * `apps/server`'s `turn-runner.ts` now gives a turn-starting user message a
+ * `apps/node-server`'s `turn-runner.ts` now gives a turn-starting user message a
  * real wire position: `driveTurn` synthesizes and broadcasts it as this
  * turn's very first `MessageFrame`, strictly before anything else that turn
  * produces (`schemas/chat.ts`'s file header). `pendingUserEchoes`
@@ -101,7 +101,7 @@ function isAbortError(error: unknown): boolean {
 }
 
 /**
- * `finalizeTurnPersistence` (`apps/server`'s `turn-runner.ts`) only ever GCs a
+ * `finalizeTurnPersistence` (`apps/node-server`'s `turn-runner.ts`) only ever GCs a
  * turn's `kind = 'chunk'` rows *after* it finishes gracefully — a cleanly-
  * completed turn's history therefore ends in `MessageFrame`s only, while an
  * in-progress or crashed one's tail end is still `ChunkEnvelope`s (never

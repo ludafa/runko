@@ -9,7 +9,7 @@ ai@7 把 telemetry 转正为**纯回调的事件集成接口**（`Telemetry`，`
 
 1. **core 注入口**：`SessionOptions.telemetry`（`SessionTelemetry`，loop.ts）透传集成对象到每次 `streamText`；不注入时零开销。loop 恒在 `telemetry.functionId` 注入 **`"<nimbo 会话 id>#<turn>"` 关联键**——ai 的 `InferTelemetryEvent` 把 TelemetryOptions 字段并进每个事件，因此所有事件天然自带此键。
 2. **工具事件补发**：nimbo 的工具由 loop 自己结算（[tech/single-ledger](./single-ledger.md)），AI SDK 自己永远没机会触发 `onToolExecutionStart/End`——core 的 `settleExecution` 在 `executeToolCall` 前后**替它补发**这两个事件（`loop.ts` 的 `notifyToolExecution*`，事件形状用 ai 导出的 widened 联合类型构造）。deny/未知工具/畸形调用从未执行，不发。
-3. **server 落库**：`apps/server/src/telemetry.ts` 的 `createSqliteTelemetry(store)` 把每个事件写成一行 SQLite；生产装配是惰性单例（`getChatTelemetry`/`getChatTelemetryStore`），经 `ChatRouteDeps` 注入默认 chatApp（写侧 `telemetry` + 读侧 `telemetryStore` 两个口，测试可分别注入假件）。
+3. **server 落库**：`apps/node-server/src/telemetry.ts` 的 `createSqliteTelemetry(store)` 把每个事件写成一行 SQLite；生产装配是惰性单例（`getChatTelemetry`/`getChatTelemetryStore`），经 `ChatRouteDeps` 注入默认 chatApp（写侧 `telemetry` + 读侧 `telemetryStore` 两个口，测试可分别注入假件）。
 
 三条硬纪律：
 
@@ -21,7 +21,7 @@ ai@7 把 telemetry 转正为**纯回调的事件集成接口**（`Telemetry`，`
 
 ### 2.1 存储形态：独立 `telemetry.db`
 
-独立于聊天库 `data.db` 的 SQLite 文件（缺省 `apps/server/telemetry.db`，`TELEMETRY_DB_PATH` 覆盖），WAL 模式。**表结构自管**（启动时 `CREATE TABLE IF NOT EXISTS`），刻意不进 drizzle 迁移链——遥测是耗材（§3），schema 演化的兜底手段是删库重建，不背迁移债。
+独立于聊天库 `data.db` 的 SQLite 文件（缺省 `apps/node-server/telemetry.db`，`TELEMETRY_DB_PATH` 覆盖），WAL 模式。**表结构自管**（启动时 `CREATE TABLE IF NOT EXISTS`），刻意不进 drizzle 迁移链——遥测是耗材（§3），schema 演化的兜底手段是删库重建，不背迁移债。
 
 ```sql
 CREATE TABLE IF NOT EXISTS telemetry_events (
@@ -141,7 +141,7 @@ sequenceDiagram
 ## 5. 关键接口
 
 - `SessionTelemetry`（`@nimbo/core`，loop.ts）：`{ integrations: Telemetry[]; recordInputs?; recordOutputs? }`——SDK 门面原样透传（`@nimbo/sdk` 的 `createSession` 直接收 `CoreSessionOptions`）。
-- `TelemetryStore`（`apps/server/src/telemetry.ts`）：`record(eventType, functionId, event)` / `list(agentSessionId, turn)` / `close()`——写读同一抽象，测试用 `createTelemetryStore(':memory:')`。
+- `TelemetryStore`（`apps/node-server/src/telemetry.ts`）：`record(eventType, functionId, event)` / `list(agentSessionId, turn)` / `close()`——写读同一抽象，测试用 `createTelemetryStore(':memory:')`。
 - functionId 约定：`"<nimbo 会话 id>#<turn>"`，`parseFunctionId` 按**最后一个** `#` 切分（防会话 id 含 `#`），不合形状时 turn 置 NULL、原文落 agent_session_id。
 
 ## 6. 取舍与已知限制

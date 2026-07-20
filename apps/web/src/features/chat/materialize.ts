@@ -61,7 +61,7 @@
  * all: `applyFrame`'s `MessageFrame` branch (a finished message, upserted
  * verbatim, see above) also fires `onUserMessage` whenever that message's
  * `role` is `'user'` — today that's exclusively the turn-start synthesized
- * user message (`apps/server`'s `turn-runner.ts`, this ticket's fix for the
+ * user message (`apps/node-server`'s `turn-runner.ts`, this ticket's fix for the
  * "连发两条消息乱序" bug). See `UserMessageListener`'s own doc comment for why
  * this — and not the steer-injected user message's `ChunkEnvelope`
  * sequence — is the one signal `use-chat-messages.ts` needs to retire its
@@ -186,7 +186,7 @@ export type TurnEndListener = (metadata: NimboMessageMetadata) => void;
 /**
  * Fires exactly when a `role === 'user'` `MessageFrame` is applied — today
  * that's *only* ever the turn-start synthesized user message
- * (`apps/server`'s `turn-runner.ts`'s `driveTurn`, broadcast as this turn's
+ * (`apps/node-server`'s `turn-runner.ts`'s `driveTurn`, broadcast as this turn's
  * very first frame). A steer-injected user message never fires this: it
  * reaches this ledger as a `ChunkEnvelope` sequence instead (a real
  * `start`/`text-*`/`finish` boundary, materialized through `applySteerChunk`

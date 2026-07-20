@@ -6,7 +6,7 @@
 
 ## 一句话
 
-一个 chat agent 网页应用：用户在对话里驱动 nimbo [agent](../terms.md) 在 Vercel [沙盒](../terms.md)中修改真实仓库代码、开 PR、触发 Vercel 部署。它把 [sandbox 端到端示例](../features/sandbox.md) 的「沙盒里跑完整设计任务」示例产品化成一个可注册、可登录、可持续多轮对话的 Web 应用（apps/web + apps/server）。
+一个 chat agent 网页应用：用户在对话里驱动 nimbo [agent](../terms.md) 在 Vercel [沙盒](../terms.md)中修改真实仓库代码、开 PR、触发 Vercel 部署。它把 [sandbox 端到端示例](../features/sandbox.md) 的「沙盒里跑完整设计任务」示例产品化成一个可注册、可登录、可持续多轮对话的 Web 应用（apps/web + apps/node-server）。
 
 Seed 骨架：https://github.com/ludafa/hono-mono-starter （Hono + zod-openapi + better-auth + drizzle/better-sqlite3；React + TanStack Router + shadcn + kubb）。
 
