@@ -7,10 +7,11 @@
  * machine" (this repo's whole premise) requires a small **gateway** —
  * `@nimbo/sandbox-cloudflare/worker`'s `createSandboxGateway()` — deployed to
  * the host's own Cloudflare account, translating a plain HTTP+NDJSON protocol
- * into real `@cloudflare/sandbox` calls. `examples/cloudflare-gateway-ref/` is a
- * reference implementation of that gateway (~15 lines + wrangler.jsonc +
- * Dockerfile) — bring your own CF account and copy it into your own wrangler
- * project to deploy (see its own README).
+ * into real `@cloudflare/sandbox` calls. `apps/cloudflare-worker-server` is a
+ * full, deployable Cloudflare Worker project whose `/gateway/*` route
+ * implements that gateway (alongside its own in-Worker nimbo session route)
+ * — bring your own CF account and deploy it as-is (see its own README),
+ * rather than hand-copying files into your own wrangler project.
  *
  * `@nimbo/sandbox-cloudflare` is, like the other two adapters, **not**
  * re-exported by `@nimbo/sdk` — install it explicitly (`pnpm add
@@ -25,7 +26,7 @@
  *     provider SDK to install on the client side at all — just a URL, a
  *     token, and plain HTTP;
  *   - `./worker` (`createSandboxGateway`, runs **inside** the host's own
- *     wrangler project — see `examples/cloudflare-gateway-ref/index.ts`):
+ *     wrangler project — see `apps/cloudflare-worker-server/src/index.ts`):
  *     translates the wire protocol into calls against `CfSandboxLike`, a
  *     structural subset of `@cloudflare/sandbox`'s `ISandbox`.
  *
@@ -64,7 +65,7 @@
  *     `read-file` calls.
  *
  * Run: `node examples/11-sandbox-cloudflare.ts` (see examples/README.md for
- * setup; see examples/cloudflare-gateway-ref/README.md to deploy the real
+ * setup; see apps/cloudflare-worker-server/README.md to deploy the real
  * gateway).
  *
  * Expected output shape:
@@ -77,7 +78,7 @@
  *      then, only if a model *is* configured, both `NIMBO_CF_GATEWAY_URL`
  *      and `NIMBO_CF_GATEWAY_TOKEN` (see .env.template's
  *      "Cloudflare Sandbox gateway" section and
- *      examples/cloudflare-gateway-ref/README.md for how to deploy and obtain
+ *      apps/cloudflare-worker-server/README.md for how to deploy and obtain
  *      them) — either missing prints setup instructions and returns cleanly,
  *      **before** any HTTP request or model call is made. This repo's
  *      checkout has no deployed gateway, so this section is expected to stop
@@ -168,8 +169,9 @@ async function realGatewaySection(): Promise<void> {
   if (url === undefined || url.length === 0 || token === undefined || token.length === 0) {
     console.log(
       "[nimbo example] NIMBO_CF_GATEWAY_URL/NIMBO_CF_GATEWAY_TOKEN are not fully set — skipping the real-gateway section.\n" +
-        "Stand up your own gateway first, using examples/cloudflare-gateway-ref/ as reference (see that directory's README — Workers Paid plan required, no " +
-        'free tier), then fill both values in per the "Cloudflare Sandbox gateway" section of ' +
+        "Deploy apps/cloudflare-worker-server as your gateway first (see that project's README — Workers Paid plan required, no " +
+        "free tier; NIMBO_CF_GATEWAY_URL must include the /gateway prefix, e.g. https://<worker>.workers.dev/gateway), then fill both values in per the " +
+        '"Cloudflare Sandbox gateway" section of ' +
         ".env.template. No HTTP request is made and no model call happens while either is missing.",
     );
     return;
@@ -177,7 +179,7 @@ async function realGatewaySection(): Promise<void> {
   const sandboxId = process.env.NIMBO_CF_SANDBOX_ID?.trim();
 
   // No SDK, no create()/kill() — the gateway's `getSandbox()` wiring (see
-  // examples/cloudflare-gateway-ref/index.ts) owns the sandbox's lifecycle.
+  // apps/cloudflare-worker-server/src/index.ts) owns the sandbox's lifecycle.
   const workspace = cloudflareWorkspace({
     url,
     token,

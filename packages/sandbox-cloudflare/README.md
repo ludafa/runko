@@ -17,10 +17,10 @@ pnpm add @nimbo/sandbox-cloudflare
 
 ## 网关部署
 
-先把网关部署到你自己的 Cloudflare 账号（需要 Workers Paid 计划，无免费层）。一份可照抄的参考实现（`index.ts`+`wrangler.jsonc`+`Dockerfile` + 部署步骤）见 [examples/cloudflare-gateway-ref/](../../examples/cloudflare-gateway-ref/README.md)——它是 BYO 参考料（自备 CF 环境、拷进你自己的 wrangler 项目部署），本包不发布也不维护一个可原地部署的模板。核心装配只有几行：
+先把网关部署到你自己的 Cloudflare 账号（需要 Workers Paid 计划，无免费层）。一个完整可跑可部署的参考项目见 [apps/cloudflare-worker-server/](../../apps/cloudflare-worker-server/README.md)——自备 CF 账号后 `pnpm --filter @nimbo-chat/cloudflare-worker-server deploy` 即可部署；本包自身只发布 `createSandboxGateway` 这层纯函数，网关的部署形态维护在该项目里。核心装配只有几行：
 
 ```ts
-// 你的 wrangler 项目的 Worker 入口（见 examples/cloudflare-gateway-ref/index.ts）
+// 你的 wrangler 项目的 Worker 入口（见 apps/cloudflare-worker-server/src/index.ts）
 import { getSandbox } from "@cloudflare/sandbox";
 import { createSandboxGateway } from "@nimbo/sandbox-cloudflare/worker";
 
@@ -54,7 +54,7 @@ console.log(result.finalResponse);
 
 没有 `Sandbox` 风格的 SDK 对象需要创建/销毁——沙盒生命周期由宿主的 wrangler 项目（`getSandbox()` 那一行）管理，不由这个客户端管理。
 
-完整可跑示例（含**零部署**的进程内 client → gateway → fake sandbox 完整协议往返演示）见 [examples/11-sandbox-cloudflare.ts](../../examples/11-sandbox-cloudflare.ts)。
+完整可跑示例（含**零部署**的进程内 client → gateway → fake sandbox 完整协议往返演示）见 [examples/src/11-sandbox-cloudflare.ts](../../examples/src/11-sandbox-cloudflare.ts)。
 
 ## 结构化接口 / BYO
 
@@ -78,4 +78,4 @@ function createSandboxGateway(opts: { token: string; getSandbox: (sandboxId: str
 - **`readdir`/`stat` 对 symlink 与其他非常规条目一律归一为 `"file"`**——真实沙盒文件系统没有 `MemoryFS` 那种"reference"概念。
 - **`mtime` 精度是容器真实的文件修改时间**（常见是秒级精度），不是 `MemoryFS` 那种毫秒级递增时间戳。
 - **每次 NimboFS/NimboExec 调用都是一次 HTTP 往返**（经 Durable Object，几十到几百毫秒）——扫描类操作（globbing 大目录树、grep-like 搜索）优先用一条 bash 命令（`find`/`grep`），而不是逐个文件工具调用。
-- **沙盒生命周期（idle 睡眠、重启、过期）由宿主的 wrangler 项目管理**，不由这个客户端/网关管理——沙盒不可达时以网关错误的形式从 `exec()`/文件方法浮出，宿主负责唤醒或重建沙盒。沙盒磁盘本身是临时的：Durable Object idle 睡眠（默认 10 分钟）后文件系统丢失（见 [examples/cloudflare-gateway-ref/README.md](../../examples/cloudflare-gateway-ref/README.md)），长期数据需要宿主自己接 R2 backup，v1 网关不代理这一层。
+- **沙盒生命周期（idle 睡眠、重启、过期）由宿主的 wrangler 项目管理**，不由这个客户端/网关管理——沙盒不可达时以网关错误的形式从 `exec()`/文件方法浮出，宿主负责唤醒或重建沙盒。沙盒磁盘本身是临时的：Durable Object idle 睡眠（默认 10 分钟）后文件系统丢失（见 [apps/cloudflare-worker-server/README.md](../../apps/cloudflare-worker-server/README.md)），长期数据需要宿主自己接 R2 backup，v1 网关不代理这一层。

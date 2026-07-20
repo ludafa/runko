@@ -17,3 +17,9 @@ apps/node-server/data.db
 
 # Claude Code 临时产物
 .tmp/
+
+# wrangler 本地密钥（apps/cloudflare-worker-server 等 Worker 项目）
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+.wrangler/

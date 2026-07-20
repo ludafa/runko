@@ -45,7 +45,7 @@ pnpm --filter @nimbo/examples example 01        # 跑 01 号（或 cd examples &
 - **不是什么**：
   - **不是自动化测试套件**。示例脚本不进 vitest、不做断言式回归——它们的价值是「跑起来看效果」。（真正的回归测试在各包 `test/` 下。原 13 号是唯一一个 e2e 测试，已迁至 `@nimbo-chat/node-server`，见 [tech/examples §5](../tech/examples.md)。）
   - **不再追求「发布后消费姿态」的严格复刻**。旧 `setup-node-modules.mjs` 想用手工符号链接模拟 `pnpm add @nimbo/sdk` 的最终布局；现放弃这个目标，换成真实 workspace 成员化——import 语句本身仍是裸名 `@nimbo/sdk`（消费姿态在 import 层面保留），但依赖搭建交给 pnpm。
-  - **不为 Cloudflare 提供"拎走即部署"的网关模板**。11 号真机段要连真实 CF 沙盒确实得先立一个 Worker（CF 沙盒只能从 Worker 内访问），但那是**自备环境（BYO）**：我们只给一份参考实现 [`examples/cloudflare-gateway-ref/`](../../examples/cloudflare-gateway-ref/README.md)（`index.ts`+`wrangler.jsonc`+`Dockerfile`，无 `package.json`、不安装/不发布），你自备 CF 账号、拷进自己的 wrangler 项目部署。不追求一个由我们维护、可原地 `wrangler deploy` 的产品化模板。
+  - **不在 examples 内维护 Cloudflare 网关**。11 号真机段要连真实 CF 沙盒确实得先立一个 Worker（CF 沙盒只能从 Worker 内访问）；这部分能力现已整体搬到独立 workspace 成员 [`apps/cloudflare-worker-server`](../../apps/cloudflare-worker-server/README.md)——一个**完整可 `wrangler deploy` 的示例项目**（同时扮演「进程内驱动真实 CF 沙盒」与「对外 BYO 网关端点 `ALL /gateway/*`，供任意 Node 机器的 `cloudflareWorkspace({ url, token })` 连入」两个角色），不再是 examples 下一份不完整的参考料。「拎走即部署的网关模板」这个非目标因此不再成立，但用它仍需**自备 CF 账号 + Workers Paid 计划**（CF 沙盒无免费层）——它是一个完整示例项目，不是由我们代管的托管服务。边界说明见 [tech/examples §6](../tech/examples.md)。
 
 ## 4. 成功标准
 

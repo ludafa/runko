@@ -14,8 +14,8 @@ packages:
   # 是 `--filter ./packages/*`，本地只查核心包、不含 examples）；刻意不定义
   # build/test，故 pnpm -r 的这两步扫到 examples 会自动跳过。
   # 不带 /*——examples 根自身就是那个 workspace 成员（其 src/ 是示例源码）。
-  # 子目录 cloudflare-gateway-ref/ 是 11 号真机段的 BYO 网关参考料，没有
-  # package.json，本就不会被当成 workspace 成员。
+  # 11 号真机段需要的那个 CF 网关不在这里：它已并入 apps/cloudflare-worker-server
+  # （那是个完整的 workspace 成员，见 docs/tech/cloudflare-worker-server.md）。
   - "examples"
 
 # just-bash 的可选依赖（zstd/xz 压缩格式的原生绑定，tar/gzip 之外的小众格式）：
@@ -28,6 +28,10 @@ allowBuilds:
   esbuild: true
   msw: true
   es5-ext: true
+  # apps/cloudflare-worker-server：wrangler 的本地 Workers 运行时（workerd 是 workerd 二进制，
+  # sharp 是其图片处理依赖）。同上——放行的是 apps 侧消费依赖，不影响发布的 @nimbo/* 包。
+  workerd: true
+  sharp: true
 
 # P12：seed 项目的 vite 版本钉子（apps/web 用 rolldown-vite；packages/* 无 vite 依赖，不受影响）
 overrides:

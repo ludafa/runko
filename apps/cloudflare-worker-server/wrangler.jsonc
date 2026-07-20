@@ -1,0 +1,37 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "nimbo-cloudflare-worker-server",
+  "main": "src/index.ts",
+  // nodejs_compat + 较新的 compat date：与 @cloudflare/sandbox 官方最小示例的
+  // 装配保持一致。
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  // Sandbox Durable Object + 其容器。Dockerfile 的镜像 tag 必须与安装的
+  // @cloudflare/sandbox 版本一致（0.12.3）——版本错配是这个 SDK 最常见的
+  // 疑难运行时错误来源。
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "./Dockerfile",
+      "instance_type": "lite",
+      "max_instances": 1
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "Sandbox",
+        "name": "Sandbox"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "new_sqlite_classes": ["Sandbox"],
+      "tag": "v1"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "name": "@nimbo-chat/cloudflare-worker-server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "示例：nimbo 服务端跑在 Cloudflare Worker 里——进程内直连驱动真实 CF Sandbox，同时对外提供 BYO 网关端点",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/deepseek": "^3.0.7",
+    "@cloudflare/sandbox": "catalog:",
+    "@nimbo/sandbox-cloudflare": "workspace:*",
+    "@nimbo/sdk": "workspace:*",
+    "ai": "catalog:",
+    "hono": "^4.12.16",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260601.0",
+    "typescript": "catalog:",
+    "wrangler": "^4.112.0"
+  }
+}

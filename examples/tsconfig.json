@@ -22,10 +22,6 @@
   // keeps node_modules/ out of the program automatically, no `exclude` needed:
   // pnpm populates a real one here (workspace symlinks + third-party deps),
   // whose bundled `.ts` sources must not be pulled in — it sits outside `src/`
-  // and `run.ts`. It also keeps cloudflare-gateway-ref/ out: that folder is a
-  // BYO reference (index.ts + wrangler.jsonc + Dockerfile, no package.json,
-  // never installed) whose index.ts imports `@cloudflare/sandbox` — which
-  // loads only inside workerd and this workspace never installs. It sits
-  // outside `src/`, so narrowing the include excludes it with no `exclude`.
+  // and `run.ts`.
   "include": ["src/**/*.ts", "run.ts"]
 }
