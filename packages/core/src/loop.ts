@@ -940,6 +940,24 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<NimboChunk,
   let lastAssistantMessage: NimboUIMessage | undefined;
 
   for (let stepIndex = 1; stepIndex <= opts.maxTurnsPerRun; stepIndex++) {
+    // Checkpoint 0（宿主中止，docs/tech/turn-abort.md §2）：**绝不开始新的一步**。
+    // 一步*之内*的中止不靠这里——`abortSignal` 已经透传给 `streamText`（模型流被
+    // 掐断、其 promise reject）与 `ToolContext.abortSignal`（工具自己收尾），两者
+    // 都落进下面那个 catch，`abortSignal.aborted` 为真时同样归成
+    // `code: "aborted"`；这里补的是 catch 覆盖不到的一种情形：工具执行被中止后
+    // 本步是**正常收尾**的（"失败即 ExecResult"，工具不抛），于是循环会照常进入
+    // 下一步、白打一次模型调用，直到那次调用因 already-aborted 才抛错停下。有了
+    // 这个检查，停止时机就是 nimbo 自己的确定性行为（"下一步绝不开始"），不再
+    // 依赖第三方库对已 abort signal 的处理细节，也不多花那一次调用。
+    if (abortSignal.aborted) {
+      const error: NimboError = {
+        code: "aborted",
+        message: "Turn aborted by the host before this step began.",
+      };
+      yield finalizeTurn({ messages: opts.messages, lastAssistantMessage, turn: opts.session.turn, turnStartedAt, turnMessagesStart, usage, status: statusForError(error), error });
+      return { finalResponse, usage };
+    }
+
     // Checkpoint A：先 drain steer 队列再估算上下文，保证注入的消息计入预算。
     yield* drainSteerMessages(opts.drainSteers, opts.messages);
 

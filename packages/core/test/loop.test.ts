@@ -948,6 +948,61 @@ describe("runTurn", () => {
     expect(messages).toHaveLength(2);
   });
 
+  it("abort during a tool execution: the turn stops at the next step boundary without another model call (docs/tech/turn-abort.md §2)", async () => {
+    const controller = new AbortController();
+
+    // 「用户在工具跑到一半时按了停止」：工具自己以成功/失败**正常收尾**（"失败即
+    // ExecResult"，不抛），所以这一步是正常结束的——若没有 step 边界的 abort 检查，
+    // loop 会照常进入第二步、白打一次模型调用。
+    const tool: Tool = {
+      description: "d",
+      inputSchema: z.object({}),
+      execute: () => {
+        controller.abort(new Error("stopped by the user"));
+        return "partial output";
+      },
+    };
+
+    const model = mockModel(() => ({
+      doStream: [
+        {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: "stream-start", warnings: [] },
+              { type: "tool-call", toolCallId: "call_1", toolName: "slow", input: "{}" },
+              { type: "finish", finishReason: { unified: "tool-calls", raw: undefined }, usage },
+            ],
+            initialDelayInMs: null,
+            chunkDelayInMs: null,
+          }),
+        },
+      ],
+    }));
+    const doStreamSpy = vi.spyOn(model, "doStream");
+
+    const messages: NimboUIMessage[] = [userTextMessage("u1", "hi")];
+    const { chunks } = await drainTurn(
+      runTurn(turnOptions(model, { messages, tools: { slow: tool }, signal: controller.signal })),
+    );
+
+    // 只调过一次模型——第二步从未开始（本检查的全部意义）。`doStream` 的 mock 也只
+    // 配了一份响应，所以真跑第二步会以另一种方式炸掉，双重保险。
+    expect(doStreamSpy).toHaveBeenCalledTimes(1);
+
+    const metadataChunks = chunksOfType(chunks, "message-metadata");
+    expect(metadataChunks).toHaveLength(1);
+    expect(metadataChunks[0]?.messageMetadata.status).toBe("interrupted");
+    expect(metadataChunks[0]?.messageMetadata.error?.code).toBe("aborted");
+
+    // 已产出的东西全部留着（停止不是撤销）：那次工具调用照常结算成 output-available，
+    // 收尾 metadata 落在这一步自己的 assistant 消息上，不新造孤儿占位消息。
+    expect(allToolParts(messages)).toEqual([
+      { type: "tool-slow", toolCallId: "call_1", state: "output-available", input: {}, output: "partial output" },
+    ]);
+    expect(messages).toHaveLength(2);
+    expect(lastAssistantMessage(messages)?.metadata?.status).toBe("interrupted");
+  });
+
   it("provider error (not abort-related): message-metadata status:'failed', error.code:'provider_error' carries the underlying message", async () => {
     const model = mockModel(() => ({
       doStream: async () => {
