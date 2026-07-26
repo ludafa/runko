@@ -34,6 +34,15 @@ export interface PendingUserEcho {
   text: string;
   /** `messages.length` at the moment this was sent (`use-chat-messages.ts`'s `sendMessage`) — anchors where it renders relative to the materialized ledger, since it briefly has no wire position of its own yet (until the real `MessageFrame` arrives and pops it — that hook's own file header). */
   afterMessageCount: number;
+  /**
+   * 这条回显来自 [steer 中途插话](../../../../../docs/terms.md)（而不是「起新一轮」）。
+   *
+   * 两者的等待含义不同，界面要说清：起新一轮的回显几乎立刻就被真实消息顶替；
+   * 插话的真实注入点是 core 的**下一个 step 边界**，当前工具跑得久就可能等上
+   * 几十秒。所以插话回显要标成「待注入」并压暗——它还没被 agent 看到，画成
+   * 一条正常指令是在撒谎。
+   */
+  steered?: boolean;
 }
 
 export type RenderEntry =

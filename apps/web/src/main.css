@@ -157,6 +157,19 @@
   letter-spacing: -0.02em;
 }
 
+/* 动效总开关：一处兜底覆盖全部组件（含 ai-elements 自带的 slide/fade），
+   组件里不再逐个判断。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* Soft hairline + dotted backdrop for editorial surfaces. */
 @utility bg-grain {
   background-image:
@@ -168,4 +181,30 @@
   background-size: 24px 24px;
   background-position: 0 0;
   opacity: 0.06;
+}
+
+/* tiptap composer（docs/tech/composer-skill-mention.md §2.4）。三条都是**必需**的
+   接线，不是修饰：
+
+   1. `.tiptap` 的 Placeholder：扩展本身只往空段落上写一个 `data-placeholder` 属性，
+      文字要靠这条伪元素才看得见——不写就是「输入框没有提示文案」。
+   2. 高度：ProseMirror 的段落自带 margin，不清掉会把单行输入框顶出一截空白。
+   3. skill 提及标记块：`user-select: none` 让它整体选中/整体删除，
+      `white-space: nowrap` 防止长 skill 名被折行拆成两半——这正是换 tiptap 想要
+      的「原子块」观感。 */
+.tiptap p {
+  margin: 0;
+}
+
+.tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--color-muted-foreground);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+.tiptap [data-type='mention'] {
+  white-space: nowrap;
+  user-select: none;
 }

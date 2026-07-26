@@ -13,7 +13,7 @@ export const postApiChatConversationsIdMessagesPathParamsSchema = z.object({
 });
 
 /**
- * @description Accepted — see `mode` (\"started\" | \"steered\"); poll/stream `GET .../stream` for its events
+ * @description Accepted — see `mode` (\"started\" | \"steered\" | \"queued\"); poll/stream `GET .../stream` for its events
  */
 export const postApiChatConversationsIdMessages202Schema = z.lazy(
   () => startTurnAckSchema,
@@ -34,7 +34,7 @@ export const postApiChatConversationsIdMessages404Schema = z.lazy(
 );
 
 /**
- * @description A turn is already in progress for this session and could not be steered either (narrow race — the turn ended between the steer attempt and the fallback start)
+ * @description Either the 待发队列 is full (docs/features/steer-and-queue.md §2.3 — nothing is ever silently dropped), or a turn was already in progress and could not be steered either (narrow race — the turn ended between the steer attempt and the fallback start)
  */
 export const postApiChatConversationsIdMessages409Schema = z.lazy(
   () => apiErrorSchema,

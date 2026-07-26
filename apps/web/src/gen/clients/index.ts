@@ -1,3 +1,5 @@
+export { deleteApiChatConversationsIdQueue } from './deleteApiChatConversationsIdQueue.ts';
+export { deleteApiChatConversationsIdQueueMessageid } from './deleteApiChatConversationsIdQueueMessageid.ts';
 export { getApiChatConversations } from './getApiChatConversations.ts';
 export { getApiChatConversationsId } from './getApiChatConversationsId.ts';
 export { getApiChatConversationsIdEvents } from './getApiChatConversationsIdEvents.ts';
@@ -5,6 +7,7 @@ export { getApiChatConversationsIdStream } from './getApiChatConversationsIdStre
 export { getApiChatConversationsIdTurnsTurnTelemetry } from './getApiChatConversationsIdTurnsTurnTelemetry.ts';
 export { getApiNotes } from './getApiNotes.ts';
 export { postApiChatConversations } from './postApiChatConversations.ts';
+export { postApiChatConversationsIdAbort } from './postApiChatConversationsIdAbort.ts';
 export { postApiChatConversationsIdApprovalsCallid } from './postApiChatConversationsIdApprovalsCallid.ts';
 export { postApiChatConversationsIdMessages } from './postApiChatConversationsIdMessages.ts';
 export { postApiChatConversationsIdQuestionsCallid } from './postApiChatConversationsIdQuestionsCallid.ts';

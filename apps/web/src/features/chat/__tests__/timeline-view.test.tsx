@@ -7,7 +7,7 @@ import { TimelineView } from '../components/timeline-view';
 describe('TimelineView — empty state', () => {
   it('renders the empty-state copy when there are no messages and no pending echoes', () => {
     render(<TimelineView messages={[]} />);
-    expect(screen.getByText('还没有消息')).toBeInTheDocument();
+    expect(screen.getByText('这条分支还没有指令')).toBeInTheDocument();
   });
 
   it('a pending echo alone (no materialized messages yet) is enough to skip the empty state', () => {
@@ -338,6 +338,32 @@ describe('TimelineView — turn-stats / turn-failed bar placement', () => {
     expect(screen.getByTestId('turn-failed-bar')).toBeInTheDocument();
     expect(screen.getByText('模型服务超时')).toBeInTheDocument();
     expect(screen.queryByTestId('turn-stats-button')).not.toBeInTheDocument();
+  });
+
+  it('一轮被[停止](../../../../../docs/terms.md)（status interrupted / code aborted）走中性的「已停止」标记，不是红色失败条，也不把 core 那句英文 message 抛给用户', () => {
+    const messages: NimboUIMessage[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          { type: 'text', text: '做到一半', state: 'done' },
+        ],
+        metadata: {
+          status: 'interrupted',
+          error: { code: 'aborted', message: 'Turn stopped by the user.' },
+        },
+      },
+    ];
+    render(<TimelineView messages={messages} />);
+    expect(screen.getByTestId('turn-stopped-bar')).toBeInTheDocument();
+    expect(screen.getByText('已停止')).toBeInTheDocument();
+    expect(screen.queryByTestId('turn-failed-bar')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Turn stopped by the user.'),
+    ).not.toBeInTheDocument();
+    // 已产出的内容照旧留在时间线上（停止不是撤销）。
+    expect(screen.getByText('做到一半')).toBeInTheDocument();
   });
 
   it('a "turn signal" placeholder message (empty parts, only metadata) renders just the trailing bar, no bubble', () => {

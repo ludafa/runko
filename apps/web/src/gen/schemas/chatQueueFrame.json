@@ -1,0 +1,21 @@
+{
+  "type": "object",
+  "properties": {
+    "queue": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "text": { "type": "string", "minLength": 1 },
+          "userId": { "type": "string" },
+          "createdAt": { "type": "integer" }
+        },
+        "required": ["id", "text", "userId", "createdAt"],
+        "x-readme-ref-name": "QueuedMessage"
+      }
+    }
+  },
+  "required": ["queue"],
+  "x-readme-ref-name": "ChatQueueFrame"
+}

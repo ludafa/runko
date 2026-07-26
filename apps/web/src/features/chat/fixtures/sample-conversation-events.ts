@@ -1,7 +1,7 @@
 /**
  * Rebuilt for the P13-5-4/P13-5-5 UIMessage-ledger migration (docs/tech/single-ledger.md §5/§6) — this fixture used to record a
  * `ChatStreamEnvelope[]` run against the retired `SessionEvent`/`SessionItem`
- * wire (see git history); it now exports full-conversation `ChatReplayFrame[]`
+ * wire (see git history); it now exports full-conversation `LedgerFrame[]`
  * scenarios built from `../__tests__/helpers/nimbo-chunks`'s factories,
  * covering the two human-in-the-loop interaction shapes docs/tech/single-ledger.md §6 defines
  * (a gated tool call that needs `review`, and an `ask-user` question) plus a
@@ -33,9 +33,9 @@ import {
   turnEndChunk,
   userMessage,
 } from '../__tests__/helpers/nimbo-chunks';
-import type { ChatReplayFrame } from '../schema';
+import type { LedgerFrame } from '../schema';
 
-function maxSeq(frames: readonly ChatReplayFrame[]): number {
+function maxSeq(frames: readonly LedgerFrame[]): number {
   return frames.reduce(
     (max, frame) => (frame.seq !== undefined ? Math.max(max, frame.seq) : max),
     0,
@@ -46,7 +46,7 @@ function maxSeq(frames: readonly ChatReplayFrame[]): number {
  * Interaction 1: a plain text-only turn, no tool calls — the simplest shape,
  * one step, `finishReason: 'stop'`.
  */
-export const plainTextTurnFrames: ChatReplayFrame[] = toChunkEnvelopes([
+export const plainTextTurnFrames: LedgerFrame[] = toChunkEnvelopes([
   startChunk('msg-1'),
   startStepChunk(),
   textStartChunk('msg-1-text'),
@@ -64,7 +64,7 @@ export const plainTextTurnFrames: ChatReplayFrame[] = toChunkEnvelopes([
  * approved, tool executes, then a second step wraps up with closing text.
  * Turn metadata lands on the second (last) assistant message.
  */
-export const approvalTurnFrames: ChatReplayFrame[] = toChunkEnvelopes([
+export const approvalTurnFrames: LedgerFrame[] = toChunkEnvelopes([
   startChunk('msg-2'),
   startStepChunk(),
   textStartChunk('msg-2-text'),
@@ -96,7 +96,7 @@ export const approvalTurnFrames: ChatReplayFrame[] = toChunkEnvelopes([
  * over the tail well after the pending state was first seen (docs/tech/single-ledger.md §6,
  * `QuestionCard`'s pending/answered states).
  */
-export const askUserPendingFrames: ChatReplayFrame[] = toChunkEnvelopes([
+export const askUserPendingFrames: LedgerFrame[] = toChunkEnvelopes([
   startChunk('msg-4'),
   startStepChunk(),
   toolInputAvailableChunk('call-ask-1', 'ask-user', {
@@ -106,7 +106,7 @@ export const askUserPendingFrames: ChatReplayFrame[] = toChunkEnvelopes([
   finishStepChunk(),
 ]);
 
-export const askUserAnsweredFrames: ChatReplayFrame[] = toChunkEnvelopes(
+export const askUserAnsweredFrames: LedgerFrame[] = toChunkEnvelopes(
   [
     toolOutputAvailableChunk('call-ask-1', '深色'),
     finishChunk('stop'),
@@ -115,7 +115,7 @@ export const askUserAnsweredFrames: ChatReplayFrame[] = toChunkEnvelopes(
   maxSeq(askUserPendingFrames),
 );
 
-export const askUserTurnFrames: ChatReplayFrame[] = [
+export const askUserTurnFrames: LedgerFrame[] = [
   ...askUserPendingFrames,
   ...askUserAnsweredFrames,
 ];
@@ -129,7 +129,7 @@ export const askUserTurnFrames: ChatReplayFrame[] = [
  * materialization on replay — these are hand-assembled already-finished
  * `NimboUIMessage`s directly.
  */
-export const gcdReplayFrames: ChatReplayFrame[] = [
+export const gcdReplayFrames: LedgerFrame[] = [
   messageFrame(1, userMessage('msg-5-user', '现在几点了？')),
   messageFrame(
     2,

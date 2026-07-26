@@ -1,7 +1,12 @@
+export type {
+  AbortTurnAck,
+  AbortTurnAckOkEnumKey,
+} from './types/AbortTurnAck.ts';
 export type { ApiError } from './types/ApiError.ts';
 export type { ApprovalAck, ApprovalAckOkEnumKey } from './types/ApprovalAck.ts';
 export type { ChatChunkEnvelope } from './types/ChatChunkEnvelope.ts';
 export type { ChatMessageFrame } from './types/ChatMessageFrame.ts';
+export type { ChatQueueFrame } from './types/ChatQueueFrame.ts';
 export type {
   Conversation,
   ConversationProviderEnumKey,
@@ -13,6 +18,22 @@ export type {
   CreateConversationInputProviderEnumKey,
 } from './types/CreateConversationInput.ts';
 export type { CreateNoteInput } from './types/CreateNoteInput.ts';
+export type {
+  DeleteApiChatConversationsIdQueue200,
+  DeleteApiChatConversationsIdQueue401,
+  DeleteApiChatConversationsIdQueue404,
+  DeleteApiChatConversationsIdQueueMutation,
+  DeleteApiChatConversationsIdQueueMutationResponse,
+  DeleteApiChatConversationsIdQueuePathParams,
+} from './types/DeleteApiChatConversationsIdQueue.ts';
+export type {
+  DeleteApiChatConversationsIdQueueMessageid200,
+  DeleteApiChatConversationsIdQueueMessageid401,
+  DeleteApiChatConversationsIdQueueMessageid404,
+  DeleteApiChatConversationsIdQueueMessageidMutation,
+  DeleteApiChatConversationsIdQueueMessageidMutationResponse,
+  DeleteApiChatConversationsIdQueueMessageidPathParams,
+} from './types/DeleteApiChatConversationsIdQueueMessageid.ts';
 export type {
   GetApiChatConversations200,
   GetApiChatConversations401,
@@ -70,6 +91,15 @@ export type {
   PostApiChatConversationsMutationResponse,
 } from './types/PostApiChatConversations.ts';
 export type {
+  PostApiChatConversationsIdAbort200,
+  PostApiChatConversationsIdAbort401,
+  PostApiChatConversationsIdAbort404,
+  PostApiChatConversationsIdAbort409,
+  PostApiChatConversationsIdAbortMutation,
+  PostApiChatConversationsIdAbortMutationResponse,
+  PostApiChatConversationsIdAbortPathParams,
+} from './types/PostApiChatConversationsIdAbort.ts';
+export type {
   PostApiChatConversationsIdApprovalsCallid200,
   PostApiChatConversationsIdApprovalsCallid401,
   PostApiChatConversationsIdApprovalsCallid404,
@@ -109,7 +139,12 @@ export type {
   PostApprovalInput,
   PostApprovalInputBehaviorEnumKey,
 } from './types/PostApprovalInput.ts';
-export type { PostChatMessageInput } from './types/PostChatMessageInput.ts';
+export type {
+  PostChatMessageInput,
+  PostChatMessageInputIntentEnumKey,
+} from './types/PostChatMessageInput.ts';
+export type { QueuedMessage } from './types/QueuedMessage.ts';
+export type { SkillSummary } from './types/SkillSummary.ts';
 export type {
   StartTurnAck,
   StartTurnAckModeEnumKey,
@@ -117,6 +152,8 @@ export type {
 } from './types/StartTurnAck.ts';
 export type { TurnTelemetry } from './types/TurnTelemetry.ts';
 export type { TurnTelemetryEvent } from './types/TurnTelemetryEvent.ts';
+export { deleteApiChatConversationsIdQueue } from './clients/deleteApiChatConversationsIdQueue.ts';
+export { deleteApiChatConversationsIdQueueMessageid } from './clients/deleteApiChatConversationsIdQueueMessageid.ts';
 export { getApiChatConversations } from './clients/getApiChatConversations.ts';
 export { getApiChatConversationsId } from './clients/getApiChatConversationsId.ts';
 export { getApiChatConversationsIdEvents } from './clients/getApiChatConversationsIdEvents.ts';
@@ -124,25 +161,44 @@ export { getApiChatConversationsIdStream } from './clients/getApiChatConversatio
 export { getApiChatConversationsIdTurnsTurnTelemetry } from './clients/getApiChatConversationsIdTurnsTurnTelemetry.ts';
 export { getApiNotes } from './clients/getApiNotes.ts';
 export { postApiChatConversations } from './clients/postApiChatConversations.ts';
+export { postApiChatConversationsIdAbort } from './clients/postApiChatConversationsIdAbort.ts';
 export { postApiChatConversationsIdApprovalsCallid } from './clients/postApiChatConversationsIdApprovalsCallid.ts';
 export { postApiChatConversationsIdMessages } from './clients/postApiChatConversationsIdMessages.ts';
 export { postApiChatConversationsIdQuestionsCallid } from './clients/postApiChatConversationsIdQuestionsCallid.ts';
 export { postApiNotes } from './clients/postApiNotes.ts';
+export { abortTurnAckOkEnum } from './types/AbortTurnAck.ts';
 export { approvalAckOkEnum } from './types/ApprovalAck.ts';
 export { conversationProviderEnum } from './types/Conversation.ts';
 export { conversationStatusEnum } from './types/Conversation.ts';
 export { createConversationInputProviderEnum } from './types/CreateConversationInput.ts';
 export { postApprovalInputBehaviorEnum } from './types/PostApprovalInput.ts';
+export { postChatMessageInputIntentEnum } from './types/PostChatMessageInput.ts';
 export { startTurnAckModeEnum } from './types/StartTurnAck.ts';
 export { startTurnAckOkEnum } from './types/StartTurnAck.ts';
+export { abortTurnAckSchema } from './zod/abortTurnAckSchema.ts';
 export { apiErrorSchema } from './zod/apiErrorSchema.ts';
 export { approvalAckSchema } from './zod/approvalAckSchema.ts';
 export { chatChunkEnvelopeSchema } from './zod/chatChunkEnvelopeSchema.ts';
 export { chatMessageFrameSchema } from './zod/chatMessageFrameSchema.ts';
+export { chatQueueFrameSchema } from './zod/chatQueueFrameSchema.ts';
 export { conversationEventsListSchema } from './zod/conversationEventsListSchema.ts';
 export { conversationSchema } from './zod/conversationSchema.ts';
 export { createConversationInputSchema } from './zod/createConversationInputSchema.ts';
 export { createNoteInputSchema } from './zod/createNoteInputSchema.ts';
+export {
+  deleteApiChatConversationsIdQueueMessageid200Schema,
+  deleteApiChatConversationsIdQueueMessageid401Schema,
+  deleteApiChatConversationsIdQueueMessageid404Schema,
+  deleteApiChatConversationsIdQueueMessageidMutationResponseSchema,
+  deleteApiChatConversationsIdQueueMessageidPathParamsSchema,
+} from './zod/deleteApiChatConversationsIdQueueMessageidSchema.ts';
+export {
+  deleteApiChatConversationsIdQueue200Schema,
+  deleteApiChatConversationsIdQueue401Schema,
+  deleteApiChatConversationsIdQueue404Schema,
+  deleteApiChatConversationsIdQueueMutationResponseSchema,
+  deleteApiChatConversationsIdQueuePathParamsSchema,
+} from './zod/deleteApiChatConversationsIdQueueSchema.ts';
 export {
   getApiChatConversationsIdEvents200Schema,
   getApiChatConversationsIdEvents401Schema,
@@ -186,6 +242,14 @@ export {
 export { noteSchema } from './zod/noteSchema.ts';
 export { postAnswerInputSchema } from './zod/postAnswerInputSchema.ts';
 export {
+  postApiChatConversationsIdAbort200Schema,
+  postApiChatConversationsIdAbort401Schema,
+  postApiChatConversationsIdAbort404Schema,
+  postApiChatConversationsIdAbort409Schema,
+  postApiChatConversationsIdAbortMutationResponseSchema,
+  postApiChatConversationsIdAbortPathParamsSchema,
+} from './zod/postApiChatConversationsIdAbortSchema.ts';
+export {
   postApiChatConversationsIdApprovalsCallid200Schema,
   postApiChatConversationsIdApprovalsCallid401Schema,
   postApiChatConversationsIdApprovalsCallid404Schema,
@@ -226,6 +290,8 @@ export {
 } from './zod/postApiNotesSchema.ts';
 export { postApprovalInputSchema } from './zod/postApprovalInputSchema.ts';
 export { postChatMessageInputSchema } from './zod/postChatMessageInputSchema.ts';
+export { queuedMessageSchema } from './zod/queuedMessageSchema.ts';
+export { skillSummarySchema } from './zod/skillSummarySchema.ts';
 export { startTurnAckSchema } from './zod/startTurnAckSchema.ts';
 export { turnTelemetryEventSchema } from './zod/turnTelemetryEventSchema.ts';
 export { turnTelemetrySchema } from './zod/turnTelemetrySchema.ts';

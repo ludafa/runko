@@ -8,6 +8,7 @@
  * SSE-specific streaming path are both fully under our control.
  */
 import {
+  abortTurnAckSchema,
   type ChatReplayFrame,
   type Conversation,
   conversationEventsListSchema,
@@ -15,6 +16,8 @@ import {
   type ConversationProvider,
   conversationSchema,
   parseChatReplayFrame,
+  type QueuedMessage,
+  queueFrameSchema,
   type TurnTelemetryEvent,
   turnTelemetrySchema,
 } from './schema';
@@ -113,16 +116,23 @@ export interface ChatFrameStreamHandlers {
 }
 
 /**
- * `POST /api/chat/conversations/:id/messages` (docs/tech/chat-webapp.md §2.2b): only *starts* a
- * turn (or steers an in-progress one, STEER-3B) — its events arrive
- * separately, over `streamConversationTail`, not this response. Resolves once the
- * server has accepted the turn (202); rejects with `ChatApiError` on a
- * non-2xx response — notably `409` when a turn is already in progress for
- * this conversation and couldn't be steered either.
+ * `POST /api/chat/conversations/:id/messages` (docs/tech/chat-webapp.md §2.2b,
+ * docs/tech/steer-and-queue.md §4.1): only *starts* a turn, *queues* this
+ * message for the next one, or *steers* the in-progress one — its events
+ * arrive separately, over `streamConversationTail`, not this response.
+ *
+ * `intent` 只在**已有进行中的一轮**时才有意义：`'queue'`（默认，省略即此）排队到下
+ * 一轮，`'steer'` 注入当前这一轮。没有进行中的一轮时两者都直接起新一轮——分流完全
+ * 由服务端判定，这里不预判。
+ *
+ * Resolves once the server has accepted it (202); rejects with `ChatApiError`
+ * on a non-2xx response — notably `409` for a full 待发队列, or (窄竞态) a turn
+ * already in progress that couldn't be steered either.
  */
 export async function postChatMessage(
   conversationId: string,
   text: string,
+  intent?: 'queue' | 'steer',
   signal?: AbortSignal,
 ): Promise<void> {
   await requestJson(
@@ -130,10 +140,61 @@ export async function postChatMessage(
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify(intent === undefined ? { text } : { text, intent }),
       signal,
     },
   );
+}
+
+/**
+ * `POST .../abort`（docs/tech/turn-abort.md §3.2）：[停止](../../../../../docs/terms.md)
+ * 进行中的那一轮——中止当前轮 + 清空[待发队列](../../../../../docs/terms.md)，返回清空
+ * 后的队列快照（恒为空数组）。
+ *
+ * resolve 只代表「停止已请求」：真正停下的那一刻由 agent 当时在做什么决定，界面靠直播
+ * 流上那条 `status: 'interrupted'` 的 `message-metadata` 才知道停住了（与审批「不做乐观
+ * 翻转」同一姿态）。`409` = 没有进行中的一轮（含「刚好自己结束了」的窄竞态），
+ * `use-chat-messages.ts` 靠 `ChatApiError.status` 把它当成无事发生。
+ */
+export async function postAbortTurn(
+  conversationId: string,
+  signal?: AbortSignal,
+): Promise<QueuedMessage[]> {
+  const json = await requestJson(
+    `/api/chat/conversations/${encodeURIComponent(conversationId)}/abort`,
+    { method: 'POST', signal },
+  );
+  return abortTurnAckSchema.parse(json).queue;
+}
+
+/**
+ * `DELETE .../queue/:messageId`（docs/tech/steer-and-queue.md §4.2）：删掉一条还没
+ * 发出的[排队](../../../../../docs/terms.md)消息，返回**变更后的完整队列快照**
+ * ——服务端始终是队列的权威，调用方直接用这份快照覆盖本地状态，不做乐观合并（与审批
+ * 「不做乐观翻转」同一姿态）。`404` = 这条已经不在队列里了（已出队成一轮 / 已删）。
+ */
+export async function deleteQueuedMessage(
+  conversationId: string,
+  messageId: string,
+  signal?: AbortSignal,
+): Promise<QueuedMessage[]> {
+  const json = await requestJson(
+    `/api/chat/conversations/${encodeURIComponent(conversationId)}/queue/${encodeURIComponent(messageId)}`,
+    { method: 'DELETE', signal },
+  );
+  return queueFrameSchema.parse(json).queue;
+}
+
+/** `DELETE .../queue`（docs/tech/steer-and-queue.md §4.2）：清空队列，同样返回变更后的快照（恒为空数组）。 */
+export async function clearQueuedMessages(
+  conversationId: string,
+  signal?: AbortSignal,
+): Promise<QueuedMessage[]> {
+  const json = await requestJson(
+    `/api/chat/conversations/${encodeURIComponent(conversationId)}/queue`,
+    { method: 'DELETE', signal },
+  );
+  return queueFrameSchema.parse(json).queue;
 }
 
 /**

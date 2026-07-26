@@ -9,6 +9,32 @@
     "provider": { "type": "string", "enum": ["vercel", "e2b"] },
     "status": { "type": "string", "enum": ["active", "sleeping", "expired"] },
     "lastActiveAt": { "type": "string" },
+    "queuedMessages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "text": { "type": "string", "minLength": 1 },
+          "userId": { "type": "string" },
+          "createdAt": { "type": "integer" }
+        },
+        "required": ["id", "text", "userId", "createdAt"],
+        "x-readme-ref-name": "QueuedMessage"
+      }
+    },
+    "availableSkills": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" }
+        },
+        "required": ["name", "description"],
+        "x-readme-ref-name": "SkillSummary"
+      }
+    },
     "createdAt": { "type": "string" }
   },
   "required": [
@@ -20,6 +46,8 @@
     "provider",
     "status",
     "lastActiveAt",
+    "queuedMessages",
+    "availableSkills",
     "createdAt"
   ],
   "x-readme-ref-name": "Conversation"

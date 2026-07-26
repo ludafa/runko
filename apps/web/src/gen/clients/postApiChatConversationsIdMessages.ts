@@ -30,7 +30,7 @@ function getPostApiChatConversationsIdMessagesUrl(
 }
 
 /**
- * @summary Start a turn for this message, or steer an in-progress one (STEER-3B): if the session has a turn running, `text` is injected into it via `Session.steer()` (mode "steered"); otherwise this acquires the sandbox, builds the session, and hands off to the in-process turn runner (mode "started"). Either way, events arrive over `GET .../stream`, not this response
+ * @summary Start a turn, queue this message for the next one, or steer the in-progress turn (docs/tech/steer-and-queue.md §4.1): with no turn running this acquires the sandbox, builds the session and hands off to the in-process turn runner (mode "started"); with one running it either queues `text` onto the conversation’s 待发队列 (mode "queued", the default) or injects it into the running turn via `Session.steer()` (mode "steered", `intent: "steer"`). Either way, events arrive over `GET .../stream`, not this response
  * {@link /api/chat/conversations/:id/messages}
  */
 export async function postApiChatConversationsIdMessages(

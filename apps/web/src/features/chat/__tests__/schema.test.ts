@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  conversationEventsListSchema,
   chatReplayFrameSchema,
+  conversationEventsListSchema,
+  frameSeq,
   isMessageFrame,
   parseChatReplayFrame,
 } from '../schema';
@@ -31,7 +32,7 @@ describe('chatReplayFrameSchema / parseChatReplayFrame', () => {
     const result = parseChatReplayFrame(raw);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.frame.seq).toBeUndefined();
+    expect(frameSeq(result.frame)).toBeUndefined();
     expect(isMessageFrame(result.frame)).toBe(false);
   });
 
@@ -45,7 +46,7 @@ describe('chatReplayFrameSchema / parseChatReplayFrame', () => {
     if (!result.ok) return;
     expect(isMessageFrame(result.frame)).toBe(true);
     if (!isMessageFrame(result.frame)) return;
-    expect(result.frame.seq).toBe(5);
+    expect(frameSeq(result.frame)).toBe(5);
     expect(result.frame.message).toEqual(message);
   });
 
@@ -77,7 +78,7 @@ describe('chatReplayFrameSchema / parseChatReplayFrame', () => {
     const result = parseChatReplayFrame(raw);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.frame.seq).toBe(0);
+    expect(frameSeq(result.frame)).toBe(0);
   });
 });
 

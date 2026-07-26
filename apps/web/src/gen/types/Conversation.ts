@@ -3,6 +3,9 @@
  * Do not edit manually.
  */
 
+import type { QueuedMessage } from './QueuedMessage.ts';
+import type { SkillSummary } from './SkillSummary.ts';
+
 export const conversationProviderEnum = {
   vercel: 'vercel',
   e2b: 'e2b',
@@ -53,6 +56,14 @@ export type Conversation = {
    * @type string
    */
   lastActiveAt: string;
+  /**
+   * @type array
+   */
+  queuedMessages: QueuedMessage[];
+  /**
+   * @type array
+   */
+  availableSkills: SkillSummary[];
   /**
    * @type string
    */

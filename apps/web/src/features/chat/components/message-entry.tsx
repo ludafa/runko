@@ -24,16 +24,23 @@
  * along — `data-tool-timing` itself has no `case` in the switch below and so
  * never renders as an independent card (falls to `default`, rejected by
  * `isNimboToolPart`).
+ *
+ * 呈现层用 ai-elements：`Message`/`MessageContent`/`MessageResponse` 负责气泡与
+ * markdown，工具/推理/计划/审批各自的组件在 `components/` 下（都已改挂 ai-elements）。
  */
 import type { NimboUIMessage } from '@nimbo/core';
+
+import {
+  Message,
+  MessageContent,
+  MessageResponse,
+} from '@/components/ai-elements/message';
 
 import { findToolTiming, isNimboToolPart, toolPartName } from '../timeline';
 import type { PendingApprovalPart } from './approval-card';
 import { ApprovalCard } from './approval-card';
-import { ChatMarkdown } from './chat-markdown';
 import { ErrorBar } from './error-bar';
 import { FileChangeBadges } from './file-change-badges';
-import { Message, MessageContent } from './message';
 import { PlanChecklist } from './plan-checklist';
 import type { QuestionPart } from './question-card';
 import { QuestionCard } from './question-card';
@@ -73,119 +80,109 @@ export function MessageEntry({
       .map((part) => part.text)
       .join('');
     return (
-      <div className="flex w-full flex-col items-end gap-1">
+      <Message from="user">
         {message.metadata?.steered === true && (
-          <span className="text-muted-foreground/70 mr-1 text-[0.65rem] tracking-wide uppercase">
+          <span className="text-muted-foreground ml-auto text-[0.6875rem]">
             插话
           </span>
         )}
-        <Message from="user">
-          <MessageContent from="user">{text}</MessageContent>
-        </Message>
-      </div>
+        <MessageContent>{text}</MessageContent>
+      </Message>
     );
   }
 
   return (
-    <div className="flex w-full flex-col gap-3">
-      {message.parts.map((part, index) => {
-        const key = `${message.id}-${String(index)}`;
-        switch (part.type) {
-          case 'text':
-            return (
-              <Message key={key} from="assistant">
-                <MessageContent from="assistant">
-                  {/* Streamdown renders (possibly still-streaming) markdown —
-                      it tolerates unterminated syntax like half-typed
-                      **bold** or open code fences, which is why it fits an
-                      incremental text part. */}
-                  <ChatMarkdown>{part.text}</ChatMarkdown>
-                  {part.state === 'streaming' && (
-                    <span
-                      aria-hidden="true"
-                      className="bg-foreground/60 ml-0.5 inline-block h-3.5 w-1.5 translate-y-0.5 animate-pulse"
+    <Message from="assistant">
+      <MessageContent>
+        {message.parts.map((part, index) => {
+          const key = `${message.id}-${String(index)}`;
+          switch (part.type) {
+            case 'text':
+              return (
+                // Streamdown renders (possibly still-streaming) markdown — it
+                // tolerates unterminated syntax like half-typed **bold** or
+                // open code fences, which is why it fits an incremental text
+                // part. `MessageResponse` is ai-elements' Streamdown wrapper.
+                <MessageResponse key={key}>{part.text}</MessageResponse>
+              );
+            case 'reasoning':
+              return (
+                <ReasoningBlock
+                  key={key}
+                  text={part.text}
+                  streaming={part.state === 'streaming'}
+                />
+              );
+            case 'data-file-change':
+              return <FileChangeBadges key={key} changes={part.data.changes} />;
+            case 'data-plan-update':
+              return <PlanChecklist key={key} items={part.data.items} />;
+            case 'data-error':
+              return <ErrorBar key={key} message={part.data.message} />;
+            case 'step-start':
+              return null;
+            default: {
+              if (!isNimboToolPart(part)) return null; // file/source-*/dynamic-tool/custom — never produced by nimbo (see @nimbo/core's state.ts NimboUIMessage doc comment)
+
+              // `data-tool-timing` never renders as its own card (no `case` for
+              // it above — falls through here, rejected by `isNimboToolPart`)
+              // — only joined by `toolCallId` into the matching tool call's own
+              // card, `timeline.ts`'s own doc comment.
+              const timing = findToolTiming(message, part.toolCallId);
+
+              if (toolPartName(part) === ASK_USER_TOOL_NAME) {
+                if (
+                  part.state === 'input-available' ||
+                  part.state === 'output-available'
+                ) {
+                  const questionPart: QuestionPart = part;
+                  return (
+                    <QuestionCard
+                      key={key}
+                      part={questionPart}
+                      submitting={submittingCallIds.has(part.toolCallId)}
+                      expired={locallyExpiredCallIds.has(part.toolCallId)}
+                      onAnswer={(answer) => {
+                        onSubmitAnswer(part.toolCallId, answer);
+                      }}
                     />
-                  )}
-                </MessageContent>
-              </Message>
-            );
-          case 'reasoning':
-            return (
-              <ReasoningBlock
-                key={key}
-                text={part.text}
-                streaming={part.state === 'streaming'}
-              />
-            );
-          case 'data-file-change':
-            return <FileChangeBadges key={key} changes={part.data.changes} />;
-          case 'data-plan-update':
-            return <PlanChecklist key={key} items={part.data.items} />;
-          case 'data-error':
-            return <ErrorBar key={key} message={part.data.message} />;
-          case 'step-start':
-            return null;
-          default: {
-            if (!isNimboToolPart(part)) return null; // file/source-*/dynamic-tool/custom — never produced by nimbo (see @nimbo/core's state.ts NimboUIMessage doc comment)
+                  );
+                }
+                return <ToolCallCard key={key} part={part} timing={timing} />;
+              }
 
-            // `data-tool-timing` never renders as its own card (no `case` for
-            // it above — falls through here, rejected by `isNimboToolPart`)
-            // — only joined by `toolCallId` into the matching tool call's own
-            // card, `timeline.ts`'s own doc comment.
-            const timing = findToolTiming(message, part.toolCallId);
-
-            if (toolPartName(part) === ASK_USER_TOOL_NAME) {
-              if (
-                part.state === 'input-available' ||
-                part.state === 'output-available'
-              ) {
-                const questionPart: QuestionPart = part;
+              if (part.state === 'approval-requested') {
+                const approvalPart: PendingApprovalPart = part;
                 return (
-                  <QuestionCard
+                  <ApprovalCard
                     key={key}
-                    part={questionPart}
+                    part={approvalPart}
                     submitting={submittingCallIds.has(part.toolCallId)}
                     expired={locallyExpiredCallIds.has(part.toolCallId)}
-                    onAnswer={(answer) => {
-                      onSubmitAnswer(part.toolCallId, answer);
+                    onDecide={(behavior) => {
+                      onSubmitApproval(part.toolCallId, behavior);
                     }}
                   />
                 );
               }
+
               return <ToolCallCard key={key} part={part} timing={timing} />;
             }
-
-            if (part.state === 'approval-requested') {
-              const approvalPart: PendingApprovalPart = part;
-              return (
-                <ApprovalCard
-                  key={key}
-                  part={approvalPart}
-                  submitting={submittingCallIds.has(part.toolCallId)}
-                  expired={locallyExpiredCallIds.has(part.toolCallId)}
-                  onDecide={(behavior) => {
-                    onSubmitApproval(part.toolCallId, behavior);
-                  }}
-                />
-              );
-            }
-
-            return <ToolCallCard key={key} part={part} timing={timing} />;
           }
-        }
-      })}
-      {message.metadata?.status !== undefined &&
-        (message.metadata.status === 'completed' ?
-          <TurnStatsButton
-            usage={message.metadata.usage ?? {}}
-            durationMs={message.metadata.durationMs}
-            toolDurationMs={message.metadata.toolDurationMs}
-            conversationId={conversationId}
-            turn={message.metadata.turn}
-          />
-        : message.metadata.error !== undefined && (
-            <TurnFailedBar error={message.metadata.error} />
-          ))}
-    </div>
+        })}
+        {message.metadata?.status !== undefined &&
+          (message.metadata.status === 'completed' ?
+            <TurnStatsButton
+              usage={message.metadata.usage ?? {}}
+              durationMs={message.metadata.durationMs}
+              toolDurationMs={message.metadata.toolDurationMs}
+              conversationId={conversationId}
+              turn={message.metadata.turn}
+            />
+          : message.metadata.error !== undefined && (
+              <TurnFailedBar error={message.metadata.error} />
+            ))}
+      </MessageContent>
+    </Message>
   );
 }

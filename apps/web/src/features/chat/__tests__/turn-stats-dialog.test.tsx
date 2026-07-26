@@ -123,6 +123,104 @@ describe('TurnStatsButton — 本轮统计弹窗', () => {
     expect(dialog.textContent).toContain('失败'); // tool-error 标记
   });
 
+  it('渲染「本轮准备」小节：起轮装配分段 + 沙盒走的哪条路 + 到首个响应/首个输出（docs/tech/telemetry.md §2.4）', async () => {
+    fetchMock.mockResolvedValue([
+      {
+        eventType: 'turn-prepare',
+        ts: 1,
+        payloadJson: JSON.stringify({
+          acquireMs: 2100,
+          acquireMode: 'create',
+          touchMs: 287,
+          loadStateMs: 12,
+          buildSessionMs: 604,
+          launchMs: 3016,
+          firstChunkMs: 812,
+        }),
+      },
+      {
+        eventType: 'turn-first-output',
+        ts: 2,
+        payloadJson: JSON.stringify({ firstOutputMs: 2240 }),
+      },
+    ]);
+    const user = userEvent.setup();
+    render(
+      <TurnStatsButton
+        usage={{ totalTokens: 10 }}
+        conversationId="chat-1"
+        turn={2}
+      />,
+    );
+
+    await user.click(screen.getByTestId('turn-stats-button'));
+    const dialog = await screen.findByTestId('turn-stats-dialog');
+    await waitFor(() => {
+      expect(dialog.textContent).toContain('本轮准备');
+    });
+    expect(dialog.textContent).toContain('3.0s'); // 起轮装配总时长
+    expect(dialog.textContent).toContain('2.1s · 重建'); // 沙盒：耗时 + 走的哪条路
+    expect(dialog.textContent).toContain('287ms'); // 续期
+    expect(dialog.textContent).toContain('604ms'); // 建会话
+    expect(dialog.textContent).toContain('12ms'); // 读账本
+    expect(dialog.textContent).toContain('812ms'); // 到首个响应
+    expect(dialog.textContent).toContain('2.2s'); // 到首个输出
+  });
+
+  it('旧记录没有这两条事件时整节不渲染，其余明细照常', async () => {
+    fetchMock.mockResolvedValue(telemetryEvents()); // 只有 model-call/tool-execution
+    const user = userEvent.setup();
+    render(
+      <TurnStatsButton
+        usage={{ totalTokens: 10 }}
+        conversationId="chat-1"
+        turn={1}
+      />,
+    );
+
+    await user.click(screen.getByTestId('turn-stats-button'));
+    const dialog = await screen.findByTestId('turn-stats-dialog');
+    await waitFor(() => {
+      expect(dialog.textContent).toContain('模型调用');
+    });
+    expect(dialog.textContent).not.toContain('本轮准备');
+  });
+
+  it('只有起轮装配事件（一轮还没产出任何模型调用记录）也不算“无遥测数据”', async () => {
+    fetchMock.mockResolvedValue([
+      {
+        eventType: 'turn-prepare',
+        ts: 1,
+        payloadJson: JSON.stringify({
+          acquireMs: 5,
+          acquireMode: 'cache',
+          touchMs: 1,
+          loadStateMs: 1,
+          buildSessionMs: 2,
+          launchMs: 10,
+          firstChunkMs: 20,
+        }),
+      },
+    ]);
+    const user = userEvent.setup();
+    render(
+      <TurnStatsButton
+        usage={{ totalTokens: 10 }}
+        conversationId="chat-1"
+        turn={1}
+      />,
+    );
+
+    await user.click(screen.getByTestId('turn-stats-button'));
+    const dialog = await screen.findByTestId('turn-stats-dialog');
+    await waitFor(() => {
+      expect(dialog.textContent).toContain('本轮准备');
+    });
+    expect(dialog.textContent).toContain('5ms · 缓存命中');
+    expect(dialog.textContent).not.toContain('无遥测数据');
+    expect(dialog.textContent).not.toContain('到首个输出'); // 这一条事件缺席就不出这一行
+  });
+
   it('反复开合不重复拉取（结果缓存在组件里）', async () => {
     fetchMock.mockResolvedValue([]);
     const user = userEvent.setup();

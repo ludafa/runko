@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { ChatReplayFrame } from '../schema';
+import type { ChatReplayFrame, QueuedMessage } from '../schema';
 import { buildRenderEntries } from '../timeline';
 import { useChatMessages } from '../use-chat-messages';
 import { FakeChatFetch } from './helpers/fake-chat-fetch';
@@ -18,6 +18,11 @@ function setup(): FakeChatFetch {
   const fake = new FakeChatFetch();
   vi.stubGlobal('fetch', fake.fetch);
   return fake;
+}
+
+/** 一条[待发队列](../../../../../docs/terms.md)条目（docs/tech/steer-and-queue.md §2.2）。 */
+function queuedMessage(id: string, text: string): QueuedMessage {
+  return { id, text, userId: 'user-1', createdAt: 1_700_000_000_000 };
 }
 
 afterEach(() => {
@@ -550,6 +555,383 @@ describe('useChatMessages — submitApproval / submitAnswer', () => {
     });
 
     expect(fake.answerPosts).toHaveLength(0);
+    stream.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 待发队列（[排队](../../../../../docs/terms.md)，docs/tech/steer-and-queue.md §6）
+// ---------------------------------------------------------------------------
+
+describe('useChatMessages — 待发队列', () => {
+  it('会话详情给的初始队列直接可见；直播流的 QueueFrame 快照随后覆盖它', async () => {
+    const fake = setup();
+    const stream = fake.queueStream();
+    const { result } = renderHook(() =>
+      useChatMessages('sess_1', [], [queuedMessage('q1', '排队中的一条')]),
+    );
+
+    expect(result.current.queuedMessages.map((m) => m.text)).toEqual([
+      '排队中的一条',
+    ]);
+
+    act(() => {
+      // 服务端的权威快照（每条 tail 连上必发一帧）——直接覆盖，不做合并。
+      stream.pushFrame({
+        queue: [
+          queuedMessage('q1', '排队中的一条'),
+          queuedMessage('q2', '又一条'),
+        ],
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.queuedMessages.map((m) => m.text)).toEqual([
+        '排队中的一条',
+        '又一条',
+      ]);
+    });
+    stream.close();
+  });
+
+  it('QueueFrame 不进账本：它既不产生消息，也不占用 seq 续传位', async () => {
+    const fake = setup();
+    const stream = fake.queueStream();
+    const { result } = renderHook(() => useChatMessages('sess_1', []));
+
+    act(() => {
+      stream.pushFrame({ queue: [queuedMessage('q1', '排一条')] });
+    });
+    await waitFor(() => {
+      expect(result.current.queuedMessages).toHaveLength(1);
+    });
+
+    expect(result.current.messages).toEqual([]);
+    stream.close();
+  });
+
+  it('流式中发消息默认带 intent "queue"，显式 steer 则带 "steer"（只有 steer 产生乐观 echo）', async () => {
+    const fake = setup();
+    const stream = fake.queueStream();
+    // 历史以 chunk 收尾 = 挂载时就有进行中的一轮。
+    const { result } = renderHook(() =>
+      useChatMessages('sess_1', [{ seq: 1, chunk: startChunk('m1') }]),
+    );
+
+    act(() => {
+      result.current.sendMessage('排到下一轮');
+    });
+    await waitFor(() => {
+      expect(fake.messagePosts).toHaveLength(1);
+    });
+    expect(fake.messagePosts[0]?.body).toEqual({
+      text: '排到下一轮',
+      intent: 'queue',
+    });
+
+    act(() => {
+      result.current.sendMessage('插进这一轮', 'steer');
+    });
+    await waitFor(() => {
+      expect(fake.messagePosts).toHaveLength(2);
+    });
+    expect(fake.messagePosts[1]?.body).toEqual({
+      text: '插进这一轮',
+      intent: 'steer',
+    });
+
+    // 排队不做乐观 echo（服务端的 QueueFrame 快照会把它回填到待发区，那里就是
+    // 它的可见位置）；steer 做——它的真实注入点是 core 的下一个 step 边界，可能
+    // 等几十秒，在那之前界面上什么都不发生用户会以为按钮没生效
+    //（docs/features/chat-ui.md、2026-07-25）。
+    expect(result.current.pendingUserEchoes).toEqual([
+      // 锚点恒为 MAX_SAFE_INTEGER：`buildRenderEntries` 把越界锚点夹到末尾，
+      // 于是这条「待注入」在等待期间始终待在时间线最下面，不会被后续 step 产出的
+      // 新消息挤到中间去（用 `messages.length` 快照锚点就会）。
+      {
+        id: 1,
+        text: '插进这一轮',
+        afterMessageCount: Number.MAX_SAFE_INTEGER,
+        steered: true,
+      },
+    ]);
+    stream.close();
+  });
+
+  it('一轮收尾时队列非空：保持 streaming 并重连 tail，接住服务端自动出队起的下一轮', async () => {
+    const fake = setup();
+    const stream = fake.queueStream();
+    const nextTurnStream = fake.queueStream();
+    const { result } = renderHook(() =>
+      useChatMessages('sess_1', [], [queuedMessage('q1', '下一件事')]),
+    );
+
+    act(() => {
+      stream.pushChunk(
+        messageMetadataChunk({ turn: 1, usage: {}, status: 'completed' }),
+        5,
+      );
+      stream.close();
+    });
+
+    // 不落回 idle——服务端必然会出队起下一轮，落回去会让界面「转完→静止→又转」。
+    // 重连走既有的退避阶梯，第一档就是 1s，所以这里的等待窗口要比它宽。
+    await waitFor(
+      () => {
+        expect(fake.streamRequests.length).toBeGreaterThan(1);
+      },
+      { timeout: 3000 },
+    );
+    expect(result.current.status).toBe('streaming');
+
+    // 下一轮的 tail 连上后带来最新快照：那条已经出队了。
+    act(() => {
+      nextTurnStream.pushFrame({ queue: [] });
+    });
+    await waitFor(() => {
+      expect(result.current.queuedMessages).toEqual([]);
+    });
+    nextTurnStream.close();
+  });
+
+  it('一轮收尾时队列为空：照旧落回 idle', async () => {
+    const fake = setup();
+    const stream = fake.queueStream();
+    const { result } = renderHook(() => useChatMessages('sess_1', []));
+
+    act(() => {
+      stream.pushChunk(
+        messageMetadataChunk({ turn: 1, usage: {}, status: 'completed' }),
+        5,
+      );
+    });
+
+    await waitFor(() => {
+      expect(result.current.status).toBe('idle');
+    });
+    stream.close();
+  });
+
+  it('removeQueuedMessage / clearQueue 用服务端返回的快照覆盖本地队列', async () => {
+    const fake = setup();
+    const stream = fake.queueStream();
+    fake.setQueueSnapshot([
+      queuedMessage('q1', '一'),
+      queuedMessage('q2', '二'),
+    ]);
+    const { result } = renderHook(() =>
+      useChatMessages(
+        'sess_1',
+        [],
+        [queuedMessage('q1', '一'), queuedMessage('q2', '二')],
+      ),
+    );
+
+    act(() => {
+      result.current.removeQueuedMessage('q1');
+    });
+    await waitFor(() => {
+      expect(result.current.queuedMessages.map((m) => m.text)).toEqual(['二']);
+    });
+    expect(fake.queueDeletes[0]).toEqual({
+      conversationId: 'sess_1',
+      messageId: 'q1',
+    });
+
+    act(() => {
+      result.current.clearQueue();
+    });
+    await waitFor(() => {
+      expect(result.current.queuedMessages).toEqual([]);
+    });
+    expect(fake.queueDeletes[1]).toEqual({
+      conversationId: 'sess_1',
+      messageId: undefined,
+    });
+    stream.close();
+  });
+
+  it('删除时的 404（那条刚被自动出队/别处删了）不算错误，只是没有变化', async () => {
+    const fake = setup();
+    const stream = fake.queueStream();
+    fake.setQueueDeleteStatus(404);
+    const { result } = renderHook(() =>
+      useChatMessages('sess_1', [], [queuedMessage('q1', '一')]),
+    );
+
+    act(() => {
+      result.current.removeQueuedMessage('q1');
+    });
+    await waitFor(() => {
+      expect(fake.queueDeletes).toHaveLength(1);
+    });
+
+    expect(result.current.error).toBeUndefined();
+    expect(result.current.queuedMessages.map((m) => m.text)).toEqual(['一']);
+    stream.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 停止本轮（docs/tech/turn-abort.md §4.1）——`stopTurn` / `stopping`。核心是「不做
+// 乐观翻转」：按下停止只发请求 + 置中间态，界面回到空闲只认 wire 上那条
+// `status: 'interrupted'` 的 `message-metadata`。
+// ---------------------------------------------------------------------------
+
+describe('useChatMessages — 停止本轮（docs/tech/turn-abort.md）', () => {
+  /** 起一轮：`initialFrames` 以一条裸 chunk 结尾 = 有进行中的一轮（`lastFrameIsChunk`）。 */
+  const IN_PROGRESS_FRAMES: ChatReplayFrame[] = [
+    { seq: 1, chunk: startChunk('m1') },
+  ];
+
+  it('stopTurn 发 POST .../abort、置 stopping，并且**不**乐观翻转 status（仍是 streaming）', async () => {
+    const fake = setup();
+    const stream = fake.queueStream();
+    const { result } = renderHook(() =>
+      useChatMessages('sess_1', IN_PROGRESS_FRAMES, [
+        queuedMessage('q1', '排着的一条'),
+      ]),
+    );
+    expect(result.current.status).toBe('streaming');
+
+    act(() => {
+      result.current.stopTurn();
+    });
+
+    await waitFor(() => {
+      expect(fake.abortPosts).toEqual([
+        { conversationId: 'sess_1', body: undefined },
+      ]);
+    });
+    // 停止请求已发出，但这一轮还没真正停住：状态照旧 streaming，只多一个中间态。
+    expect(result.current.status).toBe('streaming');
+    expect(result.current.stopping).toBe(true);
+    // 队列按服务端返回的快照清空（停止 = 全停）。
+    await waitFor(() => {
+      expect(result.current.queuedMessages).toEqual([]);
+    });
+    // tail 没被断开——还要靠它接住 interrupted 那帧。
+    expect(fake.streamRequests).toHaveLength(1);
+    stream.close();
+  });
+
+  it('interrupted 的收尾帧到达后落回 idle（不是 error）、不显示错误、stopping 复位', async () => {
+    const fake = setup();
+    const stream = fake.queueStream();
+    const { result } = renderHook(() =>
+      useChatMessages('sess_1', IN_PROGRESS_FRAMES),
+    );
+
+    act(() => {
+      result.current.stopTurn();
+    });
+    await waitFor(() => {
+      expect(result.current.stopping).toBe(true);
+    });
+
+    // 真实收尾顺序（core 的 loop）：先 `finish` 关掉这条 assistant 消息，随后那条
+    // **独立的** `message-metadata` 才是「这一轮结束了」的信号。
+    act(() => {
+      stream.pushChunk(finishChunk(), 5);
+      stream.pushChunk(
+        messageMetadataChunk({
+          turn: 1,
+          usage: {},
+          status: 'interrupted',
+          error: { code: 'aborted', message: 'Turn stopped by the user.' },
+        }),
+        6,
+      );
+    });
+
+    await waitFor(() => {
+      expect(result.current.status).toBe('idle');
+    });
+    expect(result.current.error).toBeUndefined();
+    expect(result.current.stopping).toBe(false);
+    stream.close();
+  });
+
+  it('failed 的收尾帧照旧算错误（把 interrupted 归 idle 没有顺手把真失败也一起放过）', async () => {
+    const fake = setup();
+    const stream = fake.queueStream();
+    const { result } = renderHook(() =>
+      useChatMessages('sess_1', IN_PROGRESS_FRAMES),
+    );
+
+    act(() => {
+      stream.pushChunk(finishChunk(), 5);
+      stream.pushChunk(
+        messageMetadataChunk({
+          turn: 1,
+          usage: {},
+          status: 'failed',
+          error: { code: 'provider_error', message: '模型炸了' },
+        }),
+        6,
+      );
+    });
+
+    await waitFor(() => {
+      expect(result.current.status).toBe('error');
+    });
+    expect(result.current.error).toBe('模型炸了');
+    stream.close();
+  });
+
+  it('409（这一轮刚好自己结束了）静默处理：不报错，只复位 stopping', async () => {
+    const fake = setup();
+    const stream = fake.queueStream();
+    fake.setAbortStatus(409);
+    const { result } = renderHook(() =>
+      useChatMessages('sess_1', IN_PROGRESS_FRAMES),
+    );
+
+    act(() => {
+      result.current.stopTurn();
+    });
+
+    await waitFor(() => {
+      expect(result.current.stopping).toBe(false);
+    });
+    expect(result.current.error).toBeUndefined();
+    expect(fake.abortPosts).toHaveLength(1);
+    stream.close();
+  });
+
+  it('非 409 的失败（如 500）浮到 hook 的 error 上', async () => {
+    const fake = setup();
+    const stream = fake.queueStream();
+    fake.setAbortStatus(500);
+    const { result } = renderHook(() =>
+      useChatMessages('sess_1', IN_PROGRESS_FRAMES),
+    );
+
+    act(() => {
+      result.current.stopTurn();
+    });
+
+    await waitFor(() => {
+      expect(result.current.error).toBeDefined();
+    });
+    expect(result.current.stopping).toBe(false);
+    stream.close();
+  });
+
+  it('没有进行中的一轮时 stopTurn 是无操作（不发请求）', async () => {
+    const fake = setup();
+    const stream = fake.queueStream();
+    const { result } = renderHook(() => useChatMessages('sess_1', []));
+    expect(result.current.status).toBe('idle');
+
+    act(() => {
+      result.current.stopTurn();
+    });
+
+    await waitFor(() => {
+      expect(fake.streamRequests).toHaveLength(1);
+    });
+    expect(fake.abortPosts).toEqual([]);
     stream.close();
   });
 });

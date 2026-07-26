@@ -11,7 +11,7 @@
  */
 import type { NimboChunk, NimboUIMessage } from '@nimbo/core';
 
-import type { ChatReplayFrame } from '../../schema';
+import type { ChatReplayFrame, QueuedMessage } from '../../schema';
 
 /** One controllable `text/event-stream` body — push SSE-framed lines on demand, close or error it whenever the test wants. */
 export class ControllableSSEStream {
@@ -78,6 +78,12 @@ export interface RecordedStreamRequest {
   signal: AbortSignal | undefined;
 }
 
+export interface RecordedQueueDelete {
+  conversationId: string;
+  /** 缺席 = `DELETE .../queue`（清空）；有值 = `DELETE .../queue/:messageId`（删一条）。 */
+  messageId: string | undefined;
+}
+
 /**
  * `fetch` fake, routed by method + path shape (`.../messages`,
  * `.../stream`, `.../approvals/:id`, `.../questions/:id`) — install via
@@ -87,12 +93,35 @@ export class FakeChatFetch {
   readonly messagePosts: RecordedPost[] = [];
   readonly approvalPosts: RecordedPost[] = [];
   readonly answerPosts: RecordedPost[] = [];
+  /** 每次 `POST .../abort`（[停止](../../../../../../docs/terms.md)本轮）的记录。 */
+  readonly abortPosts: RecordedPost[] = [];
   readonly streamRequests: RecordedStreamRequest[] = [];
+
+  /** 每次 `DELETE .../queue*` 的记录（`messageId` 缺席 = 清空整个队列）。 */
+  readonly queueDeletes: RecordedQueueDelete[] = [];
 
   private messagePostStatus = 202;
   private approvalStatus = 200;
   private answerStatus = 200;
+  private queueDeleteStatus = 200;
+  private abortStatus = 200;
+  /** 服务端「当前队列」的替身：删一条从中过滤，清空则置空——响应体就是变更后的这一份。 */
+  private queueSnapshot: QueuedMessage[] = [];
   private readonly streamQueue: QueuedStream[] = [];
+
+  /** 预置服务端当前的[待发队列](../../../../../../docs/terms.md)，供 `DELETE .../queue*` 的响应快照使用。 */
+  setQueueSnapshot(queue: QueuedMessage[]): void {
+    this.queueSnapshot = queue;
+  }
+
+  setQueueDeleteStatus(status: number): void {
+    this.queueDeleteStatus = status;
+  }
+
+  /** `POST .../abort` 的响应码——`409` 覆盖「没有进行中的一轮」（轮刚好自己结束了）。 */
+  setAbortStatus(status: number): void {
+    this.abortStatus = status;
+  }
 
   setMessagePostStatus(status: number): void {
     this.messagePostStatus = status;
@@ -189,6 +218,44 @@ export class FakeChatFetch {
         new Response(JSON.stringify({ ok: true }), {
           status: this.answerStatus,
         }),
+      );
+    }
+
+    // POST .../abort（[停止](../../../../../../docs/terms.md)本轮，
+    // docs/tech/turn-abort.md §3.2）——服务端中止当前轮 + 清空队列，响应带回清空后的
+    // 快照（恒为空数组）。
+    if (method === 'POST' && kind === 'abort') {
+      this.abortPosts.push({ conversationId, body: undefined });
+      if (this.abortStatus !== 200) {
+        return Promise.resolve(
+          new Response('abort failed', { status: this.abortStatus }),
+        );
+      }
+      this.queueSnapshot = [];
+      return Promise.resolve(
+        new Response(JSON.stringify({ ok: true, queue: [] }), { status: 200 }),
+      );
+    }
+
+    // DELETE .../queue/:messageId（删一条）与 DELETE .../queue（清空）——两者都返回
+    // 变更后的完整队列快照（docs/tech/steer-and-queue.md §4.2）。
+    if (method === 'DELETE' && kind === 'queue') {
+      const messageId = segments[conversationsIndex + 3];
+      this.queueDeletes.push({ conversationId, messageId });
+      if (this.queueDeleteStatus !== 200) {
+        return Promise.resolve(
+          new Response('queue delete failed', {
+            status: this.queueDeleteStatus,
+          }),
+        );
+      }
+      const queue =
+        messageId === undefined ?
+          []
+        : this.queueSnapshot.filter((message) => message.id !== messageId);
+      this.queueSnapshot = queue;
+      return Promise.resolve(
+        new Response(JSON.stringify({ queue }), { status: 200 }),
       );
     }
 

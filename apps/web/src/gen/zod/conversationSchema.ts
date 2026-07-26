@@ -3,6 +3,8 @@
  * Do not edit manually.
  */
 
+import { queuedMessageSchema } from './queuedMessageSchema.ts';
+import { skillSummarySchema } from './skillSummarySchema.ts';
 import { z } from 'zod/v4';
 
 export const conversationSchema = z.object({
@@ -14,5 +16,11 @@ export const conversationSchema = z.object({
   provider: z.enum(['vercel', 'e2b']),
   status: z.enum(['active', 'sleeping', 'expired']),
   lastActiveAt: z.string(),
+  get queuedMessages() {
+    return z.array(queuedMessageSchema);
+  },
+  get availableSkills() {
+    return z.array(skillSummarySchema);
+  },
   createdAt: z.string(),
 });

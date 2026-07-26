@@ -99,20 +99,76 @@ export const messageFrameSchema = z.object({
 export type MessageFrame = z.infer<typeof messageFrameSchema>;
 
 /**
- * Every wire frame this app can ever receive is *either* a `ChunkEnvelope`
- * *or* a `MessageFrame` — told apart structurally (which of `chunk`/`message`
- * the object actually carries), same discipline `apps/node-server`'s own
- * `chatReplayFrameSchema` uses (no shared literal discriminant field).
+ * 一条[排队](../../../../../docs/terms.md)中的待发消息（`apps/node-server` 的
+ * `schemas/chat.ts` `QueuedMessageSchema` 的手写镜像，docs/tech/steer-and-queue.md §2.2）。
+ */
+export const queuedMessageSchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  userId: z.string(),
+  createdAt: z.number(),
+});
+
+export type QueuedMessage = z.infer<typeof queuedMessageSchema>;
+
+/**
+ * `{ queue }` — 队列状态快照。两处共用：直播流的第三种帧（每条连接回放后必发一帧，
+ * 队列变化时再广播；**没有 `seq`**，因为它是状态快照而非[账本](../../../../../docs/terms.md)
+ * 事件，docs/tech/steer-and-queue.md §4.3），以及两个队列端点的响应体。
+ */
+export const queueFrameSchema = z.object({
+  queue: z.array(queuedMessageSchema),
+});
+
+export type QueueFrame = z.infer<typeof queueFrameSchema>;
+
+/**
+ * `POST .../abort` 的响应（`apps/node-server` 的 `AbortTurnAckSchema` 的手写镜像，
+ * docs/tech/turn-abort.md §3.2）：`ok` 只表示[停止](../../../../../docs/terms.md)**已
+ * 请求**，「已停止」这个结果照旧走直播流上那条 `status: 'interrupted'` 的
+ * `message-metadata`；`queue` 是清空后的队列快照（恒为空数组，停止即清空队列）。
+ */
+export const abortTurnAckSchema = z.object({
+  ok: z.literal(true),
+  queue: z.array(queuedMessageSchema),
+});
+
+/**
+ * Every wire frame this app can ever receive is a `ChunkEnvelope`, a
+ * `MessageFrame`, or a `QueueFrame` — told apart structurally (which of
+ * `chunk`/`message`/`queue` the object actually carries), same discipline
+ * `apps/node-server`'s own `chatReplayFrameSchema` uses (no shared literal
+ * discriminant field). 顺序无关紧要：zod v4 里 object schema 缺失的 `z.any()`
+ * 字段算校验失败，所以三支互不吞并（服务端同一份注释）。
  */
 export const chatReplayFrameSchema = z.union([
   chunkEnvelopeSchema,
   messageFrameSchema,
+  queueFrameSchema,
 ]);
 
-export type ChatReplayFrame = ChunkEnvelope | MessageFrame;
+export type ChatReplayFrame = ChunkEnvelope | MessageFrame | QueueFrame;
 
+/** 会进[账本](../../../../../docs/terms.md)物化的两支——`QueueFrame` 不属于账本，由 `use-chat-messages.ts` 在喂给 `MessageLedger` 之前就分流掉。 */
+export type LedgerFrame = ChunkEnvelope | MessageFrame;
+
+/** 参数取最宽的 `ChatReplayFrame`（而不是 `LedgerFrame`）——同一个判别在两处都要用：`MessageLedger` 里对已分流的账本帧，和还没分流的原始 wire 帧上。传 `LedgerFrame` 时 false 分支照样收窄到 `ChunkEnvelope`。 */
 export function isMessageFrame(frame: ChatReplayFrame): frame is MessageFrame {
   return 'message' in frame;
+}
+
+export function isQueueFrame(frame: ChatReplayFrame): frame is QueueFrame {
+  return 'queue' in frame;
+}
+
+/**
+ * 一个帧的 `seq`——`QueueFrame` **恒无 seq**（它是[待发队列](../../../../../docs/terms.md)
+ * 的状态快照，不是[账本](../../../../../docs/terms.md)事件，所以不落盘、不参与
+ * `after=` 续传；docs/tech/steer-and-queue.md §4.3），于是与 ephemeral chunk 在
+ * 去重/续传簿记上走同一条「没有 seq」的路径。
+ */
+export function frameSeq(frame: ChatReplayFrame): number | undefined {
+  return isQueueFrame(frame) ? undefined : frame.seq;
 }
 
 /** `GET .../events` response shape — `{ frames: ChatReplayFrame[] }`, not a bare array (docs/tech/chat-webapp.md §2.2 "契约细化"). */
@@ -164,6 +220,18 @@ export const conversationProviderSchema = z.enum(['vercel', 'e2b']);
 
 export type ConversationProvider = z.infer<typeof conversationProviderSchema>;
 
+/**
+ * [skill 清单](../../../../../docs/terms.md)的一条（docs/tech/composer-skill-mention.md §5.2）——
+ * [composer](../../../../../docs/terms.md) 里打 `/` 时列的就是它：`name` 上屏做
+ * [skill 提及](../../../../../docs/terms.md)的字面量，`description` 是菜单里那行灰字。
+ */
+export const skillSummarySchema = z.object({
+  name: z.string(),
+  description: z.string(),
+});
+
+export type SkillSummary = z.infer<typeof skillSummarySchema>;
+
 export const conversationSchema = z.object({
   id: z.string(),
   title: z.string().nullable(),
@@ -173,6 +241,16 @@ export const conversationSchema = z.object({
   provider: conversationProviderSchema,
   status: conversationStatusSchema,
   lastActiveAt: z.string(),
+  /** 这个会话的[待发队列](../../../../../docs/terms.md)——页面加载时的初始快照，之后由 `QueueFrame` 与队列端点响应刷新（docs/tech/steer-and-queue.md §4.2）。 */
+  queuedMessages: z.array(queuedMessageSchema),
+  /**
+   * 这个会话当前可选的 [skill 清单](../../../../../docs/terms.md)（docs/tech/composer-skill-mention.md §2.1）。
+   *
+   * `.default([])` 不是可有可无的宽容：服务端读的是库缓存列，会话建于本功能上线前、
+   * 或那一列坏掉时都会给出空清单，前端这边应当照常渲染一个「没有 skill 可选」的
+   * composer，而不是整页 parse 失败。
+   */
+  availableSkills: z.array(skillSummarySchema).default([]),
   createdAt: z.string(),
 });
 

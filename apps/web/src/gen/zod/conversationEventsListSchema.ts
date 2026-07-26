@@ -5,10 +5,17 @@
 
 import { chatChunkEnvelopeSchema } from './chatChunkEnvelopeSchema.ts';
 import { chatMessageFrameSchema } from './chatMessageFrameSchema.ts';
+import { chatQueueFrameSchema } from './chatQueueFrameSchema.ts';
 import { z } from 'zod/v4';
 
 export const conversationEventsListSchema = z.object({
   get frames() {
-    return z.array(z.union([chatChunkEnvelopeSchema, chatMessageFrameSchema]));
+    return z.array(
+      z.union([
+        chatChunkEnvelopeSchema,
+        chatMessageFrameSchema,
+        chatQueueFrameSchema,
+      ]),
+    );
   },
 });

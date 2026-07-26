@@ -2,7 +2,7 @@
   "type": "object",
   "properties": {
     "ok": { "type": "boolean", "enum": [true] },
-    "mode": { "type": "string", "enum": ["started", "steered"] }
+    "mode": { "type": "string", "enum": ["started", "steered", "queued"] }
   },
   "required": ["ok", "mode"],
   "x-readme-ref-name": "StartTurnAck"

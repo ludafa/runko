@@ -1,6 +1,9 @@
 {
   "type": "object",
-  "properties": { "text": { "type": "string", "minLength": 1 } },
+  "properties": {
+    "text": { "type": "string", "minLength": 1 },
+    "intent": { "type": "string", "enum": ["queue", "steer"] }
+  },
   "required": ["text"],
   "x-readme-ref-name": "PostChatMessageInput"
 }

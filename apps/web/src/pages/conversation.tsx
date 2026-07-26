@@ -1,27 +1,33 @@
 import { useEffect, useState } from 'react';
 
 import { fetchConversationEvents, getConversation } from '@/features/chat/api';
+import { BranchHeader } from '@/features/chat/components/branch-header';
 import { MessageComposer } from '@/features/chat/components/message-composer';
-import { ProviderBadge } from '@/features/chat/components/provider-badge';
+import { QueuedMessages } from '@/features/chat/components/queued-messages';
 import { TimelineView } from '@/features/chat/components/timeline-view';
 import type { ChatReplayFrame, Conversation } from '@/features/chat/schema';
 import { useChatMessages } from '@/features/chat/use-chat-messages';
 import { ChatLayout } from '@/layouts/chat-layout';
 
+/** 回放到达前的骨架：直接摆成轨道的样子，历史落位时不会跳版。 */
 function HistoryLoadingSkeleton() {
   return (
-    <ul className="divide-foreground/8 border-foreground/8 bg-card/40 divide-y rounded-2xl border">
+    <div className="relative flex flex-col gap-4 pl-7">
+      <span
+        aria-hidden="true"
+        className="bg-rail absolute top-1 bottom-1 left-[7px] w-px"
+      />
       {[0, 1, 2].map((i) => (
-        <li
+        <div
           key={i}
-          className="animate-pulse space-y-2 px-5 py-4"
+          className="animate-pulse space-y-2"
           style={{ animationDelay: `${String(i * 80)}ms` }}
         >
-          <div className="bg-foreground/8 h-4 w-1/3 rounded" />
-          <div className="bg-foreground/6 h-3 w-2/3 rounded" />
-        </li>
+          <div className="bg-muted h-3.5 w-1/3 rounded-sm" />
+          <div className="bg-muted h-3 w-2/3 rounded-sm" />
+        </div>
       ))}
-    </ul>
+    </div>
   );
 }
 
@@ -85,7 +91,13 @@ function ConversationTimeline({
   conversation: Conversation;
   initialFrames: ChatReplayFrame[];
 }) {
-  const chat = useChatMessages(conversationId, initialFrames);
+  // 队列初值来自会话详情（docs/tech/steer-and-queue.md §4.2）——之后由直播流的
+  // `QueueFrame` 快照接管，不再读这份初值。
+  const chat = useChatMessages(
+    conversationId,
+    initialFrames,
+    conversation.queuedMessages,
+  );
   const wasSleeping = conversation.status === 'sleeping';
 
   return (
@@ -93,27 +105,17 @@ function ConversationTimeline({
     // h-[calc(100vh-8rem)]——那个魔数假设了 header + main 内边距正好 8rem，实际是
     // 8rem+45px，多出来的部分让文档整体可滚动，就成了「双滚动条 + 底部空白」。
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <header className="flex items-center justify-between">
-        <h1 className="font-display text-xl italic">
-          {conversation.title ?? '(未命名会话)'}
-        </h1>
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground font-mono text-xs">
-            {conversation.branchName}
-          </span>
-          <ProviderBadge provider={conversation.provider} />
-        </div>
-      </header>
+      <BranchHeader conversation={conversation} messages={chat.messages} />
 
       {wasSleeping && chat.awaitingFirstEvent && (
-        <div className="text-muted-foreground border-foreground/10 bg-card/60 flex items-center gap-2 rounded-xl border px-3 py-2 text-xs">
-          沙盒恢复中…
-        </div>
+        <p className="text-muted-foreground border-border border-l-2 py-0.5 pl-3 text-xs leading-snug">
+          正在唤醒沙盒，分支代码会原样还原。
+        </p>
       )}
 
       {chat.status === 'error' && chat.error !== undefined && (
-        <p className="text-destructive text-xs">
-          连接中断：{chat.error}（已尝试补齐已产生的事件）
+        <p className="border-destructive/70 text-destructive border-l-2 py-0.5 pl-3 text-xs leading-snug">
+          直播中断：{chat.error} · 已补齐断线期间产生的事件
         </p>
       )}
 
@@ -134,10 +136,23 @@ function ConversationTimeline({
         />
       </div>
 
-      <MessageComposer
-        onSend={chat.sendMessage}
-        streaming={chat.status === 'streaming'}
-      />
+      {/* 待发区与 composer 是同一件事的两个阶段——贴在一起，不留缝。 */}
+      <div className="flex flex-col">
+        <QueuedMessages
+          messages={chat.queuedMessages}
+          onRemove={chat.removeQueuedMessage}
+          onPromote={chat.promoteQueuedMessage}
+          onClear={chat.clearQueue}
+          streaming={chat.status === 'streaming'}
+        />
+        <MessageComposer
+          onSend={chat.sendMessage}
+          onStop={chat.stopTurn}
+          stopping={chat.stopping}
+          streaming={chat.status === 'streaming'}
+          skills={conversation.availableSkills}
+        />
+      </div>
     </div>
   );
 }

@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "properties": {
+    "ok": { "type": "boolean", "enum": [true] },
+    "queue": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "text": { "type": "string", "minLength": 1 },
+          "userId": { "type": "string" },
+          "createdAt": { "type": "integer" }
+        },
+        "required": ["id", "text", "userId", "createdAt"],
+        "x-readme-ref-name": "QueuedMessage"
+      }
+    }
+  },
+  "required": ["ok", "queue"],
+  "x-readme-ref-name": "AbortTurnAck"
+}

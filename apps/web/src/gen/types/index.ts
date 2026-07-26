@@ -1,7 +1,9 @@
+export type { AbortTurnAck, AbortTurnAckOkEnumKey } from './AbortTurnAck.ts';
 export type { ApiError } from './ApiError.ts';
 export type { ApprovalAck, ApprovalAckOkEnumKey } from './ApprovalAck.ts';
 export type { ChatChunkEnvelope } from './ChatChunkEnvelope.ts';
 export type { ChatMessageFrame } from './ChatMessageFrame.ts';
+export type { ChatQueueFrame } from './ChatQueueFrame.ts';
 export type {
   Conversation,
   ConversationProviderEnumKey,
@@ -13,6 +15,22 @@ export type {
   CreateConversationInputProviderEnumKey,
 } from './CreateConversationInput.ts';
 export type { CreateNoteInput } from './CreateNoteInput.ts';
+export type {
+  DeleteApiChatConversationsIdQueue200,
+  DeleteApiChatConversationsIdQueue401,
+  DeleteApiChatConversationsIdQueue404,
+  DeleteApiChatConversationsIdQueueMutation,
+  DeleteApiChatConversationsIdQueueMutationResponse,
+  DeleteApiChatConversationsIdQueuePathParams,
+} from './DeleteApiChatConversationsIdQueue.ts';
+export type {
+  DeleteApiChatConversationsIdQueueMessageid200,
+  DeleteApiChatConversationsIdQueueMessageid401,
+  DeleteApiChatConversationsIdQueueMessageid404,
+  DeleteApiChatConversationsIdQueueMessageidMutation,
+  DeleteApiChatConversationsIdQueueMessageidMutationResponse,
+  DeleteApiChatConversationsIdQueueMessageidPathParams,
+} from './DeleteApiChatConversationsIdQueueMessageid.ts';
 export type {
   GetApiChatConversations200,
   GetApiChatConversations401,
@@ -70,6 +88,15 @@ export type {
   PostApiChatConversationsMutationResponse,
 } from './PostApiChatConversations.ts';
 export type {
+  PostApiChatConversationsIdAbort200,
+  PostApiChatConversationsIdAbort401,
+  PostApiChatConversationsIdAbort404,
+  PostApiChatConversationsIdAbort409,
+  PostApiChatConversationsIdAbortMutation,
+  PostApiChatConversationsIdAbortMutationResponse,
+  PostApiChatConversationsIdAbortPathParams,
+} from './PostApiChatConversationsIdAbort.ts';
+export type {
   PostApiChatConversationsIdApprovalsCallid200,
   PostApiChatConversationsIdApprovalsCallid401,
   PostApiChatConversationsIdApprovalsCallid404,
@@ -109,7 +136,12 @@ export type {
   PostApprovalInput,
   PostApprovalInputBehaviorEnumKey,
 } from './PostApprovalInput.ts';
-export type { PostChatMessageInput } from './PostChatMessageInput.ts';
+export type {
+  PostChatMessageInput,
+  PostChatMessageInputIntentEnumKey,
+} from './PostChatMessageInput.ts';
+export type { QueuedMessage } from './QueuedMessage.ts';
+export type { SkillSummary } from './SkillSummary.ts';
 export type {
   StartTurnAck,
   StartTurnAckModeEnumKey,
@@ -117,10 +149,12 @@ export type {
 } from './StartTurnAck.ts';
 export type { TurnTelemetry } from './TurnTelemetry.ts';
 export type { TurnTelemetryEvent } from './TurnTelemetryEvent.ts';
+export { abortTurnAckOkEnum } from './AbortTurnAck.ts';
 export { approvalAckOkEnum } from './ApprovalAck.ts';
 export { conversationProviderEnum } from './Conversation.ts';
 export { conversationStatusEnum } from './Conversation.ts';
 export { createConversationInputProviderEnum } from './CreateConversationInput.ts';
 export { postApprovalInputBehaviorEnum } from './PostApprovalInput.ts';
+export { postChatMessageInputIntentEnum } from './PostChatMessageInput.ts';
 export { startTurnAckModeEnum } from './StartTurnAck.ts';
 export { startTurnAckOkEnum } from './StartTurnAck.ts';

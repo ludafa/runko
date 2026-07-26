@@ -1,15 +1,17 @@
 import type { NimboUIMessage } from '@nimbo/core';
+import { MessageSquareIcon } from 'lucide-react';
 import { useMemo } from 'react';
 
-import type { PendingUserEcho } from '../timeline';
-import { buildRenderEntries } from '../timeline';
 import {
   Conversation,
   ConversationContent,
   ConversationEmptyState,
   ConversationScrollButton,
-} from './conversation';
-import { Message, MessageContent } from './message';
+} from '@/components/ai-elements/conversation';
+import { Message, MessageContent } from '@/components/ai-elements/message';
+
+import type { PendingUserEcho } from '../timeline';
+import { buildRenderEntries } from '../timeline';
 import { MessageEntry } from './message-entry';
 
 /** No-op default so `onSubmitApproval`/`onSubmitAnswer` are optional for callers (e.g. tests, or a read-only preview) that never need the interactive path. */
@@ -23,6 +25,27 @@ function noopDecision(): void {
 // `buildRenderEntries`'s `useMemo` on every render.
 const EMPTY_ECHOES: readonly PendingUserEcho[] = [];
 const EMPTY_CALL_ID_SET: ReadonlySet<string> = new Set();
+
+/**
+ * 还没落账本的用户消息（乐观回显）。两种成色：
+ *
+ * - **起新一轮**：几乎立刻被真实消息顶替，画得和正常用户消息一样即可。
+ * - **[插话](../../../../../docs/terms.md)**：要等 core 的下一个 step 边界才真正注入，可能几十秒。压暗 +
+ *   标「待注入」，如实说明「已经发出去了，但 agent 还没看到」。
+ */
+function PendingEchoMessage({ echo }: { echo: PendingUserEcho }) {
+  const steered = echo.steered === true;
+  return (
+    <Message from="user" className={steered ? 'opacity-60' : undefined}>
+      {steered && (
+        <span className="text-muted-foreground ml-auto text-[0.6875rem]">
+          插话 · 待注入
+        </span>
+      )}
+      <MessageContent>{echo.text}</MessageContent>
+    </Message>
+  );
+}
 
 export function TimelineView({
   messages,
@@ -56,7 +79,11 @@ export function TimelineView({
     return (
       <Conversation>
         <ConversationContent>
-          <ConversationEmptyState />
+          <ConversationEmptyState
+            icon={<MessageSquareIcon className="size-10" />}
+            title="这条分支还没有指令"
+            description="描述你想让 agent 做什么，它会在这条分支上动手。"
+          />
         </ConversationContent>
       </Conversation>
     );
@@ -67,9 +94,10 @@ export function TimelineView({
       <ConversationContent>
         {entries.map((entry) =>
           entry.kind === 'pending-echo' ?
-            <Message key={`pending-echo-${String(entry.echo.id)}`} from="user">
-              <MessageContent from="user">{entry.echo.text}</MessageContent>
-            </Message>
+            <PendingEchoMessage
+              key={`pending-echo-${String(entry.echo.id)}`}
+              echo={entry.echo}
+            />
           : <MessageEntry
               key={`message-${entry.message.id}`}
               message={entry.message}

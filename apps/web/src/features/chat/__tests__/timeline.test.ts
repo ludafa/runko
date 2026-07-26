@@ -9,7 +9,7 @@ import {
   plainTextTurnFrames,
 } from '../fixtures/sample-conversation-events';
 import { MessageLedger } from '../materialize';
-import type { ChatReplayFrame } from '../schema';
+import type { LedgerFrame } from '../schema';
 import {
   askUserInputFrom,
   bashCommandFromInput,
@@ -75,7 +75,7 @@ function collectLedger(): {
 
 async function applyAllLive(
   ledger: MessageLedger,
-  frames: readonly ChatReplayFrame[],
+  frames: readonly LedgerFrame[],
 ): Promise<void> {
   for (const frame of frames) {
     ledger.applyFrame(frame);

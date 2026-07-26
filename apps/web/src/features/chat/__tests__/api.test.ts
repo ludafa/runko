@@ -2,13 +2,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   ChatApiError,
+  postAbortTurn,
   postApprovalDecision,
   postChatMessage,
   postQuestionAnswer,
   streamConversationTail,
 } from '../api';
 import type { ChatReplayFrame } from '../schema';
-import { isMessageFrame } from '../schema';
+import { frameSeq, isMessageFrame } from '../schema';
 
 function sseResponse(chunks: string[], init?: { status?: number }): Response {
   const encoder = new TextEncoder();
@@ -76,6 +77,45 @@ describe('postChatMessage', () => {
     await expect(postChatMessage('missing', 'hi')).rejects.toThrow(
       ChatApiError,
     );
+  });
+});
+
+describe('postAbortTurn', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('POSTs .../abort（无请求体）并解析出清空后的队列快照', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ ok: true, queue: [] }), { status: 200 }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(postAbortTurn('sess_1')).resolves.toEqual([]);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/chat/conversations/sess_1/abort',
+      expect.objectContaining({ method: 'POST', credentials: 'include' }),
+    );
+  });
+
+  it('409（没有进行中的一轮）带 status 抛出，交给调用方判断是否静默', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: 'no turn in progress' }), {
+          status: 409,
+        }),
+      ),
+    );
+
+    const error = await postAbortTurn('sess_1').catch(
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(ChatApiError);
+    expect(error).toHaveProperty('status', 409);
   });
 });
 
@@ -250,7 +290,7 @@ describe('streamConversationTail', () => {
     let sawMessageFrame = false;
     await streamConversationTail('sess_1', 0, {
       onFrame: (frame: ChatReplayFrame) => {
-        received.push(frame.seq);
+        received.push(frameSeq(frame));
         if (isMessageFrame(frame)) sawMessageFrame = true;
       },
     });
@@ -289,7 +329,7 @@ describe('streamConversationTail', () => {
     const received: (number | undefined)[] = [];
     const parseErrors: string[] = [];
     await streamConversationTail('sess_1', 0, {
-      onFrame: (frame: ChatReplayFrame) => received.push(frame.seq),
+      onFrame: (frame: ChatReplayFrame) => received.push(frameSeq(frame)),
       onParseError: (message: string) => parseErrors.push(message),
     });
 

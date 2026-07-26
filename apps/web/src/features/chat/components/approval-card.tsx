@@ -9,19 +9,19 @@
  * `output-error`), the *same* tool part renders via `ToolCallCard` instead,
  * which shows the resolution (including the deny reason) inline.
  *
- * Styling follows `tool-call-card.tsx`'s established conventions in this
- * feature (a bordered card, a `Badge` status pill, a monospace `<pre>` for
- * the raw payload) rather than introducing a new `CodeBlock`/syntax-
- * highlighting dependency.
+ * 外壳用 ai-elements 的 `Confirmation`（Alert + 请求/接受/拒绝三态插槽）。三个
+ * 按钮是 nimbo 自己的三值裁决（允许 / 会话内都允许 / 拒绝），比官方示例的两值多
+ * 一档，所以按钮自己列——我们的裁决走 `POST .../approvals/:callId`，不是 useChat
+ * 内置的 `addToolApprovalResponse` 通道。
  */
-import {
-  CheckCheckIcon,
-  CheckIcon,
-  Loader2Icon,
-  ShieldAlertIcon,
-  XIcon,
-} from 'lucide-react';
+import { CheckCheckIcon, CheckIcon, Loader2Icon, XIcon } from 'lucide-react';
 
+import {
+  Confirmation,
+  ConfirmationActions,
+  ConfirmationRequest,
+  ConfirmationTitle,
+} from '@/components/ai-elements/confirmation';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
@@ -73,46 +73,45 @@ export function ApprovalCard({
   );
 
   return (
-    <div
+    <Confirmation
+      approval={part.approval}
+      state={part.state}
       data-testid="approval-card"
       data-status={status}
-      className="border-foreground/10 bg-card/40 space-y-2.5 rounded-xl border px-3 py-2.5"
+      className="mb-2"
     >
-      <div className="flex items-center gap-2">
-        <ShieldAlertIcon
-          className="text-muted-foreground size-3.5 shrink-0"
-          aria-hidden="true"
-        />
-        <span className="text-sm font-medium">{title}</span>
+      <ConfirmationTitle className="flex flex-wrap items-center gap-2">
+        <span className="text-foreground font-medium">{title}</span>
         {knownAction !== undefined && (
-          <code className="text-muted-foreground bg-muted/60 shrink-0 rounded px-1 py-0.5 font-mono text-[0.7rem]">
+          <code className="text-muted-foreground font-mono text-xs">
             {toolName}
           </code>
         )}
         <Badge variant="secondary" className="ml-auto shrink-0">
-          待审批
+          {expired ? '已失效' : '待审批'}
         </Badge>
-      </div>
+      </ConfirmationTitle>
 
-      {command !== undefined ?
-        <pre className="bg-muted/50 overflow-x-auto rounded-md p-2 font-mono text-xs font-medium">
-          {command}
-        </pre>
-      : <div className="space-y-1">
-          <h4 className="text-muted-foreground text-[0.65rem] font-medium tracking-[0.14em] uppercase">
-            Parameters
-          </h4>
-          <pre className="bg-muted/50 overflow-x-auto rounded-md p-2 font-mono text-xs">
+      <ConfirmationRequest>
+        {/* 提示符是 `::before` 伪元素而不是真节点：用户十有八九会把这条命令复制走，
+            真节点会连提示符一起进剪贴板（select-none 挡得住拖选，挡不住 Cmd+A）。 */}
+        {command !== undefined ?
+          <pre className="bg-muted text-foreground before:text-muted-foreground overflow-x-auto rounded-md px-2.5 py-2 font-mono text-xs leading-relaxed before:pr-2 before:content-['$']">
+            {command}
+          </pre>
+        : <pre className="bg-muted text-foreground overflow-x-auto rounded-md px-2.5 py-2 font-mono text-xs leading-relaxed">
             {prettyJson(part.input)}
           </pre>
-        </div>
-      }
+        }
+        {expired && (
+          <p className="text-muted-foreground mt-2 text-xs">
+            已失效（超时或轮次已结束）
+          </p>
+        )}
+      </ConfirmationRequest>
 
-      {expired ?
-        <p className="text-muted-foreground text-xs">
-          已失效（超时或轮次已结束）
-        </p>
-      : <div className="flex flex-wrap items-center gap-2">
+      {!expired && (
+        <ConfirmationActions className="justify-start self-start">
           <Button
             size="sm"
             onClick={() => {
@@ -152,8 +151,8 @@ export function ApprovalCard({
             : <XIcon className="size-3.5" aria-hidden="true" />}
             拒绝
           </Button>
-        </div>
-      }
-    </div>
+        </ConfirmationActions>
+      )}
+    </Confirmation>
   );
 }

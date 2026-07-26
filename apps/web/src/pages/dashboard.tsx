@@ -28,7 +28,9 @@ export function DashboardPage() {
   }
 
   return (
-    <div className="grid gap-12 md:grid-cols-[minmax(0,1fr)_minmax(280px,360px)] md:gap-16">
+    // 宽度约束原本在 AppLayout 里，现已下放给页面（见 app-layout.tsx 注释）：这页
+    // 是读写文档的，满宽的长文本行难读，所以自己夹回 6xl；聊天页不夹，占满整屏。
+    <div className="mx-auto grid w-full max-w-6xl gap-12 px-6 py-10 sm:px-8 sm:py-14 md:grid-cols-[minmax(0,1fr)_minmax(280px,360px)] md:gap-16">
       <section className="space-y-10">
         <header className="space-y-3">
           <p className="text-muted-foreground text-[0.7rem] font-medium tracking-[0.18em] uppercase">

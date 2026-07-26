@@ -3,10 +3,22 @@
  * Do not edit manually.
  */
 
+export const postChatMessageInputIntentEnum = {
+  queue: 'queue',
+  steer: 'steer',
+} as const;
+
+export type PostChatMessageInputIntentEnumKey =
+  (typeof postChatMessageInputIntentEnum)[keyof typeof postChatMessageInputIntentEnum];
+
 export type PostChatMessageInput = {
   /**
    * @minLength 1
    * @type string
    */
   text: string;
+  /**
+   * @type string | undefined
+   */
+  intent?: PostChatMessageInputIntentEnumKey;
 };

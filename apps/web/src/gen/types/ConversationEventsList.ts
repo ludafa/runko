@@ -5,10 +5,11 @@
 
 import type { ChatChunkEnvelope } from './ChatChunkEnvelope.ts';
 import type { ChatMessageFrame } from './ChatMessageFrame.ts';
+import type { ChatQueueFrame } from './ChatQueueFrame.ts';
 
 export type ConversationEventsList = {
   /**
    * @type array
    */
-  frames: (ChatChunkEnvelope | ChatMessageFrame)[];
+  frames: (ChatChunkEnvelope | ChatMessageFrame | ChatQueueFrame)[];
 };

@@ -125,7 +125,7 @@ import type {
 import type { FileUIPart, TextUIPart } from 'ai';
 import { readUIMessageStream } from 'ai';
 
-import type { ChatReplayFrame } from './schema';
+import type { LedgerFrame } from './schema';
 import { isMessageFrame } from './schema';
 
 // ---- steer-injected user message: built directly, not through
@@ -227,7 +227,7 @@ export class MessageLedger {
   }
 
   /** Feed one frame, in wire order — replay and live frames alike (both are just `ChatReplayFrame`s, see file header). */
-  applyFrame(frame: ChatReplayFrame): void {
+  applyFrame(frame: LedgerFrame): void {
     if (isMessageFrame(frame)) {
       this.upsert(frame.message);
       if (frame.message.role === 'user') this.onUserMessage?.();

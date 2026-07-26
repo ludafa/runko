@@ -12,10 +12,15 @@
  * message, `apps/node-server`'s `chat-agent.ts`), so an `output-available` state
  * always renders as "answered" (this app deliberately does not string-sniff
  * the fixed timeout text to recover the old distinction).
+ *
+ * ai-elements 没有「向用户提问」这一档组件（`Confirmation` 是二值审批，不带
+ * 自由文本回答），所以这里自己拼，但用的是同一批基元（`Alert` + `Button` +
+ * `Input`）与同一套间距，视觉上与审批卡片同族。
  */
 import { HelpCircleIcon, Loader2Icon, SendIcon } from 'lucide-react';
 import { useState } from 'react';
 
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -57,10 +62,6 @@ export function QuestionCard({
     expired ? '已失效'
     : answered ? '已回答'
     : '待回答';
-  const statusVariant: 'default' | 'secondary' | 'outline' =
-    expired ? 'outline'
-    : answered ? 'default'
-    : 'secondary';
 
   function submitFreeText(e: React.FormEvent) {
     e.preventDefault();
@@ -71,78 +72,76 @@ export function QuestionCard({
   }
 
   return (
-    <div
+    <Alert
+      className="mb-2 flex flex-col gap-2"
       data-testid="question-card"
       data-status={status}
-      className="border-foreground/10 bg-card/40 space-y-2.5 rounded-xl border px-3 py-2.5"
     >
-      <div className="flex items-start gap-2">
-        <HelpCircleIcon
-          className="text-muted-foreground mt-0.5 size-3.5 shrink-0"
-          aria-hidden="true"
-        />
-        <span className="flex-1 text-sm leading-snug">{question}</span>
-        <Badge variant={statusVariant} className="ml-1 shrink-0">
+      <HelpCircleIcon />
+      <AlertTitle className="flex items-start gap-2 leading-snug">
+        <span className="flex-1">{question}</span>
+        <Badge variant="secondary" className="shrink-0">
           {statusLabel}
         </Badge>
-      </div>
+      </AlertTitle>
+      <AlertDescription className="flex flex-col gap-2">
+        {isPending && (
+          <>
+            {options !== undefined && options.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {options.map((option) => (
+                  <Button
+                    key={option}
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={submitting}
+                    onClick={() => {
+                      onAnswer(option);
+                    }}
+                  >
+                    {option}
+                  </Button>
+                ))}
+              </div>
+            )}
+            <form onSubmit={submitFreeText} className="flex items-center gap-2">
+              <Input
+                value={freeText}
+                onChange={(e) => {
+                  setFreeText(e.target.value);
+                }}
+                placeholder="或者自己写一个回答…"
+                disabled={submitting}
+                aria-label="回答"
+                className="h-8 max-w-md"
+              />
+              <Button
+                type="submit"
+                size="icon-sm"
+                disabled={submitting || freeText.trim().length === 0}
+                aria-label="发送"
+              >
+                {submitting ?
+                  <Loader2Icon
+                    className="size-4 animate-spin"
+                    aria-hidden="true"
+                  />
+                : <SendIcon className="size-4" aria-hidden="true" />}
+              </Button>
+            </form>
+          </>
+        )}
 
-      {isPending && (
-        <>
-          {options !== undefined && options.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {options.map((option) => (
-                <Button
-                  key={option}
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={submitting}
-                  onClick={() => {
-                    onAnswer(option);
-                  }}
-                >
-                  {option}
-                </Button>
-              ))}
-            </div>
-          )}
-          <form onSubmit={submitFreeText} className="flex items-center gap-2">
-            <Input
-              value={freeText}
-              onChange={(e) => {
-                setFreeText(e.target.value);
-              }}
-              placeholder="输入你的回答…"
-              disabled={submitting}
-              aria-label="回答"
-            />
-            <Button
-              type="submit"
-              size="icon"
-              disabled={submitting || freeText.trim().length === 0}
-              aria-label="发送"
-            >
-              {submitting ?
-                <Loader2Icon
-                  className="size-4 animate-spin"
-                  aria-hidden="true"
-                />
-              : <SendIcon className="size-4" aria-hidden="true" />}
-            </Button>
-          </form>
-        </>
-      )}
-
-      {answered && answer !== undefined && (
-        <p className="text-muted-foreground text-xs">你的回答：{answer}</p>
-      )}
-
-      {expired && (
-        <p className="text-muted-foreground text-xs">
-          已失效（超时或轮次已结束）
-        </p>
-      )}
-    </div>
+        {/* 整句放在同一个文本节点里（不拆 span 上色）：`getNodeText` 只看直接
+            文本子节点，拆开之后测试与屏幕阅读器读到的都是碎片。 */}
+        {answered && answer !== undefined && (
+          <p className="text-xs">你的回答：{answer}</p>
+        )}
+        {expired && (
+          <p className="text-xs">{statusLabel}（超时或轮次已结束）</p>
+        )}
+      </AlertDescription>
+    </Alert>
   );
 }

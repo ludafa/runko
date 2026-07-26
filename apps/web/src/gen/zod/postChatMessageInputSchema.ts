@@ -7,4 +7,5 @@ import { z } from 'zod/v4';
 
 export const postChatMessageInputSchema = z.object({
   text: z.string().min(1),
+  intent: z.optional(z.enum(['queue', 'steer'])),
 });

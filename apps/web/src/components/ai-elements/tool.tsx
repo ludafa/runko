@@ -1,0 +1,177 @@
+/* ---------------------------------------------------------------------------
+ * 本项目的「sm 档」密度调校（2026-07-25）
+ *
+ * ai-elements 出厂密度是给「一屏几条消息」的通用聊天场景设的。nimbo chat 一轮
+ * 动辄十几个工具调用，出厂间距下一屏放不下几行、要一直滚。所以在**组件本体**里
+ * 统一收一档（gap-8→gap-4、p-4→p-2.5、px-4 py-3→px-3 py-2 等），而不是在每个
+ * 调用点覆盖 className——后者会让密度散落各处、下次 re-add 组件就全丢了。
+ *
+ * 改动只涉及间距与字号，不动结构与 API；升级组件时对着这段注释重做即可。
+ * ------------------------------------------------------------------------- */
+
+import type { ToolUIPart } from 'ai';
+import {
+  CheckCircleIcon,
+  ChevronDownIcon,
+  CircleIcon,
+  ClockIcon,
+  WrenchIcon,
+  XCircleIcon,
+} from 'lucide-react';
+import type { ComponentProps, ReactNode } from 'react';
+import { isValidElement } from 'react';
+
+import { Badge } from '@/components/ui/badge';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
+import { cn } from '@/lib/utils';
+
+import { CodeBlock } from './code-block';
+
+export type ToolProps = ComponentProps<typeof Collapsible>;
+
+export const Tool = ({ className, ...props }: ToolProps) => (
+  <Collapsible
+    className={cn('not-prose mb-2 w-full rounded-md border', className)}
+    {...props}
+  />
+);
+
+export type ToolHeaderProps = {
+  title?: string;
+  type: ToolUIPart['type'];
+  state: ToolUIPart['state'];
+  className?: string;
+};
+
+const getStatusBadge = (status: ToolUIPart['state']) => {
+  const labels: Record<ToolUIPart['state'], string> = {
+    'input-streaming': 'Pending',
+    'input-available': 'Running',
+    'approval-requested': 'Awaiting Approval',
+    'approval-responded': 'Responded',
+    'output-available': 'Completed',
+    'output-error': 'Error',
+    'output-denied': 'Denied',
+  };
+
+  const icons: Record<ToolUIPart['state'], ReactNode> = {
+    'input-streaming': <CircleIcon className="size-4" />,
+    'input-available': <ClockIcon className="size-4 animate-pulse" />,
+    'approval-requested': <ClockIcon className="size-4 text-yellow-600" />,
+    'approval-responded': <CheckCircleIcon className="size-4 text-blue-600" />,
+    'output-available': <CheckCircleIcon className="size-4 text-green-600" />,
+    'output-error': <XCircleIcon className="size-4 text-red-600" />,
+    'output-denied': <XCircleIcon className="size-4 text-orange-600" />,
+  };
+
+  return (
+    <Badge className="gap-1.5 rounded-full text-xs" variant="secondary">
+      {icons[status]}
+      {labels[status]}
+    </Badge>
+  );
+};
+
+export const ToolHeader = ({
+  className,
+  title,
+  type,
+  state,
+  ...props
+}: ToolHeaderProps) => (
+  <CollapsibleTrigger
+    className={cn(
+      'group flex w-full items-center justify-between gap-3 px-2.5 py-2',
+      className,
+    )}
+    {...props}
+  >
+    <div className="flex items-center gap-2">
+      <WrenchIcon className="text-muted-foreground size-4" />
+      <span className="text-sm font-medium">
+        {title ?? type.split('-').slice(1).join('-')}
+      </span>
+      {getStatusBadge(state)}
+    </div>
+    <ChevronDownIcon className="text-muted-foreground size-4 transition-transform group-data-[panel-open]:rotate-180" />
+  </CollapsibleTrigger>
+);
+
+export type ToolContentProps = ComponentProps<typeof CollapsibleContent>;
+
+export const ToolContent = ({ className, ...props }: ToolContentProps) => (
+  <CollapsibleContent
+    className={cn(
+      'data-[closed]:fade-out-0 data-[closed]:slide-out-to-top-2 data-[open]:slide-in-from-top-2 text-popover-foreground data-[closed]:animate-out data-[open]:animate-in outline-none',
+      className,
+    )}
+    {...props}
+  />
+);
+
+export type ToolInputProps = ComponentProps<'div'> & {
+  input: ToolUIPart['input'];
+};
+
+export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
+  <div
+    className={cn('space-y-1.5 overflow-hidden px-2.5 pb-2.5', className)}
+    {...props}
+  >
+    <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+      Parameters
+    </h4>
+    <div className="bg-muted/50 rounded-md">
+      <CodeBlock code={JSON.stringify(input, null, 2)} language="json" />
+    </div>
+  </div>
+);
+
+export type ToolOutputProps = ComponentProps<'div'> & {
+  output: ToolUIPart['output'];
+  errorText: ToolUIPart['errorText'];
+};
+
+export const ToolOutput = ({
+  className,
+  output,
+  errorText,
+  ...props
+}: ToolOutputProps) => {
+  if (!(output || errorText)) {
+    return null;
+  }
+
+  let Output = <div>{output as ReactNode}</div>;
+
+  if (typeof output === 'object' && !isValidElement(output)) {
+    Output = (
+      <CodeBlock code={JSON.stringify(output, null, 2)} language="json" />
+    );
+  } else if (typeof output === 'string') {
+    Output = <CodeBlock code={output} language="json" />;
+  }
+
+  return (
+    <div className={cn('space-y-1.5 px-2.5 pb-2.5', className)} {...props}>
+      <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+        {errorText ? 'Error' : 'Result'}
+      </h4>
+      <div
+        className={cn(
+          'overflow-x-auto rounded-md text-xs [&_table]:w-full',
+          errorText ?
+            'bg-destructive/10 text-destructive'
+          : 'bg-muted/50 text-foreground',
+        )}
+      >
+        {errorText && <div>{errorText}</div>}
+        {Output}
+      </div>
+    </div>
+  );
+};
