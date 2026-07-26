@@ -485,7 +485,7 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
   }
   const system = buildSystemPrompt(agent, opts);
   const model: LanguageModel = agent.model;
-  const maxTurnsPerRun = agent.maxTurnsPerRun ?? 40;
+  const maxTurnsPerRun = agent.maxTurnsPerRun ?? 100;
   const maxContextTokens = agent.maxContextTokens;
   const maxOutputTokens = agent.maxOutputTokens;
 

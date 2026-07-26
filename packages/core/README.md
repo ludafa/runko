@@ -42,7 +42,7 @@ console.log(result.finalResponse);
 
 | 导出 | 说明 |
 |---|---|
-| `defineAgent(def): AgentDefinition` | 纯声明恒等函数。字段：`model`（必填）、`instructions?`、`tools?`、`builtinTools?`（数组白名单或 `false`）、`skills?`、`maxTurnsPerRun?`（默认 40，计 send() 内模型步数）、`maxOutputTokens?`、`maxContextTokens?`（opt-in 上下文上限，超限 `turn.failed`/`context_overflow`） |
+| `defineAgent(def): AgentDefinition` | 纯声明恒等函数。字段：`model`（必填）、`instructions?`、`tools?`、`builtinTools?`（数组白名单或 `false`）、`skills?`、`maxTurnsPerRun?`（默认 100，计 send() 内模型步数）、`maxOutputTokens?`、`maxContextTokens?`（opt-in 上下文上限，超限 `turn.failed`/`context_overflow`） |
 | `defineTool({ description, inputSchema, outputSchema?, approval?, execute }): Tool` | zod v4 `inputSchema` 推导 `execute` 的 input 类型（`In extends z.ZodType<JsonValue>`——工具输入来自模型 JSON）；返回类型擦除态 `Tool` |
 | `defineSkill({ name, description, markdown, files? }): Skill` | 程序化 skill（eve 同款） |
 | `Skill.fromDirectory(path)` / `Skill.fromFS(fs, path)` / `Skill.fromMarkdown(name, md)` | packaged（要求 `description` frontmatter，缺失报错）与 flat（无 frontmatter 时取首个非空非代码行为 description）两种形态；Claude 官方 skill 目录与 eve 布局不改动即可加载 |

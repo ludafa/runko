@@ -43,7 +43,7 @@ export interface AgentDefinition {
   /** 默认全部文件工具；false 关闭。 */
   builtinTools?: BuiltinToolName[] | false;
   skills?: Skill[];
-  /** 默认 40（默认值在 L2 runtime 生效，此处仅为可选字段）。 */
+  /** 默认 100（默认值在 L2 runtime 生效，此处仅为可选字段）。 */
   maxTurnsPerRun?: number;
   maxOutputTokens?: number;
   /**
