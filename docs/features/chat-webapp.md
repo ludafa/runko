@@ -2,7 +2,9 @@
 
 > 相关：[技术方案](../tech/chat-webapp.md) · [施工进展](../plans/chat-webapp.md)
 > 依赖：[core-sdk](./core-sdk.md)（nimbo agent SDK，驱动对话的 [agent](../terms.md)/[loop](../terms.md)/[turn](../terms.md)）· [sandbox](./sandbox.md)（Vercel 沙盒，代码真身所在）
-> 被增强：[turn-checkpoint](./turn-checkpoint.md)（每轮代码快照保活）· [single-ledger](./single-ledger.md)（UIMessage 单账本，P13-5 已落地）· [compaction](./compaction.md)（长会话上下文压缩）
+> 被增强：[turn-checkpoint](./turn-checkpoint.md)（每轮代码快照保活）· [single-ledger](./single-ledger.md)（UIMessage 单账本，P13-5 已落地）· [compaction](./compaction.md)（长会话上下文压缩）· [chat-ui](./chat-ui.md)（chat 页面的界面语言，2026-07-25 改版）
+
+> **界面呈现细节看 [chat-ui](./chat-ui.md)**：本文讲这个应用**做什么**（端点、生命周期、人在回路的行为语义），chat-ui 讲它**长什么样**（[轨道](../terms.md)、[打断](../terms.md)、[信号色](../terms.md)、[指令块](../terms.md)）。下文出现的界面描述若与 chat-ui 冲突，以 chat-ui 为准。
 
 ## 一句话
 
@@ -20,7 +22,7 @@ Seed 骨架：https://github.com/ludafa/hono-mono-starter （Hono + zod-openapi 
 1. **注册 / 登录**：seed 自带 better-auth。登录后进入 chat 界面。
 2. **新建会话即绑定一个沙盒**：新建 [session（会话）](../terms.md)时，服务端为它开一个 Vercel [沙盒](../terms.md)——clone 配置好的 `GITHUB_REPO`、装好 `frontend-design` [skill](../terms.md)、建一条会话专属分支。此后这个会话固定在这条分支上工作，多轮改动在同一分支上累积。
 3. **每条消息驱动一轮 agent loop，实时流式渲染**：用户每发一条消息触发 agent 的一次完整 [turn（轮）](../terms.md)。这一轮内部的过程（工具调用状态流转、文件改动、文本打字机、推理折叠）通过 [直播流](../terms.md)边跑边推到页面——就是 07 示例时间线的 React 版。每个工具调用卡片上还标注它的启动时间、完成时间与耗时（**真实执行口径**：启动时间是真正开始执行的时刻，耗时不含排队与审批等待）：调用还在排队/等审批时徽标显示「等待中」并逐秒跳动已等待时长，开始执行后从零起跳执行耗时，结算后定格；被拒绝的调用因从未执行而显示「未执行」。同一步发出的一批工具调用**全部只读**（读文件/列目录/glob/grep）时并行执行，混有写操作则按顺序执行。每条 assistant 回复末尾有一枚「统计」按钮，点开「本轮统计」弹窗——概览里领头显示**本轮总耗时**，并拆分**工具总耗时 / agent 总耗时**（工具 = 本轮所有工具执行时段的并集，agent = 其余的模型思考/往返时间；纯文本轮不显示拆分），token 数字带千分位分组（如 `耗时 1m 23s · 工具 33.0s · agent 50.0s · 输入 149,326 · …`）。弹窗下半区是[遥测](../terms.md)明细：逐次模型调用的响应/首 token 耗时、输入输出吞吐（tok/s）、token 三分（输入含缓存、输出含推理、共计）、finishReason、模型名，以及逐个工具执行的耗时与失败标记——遥测未开启时明细区显示「无遥测数据」，概览不受影响（遥测的完整产品说明见 [features/telemetry](./telemetry.md)）。
-4. **中途插话（[steer](../terms.md)）**：一轮还在跑时，用户又发一条消息，会被注入到当前这一轮里（在下一个 step checkpoint 真实注入点生效），而不是排队等下一轮。
+4. **[排队](../terms.md)与[中途插话](../terms.md)**：一轮还在跑时用户又发一条消息，有两条路——默认**排队**（存进会话的待发队列，本轮收尾后自动作为下一轮发出，可查看/删除/清空），显式（Alt+Enter 或插话按钮）**steer 插话**（注入当前这一轮，在下一个 step checkpoint 真实注入点生效）。完整说明见 [features/steer-and-queue](./steer-and-queue.md)。
 5. **人在回路（[human-in-the-loop](../terms.md)）**：
    - 当 agent 要跑危险命令（`git push`、调 GitHub API、`rm -r/-f`、`git reset --hard`、`git clean -f` 等外发/破坏性动作）时，界面弹出**[审批卡片](../terms.md)**，停下这一轮，等用户裁决再继续。三个按钮：**允许**（只放行本次）/ **会话内都允许**（放行本次，并记住这次**具体调用**——本会话内完全相同的命令后续直接放行、不再打扰；换个命令仍会再问，所以授权某条 `rm -rf` 不会连带放行别的危险命令）/ **拒绝**（可带理由）。「会话内都允许」是当次会话内的信任，重启即失效。安全的只读命令本就自动放行、不打扰。
    - 当 agent 需要用户拍板或澄清需求时，用 [ask-user](../terms.md) 工具直接在时间线里提问（可带快捷选项），用户作答后这一轮继续；用户可以点选项，也可以自由文本回答。
@@ -40,7 +42,8 @@ Seed 骨架：https://github.com/ludafa/hono-mono-starter （Hono + zod-openapi 
 | `GET /api/chat/sessions` | 列出当前用户的会话（含 status 徽标）。 |
 | `GET /api/chat/sessions/{id}` | 单个会话详情（含 active/sleeping/expired 状态）。 |
 | `GET /api/chat/sessions/{id}/events?after=<seq>` | 回放：从账本按 [seq](../terms.md) 读历史帧，用于进入会话或补齐（返回 `{ frames }`）。 |
-| `POST /api/chat/sessions/{id}/messages` | 发消息：若该会话已有进行中的一轮，则把消息**注入**（steer，`mode: "steered"`）；否则**起新一轮**（`mode: "started"`）。返回 202——事件不在这个响应里，去 `GET .../stream` 收。 |
+| `POST /api/chat/sessions/{id}/messages` | 发消息：无进行中的一轮则**起新一轮**（`mode: "started"`）；已有进行中的一轮时看 `intent`——默认 `queue` 则**排队**（`mode: "queued"`），`steer` 则**注入当前轮**（`mode: "steered"`）。返回 202——事件不在这个响应里，去 `GET .../stream` 收。详见 [features/steer-and-queue](./steer-and-queue.md)。 |
+| `DELETE /api/chat/sessions/{id}/queue/{messageId}` · `DELETE .../queue` | 删除一条 / 清空[待发队列](../terms.md)，返回变更后的完整队列快照。 |
 | `GET /api/chat/sessions/{id}/stream?after=<seq>` | 可续传直播 tail：先回放 `after` 之后的历史帧，再转发这一轮的实时帧，直到本轮结束（或无进行中轮时回放完即关）。断线带 `after=lastSeq` 重开即续。 |
 | `POST /api/chat/sessions/{id}/approvals/{callId}` | 对一个待处理审批请求裁决（`allow` 允许本次 / `allow-session` 会话内都允许该具体调用 / `deny` 拒绝，可带理由）。响应只是 ack，结果经直播流的审批 chunk 送达。 |
 | `POST /api/chat/sessions/{id}/questions/{callId}` | 回答一个待处理的 ask-user 提问。响应只是 ack，结果经直播流的 `tool-ask-user` 部件送达。 |

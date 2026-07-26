@@ -29,6 +29,33 @@ chat server 目前只有界面能看到 turn/step/工具调用的过程，运维
 
 **依赖顺序**：#2/#3 依赖 #1 已落地的 `data-tool-timing` 部件形状（已满足，可直接开工）；#2 与 #3 彼此独立可并行；#4 需 #2/#3 落地后补齐对应用例。
 
+### 拆单二：起轮装配打点（2026-07-26 追加）
+
+**起因**：用户反馈「发完消息要盯着空白等一段时间才有 AI 消息」。通读调用链后确认：界面第一次出现 assistant 气泡的时刻是 core loop 的 `yield start`，它前面串着一整段无人测量的[起轮装配](../terms.md)（取沙盒 → 续期 → 读账本 → `Skill.fromFS` 建会话），整段跑在 `POST .../messages` 里；现有遥测全部产自「turn 已经在跑之后」，这段是盲区。方案见 [tech/telemetry §2.4](../tech/telemetry.md)。
+
+| # | 内容 | 状态 |
+|---|---|---|
+| 6 | 文档：`terms.md` 收录「起轮装配」、`tech/telemetry.md` 新增 §2.4（两种事件形状 + 时序图 + 为何延后落库）、`features/telemetry.md` 补用户可见行为与事件表、本节拆单 | ✅ 已完成 |
+| 7 | server：`sandbox-manager.ts` 的 `AcquiredSandbox` 增 `mode: 'cache' \| 'resume' \| 'create'`（三条返回路径各自标注），同步测试假件 | ✅ 已实现（假件另加 `nextAcquireMode` 覆盖口，供 launcher 测试断言原样透传） |
+| 8 | server：`turn-runner.ts` 增 `StartTurnParams.onMilestone`（`'first-chunk'` / `'first-output'` 各触发一次，带 `sessionId`/`turn`/`sinceStartMs`）——纯生命周期通知，本模块不认识遥测 | ✅ 已实现（时刻在 chunk 抵达那一刻取、报告排在 `emitChunk` 之后；`session.toJSON()` 与回调各自 try/catch） |
+| 9 | server：`turn-launcher.ts` 逐段计时 + 经 `onMilestone` 写 `turn-prepare` / `turn-first-output` 两条遥测事件 + 一行 info 日志；`TurnLauncherDeps` 增 `telemetryStore` | ✅ 已实现（`ChatRouteDeps` 本就带 `telemetryStore`，生产装配零改动即接通） |
+| 10 | web：`turn-stats-dialog.tsx` 新增「本轮准备」小节（解析两种新事件，缺席则整节不渲染） | ✅ 已实现 |
+| 11 | 测试：server（milestone 时机与只触发一次、落库载荷形状、`acquireMode` 三态）+ web（新节渲染与缺席回退） | ✅ 已实现（server +9：turn-runner 4 / 新建 turn-launcher.test.ts 4 / sandbox-manager 1；web +3） |
+
+**依赖顺序**：#7 → #9（launcher 要读 `mode`）；#8 → #9（launcher 挂回调）；#10 依赖 #9 定下的载荷字段名；#11 收尾。#6 先行（本仓库硬性规范：文档先于代码）。
+
+### 拆单二的验收要点
+
+- **关联键必须与 core 注入 `streamText` 的 functionId 逐字节相同**，否则弹窗按 turn 查不到——`turn-launcher.test.ts` 因此跑真 `buildSession` + 真 core loop（模型/沙盒是假件），拿会话行上的 `agentSessionId` 反查，而不是用假 session 绕开这段。
+- **`launchMs` 不得把「等第一个 chunk」算进去**：它在 `startTurn` 返回后即定，回调只是读这个已定的值（载荷惰性求值只为这一件事）。
+- **打点纯旁路**：`onMilestone` 抛错、`session.toJSON()` 抛错、遥测写库抛错，三者都不影响这一轮的落盘与收尾（有对应用例）。
+- **遥测缺席不是错误**：不注入 `telemetryStore` 时整条打点是无操作，轮照常跑（有用例）；`turn-prepare` 那一行同时也进 stdout 日志，遥测关掉照样能排障。
+- 测试基线不得回归：`@nimbo-chat/node-server` 379（+9）、`@nimbo-chat/web` 236（+3），两包 typecheck 全绿。
+
+### 拆单二的验收结论
+
+**自测通过（2026-07-26）。** node-server：typecheck 干净，`pnpm test` 15 文件 379 用例全绿；web：typecheck 干净，`pnpm test` 16 文件 236 用例全绿、`pnpm lint` 零警告。node-server 的 `pnpm lint` 仍有既有告警/错误，全部落在本次未触碰的文件（`test/agent/uimessage-single-ledger.test.ts` 的 11 个 `no-unused-vars`、`src/telemetry.ts` 等的 prettier 告警），本次改动涉及的文件单独跑 eslint 为零告警。**尚未在真实沙盒上验过**（本地未起服务），真实分段耗时待用户跑一轮后从统计弹窗/日志读取。
+
 ## 验收要点
 
 - core：四条结算路径（正常输出/工具报错/拒绝-含审批 deny/未知工具错误）都补上 `completedAt`，无遗漏分支；同一 `toolCallId` 的 `tool-timing` 部件只有一条（同 id 覆盖，不重复 push）。
@@ -64,3 +91,4 @@ chat server 目前只有界面能看到 turn/step/工具调用的过程，运维
 | 2026-07-17 | 遥测独立成篇（主线程） | 新建 [features/telemetry](../features/telemetry.md)（怎么提供、提供哪些观测数据、与账本分工、范围与非目标）与 [tech/telemetry](../tech/telemetry.md)（存储 + ER 图、有效期定案：耗材/无自动清理/手动管理姿势、写读时序图、接口与取舍）；`tech/chat-webapp.md` §11.4 瘦身为指针，遥测的唯一技术主文档移交 tech/telemetry | 纯文档；三处互链齐全（feature ↔ tech ↔ 本 plan） |
 | 2026-07-17 | 汇总条 → 统计按钮 + 弹窗，明细富化（主线程） | 用户反馈「明细太薄、想要一个 stats 按钮点开看全部」：web `TurnResultBar`（常驻汇总条 + 内联薄面板）重写为 `TurnStatsButton`（`components/turn-stats-dialog.tsx`）——界面只留一枚「统计」按钮，点开 `Dialog`；弹窗 = 概览（原汇总条的耗时/工具/agent + usage 四分，来自账本 metadata）+ 富字段明细（`model-call-end` 补出 modelId·finishReason·`timeToFirstOutputMs`（首 token）·输入输出吞吐·token 三分含 `cacheReadTokens`/`reasoningTokens`）+ 工具执行。采集侧零改动（ai@7 事件本就带这些字段，此前面板只挑了 3 个渲染） | web 159 全绿（`turn-stats-dialog.test.tsx` 7 用例含富字段与概览格式化，`timeline-view.test.tsx` 迁为按钮落位断言）；`features/telemetry.md`·`tech/telemetry.md` §4.2·`tech/chat-webapp.md` §11.4·`features/chat-webapp.md` 同步 |
 | 2026-07-17 | 修复：工具执行事件从未落库（主线程） | 根因不在 core（`settleExecution` 的 `notifyToolExecution*` 一直在补发），而在**接收端**——server `createSqliteTelemetry` 返回的 `Telemetry` 对象漏挂 `onToolExecutionStart/End`，core `notifyIntegrations` 里 `handler?.(event)` 取到 undefined 就静默跳过，工具事件被发出却无人记录（账本 `toolDurationMs`>0、遥测零工具事件）。补上两个 `record('tool-execution-*')` 回调即修复 | server 211 全绿；新增端到端回归护栏（`telemetry.test.ts` 用 `write-file` 真跑一次工具调用，断言 `tool-execution-start/end` 落库 + toolName/toolExecutionMs 载荷）——旧端到端用例只用 `stopOnlyModel`（无工具调用）故从未覆盖到，正是漏网原因 |
+| 2026-07-26 | 起轮装配打点（主线程） | 用户反馈「发完消息要盯着空白等一段时间才有 AI 消息」：新增 `turn-prepare`/`turn-first-output` 两种遥测事件，把 `POST .../messages` 里那段无人测量的[起轮装配](../terms.md)（沙盒 acquire 含 cache/resume/create 三态 + touch + 读账本 + buildSession）与「到首个 chunk / 到首个可见输出」摊开；`turn-runner.ts` 只多一个 `onMilestone` 纯通知点（不认识遥测），拼载荷/落库在 `turn-launcher.ts`；web 统计弹窗新增「本轮准备」小节 | server 379（+9）/ web 236（+3）全绿；`terms.md`、`tech/telemetry.md` §2.4、`features/telemetry.md` 同步 |

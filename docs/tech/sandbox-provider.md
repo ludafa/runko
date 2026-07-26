@@ -86,7 +86,7 @@ export interface SandboxProvider {
 两个实现：
 
 - **`createVercelProvider()`**：`create` = 现状 `Sandbox.create({ source: git, persistent, runtime, env, timeout })` + `vercelWorkspace(sb)`，`resumeToken = params.name`，`extendIdle = extendTimeout`。`resume(name)` = `Sandbox.get({name})`，404/410 → `unavailable`。**逻辑与今天逐字等价，只是换了个壳**。
-- **`createE2bProvider()`**：`create` = `Sandbox.create({ apiKey, timeoutMs, lifecycle:{onTimeout:'pause',autoResume:true}, envs:{GH_TOKEN:pat}, metadata:{name} })` → 用绝对路径命令 `git clone https://x-access-token:<pat>@github.com/owner/repo.git /home/user/repo` → `e2bWorkspace(sb, { root: '/home/user/repo' })`，`resumeToken = sb.sandboxId`，`extendIdle = setTimeout`。`resume(id)` = `Sandbox.connect(id)`（自动 resume）包 `e2bWorkspace(root)`；抛错 → `unavailable`。
+- **`createE2bProvider()`**：`create` = `Sandbox.create({ apiKey, template: resolveE2bTemplate(), timeoutMs, lifecycle:{onTimeout:'pause',autoResume:true}, envs:{GH_TOKEN:pat}, metadata:{name} })`（`template` 见 §5 自建[沙盒模板](../terms.md)） → 用绝对路径命令 `git clone https://x-access-token:<pat>@github.com/owner/repo.git /home/user/repo` → `e2bWorkspace(sb, { root: '/home/user/repo' })`，`resumeToken = sb.sandboxId`，`extendIdle = setTimeout`。`resume(id)` = `Sandbox.connect(id)`（自动 resume）包 `e2bWorkspace(root)`；抛错 → `unavailable`。
 
 provider 由 `SANDBOX_PROVIDER` 默认 + 会话 `provider` 列选择：`sandbox-manager` 持有 `Record<SandboxProviderId, SandboxProvider>`，按会话 provider 取实现。
 
@@ -159,7 +159,35 @@ Vercel 路径同构，把 `create/resume/extendIdle` 换成 `Sandbox.create(sour
 - **E2B 令牌落库时机**：`sandboxId` 建盒后才有，故 `acquire` 必须能把它回传给路由落库（`AcquiredSandbox.resumeToken`）。若首建落库前进程崩溃，该 E2B 沙盒成孤儿（靠 `onTimeout:'kill'`? 否——它是 pause，会占额度）——首建流程要保证「create 成功 → 立即落库」尽量原子（路由内 create 与 insert 同一 try）；孤儿由 `Sandbox.list` + metadata.conversationId 兜底清理（运维脚本，非本次范围）。
 - **`setTimeout` 语义**：E2B `setTimeout(ms)` 是「从现在起剩余 ms」，正是「每条消息把空闲窗口滚到满」的意图；与 Vercel `extendTimeout` 的差异被 `extendIdle` 抽象吸收，`sandbox-manager` 的 `touch` 无感。
 - **`E2B_API_KEY` 成为 chat 应用条件依赖**：仅当有会话选 E2B 时需要；provider 工厂惰性读 env（同 `model.ts`/`github-repo.ts` 的「不在 import 时读 env」纪律），未配又选 E2B → `create` 抛带指引的配置错误，路由转 500。
+- **E2B 不用自带 `base`，改用自建[沙盒模板](../terms.md) `nimbo-chat-base`（1024 MiB）**：E2B 的 CPU/内存**只能在构建模板时定死**——`SandboxOpts` 只有 template/timeout/lifecycle/envs/metadata，没有任何内存参数——而自带 `base` 是 2 vCPU / **512 MiB**，跑 `npm install` 会被 OOM kill。故 `scripts/build-e2b-template.ts` 用 `Template().fromBaseImage()`（**同一个** base 镜像，盒内环境零变化）以 `memoryMB: 1024` 构建并发布 `nimbo-chat-base`，`create` 传 `template` 指名用它。规格三项（名字/内存/核数）均**从 env 读、以 `src/agent/e2b-template.ts` 的 `DEFAULT_*` 常量兜底**，构建脚本与运行时共用同一组 resolver，名字不会漂移。**但三项生效时机不同**：名字每次建盒都读；内存/核数**只有构建脚本读**（E2B 只在构建时给设资源的机会），改完必须重跑 `pnpm --filter @nimbo-chat/node-server e2b:template`（每个 E2B team 一次性，幂等）。内存/核数填了非正整数**直接抛错终止构建**，不沿用 `resolveIdleTimeoutMs` 的静默回退——构建是一次性操作，把 `4O96` 静默当成 1024 会发布一个「看着像 4 GiB 实则 1 GiB」的模板，几周后才以 OOM 现形。**已知限制**：模板未构建前建 E2B 盒会拿到 E2B 的 template-not-found 错误——逃生门是 `E2B_TEMPLATE=base` 退回自带模板（内存回到 512）。Vercel 侧无此问题（其资源在 `Sandbox.create` 上按盒指定）。
+- **进程内缓存必须能失效，且长轮次要保活**（SP-7）：见下 §5.1——这是**上面「`setTimeout` 语义」那条的直接后果**，当初只写了语义、没写它对缓存和长轮次的含义，代价是一个线上 bug。
 - **测试可 fake**：`SandboxProvider` 是纯结构接口，E2B/Vercel 两实现各自的契约测试用进程内 fake（沿用适配器包已有的 `FakeE2bSandbox`/fake `VercelSandboxLike`），`sandbox-manager` 的 acquire 三态测试注入 fake provider，零网络/凭证。
+
+### 5.1 缓存失效与保活心跳（SP-7）
+
+**根因：平台超时是绝对截止时间，跑命令不续期。** E2B 的 `POST /sandboxes/{id}/timeout` 文档原话是「沙盒将在**请求时刻**起 x 秒后过期」，多次调用互相覆盖、每次都以当前时刻重新起算。**执行命令不会把它往后推。** 真机实测吻合：某盒 `startedAt 09:52:53`，轮开始时 `touch` 一次，`endAt` 就钉在 `touch + 5min = 10:00:56`，其间跑了 2.5 分钟命令，`endAt` 纹丝不动。
+
+这条语义有两个后果，原设计都没接住：
+
+1. **进程内缓存会腐坏。** `sandbox-manager` 的 `active` Map 缓存活沙盒句柄，`acquire` 命中即返回。沙盒被平台 pause 后，句柄还在，后续 `touch`/`exec` 直接打到已暂停的盒 → 裸 `Sandbox … not found` 冒给用户。而 `resume()` 里那套「重试 + 判 gone + 重建」被缓存短路，**根本没机会跑**——所以连自愈都不会发生，要等进程重启。
+2. **长轮次会被从底下抽走。** `touch` 只在轮开始（`turn-launcher`）和审批/提问路由调，一轮跑得比 `SANDBOX_IDLE_TIMEOUT_MS` 长，沙盒就在轮跑到一半时暂停。
+
+**修法四层**（对应 `docs/plans/sandbox-provider.md` SP-7）：
+
+| 层 | 做什么 | 落点 |
+|---|---|---|
+| 1 保活覆盖整轮 | `startHeartbeat(conversationId)` 每 `idleTimeout/2` 续一次，返回停止函数；**轮级作用域**，`onTurnSettled` 停 | `SandboxManager` + `turn-launcher` |
+| 2 缓存可失效 | `ActiveSandbox.expiresAt` = 最后一次 create/resume/保活 + `idleTimeoutMs`；`acquire` 命中先比时间，过期即驱逐走 `resume()`（主动）。任何操作抛 gone 也驱逐（被动） | `sandbox-manager` |
+| 3 gone 判定上升到接口 | `SandboxProvider.isGone(error)`，让 manager 能给**任意操作**抛的错误分类，不只是 `resume()` | `SandboxProvider` 两实现 |
+| 5 生命周期收口 | `release()` 同时停心跳；驱逐是唯一出口 | `sandbox-manager` |
+
+**心跳为什么必须是轮级、不能常驻**：常驻心跳等于把「空闲自动暂停」整套机制废掉，沙盒永不休眠、持续计费。它要解决的只是「一轮跑得太长」，不是「让沙盒长生」。
+
+**主动 + 被动两半都要**：只算时间不够（时钟会偏、平台可能提前暂停、盒可能被外部删）；只等报错也不够（那意味着每次都要先失败一次，且失败点可能在轮子中间而不是 `acquire`）。
+
+**未做的第 4 层（workspace 自愈代理）**：即便有 1+2+3，中途暂停仍可能发生（心跳请求本身失败、网络分区）。彻底做法是把交给 session 的 workspace 包一层、捕获 gone 后重连重放。**本期刻意不做**，因为重放安全性需要单独设计：只有「命令还没开始跑」就失败（连接时 404）才能安全重试；「命令已在跑、连接中途断了」重放会**重复执行**，`git push`/`npm publish`/`>> 追加写` 都会出事。这个区分做不干净的话，这一层的危害大于收益。
+
+**词法层限制照旧**：这套只保证「沙盒还活着」，不保证沙盒里的命令做了什么。
 
 ## 6. env / 配置
 
@@ -167,4 +195,6 @@ Vercel 路径同构，把 `create/resume/extendIdle` 换成 `Sandbox.create(sour
 
 - `SANDBOX_PROVIDER`（新增，可选，默认 `vercel`）：新建会话不带 `provider` 时的服务端默认。
 - `E2B_API_KEY`：注释从「仅 examples/09」改为「examples/09 + chat 应用选 E2B 的会话」。
+- `E2B_TEMPLATE`（可选，默认 `nimbo-chat-base`）：建 E2B 盒用哪个[沙盒模板](../terms.md)。**建盒时读**，改了下一个盒即生效；填 `base` 即退回 E2B 自带模板（512 MiB），是模板没构建时的逃生门。
+- `E2B_TEMPLATE_MEMORY_MB`（可选，默认 `1024`）/ `E2B_TEMPLATE_CPU_COUNT`（可选，默认 `2`）：模板的资源规格。**只有构建脚本读**——E2B 不给建盒时设资源的机会，所以改完必须重跑 `e2b:template`，否则沙盒规格纹丝不动。非正整数直接抛错终止构建（不静默回退，见 §5）。
 - `VERCEL_*` / `GITHUB_*`：不变。

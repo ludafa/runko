@@ -15,7 +15,11 @@
 | **turn（轮）** | 回合 | 用户发一条消息，触发 agent 的一次完整循环，直到它不再调工具、给出答复。一条消息 = 一轮。 |
 | **step（步）** | — | 一轮内部，agent 每调一次模型算一步。一轮可能有很多步（每调一次工具通常就多一步）。 |
 | **conversation（会话/对话）** | session（指聊天会话时，2026-07-17 退役） | 一段持续的多轮对话，跨轮累积记忆。对应 chat 应用里的一个聊天窗口；存储为 `conversations` 表、事件账本 `conversation_events`。改名动机：解开 "session" 三重超载——该词此后专指 better-auth 登录态（`session` 表）与 SDK 的 agent 会话（`SessionState`/`agent_session_*` 列）。 |
-| **steer（中途插话）** | 软 steer、soft steer | agent 正在跑一轮的过程中，用户又发了一条消息，把它插进当前这一轮（而不是等它结束再开新一轮）。 |
+| **steer（中途插话）** | 软 steer、soft steer | agent 正在跑一轮的过程中，用户又发了一条消息，把它插进当前这一轮（而不是等它结束再开新一轮）。真实注入点是下一个 step 边界。在 chat 应用里这是**要显式选择**的路径（默认是排队，见下）。 |
+| **排队（queue）** | 待发队列 | agent 正在跑一轮时，用户发的消息**不进当前这一轮**，而是存进会话的待发队列；这一轮收尾后由服务端自动取队首、起下一轮。与 steer 相对，是 chat 应用运行中发消息的**默认**路径。队列存 `conversations.queued_messages_json`（不是[账本](#三数据存哪怎么传)——排队消息是「尚未发生的意图」，不是已发生的事件）。 |
+| **出队（dequeue）** | — | 一轮收尾后服务端自动取出待发队列队首、以它起下一轮的动作。出队即从队列移除；起轮失败则该条留在队列，等下一次轮收尾再试。 |
+| **起轮装配（turn launch）** | — | 从「服务端收到一条要起新一轮的消息」到「这一轮真正开始产出内容」之间那段准备工作：取沙盒 → 续期 → 从账本重建 `SessionState` → 建 agent 会话 → 交给 turn runner 驱动。落地为 `apps/node-server/src/agent/turn-launcher.ts` 的 `launchTurn`。它整段跑在 `POST .../messages` 的请求生命周期里，用户在界面上的等待有相当一部分花在这里，故单独打点（见 docs/tech/telemetry.md §2.4）。 |
+| **停止（stop / abort）** | 硬打断（interrupt）、取消（cancel）、中止 | 用户在一轮进行中主动叫停它：当前轮不再进入下一个 [step](#一agent-运行的基本单位)、待发队列一并清空，已产出的内容全部留在账本里。落地为 `AbortController` → core `TurnOptions.signal`，收尾状态是 `status: 'interrupted'` + `NimboError.code: 'aborted'`（这两个是代码标识符，行文一律说「停止」/「已停止」）。与 steer 的分别：steer 是「往这一轮里加话」，停止是「让这一轮结束」。见 docs/features/turn-abort.md。 |
 
 ## 二、两种「消息」格式（AI SDK 的概念）
 
@@ -40,6 +44,7 @@
 | **折叠（fold）** | — | 把一段 chunk 流按消息边界（`start`/`finish` chunk）积累还原成完整 UIMessage 的动作——chunk 是消息的传输形态，折叠是反向还原。界面端由 AI SDK 流处理器边收边折叠；服务端不重新折叠——core 的 loop 产出 chunk 的同时就在账本工作态里维护着成品消息，收尾直接落盘（见 docs/tech/single-ledger.md §2.4）。 |
 | **直播流** | live tail | 服务端通过 `GET .../stream` 实时把 chunk 推给浏览器的那条连接（SSE）。「直播」= 边跑边推，区别于「回放」= 从账本读历史。 |
 | **回放（replay）** | — | 刷新页面或断线重连后，从账本按序号读出历史、在界面重建出来。 |
+| **进行中草稿（in-flight draft）** | 临时记录、半成品 | 一轮进行中、成品消息还没落盘时，为「此刻刷新页面能重建当前画面」而留着的那串耐久 chunk。轮一收尾就被成品消息取代、随即丢弃。它的存放位置见 docs/tech/in-flight-draft.md（现状在账本表里占 `kind='chunk'` 行，方案是改放进程内存）。 |
 | **seq（序号）** | — | 账本里每条落盘记录的单调递增编号，一个会话内唯一。断线重连靠它续传（`after=<seq>`）。 |
 | **transient / persistent** | ephemeral / durable、过程帧 / 耐久帧 | 流数据的持久化两档：transient = 只直播不落盘（打字增量、进度）；persistent = 落盘可回放（完工消息、工具状态、审批状态）。P13-1 定的分层。transient 部件就是这一档在 data 部件上的体现——与 AI SDK 用词对齐，一个概念一个名字。 |
 
@@ -55,7 +60,9 @@
 | **审批分类器** | `shouldAutoAllow` | 会话级注入的「审批工具调用」接口，看一次工具调用、返回三值之一。chat 应用在这里放危险命令清单：安全命令返回 `allow`、危险命令返回 `review`。 |
 | **人工裁决（human decision）** | — | 分类器返回 `review` 后，弹给真人的卡片收到的最终答复：**允许** 或 **拒绝**（可带理由）。真人是终点，只有两值；「改参数」已于 2026-07-15 定案删除。 |
 | **审批卡片** | — | 界面上让用户裁决的那个 UI 元素，三个按钮：**允许**（本次）/ **会话内都允许**（本次 + 记住，见下）/ **拒绝**（可带理由）。 |
-| **会话级授权（session grant）** | once 记忆 | 用户在审批卡片上点「会话内都允许」后落下的一条放行记录：**本会话内、该用户、完全相同的调用**（同工具 + 同入参指纹）后续直接放行、不再弹卡片；换个命令（指纹不同）仍照常审批。**持久化**到 `conversation_grants` 子表、按 (会话, **用户**, 工具, 入参指纹) 记账——随会话存续、跨进程重启存活、会话删除即随 conversation 级联清（`clearSessionGrants` 为显式清理入口）；`user_id` = 审批人，查时按**本轮发起者**匹配，为将来一个 conversation 多用户时「每人管自己的授权」留好数据。落在 chat 层（`apps/node-server/src/agent/session-grants.ts`），wire 上是 `POST .../approvals/:callId` 的 `behavior:'allow-session'` 裁决——与 core 的 `review-once`「once 记忆」是**同一意图的两条实现路径**（core 那条按工具名、由策略驱动、纯内存；这条按具体调用、由用户在卡片上驱动、持久化到会话，chat 分类器够不着 core 的 once 记忆，故自建）。 |
+| **会话级授权（session grant）** | once 记忆 | 用户在审批卡片上点「会话内都允许」后落下的一条放行记录：**本会话内、该用户**后续同样的调用直接放行、不再弹卡片。记账粒度按工具分两种——bash 走**分段授权**（按[命令段](#四审批human-in-the-loop)记，见 docs/features/approval-grant-split.md），其余工具（及拆不动的 bash）仍按**完全相同的调用**（同工具 + 同入参指纹）记。**持久化**到 `conversation_grants` 子表、按 (会话, **用户**, 工具, 入参指纹) 记账——随会话存续、跨进程重启存活、会话删除即随 conversation 级联清（`clearSessionGrants` 为显式清理入口）；`user_id` = 审批人，查时按**本轮发起者**匹配，为将来一个 conversation 多用户时「每人管自己的授权」留好数据。落在 chat 层（`apps/node-server/src/agent/session-grants.ts`），wire 上是 `POST .../approvals/:callId` 的 `behavior:'allow-session'` 裁决——与 core 的 `review-once`「once 记忆」是**同一意图的两条实现路径**（core 那条按工具名、由策略驱动、纯内存；这条按具体调用、由用户在卡片上驱动、持久化到会话，chat 分类器够不着 core 的 once 记忆，故自建）。 |
+| **命令段（command segment）** | 子命令 | 一条 bash 命令行按 `&&` / `\|\|` / `;` / `\|` 切开后的**一条简单命令**——含它自己的参数、重定向与工作目录。`cd /repo && rm -rf build` 是两个命令段。切分由 `apps/node-server/src/agent/split-command.ts` 做，**看不透的写法一律不切**（见 docs/tech/approval-grant-split.md §3.4 拒绝清单）。 |
+| **分段授权（segmented grant）** | — | [会话级授权](#四审批human-in-the-loop)的记账粒度：按**命令段**记，而不是按整条调用的入参指纹。人点「会话内都允许」时，这次调用切出的每一段各记一行；后续调用**每一段都记过**才自动放行，有任何新段仍照常弹卡片。记的是段的 argv 数组 + cwd + 重定向（不是命令名，也不是段的字符串原文——`rm -rf "my dir"` 与 `rm -rf my dir` 必须是两个键）。见 docs/features/approval-grant-split.md。 |
 | **审批链（approval chain）** | — | 两级求值：per-tool approval 策略先行 → 升级请求交给 session 级审批分类器 `onApproval` → 结果为 review 时经人审通道 `onReview` 等真人；无仲裁者即 deny。 |
 | **人审通道（`ApprovalReviewer` / `onReview`）** | — | 会话级注入的一条通道：审批分类器把某次工具调用判为 review 后，把审批请求送到真人面前、再把裁决 resolve 回正挂起的 loop。与「审批分类器」（决定要不要人）、「人工裁决」（人给的答复）三者分工不同。 |
 | **审批请求 chunk（`tool-approval-request`）** | — | loop 解析出 review、真正阻塞等人「之前」先产出的一个耐久 chunk；界面据它弹审批卡片，是「审批可见性走直播」的结构保证（对应 ai@7 原生审批状态机的 approval-requested 态）。 |
@@ -72,8 +79,12 @@
 | **遥测（telemetry）** | — | ai@7 的 `Telemetry` 事件集成接口产出的模型调用生命周期数据（每步/每次 model call 的耗时、吞吐、usage 等），经 `SessionTelemetry` 注入、按 `"<sessionId>#<turn>"` 关联键落 SQLite（`telemetry.db`），按 turn 可查；与账本数据（`data-tool-timing`、消息 metadata）互补不重复。 |
 | **平台快照（snapshot）** | — | Vercel 沙盒停机时自动存的磁盘镜像，下次按名字恢复。是「休眠/唤醒」的底层机制。 |
 | **休眠 / 唤醒** | — | 沙盒长时间没人用 → 平台自动停机存快照（休眠）；下条消息来 → 按名字恢复（唤醒）。 |
-| **存活时长（lifetime）** | 时效、租期倒计时 | Vercel 沙盒创建时设的存活期限，到点自动停机。**跑命令不会延长它**，只有显式续期才行（见保活）。与保活的实现名 `ensureLifetime` 同词根。 |
-| **保活（keepalive，实现为 `ensureLifetime`）** | touch | 主动延长沙盒剩余存活时间。P13-2b 定为「补足到还剩 X 分钟」的语义（`ensureLifetime`）；touch 是它取代的旧续期动作。 |
+| **存活时长（lifetime）** | 时效、租期倒计时 | 云沙盒建盒时设的存活期限，到点自动停机或休眠。**跑命令不会延长它**——平台不看活动，只认显式续期（见保活）。Cloudflare 是例外，它的 `sleepAfter` 是真·空闲检测。与保活的实现名 `ensureLifetime` 同词根。 |
+| **保活（keepalive，实现为 `ensureLifetime`）** | touch、续期 | 主动把沙盒剩余[存活时长](#五沙盒与生命周期)补到目标值。语义是**补足**不是加时：够了就什么都不做，不够才补差额。实现下沉在[沙盒适配器](#五沙盒与生命周期)里，厂商差异封在适配器内部（见 [docs/features/sandbox-keepalive.md](./features/sandbox-keepalive.md)）。touch 是它取代的旧叫法。 |
+| **活动信号（activity signal）** | — | core 在一轮产出 chunk 时通知[工作区](#五沙盒与生命周期)「这一轮还在干活」的可选回调（`NimboActivityAware.onActivity`）。同步、不返回值、绝不抛错；工作区没实现这个方法就什么都不会发生。 |
+| **续期闸门（renewal gate）** | — | [沙盒适配器](#五沙盒与生命周期)内部唯一真正调用厂商续期 API 的地方。[活动信号](#五沙盒与生命周期)、exec 期间的自打点、宿主的手动调用三个来源都汇到这里，由它按「补足」语义决定这次要不要真的打网络。 |
+| **审批保活预算（approval keepalive budget）** | — | 卡在人工审批时最多还愿意为沙盒续多久。与[单轮保活上限](#五沙盒与生命周期)相互独立；配 0 表示审批期间完全不续，沙盒可能在人点下按钮之前就休眠。 |
+| **单轮保活上限（turn keepalive cap）** | — | 一轮之内保活最多持续多久。到点就停止续期、让沙盒按自己的节奏休眠，防失控任务无限烧钱。 |
 | **代码快照（checkpoint）** | — | P13-2 计划：每轮结束把工作区完整状态推到用户仓库的快照引用，防平台快照过期丢未 push 的工作。 |
 | **快照引用（checkpoint ref）** | WIP ref、隐藏 ref | 存放代码快照的自定义 git 引用（如 `refs/nimbo/wip/<会话id>`），不在正常分支命名空间下：GitHub 界面看不到、不触发 CI。与代码快照同族——快照存进快照引用。 |
 | **VirtualFS（虚拟文件系统）** | — | nimbo 的 NimboFS 抽象的具体实现族——MemoryFS（纯内存）/ OverlayFS（真实目录零拷贝 overlay）/ 自定义实现；agent 视角是普通文件系统，宿主视角是可检查、可导出（diff/writeBack）、可丢弃的对象。 |
@@ -87,8 +98,9 @@
 | **网关形态（gateway form）** | — | 沙盒 SDK 无法在普通 Node 进程直连时（如 Cloudflare）的接入方式：自部署一个 HTTP 网关把七个文件方法与 exec 映射成端点，nimbo 侧用纯 fetch 客户端连它。 |
 | **双角色 Worker（dual-role worker）** | — | `apps/cloudflare-worker-server` 的形态：同一个 Cloudflare Worker 既在进程内自驱 nimbo 会话（`/agent`），又对外提供[网关形态](../terms.md)端点（`/gateway/*`）供任意 Node 机器的客户端连入；两者共用同一套 `getSandbox` 接线与 Durable Object binding。 |
 | **沙盒 provider（sandbox provider）** | 沙盒厂商 | 一次会话选用哪家云沙盒（`vercel` / `e2b`）的选择项。决定 server 端 `sandbox-manager` 接哪个沙盒适配器、走哪套生命周期实现（建盒拉码方式、重连方式、休眠机制）。与会话 1:1 绑定，创建时选定即固定、运行中不切换。 |
+| **沙盒模板（sandbox template）** | — | 建盒时指定的镜像 + 资源规格（CPU 核数、内存），沙盒按它开出来。E2B 的 CPU/内存**只能在构建模板时定死**，`Sandbox.create` 没有内存参数；其自带 `base` 模板是 2 vCPU / 512 MiB。chat 应用因此自建模板 `nimbo-chat-base`（同一 base 镜像，内存抬到 1024 MiB），见 `apps/node-server/src/agent/e2b-template.ts`。 |
 | **重连令牌（resume token）** | — | server 为一次会话持久化、下次唤醒沙盒时用来指名恢复的字符串。因 provider 而异：Vercel 是创建时用户自选的确定性[沙盒名](../terms.md)（由 conversationId 派生，无需额外落库），E2B 是**建盒后**服务端分配的 `sandboxId`（必须落 `conversations.sandbox_id` 才能跨进程 `Sandbox.connect` 恢复）。 |
-| **心跳（keepalive heartbeat）** | — | turn 期间每 idleTimeout/2（默认 150 秒）触发一次 `ensureLifetime(idleTimeout)` 的定时器，turn 注册时启动、收尾（含异常）时停止，用「补足」语义把沙盒剩余存活时间维持在恒定水位。 |
+| **心跳（keepalive heartbeat）** | — | 一轮进行期间持续触发[保活](#五沙盒与生命周期)的整套机制。不是单个定时器，而是**两个信号源合流**：core 按 [活动信号](#五沙盒与生命周期)往下推、[沙盒适配器](#五沙盒与生命周期)在自己的 exec 调用期间自己打点，两者都汇进[续期闸门](#五沙盒与生命周期)。见 [docs/tech/sandbox-keepalive.md](./tech/sandbox-keepalive.md)。 |
 | **上次存档** | — | 最近一次 turn 正常收尾时成对写下的「模型上下文 + 代码快照」，是崩溃恢复时判断两本账是否对齐的基准。 |
 | **crash ref（事故留底引用）** | — | `refs/nimbo/crash/<sessionId>`，turn-runner catch 分支把崩溃残局尽力推到的 git 引用；恢复流程永不读取它，仅供人工打捞。 |
 
@@ -97,10 +109,12 @@
 | 主术语 | 同义词（退役） | 大白话定义 |
 |---|---|---|
 | **skill（技能）** | — | 给 agent 附加的一包能力说明 + 文件（如 frontend-design）。 |
+| **skill 清单（skill catalog）** | — | 一个会话当前可选的 skill 集合（`{name, description}[]`）。事实来源是沙盒 `.agents/skills/` 目录，缓存在 `conversations.available_skills_json` 里供前端列菜单（读缓存不唤醒沙盒，故最多滞后一轮）。见 docs/features/composer-skill-mention.md。 |
 | **kubb 重生成** | openapi 重生成 | 服务端 API 契约改了之后，用 kubb 重新生成前端的类型/客户端代码。 |
 | **BYO 实例（Bring Your Own）** | — | nimbo 不创建/不销毁沙盒，只接管宿主已创建好的实例；生命周期归宿主。 |
 | **渐进式披露（progressive disclosure）** | — | skills 的加载策略：装载时只把 name/description 注入 instructions，agent 需要时才用 load-skill 工具读取 SKILL.md 全文与附属文件——「loading a skill adds instructions, never a new execution surface」。 |
 | **ask-user（工具）** | — | 内置工具/产品能力：agent 在一轮进行中直接向用户提问（可带快捷选项）并阻塞等回答，回答后本轮继续；超时返回一段提示文案而非报错，模型自行决定继续。与审批无关、恒注册，是产品能力不是安全闸。 |
+| **联网搜索（web search，工具名 `web-search`）** | exa 搜索 | chat 应用注册给 agent 的查网工具（不是 [core 内置工具](#九内置工具见-docsfeaturesbuiltin-toolsmd)，只活在 `apps/node-server`）：一句自然语言查询 → 若干条「标题/网址/日期/摘录」。后端是 Exa 的 `/search`，`EXA_API_KEY` 没配就不注册、模型看不见。只读、不弹审批。与[原生搜索](#五沙盒与生命周期)（搜沙盒里的文件）是两回事。见 docs/features/web-search.md。 |
 
 ## 七、上下文压缩（compaction，见 docs/features/compaction.md）
 
@@ -144,3 +158,14 @@
 | **确定性段** | — | 示例脚本中不依赖模型/网络、零 key 即可确定性跑通的那一段（打印 JSON Schema、直调 exec/fs、fake 沙盒往返等），用来在无凭证下验证机制正确；与「模型驱动段」相对。 |
 | **模型驱动段** | — | 示例脚本中需真实模型（可能还需云凭证）才运行、用来验证 agent 端到端行为的那一段；与「确定性段」相对。 |
 | **gate（配置闸门）** | — | 示例脚本在发起任何模型调用/网络请求之前，按序检查所需环境变量/凭证；任一未配置就打印指引并干净退出或 return（exit 0），全程不创建沙盒、不发起模型调用、不产生副作用。 |
+
+## 十一、界面语言（chat 页面，见 docs/features/chat-ui.md）
+
+| 主术语 | 同义词（退役） | 大白话定义 |
+|---|---|---|
+| **ai-elements** | — | Vercel 官方的 AI 界面组件库（建在 shadcn/ui 上，从 registry 取到本地、代码归你）。chat 页面的消息流、工具卡片、推理块、审批、待发队列、输入框全部建在它上面；nimbo 特有的部分（中文状态词、工具计时条、三值裁决、插进本轮）作为薄封装留在 `features/chat/components/`。 |
+| **composer（消息输入框）** | 输入框 | chat 页面底部写消息的那块区域，含输入区 + 底部工具条（插话键 / 发送键 / 流式期间的停止键）。外壳是 ai-elements 的 `PromptInput`；输入区自 skill 提及功能起由 tiptap 承载，不再是原生 textarea。 |
+| **skill 提及（skill mention）** | — | 用户在 [composer](#十一界面语言chat-页面见-docsfeatureschat-uimd) 里打 `/` 唤出[skill 清单](#六其它)、选中后插入的一枚原子标记块，形如 `/frontend-design`——告诉 agent「这件事按这个 skill 来做」。删除是整枚一起删，不会剩半截字符。wire 上它就是消息文本里的普通字符串，不是独立字段（这样[回放](#三数据存哪怎么传)时天然跟着走）。见 docs/features/composer-skill-mention.md。 |
+| **sm 档密度** | — | 本项目对 ai-elements 出厂间距统一收一档的调校（消息 gap-8→gap-4、工具卡片 p-4→p-2.5 等）。改在**组件本体**里而不是调用点，否则下次重新 `add` 组件就全丢了。改动清单见 [tech/chat-ui §4](./tech/chat-ui.md)。 |
+| **设计工作台（design bench）** | 预览页 | dev-only 的 `/design` 路由：用固定假数据把 chat 页面每一档界面状态铺在同一屏，不连服务端、不需要登录，供改样式时对着迭代。生产构建下 404。 |
+| ~~轨道（rail）~~ | — | **已退役**（2026-07-25 当天提出又当天推翻）：一条贯穿一轮的竖线 + 节点。连同「打断 / 指令块 / 信号色 / 刻字面 / 结算行」都属于一版未被采纳的自研界面语言，现已全部换成 ai-elements。读旧 commit 时对照用，新文档不得再使用。 |

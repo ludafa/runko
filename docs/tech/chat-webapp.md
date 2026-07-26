@@ -132,9 +132,10 @@ sequenceDiagram
   - `acquire(input)`：三态——① 内存命中 → 直接复用，零 Vercel 调用；② `SandboxClient.get()` 成功（Vercel 从快照恢复，**分支代码含未提交改动原样还原**）→ 原样复用；③ `get()` 失败（404「从未建过」或 410「停机后无法从快照恢复=快照过期」）→ `create()`（`persistent:true` + `runtime:node24` + git source）+ 重跑 init 计划（装 skill、git identity、remote auth、git exclude）+ `recoverSessionBranch`（`git fetch origin <branch> && git checkout`，失败则 `git checkout -b` 重建——一条路径覆盖「全新」与「过期」两子情形）。
   - `touch(sessionId)`：**沙盒「休眠」机制本体**——只调 Vercel 的 `extendTimeout(idleTimeoutMs)`，无服务端定时器。会话空闲超过 `SANDBOX_IDLE_TIMEOUT_MS`（默认 5 分钟，env 可调）时 Vercel 自己 stop + 快照；下条消息的 `acquire`（态 ② 或 ③）恢复。进程重启也不漏。无内存态时 `touch` 抛错（须先 `acquire`）。
 - **`chat-agent.ts`**：`buildSession(opts)`——`Skill.fromFS(workspace, "/.agents/skills/frontend-design")` + instructions（owner/repo/分支/默认分支烤进去，模型不用猜；分支固定为会话 `branchName`，多轮在同一分支累积，且明确要求「用户没让改就只读」）+ 调 **`@nimbo/sdk`** 的 `createSession`（不是 `@nimbo/core` 的——只有 sdk facade 版打包了八件套文件工具默认装配，才让 agent 真能改沙盒里 checkout 的仓库）。**每轮 fresh 重建**，无跨请求长驻 `Session`；消息史经 `conversation_events` 的 `kind='message'` 行 + `nimbo` 标量 header round-trip（`resume`），沙盒文件态另走快照。
+- **`web-search.ts`**：[联网搜索](../terms.md)工具（`web-search`，后端 Exa `/search`）——应用级工具，**条件注册**：`EXA_API_KEY` 有值才进 `agent.tools`，没配则模型看不见它。与 `ask-user` 同构、core 零改动，详见 [tech/web-search](./web-search.md)。
 - **`turn-runner.ts`**：turn 执行/连接解耦的核心（详见 §5）。
 - **`approval-policy.ts`**：审批放行/拦截策略的纯函数（`classifyApproval`/`resolveApprovalMode`），三档 `CHAT_APPROVAL_MODE`（详见 §6）。
-- **`routes/chat.ts`**（`@hono/zod-openapi`，七个端点，全登录态强制）：见 §7 契约。
+- **`routes/chat.ts`**（`@hono/zod-openapi`，十二个端点，全登录态强制）：见 §7 契约。本页只写其中的会话/直播流/审批那几个；[待发队列](../terms.md)的三个见 [tech/steer-and-queue §4.2](./steer-and-queue.md)，`POST .../abort`（[停止](../terms.md)本轮）见 [tech/turn-abort §3.2](./turn-abort.md)。
 
 ## 5. 断线可续的实时流（turn 执行与连接解耦）
 
@@ -161,7 +162,8 @@ P13-5 后的现行机制（三值审批 + 原生 chunk，取代旧的四对 wire
 - **人工裁决纯两值**：允许 / 拒绝（可带拒绝理由回填模型），映射 `@nimbo/core` 的 `HumanDecision`。「改参数」口子已于 2026-07-15 定案删除。
 - **ask-user 工具**：`BuildSessionOptions.onAskUser` 存在时注册进 `agent.tools`（kebab-case `ask-user`）；`execute` 经 `requestUserAnswer`/`resolveUserAnswer` 同款桥挂起（`pendingQuestions`，独立于 `pendingReviews`）。可见性=`tool-ask-user` 部件自身的 `input-available`/`output-available` 状态（普通工具调用）。超时（`CHAT_ASK_USER_TIMEOUT_MS` 默认 240s）返回固定提示文案（`status:"completed"`，不抛错，模型自行继续）。**与 approvalMode 无关恒注册**（产品能力，不是安全闸）。
 - **裁决路由**：`POST .../approvals/:callId` `{behavior:"allow"|"deny", message?}`、`POST .../questions/:callId` `{answer}`——属主校验同其余路由；404 覆盖「session 不存在/非属主」与「callId 无 pending」；allow/answer 先 `touch` 续沙盒且**失败不阻断裁决**（挂到超时比 exec 失败更糟）。
-- **[会话级授权](../terms.md)（`allow-session`）**：卡片第三个按钮「会话内都允许」。wire 上是 `POST .../approvals/:callId` 的 `behavior:'allow-session'`——`resolveReview` 除了按 `allow` 放行本次，还调 `session-grants.ts` 的 `grantSessionApproval(id, toolName, input)` 记一条**按 (会话, 工具, 入参指纹) 的放行**（`pendingReviews` 项带着 `toolName`/`input`，路由只知 `callId` 也够用）。此后 `onApproval` 分类前先查 `hasSessionGrant(db, id, userId, tool, input)`：命中即短路 `allow`、不弹卡片；换命令（指纹不同）仍照常分类。刻意按**具体调用**而非按工具名——授权 `rm -rf build` 不等于放行之后任意 bash（`git push -f` 仍拦）。纯 chat 层、core 不感知（`HumanDecision` 仍只 allow/deny）。
+- **[会话级授权](../terms.md)（`allow-session`）**：卡片第三个按钮「会话内都允许」。wire 上是 `POST .../approvals/:callId` 的 `behavior:'allow-session'`——`resolveReview` 除了按 `allow` 放行本次，还调 `session-grants.ts` 的 `grantSessionApproval(id, userId, toolName, input)` 记放行（`pendingReviews` 项带着 `toolName`/`input`，路由只知 `callId` 也够用）。此后 `onApproval` 分类前先查 `hasSessionGrant(db, id, userId, tool, input)`：命中即短路 `allow`、不弹卡片；没记过的仍照常分类。刻意按**具体命令**而非按工具名——授权 `rm -rf build` 不等于放行之后任意 bash（`git push -f` 仍拦）。纯 chat 层、core 不感知（`HumanDecision` 仍只 allow/deny）。
+- **记账粒度：bash 走[分段授权](../terms.md)**（详见 [approval-grant-split](approval-grant-split.md)）：一条复合命令按 `&&`/`||`/`;`/`|` 拆成若干[命令段](../terms.md)、每段记一行，后续调用**每段都记过**才放行。这样 `cd X && rm -rf y && npm i a` 授权后，`cd X && npm i a` 直接放行，只有新出现的段才再弹卡片——整串指纹时代「命令稍变即重新审批」的组合爆炸消掉了。段的键是**去引号后的 argv 数组 + cwd + 重定向**（不是命令名，否则 `rm -rf node_modules` 的授权会放行 `rm -rf /`；也不是段的字符串原文，否则 `rm -rf "my dir"` 与 `rm -rf my dir` 撞键）。拆分器（`split-command.ts`）**只认平坦形状**，命令替换/heredoc/控制结构/注释等一律拒拆并**退回整串匹配**（= 本功能上线前的行为，零回退）。非 bash 工具、以及上线前落下的历史授权行，同样走整串键——两种键形态并存都参与查询，**无 DB 迁移**。
 
 **持久化到会话**：授权落 `conversation_grants` 子表（PK `(conversation_id, user_id, grant_key)`，`grant_key = tool + 入参指纹`，FK→conversations `ON DELETE CASCADE`），随会话存续、跨进程重启存活、会话删除即级联清（`clearSessionGrants` 为显式清理入口）。选持久化而非内存耗材,是因为「会话」在本 app = 持久的 conversation:工作区(快照+分支)、账本都跨重启存活,授权若唯独易失,重启后被重新询问只是摩擦;而粒度已窄到「精确命令 + 单会话 + 单用户」,持久化不显著扩大安全面。
 
@@ -170,7 +172,7 @@ P13-5 后的现行机制（三值审批 + 原生 chunk，取代旧的四对 wire
 
 ## 7. 关键接口 / 数据结构
 
-七个端点（`routes/chat.ts`），契约要点（`schemas/chat.ts`）：
+十二个端点（`routes/chat.ts`），契约要点（`schemas/chat.ts`）——队列三件套与 `POST .../abort` 的契约在它们各自的文档里（见 §2.2 那条），这里不复述：
 
 - JSON 字段一律 **camelCase**（seed 先例）。
 - `GET /api/chat/conversations` 返回 `ChatSession[]` 裸数组；`POST /api/chat/conversations`（201）与 `GET /api/chat/conversations/:id` 返回单个 `ChatSession`。

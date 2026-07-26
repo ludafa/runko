@@ -77,6 +77,58 @@ erDiagram
 
 补发的工具事件在源头就配合这一策略：`messages` 字段（"发起该调用的上下文"）置空数组，不为遥测多留一份账本引用。
 
+### 2.4 起轮装配事件（`turn-prepare` / `turn-first-output`）
+
+前三种事件（模型调用、step、工具执行）全部来自 turn **已经在跑之后**。但用户感知的等待是从「按下回车」开始算的，中间还夹着一段谁也没测量过的[起轮装配](../terms.md)：取沙盒、续期、读账本、建会话——它整段跑在 `POST .../messages` 的请求生命周期里，慢了界面上一点反馈都没有。这两种事件补的就是这段空白。
+
+| 事件 | 何时写 | 载荷字段 |
+|---|---|---|
+| `turn-prepare` | 这一轮**第一个 chunk** 抵达 turn runner 时 | `acquireMs` / `acquireMode`（`cache`\|`resume`\|`create`）/ `touchMs` / `loadStateMs` / `buildSessionMs` / `launchMs` / `firstChunkMs` |
+| `turn-first-output` | 这一轮**第一个可见 chunk**（`text-start`／`reasoning-start`／`tool-input-available`）抵达时 | `firstOutputMs` |
+
+字段口径（全部毫秒，墙钟）：
+
+- `acquireMs` + `acquireMode`：`sandboxManager.acquire()` 的耗时与它走的哪条路——进程内缓存命中（`cache`，零远程调用）、按[重连令牌](../terms.md)恢复（`resume`）、还是重建（`create`，含 clone + 装 skill + 切分支）。**解释「今天怎么这么慢」时先看这一格**。
+- `touchMs`：沙盒续期（`touch`）的远程往返，每轮必做。
+- `loadStateMs`：`loadResumeState`——读全部 `kind = 'message'` 账本行 + zod 校验，本地 SQLite，随历史增长。
+- `buildSessionMs`：`buildSession`——其中几乎全部是 `Skill.fromFS()` 把 frontend-design skill 的 SKILL.md 与全部附属文件从沙盒读出来（每个文件一次远程往返），`createSession` 本身是同步的。
+- `launchMs`：`launchTurn` 全程（≥ 上面四段之和，差额是 zod 校验、凭据解析等零散同步开销）。
+- `firstChunkMs`：`startTurn` 返回到第一个 chunk 抵达——这段是 `session.stream()` 顶部的 `await`（把 skill 附属文件**写回**沙盒的 `mountSkillFiles`、账本 zod 校验）加 `convertToModelMessages`。**不含**模型首 token：core 的 loop 在发出请求之前就 yield 了 `start`/`start-step`。
+- `firstOutputMs`：`startTurn` 到第一个可见 chunk——`firstOutputMs - firstChunkMs` 即模型首 token 的等待。（模型自报的 `timeToFirstOutputMs` 在 `model-call-end` 里，但那要等整次调用结束才落库，看不到「此刻还在等」。）
+
+**为什么在第一个 chunk 抵达时才落库，而不是装配一结束就写**：遥测的关联键是 `functionId = "<nimbo 会话 id>#<turn>"`，而首轮的 nimbo 会话 id 是 `createSession` 现场 mint 的，装配阶段根本不知道；`turn` 号同理要等 `session.stream()` 把它 `+1`。第一个 chunk 抵达时两者都已确定，`session.toJSON()` 一读即得，且与 core 注入 `streamText` 的那个 functionId **逐字节相同**——同轮数据自然 join 得上。代价是这一轮若在产出任何 chunk 之前就崩了（沙盒装配失败），就没有 `turn-prepare` 行；那种失败会以 500 响应 + `turn-launcher` 的 error 日志现身，不靠遥测。
+
+**依赖方向**：`turn-runner.ts` 不认识遥测，也不认识计时——它只多了两个生命周期通知点（`onMilestone`），与既有的 `onTurnSettled`（不认识「队列」只报告事件）是同一姿态；拼载荷、写库都在 `turn-launcher.ts`。
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Web as web
+    participant Route as POST .../messages
+    participant Launch as turn-launcher（launchTurn）
+    participant Box as 沙盒
+    participant Runner as turn-runner（driveTurn）
+    participant Core as core loop
+    participant DB as telemetry.db
+
+    Web->>Route: 发消息（此时界面只有乐观回显）
+    Route->>Launch: launchTurn
+    Launch->>Box: acquire（cache / resume / create）
+    Launch->>Box: touch（续期）
+    Launch->>Launch: loadResumeState（读账本 + 校验）
+    Launch->>Box: buildSession → Skill.fromFS（读 skill 附属文件）
+    Launch->>Runner: startTurn（登记后立即返回）
+    Route-->>Web: 202（前端此刻才开 SSE）
+    Runner->>Core: session.stream()
+    Core->>Box: mountSkillFiles（写回 skill 附属文件）
+    Core-->>Runner: start / start-step（模型请求已发出，尚无 token）
+    Runner->>Launch: onMilestone('first-chunk')
+    Launch->>DB: INSERT turn-prepare（含装配分段 + firstChunkMs）
+    Core-->>Runner: text-start / reasoning-start / tool-input-available（模型首个可见输出）
+    Runner->>Launch: onMilestone('first-output')
+    Launch->>DB: INSERT turn-first-output
+```
+
 ## 3. 有效期
 
 **定位：耗材（无持久承诺），当前不自动清理。** 具体含义：
@@ -117,7 +169,7 @@ sequenceDiagram
 
 ### 4.2 三个消费入口
 
-- **统计弹窗**：`TurnStatsButton`（`components/turn-stats-dialog.tsx`）挂在完成轮的 assistant 回复末尾，点开弹窗——概览来自消息 metadata（耗时/工具/agent/usage），有 `conversationId`/`turn` 时再拉遥测明细：渲染 `model-call-end`（modelId / finishReason / responseTimeMs / timeToFirstOutputMs / 输入输出吞吐 / usage 三分含 cacheReadTokens·reasoningTokens）与 `tool-execution-end`（toolName / toolExecutionMs / 失败标记）两组行。
+- **统计弹窗**：`TurnStatsButton`（`components/turn-stats-dialog.tsx`）挂在完成轮的 assistant 回复末尾，点开弹窗——概览来自消息 metadata（耗时/工具/agent/usage），有 `conversationId`/`turn` 时再拉遥测明细，三组行：**本轮准备**（`turn-prepare` + `turn-first-output`，§2.4——起轮装配分段、沙盒走的哪条路、到首个 chunk / 首个输出的耗时）、`model-call-end`（modelId / finishReason / responseTimeMs / timeToFirstOutputMs / 输入输出吞吐 / usage 三分含 cacheReadTokens·reasoningTokens）与 `tool-execution-end`（toolName / toolExecutionMs / 失败标记）。
 - **API**：`GET /api/chat/conversations/{id}/turns/{turn}/telemetry`（openapi.yml 已含）——`{ events: [{ eventType, ts, payloadJson }] }`，payloadJson 原样透传字符串，服务端不做二次建模（形状随 ai 小版本演化，深度建模只会先碎在服务端）。
 - **SQL**：
   ```sql
@@ -151,3 +203,5 @@ sequenceDiagram
 3. **单进程本地文件**：多实例部署时各写各的 telemetry.db，无汇聚——当前单进程场景够用，需要集中式再议（届时 `Telemetry` 集成换个后端即可，接口不变）。
 4. **首轮未完成的会话查不到**：`agent_session_id` 在首轮优雅收尾才写入，此前端点返回空数组（数据其实已按 nimbo 会话 id 落库，只是缺翻译键）——可接受的边界，统计按钮本就只出现在完成轮上，无 `turn` 键时弹窗只出概览、不拉明细。
 5. **turn 内时序**：`ts` 是落库时刻、`id` 单调递增，同轮内按 `id` 排序即事件顺序；跨轮/跨会话比较用各事件 payload 里的业务时间字段。
+6. **起轮装配打点只覆盖成功起轮的那些轮**（§2.4）：装配途中失败（沙盒挂了、凭据缺失）永远产不出第一个 chunk，也就没有 `turn-prepare` 行——那条路径的可观测性归日志与 500 响应，遥测不兜底。同理，`intent: 'steer'`（[插话](../terms.md)）与[排队](../terms.md)不走 `launchTurn`，也没有这两种事件。
+7. **`firstChunkMs` 里混着一段 core 内部的活**（`mountSkillFiles` + 账本校验 + `convertToModelMessages`），当前不再细分——继续拆需要在 `@nimbo/core` 里加打点口，那是发布包的破坏性面，等这层数据证明确有必要再动。

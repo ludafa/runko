@@ -17,6 +17,7 @@
 | SP-4 前端 | 新建会话选 provider + 会话卡片 provider 徽标 + kubb 重生成 | ✅ 已完成 |
 | SP-5 测试 | provider 两实现契约测试（fake）+ acquire 三态注入 fake provider + 路由集成 | ✅ 已完成 |
 | SP-6 真机验收 | 选 E2B 走完 建会话→消息→休眠→唤醒→（可选）PR；Vercel 回归 | 🔶 休眠已暴露 bug→修复→真机验证；完整浏览器 E2E（设计→PR、Vercel 回归）待重跑 |
+| SP-7 缓存失效 + 保活心跳 | 修「沙盒 paused 后进程仍用陈旧句柄 → 裸 404 且永不自愈」 | ✅ 已完成（层 4 自愈代理另立） |
 
 ## 拆单明细
 
@@ -27,6 +28,8 @@
 - **SP-4 前端（主线程内联，✅）**：`features/chat/schema.ts` 手写 `conversationSchema` 加 `provider` + 导出 `conversationProviderSchema`/`ConversationProvider`（chat 客户端用手写 zod 校验，非 kubb 生成）；`api.ts` `createConversation` 入参加 `provider`；`chat-layout.tsx` `handleCreate(title, provider)`；`conversation-list.tsx` 新建表单加 provider 分段切换（默认 vercel、显式发送，见 lantie 决策）+ 卡片加 provider 徽标；新增 `provider-badge.tsx`（品牌色圆点 + 名称）；`conversation.tsx` 详情头部加徽标；kubb 重生成（`src/gen/` 的 Conversation/CreateConversationInput 同步 `provider`）。**验收结论见下**。
 - **SP-5 测试（tester agent，✅）**：大部分随 SP-1/2/3 内联完成，本阶段由 tester 补深水缺口并审计。**新增 10 例**：① `test/routes/chat.test.ts` E2B 重建回写 3 例（过期重建→acquire 返回新 token→`sandbox_id` 回写为新值；Vercel 恒不回写 `sandbox_id`；resumeToken 未变时 `db.update` spy 断言零写）；② `test/agent/store.test.ts` 3 例（`createConversation` 默认 vercel/null、显式 e2b 存值、`updateConversation` 仅 sandboxId 补丁不误动其他列）；③ `test/agent/sandbox-manager.test.ts` `resolveDefaultProvider` 4 例（未设/=e2b/大小写空白/非法回落）。扩展 `test/helpers/fake-sandbox-manager.ts` 加 `nextResumeToken`（让某次 acquire 返回不同令牌，模拟重建）。tester 审计未发现产品缺陷。**验收结论见下**。
 - **SP-6 真机验收（主线程 + tester，🔶 部分）**：`E2B_API_KEY` 已在 `.env`。tester 起完整栈跑浏览器 E2E；**休眠→唤醒步骤暴露真 bug**（详见下「SP-6 发现与修复」），主线程接手诊断+修复+真机验证。完整浏览器 E2E（设计→PR、Vercel 只读回归）因 tester 中途卡在长轮次未跑完确认，待重跑。
+
+- **SP-7 缓存失效 + 保活心跳（主线程内联，✅ 2026-07-25）**：起因是用户线上撞到 `{"error":"Sandbox ie678jts670cem6zsgay7 not found"}`。**诊断**：查 E2B 实况发现该盒 `state=paused`（**没被删**）、`lifecycle{onTimeout:'pause',autoResume:true}`；真因是 `sandbox-manager` 的 `active` Map 缓存句柄却**从不失效**、`release()` 全仓无调用点——盒被平台 pause 后进程仍拿旧句柄打，`resume()` 那套重试/重建被缓存短路，永不自愈。旁证两条：走 `resume` 的话 `isE2bSandboxGone` 会匹配并静默重建、用户根本看不到这个错；且当时唯一 running 的盒属于**另一个**会话，说明该会话确实没发生重建。**根因层面**是 E2B 超时为绝对截止时间、跑命令不续期（文档 + 实测双证，见技术方案 §5.1）。**实际改动**：`SandboxProvider` 加 `isGone(error)`（两实现各自复用已有的 `isRecoverableGetFailure`/`isE2bSandboxGone`）；`ActiveSandbox` 加 `provider`/`expiresAt`，`acquire` 命中先比截止时间、过期即驱逐走 resume，resume 成功后显式 `extendIdle` 一次让 `expiresAt` 可信（并处理「resume 回来的盒在保活时就没了 → 退回 create」）；`touch` 抽成 `extendDeadline`，成功推 `expiresAt`、抛 gone 则驱逐后原样 rethrow；新增 `startHeartbeat(conversationId)`（`idleTimeout/2` 周期、`unref`、停止函数幂等），`turn-launcher` 在 `startTurn` 前开、`onTurnSettled` 停、起轮被 busy 守卫挡掉时就地停；`release` 走统一 `evict`（连带停心跳）。**未做**：层 4 workspace 自愈代理，理由（重放安全性）见技术方案 §5.1。**测试**：`sandbox-manager.test.ts` 新增 9 例（TTL 过期重连 / 保活推后截止时间 / gone 驱逐 / 非 gone 不驱逐 / 心跳周期与停止 / 心跳吞错 / 停止幂等 / release 停心跳 / resume 后显式保活 + 保活即没退回 create），`chat.test.ts` 新增 1 例（一轮开心跳、轮结束停），假件补 `startHeartbeat` 记账。**server 全量 358 绿、`tsc --noEmit` 干净、改动文件 lint 零 error。** **待办**：真机复验一轮——让一个会话空闲超过 `SANDBOX_IDLE_TIMEOUT_MS` 再发消息，确认自动重连且不再报 not found。
 
 ## 验收结论
 

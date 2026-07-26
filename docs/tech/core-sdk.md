@@ -169,7 +169,7 @@ interface AgentDefinition {
   tools?: Record<string, Tool>;                // key 即工具名（对应 eve 的"文件名即工具名"）
   builtinTools?: BuiltinToolName[] | false;    // 默认全部文件工具；false 关闭
   skills?: Skill[];
-  maxTurnsPerRun?: number;                     // 默认 40（计数语义见 §4.8"max_turns 语义"）
+  maxTurnsPerRun?: number;                     // 默认 100（计数语义见 §4.8"max_turns 语义"）
   maxOutputTokens?: number;
   maxContextTokens?: number;                   // 上下文显式上限，opt-in（P4-2 回填，语义见 §4.8）
 }
@@ -476,6 +476,7 @@ function loadAgentFromFS(fs: NimboFS, dir: string, opts?): Promise<AgentDefiniti
 ### 4.8 Agent loop 细节
 
 - 终止条件：`finishReason: "stop"`（无 tool call）、`maxTurnsPerRun` 触达（`max_turns`）、`signal` abort（`aborted`）、模型错误（单步重试交给 streamText 的 `maxRetries`，最终失败则 `provider_error`）——失败原因写进末条 assistant 消息 metadata 的 `status`（`failed`/`interrupted`）+ `error`。
+- **abort 的生效点（[停止本轮](./turn-abort.md)工单回填）**：`runTurn` 的 step 循环**开头**显式检查 `abortSignal.aborted`，命中即以 `interrupted`/`aborted` 优雅收尾——「绝不开始新的一步」是 nimbo 自己的确定性保证。一步*之内*的中止仍由 `abortSignal` 本身负责（模型流被掐断 / `ToolContext.abortSignal` 交给工具），两条路收尾形状一致。之所以需要这个显式检查：工具执行被中止时工具是**正常收尾**的（§4.5a「失败即 `ExecResult`」，不抛错），若只等 AI SDK 抛错，loop 会照常进入下一步、白打一次模型调用才停。
 - 结构化输出：实际用 `generateText({ output: Output.object })`（`generateObject` 在 ai@7 已弃用）；"原生 vs 回退"收敛为单一机制——`Output.object` 的解析本身就是"JSON 解析 + zod 校验"，失败抛 `NoObjectGeneratedError` 触发修正重试（初次 + 重试 2 = 至多 3 次调用），无平行手写回退。抽取发生在 turn 成功收尾**之后**的独立一轮、不回写账本；耗尽预算 **throw `NimboStructuredOutputError`**（不新增失败 code——turn 本身成功，失败的只是附加的结构化折叠步骤）。
 - 上下文管理 v1 显式上限：估算 token 超阈值即 `context_overflow`（用每步 usage 回填校准估算）；自动 compaction 列 v2（避免隐式行为，另见 [compaction](./compaction.md)）。
 - 会话恢复：`SessionState = { id, turn, messages: NimboUIMessage[], createdAt, fsSnapshot? }`——messages 是账本的 UIMessage 数组（本身即 JSON 可序列化），经 `validateSessionMessages`（ai 官方 `validateUIMessages`，天生异步）校验后恢复（P13-5：不再存 `ModelMessage[]`，模型上下文每步由官方 `convertToModelMessages` 现场推导，`nimbo_state_json` 取消）；FS 默认不内联，`toJSON({ includeFs: true })` 经 `fs.snapshot()` 可选内联（`resume` 时经结构探测调 `fs.restore()`）。
