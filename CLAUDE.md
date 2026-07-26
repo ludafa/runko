@@ -1,5 +1,48 @@
 # CLAUDE.md
 
+## 仓库拓扑
+
+pnpm workspace 三组成员（见 [pnpm-workspace.yaml](./pnpm-workspace.yaml)）：`packages/*` 是对外发布的 `@nimbo/*` 包，`apps/*` 与 `examples` 是 `private: true` 的消费侧、不发布。各包的对外定位与 README 索引见 [docs/README.zh-CN.md](./docs/README.zh-CN.md)，这里只给改代码时要的**落点**与**依赖方向**。
+
+### packages/\*（发布，changesets 管版本）
+
+| 包                          | 落点                                                                         | runtime workspace 依赖      |
+| --------------------------- | ---------------------------------------------------------------------------- | --------------------------- |
+| `@nimbo/core`               | L0 接口 / L1 定义层 / L2 运行层 / AI SDK step runner / skills / 内置工具本体 | 无（peer `ai`）             |
+| `@nimbo/virtual-fs`         | MemoryFS·OverlayFS·DirFS、mime 推断、diff/writeBack、文件工具八件套          | core                        |
+| `@nimbo/mini-bash`          | NimboExec 实现：纯 TS 只读解释器（零依赖极简档，随 sdk 装入）                | core                        |
+| `@nimbo/just-bash`          | NimboExec 实现：全语法档 bash（just-bash 适配器，不随 sdk 装入）             | core                        |
+| `@nimbo/sandbox-e2b`        | NimboFS & NimboExec 适配 E2B（BYO 实例，provider SDK 仅类型依赖）            | core, virtual-fs            |
+| `@nimbo/sandbox-vercel`     | 同上，适配 Vercel Sandbox                                                    | core, virtual-fs            |
+| `@nimbo/sandbox-cloudflare` | 同上，适配 Cloudflare Sandbox（`.` fetch 客户端 + `./worker` 网关双入口）    | core, virtual-fs            |
+| `@nimbo/sdk`                | 主包门面：re-export core + virtual-fs + mini-bash，不放实现                  | core, virtual-fs, mini-bash |
+
+**依赖方向单向**：`core` 是根，其余全部指向它。`core` 反向持有 `mini-bash`/`virtual-fs` 的是 **devDependencies**（自测用）——这条循环 devDep 正是「跨包类型解析指向 dist、必须先 `build` 再 `typecheck`」的原因，别改成 dependencies。
+
+### apps/\* 与 examples（private，不发布）
+
+| 成员                                   | 是什么                                                                               | workspace 依赖                                |
+| -------------------------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------- |
+| `@nimbo-chat/node-server`              | chat 应用服务端：Hono + zod-openapi + drizzle/better-sqlite3 + better-auth，SSE 流式 | core, sdk, sandbox-e2b, sandbox-vercel        |
+| `@nimbo-chat/web`                      | chat 应用前端：Vite + React + TanStack Router + shadcn(base-ui) + Tailwind           | core                                          |
+| `@nimbo-chat/cloudflare-worker-server` | 双角色 Worker：进程内直连真实 CF Sandbox，同时对外提供 BYO 网关端点                  | sdk, sandbox-cloudflare                       |
+| `@nimbo/examples`                      | 示例集（实验田），`pnpm example <编号>` 即跑；只有 typecheck，无 build/test          | sdk, just-bash, sandbox-e2b/vercel/cloudflare |
+
+`apps/*` 并入根 workspace，是因为它们要用 `workspace:*` 协议解析 `@nimbo/*`（独立子 workspace 解析不到）；`examples` 不带 `/*`——workspace 根自身就是那个成员。
+
+### 命令边界（容易踩）
+
+- 根 `pnpm build` / `typecheck` / `test` 只 filter `./packages/*`，**不覆盖 apps 与 examples**；动了 apps 要进对应目录跑它自己的 `typecheck`/`lint`/`test`。
+- CI（`.github/workflows/ci.yml`）跑的是 `pnpm -r build|typecheck|test`，覆盖**全部**成员——本地只跑根脚本会漏掉 apps/examples 的问题。
+- chat 应用另有根级 `chat:bootstrap`（建库 + 生成 OpenAPI 与前端 client）、`chat:server`、`chat:web`。
+
+### dev server 归我自己管（硬性规范）
+
+- **不要主动起常驻进程**——`chat:server`、`chat:web`、任何 `dev` / `--watch` 脚本，一律别起，后台运行也不行。**只有我明确说「你起一个」时才起。**
+- **为什么**：这类进程跑完不退、会被你的会话持有；攒几轮下来就是一堆占着端口的孤儿 watcher，我这边还不一定看得见。要验证改动，用**跑完即退**的命令：`typecheck` / `test` / `build`，或对着我已经起好的服务 `curl`。
+- **确实需要一个跑着的服务才能验证**时：别自己起，告诉我要起什么、监听哪个端口、你接下来要拿它验什么，让我起。可以提示我用 `! pnpm chat:server`（`!` 前缀在会话里执行，输出直接进上下文）。
+- **别擅自杀我的 dev server**。要清理先问，并说清哪个 PID / 端口、为什么该清。
+
 ## 术语纪律
 
 - 所有对话与文档中使用的项目术语，必须在 [docs/terms.md](./docs/terms.md) 中有明确定义。使用未登记的新术语前，先在术语表加词条（主术语 + 一句话定义），再在正文使用。
@@ -19,6 +62,8 @@
 
 nimbo 是技术产品，**技术面本身就是产品功能**——架构总纲、内置工具、沙盒适配契约这类「底座」对开发者而言都是功能，一律按上面三目录归位，不另设参考目录。唯一例外：术语表 `docs/terms.md` 与总览 `README` 留在 `docs/` 根（它们是词典/索引，不是功能文档）。
 
+请用简单易懂、清晰明了的语言来编写所有文档，避免晦涩、避免过度术语化。可以的时候尽量多画图，业务领域实体关系图、时序图是很重要的。
+
 **引用纪律**：
 
 - 文档间要有**关系引用**——一个功能的 feature/tech/plan 三份互链；依赖或延续其他功能时链到对应文档。
@@ -37,6 +82,8 @@ nimbo 是技术产品，**技术面本身就是产品功能**——架构总纲�
 
 每次有面向用户的改动,都要生成一个 changeset 文件放在 `.changeset/` 下。
 纯内部改动(如仅改测试、CI、注释)不需要 changeset。
+
+**范围只限 `packages/*`**——`apps/*` 与 `examples` 是 `private: true` 的不发布成员(见上「仓库拓扑」),没有版本号也不进 CHANGELOG,改它们不写 changeset。
 
 ## changeset 文件格式
 

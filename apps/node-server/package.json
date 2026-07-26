@@ -7,6 +7,7 @@
     "dev": "node --env-file-if-exists=../../.env --env-file-if-exists=.env --import tsx --watch src/index.ts",
     "start": "node --env-file-if-exists=../../.env.production --env-file-if-exists=.env.production --import tsx src/index.ts",
     "generate:openapi": "tsx scripts/generate-openapi.ts",
+    "e2b:template": "node --env-file-if-exists=../../.env --env-file-if-exists=.env --import tsx scripts/build-e2b-template.ts",
     "build": "pnpm run generate:openapi && tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
