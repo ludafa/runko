@@ -27,11 +27,13 @@ import type {
   ChunkEnvelope,
   ConversationDto,
   MessageFrame,
+  QueueFrame,
 } from '../../src/schemas/chat.js';
 import {
   chatReplayFrameSchema,
   ConversationEventsListSchema,
   ConversationSchema,
+  messageFrameSchema,
 } from '../../src/schemas/chat.js';
 import { createTelemetryStore } from '../../src/telemetry.js';
 import { createControllableSession } from '../helpers/controllable-session.js';
@@ -108,8 +110,62 @@ function messageFrames(frames: ChatReplayFrame[]): MessageFrame[] {
   return frames.filter((frame): frame is MessageFrame => 'message' in frame);
 }
 
+/** Narrows a frame list to its `QueueFrame`s（[待发队列](docs/terms.md)快照，docs/tech/steer-and-queue.md §4.3）——同样是结构判别（`'queue' in frame`）。 */
+function queueFrames(frames: ChatReplayFrame[]): QueueFrame[] {
+  return frames.filter((frame): frame is QueueFrame => 'queue' in frame);
+}
+
 function chunksOnly(frames: ChatReplayFrame[]): NimboChunk[] {
   return chunkFrames(frames).map((frame) => frame.chunk);
+}
+
+/** 账本里已落盘的消息，按 seq 序（`kind = 'message'` 行原样解析回 `NimboUIMessage`）。 */
+function persistedMessages(db: Db, conversationId: string): NimboUIMessage[] {
+  return listConversationEvents(db, conversationId)
+    .filter((row) => row.kind === 'message')
+    .map(
+      (row) =>
+        // `JSON.parse` 的 `any` 直接喂进 zod、不落进具名变量——与本文件 `parseFrames`
+        // 同一姿态，`any` 不逃出这个表达式。
+        messageFrameSchema.parse({
+          seq: row.seq,
+          message: JSON.parse(row.payloadJson),
+        }).message,
+    );
+}
+
+/** 账本里已落盘的用户消息文本，按 seq 序——自动出队用例据此确认「排队的那条真的成了下一轮的用户消息」。 */
+function persistedUserTexts(db: Db, conversationId: string): string[] {
+  return persistedMessages(db, conversationId)
+    .filter((message) => message.role === 'user')
+    .map((message) => collectText(message));
+}
+
+/** 已落盘的每一轮收尾状态，按 seq 序（`completed` / `failed` / `interrupted`）——停止用例据此确认这一轮是**被停止**收尾的，不是失败也不是正常完成。 */
+function persistedTurnStatuses(
+  db: Db,
+  conversationId: string,
+): (string | undefined)[] {
+  return persistedMessages(db, conversationId)
+    .filter((message) => message.metadata?.status !== undefined)
+    .map((message) => message.metadata?.status);
+}
+
+/**
+ * 轮询直到 `read()` 给出一个非 undefined 的值（默认 ~2s 上限）——自动出队是**跨轮**的
+ * 异步链（上一轮 `finally` → 出队 → 起下一轮 → 下一轮跑完），没有单一的 promise 可
+ * `await`，所以这里按 `sleep(5)` 轮询已落盘的结果，与本文件既有的 `readUntil` 同风格。
+ */
+async function waitFor<T>(
+  read: () => T | undefined,
+  maxAttempts = 400,
+): Promise<T> {
+  for (let i = 0; i < maxAttempts; i += 1) {
+    const value = read();
+    if (value !== undefined) return value;
+    await sleep(5);
+  }
+  throw new Error('timed out waiting for the expected state');
 }
 
 function messagesOnly(frames: ChatReplayFrame[]): NimboUIMessage[] {
@@ -279,6 +335,7 @@ function createHoldableSandboxManager(): SandboxManager & {
         workspace: await workspacePromise,
         defaultBranch: 'main',
         resumeToken: input.resumeToken ?? input.sandboxName,
+        mode: 'resume',
       };
     },
     async touch(conversationId: string): Promise<void> {
@@ -286,6 +343,11 @@ function createHoldableSandboxManager(): SandboxManager & {
     },
     release(): void {
       // no-op — this fake only cares about acquire()'s workspace and touch()'s call log.
+    },
+    startHeartbeat(): () => void {
+      return () => {
+        // no-op — keepalive timing is covered by sandbox-manager's own tests.
+      };
     },
   };
 }
@@ -313,6 +375,8 @@ function createSandboxManagerWithFailingTouchAfterFirst(): SandboxManager {
     release: (conversationId: string) => {
       base.release(conversationId);
     },
+    startHeartbeat: (conversationId: string) =>
+      base.startHeartbeat(conversationId),
   };
 }
 
@@ -648,13 +712,18 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
     expect(response.status).toBe(404);
   });
 
-  it('POST .../messages 409s when a turn is already in progress for that session', async () => {
+  it('POST .../messages with intent "steer" 409s when the in-progress turn can’t actually be steered (its session has no steer capability) and the fallback start finds the slot still occupied', async () => {
     const app = buildApp(() => stopOnlyModel('hi'));
     const created = await createSession(app);
 
     // Occupy the turn slot directly (a fake that never finishes on its own)
     // instead of racing a real mock-model turn, which could complete before
-    // the second POST below ever runs.
+    // the second POST below ever runs. `ControllableSession` deliberately has
+    // no `steer` (turn-runner.ts's `TurnDrivenSession.steer` is optional), so
+    // `steerTurn` returns false and the route falls back to starting a new
+    // turn — which `startTurn`'s own guard then rejects. That fallback path is
+    // the only way a 409 "turn already in progress" is still reachable now
+    // that the default intent queues instead (docs/tech/steer-and-queue.md §4.1).
     const stuck = createControllableSession();
     const { started } = startTurn({
       db,
@@ -670,7 +739,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: 'second' }),
+        body: JSON.stringify({ text: 'second', intent: 'steer' }),
       },
     );
     expect(response.status).toBe(409);
@@ -791,7 +860,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
     expect(messageFrames(frames)).toEqual([]);
   });
 
-  it('GET .../stream closes immediately after replay when there is no turn in progress (fresh session, never messaged)', async () => {
+  it('GET .../stream closes immediately after replay when there is no turn in progress (fresh session, never messaged) — the one frame it still sends is the 待发队列 snapshot', async () => {
     const app = buildApp(() => stopOnlyModel('hi'));
     const created = await createSession(app);
 
@@ -799,7 +868,10 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       `/api/chat/conversations/${created.id}/stream`,
     );
     expect(response.status).toBe(200);
-    expect(await response.text()).toBe('');
+    // docs/tech/steer-and-queue.md §4.3 时机 1：每条连接在回放之后都发一帧权威队列
+    // 快照，**包括**没有进行中那一轮的这种「连上即关」的连接——前端因此不必为
+    // 「刚起的会话」单独查一次队列。空队列也照发（空≠不发）。
+    expect(await response.text()).toBe('event: queue\ndata: {"queue":[]}\n\n');
   });
 
   it('GET .../stream called while a turn is active replays the turn-start user MessageFrame (already persisted before the connection opened) plus the live chunk feed; a later GET .../stream (after the turn has finished) instead replays all its messages as MessageFrames, the now-GC’d chunk frames gone', async () => {
@@ -1368,7 +1440,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
   // isolation; this is the end-to-end route regression for it).
   // -------------------------------------------------------------------------
 
-  it('a second POST while a turn is in progress steers it (202 mode "steered"): the steered text streams as its own start(steered:true)…finish sequence, and both messages persist correctly once the turn ends', async () => {
+  it('a second POST with intent "steer" while a turn is in progress steers it (202 mode "steered"): the steered text streams as its own start(steered:true)…finish sequence, and both messages persist correctly once the turn ends', async () => {
     const holdableSandboxManager = createHoldableSandboxManager();
     const app = createChatApp({
       db,
@@ -1399,12 +1471,17 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
     // inside fs.writeFile() — nothing time-based, no sleep/race.
     await holdableSandboxManager.writeCalled;
 
+    // `intent: 'steer'` 是**显式**的——默认（省略 intent）现在是排队到下一轮
+    // （docs/tech/steer-and-queue.md §4.1），排队路径的覆盖见本文件的队列用例组。
     const secondResponse = await app.request(
       `/api/chat/conversations/${created.id}/messages`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: 'also check the API timeout' }),
+        body: JSON.stringify({
+          text: 'also check the API timeout',
+          intent: 'steer',
+        }),
       },
     );
     expect(secondResponse.status).toBe(202);
@@ -1620,6 +1697,112 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       expect(
         findByToolCallId(chunks2, 'tool-output-available', 'call_2'),
       ).toBeDefined();
+    });
+
+    it('一轮跑起来会开保活心跳，轮结束时停掉（docs/tech/sandbox-provider.md §5.1）', async () => {
+      const app = buildApp(() => stopOnlyModel('done'));
+      const created = await createSession(app);
+
+      expect(sandboxManager.heartbeats).toHaveLength(0);
+
+      await app.request(`/api/chat/conversations/${created.id}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'hi' }),
+      });
+      const stream = await app.request(
+        `/api/chat/conversations/${created.id}/stream`,
+      );
+      await stream.text(); // 直播流关闭 = 这一轮收尾完毕
+
+      expect(sandboxManager.heartbeats).toHaveLength(1);
+      // 停掉是硬要求：不停的话每个跑过的会话都会永远留着一个保活定时器，
+      // 空闲自动暂停整套机制失效（还持续烧钱）。
+      expect(sandboxManager.heartbeats[0]?.stopped).toBe(true);
+      expect(sandboxManager.heartbeats[0]?.conversationId).toBe(created.id);
+    });
+
+    it('分段授权：allow-session 一条复合命令后，「其中一段」直接放行，「含新段」仍弹审批（docs/features/approval-grant-split.md）', async () => {
+      // 三轮各发一条命令：授权复合命令 → 只发其中一段 → 发含新段的命令。
+      const commands = [
+        'cd /home/user/repo && git push origin main',
+        'git push origin main', // 段是第 1 轮的子集 → 应直接放行
+        'cd /home/user/repo && git push origin main && rm -rf /tmp/scratch', // 多一段没批过的
+      ];
+      let turn = 0;
+      const app = buildApp(() => {
+        const command = commands[turn] ?? '';
+        turn += 1;
+        return toolCallThenStopModel(
+          'bash',
+          { command },
+          `call_${String(turn)}`,
+          'ok',
+        );
+      });
+      const created = await createSession(app);
+
+      const runTurn = async (text: string): Promise<void> => {
+        await app.request(`/api/chat/conversations/${created.id}/messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }),
+        });
+      };
+
+      // ---- 第 1 轮：复合危险命令 → 弹审批 → allow-session（记两段）----
+      await runTurn('push my branch');
+      const stream1 = await app.request(
+        `/api/chat/conversations/${created.id}/stream`,
+      );
+      const reader1 = createIncrementalReader(stream1);
+      await reader1.readUntil((frames) =>
+        chunksOnly(frames).some((c) => c.type === 'tool-approval-request'),
+      );
+      const grantResponse = await app.request(
+        `/api/chat/conversations/${created.id}/approvals/call_1`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ behavior: 'allow-session' }),
+        },
+      );
+      expect(grantResponse.status).toBe(200);
+      await reader1.drainToClose();
+
+      // ---- 第 2 轮：只发其中一段 → 段已记过 → 不弹审批 ----
+      // 注意 `git push` 本身在危险清单里：这里能直接跑，靠的正是分段授权命中
+      // 短路了危险命令分类（整串指纹时代这条命令与第 1 轮指纹不同，会重新弹卡片）。
+      await runTurn('push again');
+      const stream2 = await app.request(
+        `/api/chat/conversations/${created.id}/stream`,
+      );
+      const chunks2 = chunksOnly(parseFrames(await stream2.text()));
+      expect(chunks2.some((c) => c.type === 'tool-approval-request')).toBe(
+        false,
+      );
+      expect(
+        findByToolCallId(chunks2, 'tool-output-available', 'call_2'),
+      ).toBeDefined();
+
+      // ---- 第 3 轮：含一段没批过的 → 仍然弹审批 ----
+      await runTurn('cleanup and push');
+      const stream3 = await app.request(
+        `/api/chat/conversations/${created.id}/stream`,
+      );
+      const reader3 = createIncrementalReader(stream3);
+      await reader3.readUntil((frames) =>
+        chunksOnly(frames).some((c) => c.type === 'tool-approval-request'),
+      );
+      await app.request(
+        `/api/chat/conversations/${created.id}/approvals/call_3`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ behavior: 'deny' }),
+        },
+      );
+      await reader3.drainToClose();
     });
 
     it('a dangerous bash command escalates to a human: deny resolves tool-approval-response(approved:false) and the tool_call settles output-denied, the turn still reaching a completed message-metadata', async () => {
@@ -1959,6 +2142,416 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
         approved: true,
       });
       expect(chunks.at(-1)?.type).toBe('message-metadata');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 待发队列（[排队](docs/terms.md)，docs/tech/steer-and-queue.md）：默认 intent 的
+  // 入队、队列管理端点、tail 上的 QueueFrame，以及一轮收尾后的自动出队。
+  // -------------------------------------------------------------------------
+
+  describe('待发队列 / 排队（docs/tech/steer-and-queue.md）', () => {
+    /** 占住这个会话的 turn 槽位（一个自己不会结束的 fake），好让 POST 走「有进行中的一轮」那条分支。 */
+    function occupyTurn(conversationId: string) {
+      const stuck = createControllableSession();
+      const { started } = startTurn({
+        db,
+        conversationId,
+        session: stuck,
+        text: 'first',
+        priorMessageCount: 0,
+      });
+      expect(started).toBe(true);
+      return stuck;
+    }
+
+    async function postMessage(
+      app: ReturnType<typeof buildApp>,
+      conversationId: string,
+      body: { text: string; intent?: 'queue' | 'steer' },
+    ): Promise<Response> {
+      return app.request(`/api/chat/conversations/${conversationId}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    }
+
+    async function readQueue(
+      app: ReturnType<typeof buildApp>,
+      conversationId: string,
+    ): Promise<{ id: string; text: string }[]> {
+      const response = await app.request(
+        `/api/chat/conversations/${conversationId}`,
+      );
+      return ConversationSchema.parse(await response.json()).queuedMessages;
+    }
+
+    it('默认 intent：有进行中的一轮时消息入队（202 "queued"），当前轮不受影响，队列在会话详情里可见', async () => {
+      const app = buildApp(() => stopOnlyModel('hi'));
+      const created = await createSession(app);
+      const stuck = occupyTurn(created.id);
+
+      const response = await postMessage(app, created.id, {
+        text: '做完A再做B',
+      });
+      expect(response.status).toBe(202);
+      expect(await response.json()).toEqual({ ok: true, mode: 'queued' });
+
+      const queue = await readQueue(app, created.id);
+      expect(queue).toHaveLength(1);
+      expect(queue[0]?.text).toBe('做完A再做B');
+      // 入队是纯 DB 操作：这一轮的账本一条没多（只有 startTurn 自己那条起轮消息）。
+      expect(
+        listConversationEvents(db, created.id).filter(
+          (r) => r.kind === 'message',
+        ),
+      ).toHaveLength(1);
+
+      stuck.finish({ finalResponse: 'ok', usage: {} });
+    });
+
+    it('没有进行中的一轮时 intent 不起作用：queue 与 steer 都直接起新一轮（202 "started"）', async () => {
+      const app = buildApp(() => stopOnlyModel('hi'));
+      const created = await createSession(app);
+
+      const response = await postMessage(app, created.id, {
+        text: 'hello',
+        intent: 'queue',
+      });
+      expect(response.status).toBe(202);
+      expect(await response.json()).toEqual({ ok: true, mode: 'started' });
+      expect(await readQueue(app, created.id)).toEqual([]);
+    });
+
+    it('队列满（10 条）时第 11 条被明确拒绝（409），队列不被截断也不静默丢弃', async () => {
+      const app = buildApp(() => stopOnlyModel('hi'));
+      const created = await createSession(app);
+      const stuck = occupyTurn(created.id);
+
+      for (let i = 0; i < 10; i += 1) {
+        const ok = await postMessage(app, created.id, {
+          text: `queued ${String(i)}`,
+        });
+        expect(ok.status).toBe(202);
+      }
+
+      const overflow = await postMessage(app, created.id, { text: '第 11 条' });
+      expect(overflow.status).toBe(409);
+      expect(await overflow.json()).toEqual({
+        error: '待发队列已满（最多 10 条）',
+      });
+
+      const queue = await readQueue(app, created.id);
+      expect(queue).toHaveLength(10);
+      expect(queue.map((m) => m.text)).toEqual(
+        Array.from({ length: 10 }, (_, i) => `queued ${String(i)}`),
+      );
+
+      stuck.finish({ finalResponse: 'ok', usage: {} });
+    });
+
+    it('DELETE .../queue/{messageId} 删一条并返回变更后的快照；重复删同一条 404', async () => {
+      const app = buildApp(() => stopOnlyModel('hi'));
+      const created = await createSession(app);
+      const stuck = occupyTurn(created.id);
+
+      for (const text of ['一', '二', '三']) {
+        await postMessage(app, created.id, { text });
+      }
+      const queue = await readQueue(app, created.id);
+      const middleId = queue[1]?.id ?? '';
+
+      const response = await app.request(
+        `/api/chat/conversations/${created.id}/queue/${middleId}`,
+        { method: 'DELETE' },
+      );
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { queue: { text: string }[] };
+      // 剩下的保持原有顺序（先到先发），不因删中间一条而重排。
+      expect(body.queue.map((m) => m.text)).toEqual(['一', '三']);
+
+      const again = await app.request(
+        `/api/chat/conversations/${created.id}/queue/${middleId}`,
+        { method: 'DELETE' },
+      );
+      expect(again.status).toBe(404);
+
+      stuck.finish({ finalResponse: 'ok', usage: {} });
+    });
+
+    it('DELETE .../queue 清空整个队列', async () => {
+      const app = buildApp(() => stopOnlyModel('hi'));
+      const created = await createSession(app);
+      const stuck = occupyTurn(created.id);
+
+      await postMessage(app, created.id, { text: '一' });
+      await postMessage(app, created.id, { text: '二' });
+
+      const response = await app.request(
+        `/api/chat/conversations/${created.id}/queue`,
+        { method: 'DELETE' },
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ queue: [] });
+      expect(await readQueue(app, created.id)).toEqual([]);
+
+      stuck.finish({ finalResponse: 'ok', usage: {} });
+    });
+
+    it('队列端点对不属于自己的会话 404（鉴权先于队列操作）', async () => {
+      const app = buildApp(() => stopOnlyModel('hi'));
+      const created = await createSession(app);
+      const otherApp = buildApp(() => stopOnlyModel('hi'), 'someone-else');
+
+      expect(
+        (
+          await otherApp.request(
+            `/api/chat/conversations/${created.id}/queue`,
+            { method: 'DELETE' },
+          )
+        ).status,
+      ).toBe(404);
+      expect(
+        (
+          await otherApp.request(
+            `/api/chat/conversations/${created.id}/queue/whatever`,
+            { method: 'DELETE' },
+          )
+        ).status,
+      ).toBe(404);
+    });
+
+    it('直播流：回放之后先发一帧队列快照（时机 1），队列随后变化再广播一帧（时机 2）', async () => {
+      const app = buildApp(() => stopOnlyModel('hi'));
+      const created = await createSession(app);
+      const stuck = occupyTurn(created.id);
+
+      const response = await app.request(
+        `/api/chat/conversations/${created.id}/stream`,
+      );
+      const reader = createIncrementalReader(response);
+
+      // 时机 1：连上就有一帧权威快照（此刻还是空队列）。
+      const afterReplay = await reader.readUntil(
+        (frames) => queueFrames(frames).length > 0,
+      );
+      expect(queueFrames(afterReplay)[0]?.queue).toEqual([]);
+
+      // 时机 2：入队后广播——多标签一致靠的就是这一帧。
+      await postMessage(app, created.id, { text: '排一条' });
+      const afterEnqueue = await reader.readUntil(
+        (frames) => queueFrames(frames).length > 1,
+      );
+      expect(
+        queueFrames(afterEnqueue)
+          .at(-1)
+          ?.queue.map((m) => m.text),
+      ).toEqual(['排一条']);
+
+      stuck.finish({ finalResponse: 'ok', usage: {} });
+      await reader.drainToClose();
+    });
+
+    it('一轮收尾后自动出队起下一轮：排队的消息成为下一轮的用户消息，队列随之清空', async () => {
+      const holdableSandboxManager = createHoldableSandboxManager();
+      let modelCalls = 0;
+      const app = createChatApp({
+        db,
+        sandboxManager: holdableSandboxManager,
+        resolveModel: () => {
+          modelCalls += 1;
+          // 第一轮用会真的调 write-file 的模型（好在工具执行处挂住这一轮）；
+          // 自动出队起的第二轮用纯文本模型，跑完即止。
+          return modelCalls === 1 ?
+              toolCallThenStopModel(
+                'write-file',
+                { path: '/notes.txt', content: 'hi' },
+                'call_1',
+                'wrote it',
+              )
+            : stopOnlyModel('第二轮答复');
+        },
+        authMiddleware: fakeAuthMiddleware(USER_ID),
+      });
+      const created = await createSession(app);
+
+      const first = await postMessage(app, created.id, { text: '第一件事' });
+      expect(await first.json()).toEqual({ ok: true, mode: 'started' });
+
+      // 确定性挂起点：第一轮此刻停在 write-file 里。
+      await holdableSandboxManager.writeCalled;
+
+      const queued = await postMessage(app, created.id, { text: '第二件事' });
+      expect(await queued.json()).toEqual({ ok: true, mode: 'queued' });
+
+      holdableSandboxManager.releaseWrite();
+
+      // 第一轮收尾 → onTurnSettled → 出队 → 起第二轮 → 第二轮跑完。
+      const userTexts = await waitFor(() => {
+        const texts = persistedUserTexts(db, created.id);
+        return texts.length >= 2 ? texts : undefined;
+      });
+
+      expect(userTexts).toEqual(['第一件事', '第二件事']);
+      expect(await readQueue(app, created.id)).toEqual([]);
+      expect(modelCalls).toBe(2); // 第二轮确实是**新起的一轮**，不是被塞进第一轮
+    });
+
+    // -----------------------------------------------------------------------
+    // 停止本轮（docs/tech/turn-abort.md §3.2）——`POST .../abort`。停止与队列在这里
+    // 交汇：定案是「停止 = 全停」，所以这一组用例放在队列组里，正是为了钉住那个
+    // 顺序（清队列**先于** abort，否则出队会抢跑）。
+    // -----------------------------------------------------------------------
+
+    describe('POST .../abort（停止本轮，docs/tech/turn-abort.md）', () => {
+      async function postAbort(
+        app: ReturnType<typeof buildApp>,
+        conversationId: string,
+      ): Promise<Response> {
+        return app.request(`/api/chat/conversations/${conversationId}/abort`, {
+          method: 'POST',
+        });
+      }
+
+      it('中止进行中的那一轮并清空待发队列，200 带回清空后的快照', async () => {
+        const app = buildApp(() => stopOnlyModel('hi'));
+        const created = await createSession(app);
+        const stuck = occupyTurn(created.id);
+
+        await postMessage(app, created.id, { text: '排一条' });
+        await postMessage(app, created.id, { text: '再排一条' });
+        expect(await readQueue(app, created.id)).toHaveLength(2);
+
+        const response = await postAbort(app, created.id);
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({ ok: true, queue: [] });
+
+        // 队列真清了（服务端权威），而这一轮的 signal 也真被 abort 了。
+        expect(await readQueue(app, created.id)).toEqual([]);
+        expect(stuck.turnSignal?.aborted).toBe(true);
+
+        stuck.finish({ finalResponse: '', usage: {} });
+      });
+
+      it('停止后这一轮收尾时不再自动出队（清队列先于 abort，出队时队列必然已空）', async () => {
+        const app = buildApp(() => stopOnlyModel('hi'));
+        const created = await createSession(app);
+        const stuck = occupyTurn(created.id);
+
+        await postMessage(app, created.id, { text: '别自己发出去' });
+        await postAbort(app, created.id);
+
+        // 这一轮按 core 的优雅收尾方式结束（停止走的就是这条路）。
+        stuck.finish({ finalResponse: '', usage: {} });
+        await flushMicrotasks();
+
+        // 起轮只发生过一次（第一轮），排队那条既没被发出、也没留在队列里。
+        expect(persistedUserTexts(db, created.id)).toEqual(['first']);
+        expect(await readQueue(app, created.id)).toEqual([]);
+      });
+
+      it('真链路（真 core loop + 自动出队接线）：停止后这一轮以 interrupted 收尾，排队那条既不被自动发出也不留在队列里', async () => {
+        // 这条用例刻意走 `POST .../messages` → `launchTurn` 起轮（而不是直接
+        // `startTurn`），因为要验的正是[出队](docs/terms.md)那条 `onTurnSettled` 链条
+        // 在停止后不抢跑——只有 `launchTurn` 会接上它。模型/沙盒是 fake，但 loop 是
+        // 真的：于是这里同时验证了 core 的 step 边界 abort 检查（第二次模型调用不
+        // 发生），以及「工具执行中被停止」那一档（docs/features/turn-abort.md §2.3）。
+        const holdableSandboxManager = createHoldableSandboxManager();
+        let modelCalls = 0;
+        const app = createChatApp({
+          db,
+          sandboxManager: holdableSandboxManager,
+          resolveModel: () => {
+            modelCalls += 1;
+            return toolCallThenStopModel(
+              'write-file',
+              { path: '/notes.txt', content: 'hi' },
+              'call_1',
+              'wrote it',
+            );
+          },
+          authMiddleware: fakeAuthMiddleware(USER_ID),
+        });
+        const created = await createSession(app);
+
+        await postMessage(app, created.id, { text: '第一件事' });
+        // 确定性挂起点：这一轮此刻停在 write-file 里。
+        await holdableSandboxManager.writeCalled;
+
+        await postMessage(app, created.id, { text: '第二件事' });
+        expect((await postAbort(app, created.id)).status).toBe(200);
+
+        holdableSandboxManager.releaseWrite();
+
+        // 收尾状态由真 loop 给出：这一轮最后一条 assistant 消息带 interrupted。
+        const lastStatus = await waitFor(() =>
+          persistedTurnStatuses(db, created.id).at(-1),
+        );
+        expect(lastStatus).toBe('interrupted');
+
+        // 排队那条既没起轮（模型只被要过一次），也没留在队列里。
+        expect(persistedUserTexts(db, created.id)).toEqual(['第一件事']);
+        expect(await readQueue(app, created.id)).toEqual([]);
+        expect(modelCalls).toBe(1);
+      });
+
+      it('没有进行中的一轮时 409，且**什么都不动**——误点停止不该变成丢消息', async () => {
+        const app = buildApp(() => stopOnlyModel('hi'));
+        const created = await createSession(app);
+
+        // 队列里有一条（自动出队失败等情形下会出现「无进行中的轮 + 非空队列」）。
+        const stuck = occupyTurn(created.id);
+        await postMessage(app, created.id, { text: '还没发的一条' });
+        stuck.finish({ finalResponse: 'ok', usage: {} });
+        await flushMicrotasks();
+
+        const response = await postAbort(app, created.id);
+        expect(response.status).toBe(409);
+        expect(await response.json()).toEqual({ error: 'no turn in progress' });
+      });
+
+      it('不属于自己的会话 404（鉴权先于任何副作用）', async () => {
+        const app = buildApp(() => stopOnlyModel('hi'));
+        const created = await createSession(app);
+        const otherApp = buildApp(() => stopOnlyModel('hi'), 'someone-else');
+        const stuck = occupyTurn(created.id);
+        await postMessage(app, created.id, { text: '排一条' });
+
+        const response = await postAbort(otherApp, created.id);
+        expect(response.status).toBe(404);
+        // 别人的停止请求既没有停掉这一轮，也没有清掉这个会话的队列。
+        expect(stuck.turnSignal?.aborted).toBe(false);
+        expect(await readQueue(app, created.id)).toHaveLength(1);
+
+        stuck.finish({ finalResponse: 'ok', usage: {} });
+      });
+
+      it('直播流上先到一帧空队列快照（趁这一轮 emitter 还开着广播——轮结束后前端不会再重连）', async () => {
+        const app = buildApp(() => stopOnlyModel('hi'));
+        const created = await createSession(app);
+        const stuck = occupyTurn(created.id);
+        await postMessage(app, created.id, { text: '排一条' });
+
+        const response = await app.request(
+          `/api/chat/conversations/${created.id}/stream`,
+        );
+        const reader = createIncrementalReader(response);
+        // 时机 1 的那帧（回放后必发）：此刻队列里还有一条。
+        const afterReplay = await reader.readUntil(
+          (frames) => queueFrames(frames).length > 0,
+        );
+        expect(queueFrames(afterReplay).at(-1)?.queue).toHaveLength(1);
+
+        await postAbort(app, created.id);
+        const afterAbort = await reader.readUntil(
+          (frames) => queueFrames(frames).length > 1,
+        );
+        expect(queueFrames(afterAbort).at(-1)?.queue).toEqual([]);
+
+        stuck.finish({ finalResponse: '', usage: {} });
+        await reader.drainToClose();
+      });
     });
   });
 

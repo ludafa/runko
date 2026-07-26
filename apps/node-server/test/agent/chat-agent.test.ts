@@ -30,19 +30,23 @@ import type {
   NimboExec,
   NimboFS,
   NimboUIMessage,
+  Skill,
 } from '@nimbo/core';
-import { MemoryFS } from '@nimbo/sdk';
+import { defineTool, MemoryFS } from '@nimbo/sdk';
 import type { ToolUIPart, UITools } from 'ai';
 import type { Mock } from 'vitest';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
 import { buildSession } from '../../src/agent/chat-agent.js';
+import { loadSkillsFromWorkspace } from '../../src/agent/skill-catalog.js';
 import type {
   AskUserOutcome,
   RequestUserAnswerInput,
 } from '../../src/agent/turn-runner.js';
 import { stopOnlyModel, toolCallThenStopModel } from '../helpers/mock-model.js';
 import { allToolParts, drainTurn } from '../helpers/nimbo-chunks.js';
+import { silentLogger } from '../helpers/silent-logger.js';
 
 const FRONTEND_DESIGN_SKILL_STUB = `---
 description: Make one focused, non-generic visual/interaction improvement to an existing web UI without rewriting it.
@@ -59,6 +63,8 @@ description: Make one focused, non-generic visual/interaction improvement to an 
 
 interface SpyWorkspace {
   workspace: NimboFS & NimboExec;
+  /** 从这个假 workspace 真加载出来的 skill——见 `createSpyWorkspace` 末尾。 */
+  skills: Skill[];
   readFile: Mock<NimboFS['readFile']>;
   writeFile: Mock<NimboFS['writeFile']>;
   rm: Mock<NimboFS['rm']>;
@@ -129,8 +135,14 @@ async function createSpyWorkspace(
     : {}),
   };
 
+  // docs/tech/composer-skill-mention.md §1 改动 A：`buildSession` 不再自己读沙盒，
+  // skill 由调用方加载后传入——这里就地扫同一个假 workspace，让测试用的仍是
+  // 「真加载出来的 skill」。加载行为本身由 `skill-catalog.test.ts` 覆盖。
+  const skills = await loadSkillsFromWorkspace(workspace, silentLogger);
+
   return {
     workspace,
+    skills,
     readFile,
     writeFile,
     rm,
@@ -149,15 +161,23 @@ async function createSpyWorkspace(
 
 interface BaseBuildOptions {
   workspace: NimboFS & NimboExec;
+  skills: Skill[];
   repoOwner: string;
   repoName: string;
   defaultBranch: string;
   branchName: string;
 }
 
-function baseBuildOptions(workspace: NimboFS & NimboExec): BaseBuildOptions {
+/**
+ * docs/tech/composer-skill-mention.md §1 改动 A 之后 `buildSession` 不再自己读
+ * 沙盒，skill 由调用方（`turn-launcher.ts`）加载后传入——这里就地用
+ * `loadSkillsFromWorkspace` 扫同一个假 workspace，保持「测的是真加载出来的
+ * skill」而不是手搓一个 stub 对象。加载本身的行为由 `skill-catalog.test.ts` 覆盖。
+ */
+function baseBuildOptions(spy: SpyWorkspace): BaseBuildOptions {
   return {
-    workspace,
+    workspace: spy.workspace,
+    skills: spy.skills,
     repoOwner: 'acme',
     repoName: 'demo',
     defaultBranch: 'main',
@@ -190,7 +210,7 @@ describe('agent/chat-agent: buildSession — gateWorkspace (approvalMode !== "of
   it('forwards every NimboFS/NimboExec method call to the original workspace, preserving arguments and return values, and forces defaultApproval to "review"', async () => {
     const spy = await createSpyWorkspace({ withDescribe: true });
     const session = await buildSession({
-      ...baseBuildOptions(spy.workspace),
+      ...baseBuildOptions(spy),
       model: stopOnlyModel('ok'),
     });
 
@@ -256,7 +276,7 @@ describe('agent/chat-agent: buildSession — gateWorkspace (approvalMode !== "of
   it('omits describe entirely from the wrapped fs when the original workspace has none', async () => {
     const spy = await createSpyWorkspace({ withDescribe: false });
     const session = await buildSession({
-      ...baseBuildOptions(spy.workspace),
+      ...baseBuildOptions(spy),
       model: stopOnlyModel('ok'),
     });
     expect('describe' in session.fs).toBe(false);
@@ -265,7 +285,7 @@ describe('agent/chat-agent: buildSession — gateWorkspace (approvalMode !== "of
   it('forwards the optional native-search methods (searchFiles/searchContent) when the workspace implements them — the grep/glob fast path must survive the gate', async () => {
     const spy = await createSpyWorkspace({ withNativeSearch: true });
     const session = await buildSession({
-      ...baseBuildOptions(spy.workspace),
+      ...baseBuildOptions(spy),
       model: stopOnlyModel('ok'),
     });
 
@@ -303,7 +323,7 @@ describe('agent/chat-agent: buildSession — gateWorkspace (approvalMode !== "of
   it('omits searchFiles/searchContent entirely when the workspace lacks them — the built-in tools must keep seeing "no native search" and fall back', async () => {
     const spy = await createSpyWorkspace({ withNativeSearch: false });
     const session = await buildSession({
-      ...baseBuildOptions(spy.workspace),
+      ...baseBuildOptions(spy),
       model: stopOnlyModel('ok'),
     });
     expect('searchFiles' in session.fs).toBe(false);
@@ -313,7 +333,7 @@ describe('agent/chat-agent: buildSession — gateWorkspace (approvalMode !== "of
   it('gates by default — approvalMode omitted (defaults to "dangerous") wraps the workspace into a different object', async () => {
     const spy = await createSpyWorkspace();
     const session = await buildSession({
-      ...baseBuildOptions(spy.workspace),
+      ...baseBuildOptions(spy),
       model: stopOnlyModel('ok'),
     });
     expect(session.fs).not.toBe(spy.workspace);
@@ -323,7 +343,7 @@ describe('agent/chat-agent: buildSession — gateWorkspace (approvalMode !== "of
   it('gates explicitly under approvalMode "dangerous", same as the default', async () => {
     const spy = await createSpyWorkspace();
     const session = await buildSession({
-      ...baseBuildOptions(spy.workspace),
+      ...baseBuildOptions(spy),
       model: stopOnlyModel('ok'),
       approvalMode: 'dangerous',
     });
@@ -334,7 +354,7 @@ describe('agent/chat-agent: buildSession — gateWorkspace (approvalMode !== "of
   it('gates under approvalMode "all", same as "dangerous"', async () => {
     const spy = await createSpyWorkspace();
     const session = await buildSession({
-      ...baseBuildOptions(spy.workspace),
+      ...baseBuildOptions(spy),
       model: stopOnlyModel('ok'),
       approvalMode: 'all',
     });
@@ -347,7 +367,7 @@ describe('agent/chat-agent: buildSession — approvalMode "off"', () => {
   it('passes the original workspace object straight through — zero wrapping', async () => {
     const spy = await createSpyWorkspace();
     const session = await buildSession({
-      ...baseBuildOptions(spy.workspace),
+      ...baseBuildOptions(spy),
       model: stopOnlyModel('ok'),
       approvalMode: 'off',
     });
@@ -359,7 +379,7 @@ describe('agent/chat-agent: buildSession — ask-user tool registration', () => 
   it('omits ask-user from the tool set when onAskUser is not supplied — a model call to it fails as an unavailable tool (tool-ask-user part settles output-error)', async () => {
     const spy = await createSpyWorkspace();
     const session = await buildSession({
-      ...baseBuildOptions(spy.workspace),
+      ...baseBuildOptions(spy),
       model: toolCallThenStopModel(
         'ask-user',
         { question: 'want fries?' },
@@ -393,7 +413,7 @@ describe('agent/chat-agent: buildSession — ask-user tool registration', () => 
       return Promise.resolve({ outcome: 'answered', answer: 'blue' });
     };
     const session = await buildSession({
-      ...baseBuildOptions(spy.workspace),
+      ...baseBuildOptions(spy),
       model: toolCallThenStopModel(
         'ask-user',
         { question: 'favorite color?' },
@@ -429,7 +449,7 @@ describe('agent/chat-agent: buildSession — ask-user tool registration', () => 
       return Promise.resolve({ outcome: 'answered', answer: 'red' });
     };
     const session = await buildSession({
-      ...baseBuildOptions(spy.workspace),
+      ...baseBuildOptions(spy),
       model: toolCallThenStopModel(
         'ask-user',
         { question: 'pick a color', options: ['red', 'blue'] },
@@ -448,7 +468,7 @@ describe('agent/chat-agent: buildSession — ask-user tool registration', () => 
     const onAskUser = (): Promise<AskUserOutcome> =>
       Promise.resolve({ outcome: 'timeout' });
     const session = await buildSession({
-      ...baseBuildOptions(spy.workspace),
+      ...baseBuildOptions(spy),
       model: toolCallThenStopModel(
         'ask-user',
         { question: 'still there?' },
@@ -475,7 +495,7 @@ describe('agent/chat-agent: buildSession — ask-user tool registration', () => 
     const onAskUser = (): Promise<AskUserOutcome> =>
       Promise.resolve({ outcome: 'answered', answer: 'ok' });
     const session = await buildSession({
-      ...baseBuildOptions(spy.workspace),
+      ...baseBuildOptions(spy),
       model: toolCallThenStopModel(
         'ask-user',
         { question: 'continue?' },
@@ -498,5 +518,105 @@ describe('agent/chat-agent: buildSession — ask-user tool registration', () => 
         askUserPart.output
       : undefined,
     ).toBe('ok');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// web-search 条件注册（docs/tech/web-search.md §5；工具本身的单测在
+// test/agent/web-search.test.ts）。三条覆盖它的两个注册来源与「都没有」那一档；
+// env 那条用 stubGlobal 拦下全局 fetch，所以整个文件仍是零网络。
+// ---------------------------------------------------------------------------
+
+describe('agent/chat-agent: buildSession — web-search tool registration', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  const fakeWebSearchTool = defineTool({
+    description: 'fake web search',
+    inputSchema: z.object({ query: z.string() }),
+    readOnly: true,
+    execute: () => 'FAKE SEARCH RESULTS',
+  });
+
+  it('omits web-search when neither EXA_API_KEY nor an injected tool is present — a model call to it fails as an unavailable tool', async () => {
+    vi.stubEnv('EXA_API_KEY', '');
+    const spy = await createSpyWorkspace();
+    const session = await buildSession({
+      ...baseBuildOptions(spy),
+      model: toolCallThenStopModel(
+        'web-search',
+        { query: 'anything' },
+        'call_1',
+        'done',
+      ),
+    });
+
+    const { messages } = await drainStream(session, 'hi');
+    const part = findToolPart(messages, 'web-search');
+    expect(part?.state).toBe('output-error');
+    expect(
+      part?.state === 'output-error' ? part.errorText : undefined,
+    ).toContain("unavailable tool 'web-search'");
+  });
+
+  it('registers an explicitly injected webSearchTool (which wins over env resolution)', async () => {
+    vi.stubEnv('EXA_API_KEY', '');
+    const spy = await createSpyWorkspace();
+    const session = await buildSession({
+      ...baseBuildOptions(spy),
+      model: toolCallThenStopModel(
+        'web-search',
+        { query: 'vitest fixtures' },
+        'call_1',
+        'done',
+      ),
+      webSearchTool: fakeWebSearchTool,
+    });
+
+    const { messages } = await drainStream(session, 'hi');
+    const part = findToolPart(messages, 'web-search');
+    expect(part?.state).toBe('output-available');
+    expect(part?.state === 'output-available' ? part.output : undefined).toBe(
+      'FAKE SEARCH RESULTS',
+    );
+  });
+
+  it('registers web-search from EXA_API_KEY alone — the real tool runs and sends the key as x-api-key', async () => {
+    vi.stubEnv('EXA_API_KEY', 'env-key');
+    const fetchImpl = vi.fn<typeof fetch>(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            results: [{ title: 'Hit', url: 'https://hit.example' }],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchImpl);
+
+    const spy = await createSpyWorkspace();
+    const session = await buildSession({
+      ...baseBuildOptions(spy),
+      model: toolCallThenStopModel(
+        'web-search',
+        { query: 'vitest fixtures' },
+        'call_1',
+        'done',
+      ),
+    });
+
+    const { messages } = await drainStream(session, 'hi');
+    const part = findToolPart(messages, 'web-search');
+    expect(part?.state).toBe('output-available');
+    expect(
+      part?.state === 'output-available' ? part.output : undefined,
+    ).toContain('[1] Hit');
+
+    const call = fetchImpl.mock.calls[0];
+    expect(call?.[0]).toBe('https://api.exa.ai/search');
+    expect(new Headers(call?.[1]?.headers).get('x-api-key')).toBe('env-key');
   });
 });

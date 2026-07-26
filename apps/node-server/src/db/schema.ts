@@ -109,6 +109,38 @@ export const conversations = sqliteTable('conversations', {
   }),
   /** `SessionState.turn` as of the last turn that finished — resumed agent sessions start their next turn at `agentSessionTurn + 1`. */
   agentSessionTurn: integer('agent_session_turn'),
+  /**
+   * 待发队列（[排队](../../../../docs/terms.md)，docs/tech/steer-and-queue.md §2）：
+   * `QueuedMessage[]` 的 JSON——一轮进行中用户发的消息若走默认的排队路径就落这里，
+   * 本轮收尾后由 `turn-launcher.ts` 取队首起下一轮。
+   *
+   * **刻意不进 `conversation_events` 账本**：账本记的是「已发生的事」（`kind='message'`
+   * 行永不删除、`seq` 单调且被回放/断线续传/`finalizeTurnPersistence` 的 GC 阈值三处
+   * 依赖），而排队消息是「尚未发生的意图」，可删可清空——两种语义混在一张表里会同时
+   * 破坏「永不删除」与 seq 空间。也刻意不另开子表：队列与 conversation 天然 1:1、有序、
+   * 量小（`MAX_QUEUED_MESSAGES`）、永远整体读写，没有按条件查询的需求来兑现一张表的代价。
+   *
+   * 读回一律走 `store.ts` 的 `queuedMessagesSchema.safeParse`（不是类型断言）——这是
+   * JSON 列的反序列化边界。
+   */
+  queuedMessagesJson: text('queued_messages_json').notNull().default('[]'),
+  /**
+   * [skill 清单](../../../../docs/terms.md)缓存（docs/tech/composer-skill-mention.md
+   * §2.1）：`SkillSummary[]` 的 JSON——`{name, description}` 两个字段，供
+   * [composer](../../../../docs/terms.md) 里打 `/` 时列菜单。
+   *
+   * **是缓存，不是事实来源**。事实来源永远是沙盒 `.agents/skills/` 目录；这一列
+   * 由「会话创建」与「每轮起轮」两处幂等覆盖写入。之所以缓存而不是让前端现读
+   * 沙盒：沙盒会[休眠](../../../../docs/terms.md)，为了列个下拉菜单去唤醒它要让
+   * 用户干等几十秒，代价与收益完全不成比例，还会把一个只读操作变成能改变沙盒
+   * 生命周期的副作用操作。代价是清单最多滞后一轮。
+   *
+   * 这一列空了/坏了不影响正确性：`buildSession` 照常自己扫沙盒加载 skill，agent
+   * 照常能用，最坏只是菜单空着。读回一律走 `store.ts` 的
+   * `availableSkillsSchema.safeParse`（不是类型断言）——JSON 列的反序列化边界，
+   * 与上面 `queuedMessagesJson` 同一姿态。
+   */
+  availableSkillsJson: text('available_skills_json').notNull().default('[]'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
 

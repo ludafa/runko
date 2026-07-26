@@ -1,0 +1,1 @@
+ALTER TABLE `conversations` ADD `available_skills_json` text DEFAULT '[]' NOT NULL;

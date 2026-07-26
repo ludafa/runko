@@ -1,0 +1,1 @@
+ALTER TABLE `conversations` ADD `queued_messages_json` text DEFAULT '[]' NOT NULL;

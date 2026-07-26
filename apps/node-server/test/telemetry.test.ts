@@ -9,6 +9,7 @@ import { MemoryFS } from '@nimbo/sdk';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { buildSession } from '../src/agent/chat-agent.js';
+import { loadSkillsFromWorkspace } from '../src/agent/skill-catalog.js';
 import {
   createSqliteTelemetry,
   createTelemetryStore,
@@ -17,6 +18,7 @@ import {
   parseFunctionId,
 } from '../src/telemetry.js';
 import { stopOnlyModel, toolCallThenStopModel } from './helpers/mock-model.js';
+import { silentLogger } from './helpers/silent-logger.js';
 import { drainTurn } from './helpers/nimbo-chunks.js';
 
 describe('parseFunctionId', () => {
@@ -168,6 +170,7 @@ describe('端到端：buildSession → core loop 注入 functionId → SQLite �
     const session = await buildSession({
       model: stopOnlyModel('done'),
       workspace: Object.assign(fs, exec),
+      skills: await loadSkillsFromWorkspace(fs, silentLogger),
       repoOwner: 'acme',
       repoName: 'demo',
       defaultBranch: 'main',
@@ -211,6 +214,7 @@ describe('端到端：buildSession → core loop 注入 functionId → SQLite �
         'wrote it',
       ),
       workspace: Object.assign(fs, exec),
+      skills: await loadSkillsFromWorkspace(fs, silentLogger),
       repoOwner: 'acme',
       repoName: 'demo',
       defaultBranch: 'main',

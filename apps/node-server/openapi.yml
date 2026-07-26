@@ -68,6 +68,14 @@ components:
             - expired
         lastActiveAt:
           type: string
+        queuedMessages:
+          type: array
+          items:
+            $ref: "#/components/schemas/QueuedMessage"
+        availableSkills:
+          type: array
+          items:
+            $ref: "#/components/schemas/SkillSummary"
         createdAt:
           type: string
       required:
@@ -79,7 +87,36 @@ components:
         - provider
         - status
         - lastActiveAt
+        - queuedMessages
+        - availableSkills
         - createdAt
+    QueuedMessage:
+      type: object
+      properties:
+        id:
+          type: string
+        text:
+          type: string
+          minLength: 1
+        userId:
+          type: string
+        createdAt:
+          type: integer
+      required:
+        - id
+        - text
+        - userId
+        - createdAt
+    SkillSummary:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+      required:
+        - name
+        - description
     CreateConversationInput:
       type: object
       properties:
@@ -101,6 +138,7 @@ components:
             anyOf:
               - $ref: "#/components/schemas/ChatChunkEnvelope"
               - $ref: "#/components/schemas/ChatMessageFrame"
+              - $ref: "#/components/schemas/ChatQueueFrame"
       required:
         - frames
     ChatChunkEnvelope:
@@ -117,6 +155,15 @@ components:
         message: {}
       required:
         - seq
+    ChatQueueFrame:
+      type: object
+      properties:
+        queue:
+          type: array
+          items:
+            $ref: "#/components/schemas/QueuedMessage"
+      required:
+        - queue
     TurnTelemetry:
       type: object
       properties:
@@ -151,6 +198,7 @@ components:
           enum:
             - started
             - steered
+            - queued
       required:
         - ok
         - mode
@@ -160,8 +208,27 @@ components:
         text:
           type: string
           minLength: 1
+        intent:
+          type: string
+          enum:
+            - queue
+            - steer
       required:
         - text
+    AbortTurnAck:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          enum:
+            - true
+        queue:
+          type: array
+          items:
+            $ref: "#/components/schemas/QueuedMessage"
+      required:
+        - ok
+        - queue
     ApprovalAck:
       type: object
       properties:
@@ -404,12 +471,14 @@ paths:
     post:
       tags:
         - Chat
-      summary: 'Start a turn for this message, or steer an in-progress one (STEER-3B):
-        if the session has a turn running, `text` is injected into it via
-        `Session.steer()` (mode "steered"); otherwise this acquires the sandbox,
-        builds the session, and hands off to the in-process turn runner (mode
-        "started"). Either way, events arrive over `GET .../stream`, not this
-        response'
+      summary: 'Start a turn, queue this message for the next one, or steer the
+        in-progress turn (docs/tech/steer-and-queue.md §4.1): with no turn
+        running this acquires the sandbox, builds the session and hands off to
+        the in-process turn runner (mode "started"); with one running it either
+        queues `text` onto the conversation’s 待发队列 (mode "queued", the default)
+        or injects it into the running turn via `Session.steer()` (mode
+        "steered", `intent: "steer"`). Either way, events arrive over `GET
+        .../stream`, not this response'
       parameters:
         - schema:
             type: string
@@ -425,8 +494,8 @@ paths:
               $ref: "#/components/schemas/PostChatMessageInput"
       responses:
         "202":
-          description: Accepted — see `mode` ("started" | "steered"); poll/stream `GET
-            .../stream` for its events
+          description: Accepted — see `mode` ("started" | "steered" | "queued");
+            poll/stream `GET .../stream` for its events
           content:
             application/json:
               schema:
@@ -444,15 +513,131 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
         "409":
-          description: A turn is already in progress for this session and could not be
-            steered either (narrow race — the turn ended between the steer
-            attempt and the fallback start)
+          description: Either the 待发队列 is full (docs/features/steer-and-queue.md §2.3 —
+            nothing is ever silently dropped), or a turn was already in progress
+            and could not be steered either (narrow race — the turn ended
+            between the steer attempt and the fallback start)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
         "500":
           description: Model/sandbox configuration or provisioning error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/chat/conversations/{id}/abort:
+    post:
+      tags:
+        - Chat
+      summary: '[停止](docs/terms.md)这个会话进行中的那一轮（docs/tech/turn-abort.md）：中止当前轮并清空[待发队列](docs/terms.md)。200
+        只表示「停止已请求」——真正停下的时刻取决于 agent 当时在做什么（最坏情况是一条 bash 命令响应中断信号的时间），「已停止」这个结果走
+        `GET .../stream` 上那条 `status: "interrupted"` 的 `message-metadata` chunk
+        送达'
+      parameters:
+        - schema:
+            type: string
+            examples: *a1
+          required: true
+          name: id
+          in: path
+      responses:
+        "200":
+          description: Stop requested — `queue` is the (now empty) 待发队列 snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AbortTurnAck"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: No turn in progress on this conversation (nothing to stop) — also
+            covers the narrow race where the turn finished on its own between
+            the check and the abort. Nothing is changed in this case, the 待发队列
+            included
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/chat/conversations/{id}/queue/{messageId}:
+    delete:
+      tags:
+        - Chat
+      summary: 从[待发队列](docs/terms.md)里删掉一条还没发出的消息——返回变更后的完整队列快照（调用方一次往返拿到权威状态，不必删完再查）
+      parameters:
+        - schema:
+            type: string
+            examples:
+              - 3f1b2c4d-...
+          required: true
+          name: id
+          in: path
+        - schema:
+            type: string
+            examples:
+              - 9c2e1f70-...
+          required: true
+          name: messageId
+          in: path
+      responses:
+        "200":
+          description: Queue after the removal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatQueueFrame"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not found — either this conversation doesn’t exist (or isn’t the
+            caller’s), or `messageId` isn’t in its queue anymore (already
+            dequeued into a turn, already deleted, or never existed)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/chat/conversations/{id}/queue:
+    delete:
+      tags:
+        - Chat
+      summary: 清空[待发队列](docs/terms.md)——已经出队起轮的消息不受影响（那已经是一条正常的用户消息了）
+      parameters:
+        - schema:
+            type: string
+            examples: *a1
+          required: true
+          name: id
+          in: path
+      responses:
+        "200":
+          description: Queue after clearing (always empty)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatQueueFrame"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not found
           content:
             application/json:
               schema:
@@ -494,6 +679,7 @@ paths:
                 anyOf:
                   - $ref: "#/components/schemas/ChatChunkEnvelope"
                   - $ref: "#/components/schemas/ChatMessageFrame"
+                  - $ref: "#/components/schemas/ChatQueueFrame"
         "401":
           description: Unauthorized
           content:

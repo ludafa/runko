@@ -13,11 +13,18 @@
  * parsing/serialization is the caller's job (`turn-runner.ts` writes,
  * `routes/chat.ts` reads back via `schemas/chat.ts`'s zod schemas).
  */
+import { randomUUID } from 'node:crypto';
+
 import type { InferSelectModel } from 'drizzle-orm';
 import { and, asc, eq, gt, max } from 'drizzle-orm';
+import { z } from 'zod';
 
 import type { db as DbInstance } from '../db/instance.js';
 import { conversationEvents, conversations } from '../db/schema.js';
+import type { Logger } from '../logger.js';
+import { logger as defaultLogger } from '../logger.js';
+import type { QueuedMessage, SkillSummaryDto } from '../schemas/chat.js';
+import { QueuedMessageSchema, SkillSummarySchema } from '../schemas/chat.js';
 
 export type Db = typeof DbInstance;
 
@@ -65,6 +72,8 @@ export function createConversation(
     agentSessionId: null,
     agentSessionCreatedAt: null,
     agentSessionTurn: null,
+    queuedMessagesJson: '[]', // 空[待发队列](../../../../docs/terms.md)，与列默认值一致
+    availableSkillsJson: '[]', // 空 [skill 清单](../../../../docs/terms.md)——沙盒就绪后由 `writeAvailableSkills` 首次填上
     createdAt: now,
   };
   db.insert(conversations).values(row).run();
@@ -221,4 +230,249 @@ export function deleteChunkEventsAfter(
       ),
     )
     .run();
+}
+
+// ---------------------------------------------------------------------------
+// 待发队列（[排队](../../../../docs/terms.md)，docs/tech/steer-and-queue.md §2）
+//
+// 全部落在 `conversations.queued_messages_json` 这一列上——**不是**账本
+// （`conversation_events`）的一部分：账本记「已发生的事」（`kind='message'` 行永不
+// 删除、`seq` 被回放/续传/GC 三处依赖），排队消息是「尚未发生的意图」（可删可清空）。
+// 见 `db/schema.ts` 该列的注释与 docs/tech/steer-and-queue.md §2。
+//
+// 每个写操作都是**读-改-写整个数组**：读列 → 改数组 → 写回。中间不 `await`
+// （better-sqlite3 全同步），所以在 chat 应用的单进程前提下无并发丢更新窗口
+// （多进程部署的限制见 docs/tech/steer-and-queue.md §7）。
+// ---------------------------------------------------------------------------
+
+const LOG_SCOPE = 'store';
+
+/** 一个会话最多排多少条（docs/features/steer-and-queue.md §2.3）——满了 `enqueueMessage` 返回 `'full'`，路由转成 409，绝不静默丢弃。 */
+export const MAX_QUEUED_MESSAGES = 10;
+
+/** JSON 列的反序列化边界：`JSON.parse` 的 `any` 直接喂进 `safeParse`，不落进任何具名变量——`any` 不会逃出这个表达式（与 `schemas/chat.ts` 里同类边界一致的姿态）。 */
+const queuedMessagesSchema = z.array(QueuedMessageSchema);
+
+/**
+ * `queued_messages_json` 列 → `QueuedMessage[]`。列内容损坏（手改过库、旧版本写坏）时
+ * **当作空队列**并记一行 warn，而不是抛出——队列是辅助状态，不该让一次
+ * `GET .../conversations/{id}` 或一轮收尾因为它而 500。
+ *
+ * 单独导出是因为路由把整行 `select` 出来了（`listConversations`/`getConversation`），
+ * 直接解析手上这一列比再查一次库便宜。
+ */
+export function parseQueuedMessages(
+  json: string,
+  conversationId: string,
+  log: Logger = defaultLogger,
+): QueuedMessage[] {
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(json);
+  } catch (error) {
+    log.warn(LOG_SCOPE, 'queued messages column is not valid JSON', {
+      conversationId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
+
+  const result = queuedMessagesSchema.safeParse(parsedJson);
+  if (!result.success) {
+    log.warn(LOG_SCOPE, 'queued messages column failed validation', {
+      conversationId,
+      error: result.error.message,
+    });
+    return [];
+  }
+  return result.data;
+}
+
+/** 同 `queuedMessagesSchema`：JSON 列的反序列化边界（docs/tech/composer-skill-mention.md §3）。 */
+const availableSkillsSchema = z.array(SkillSummarySchema);
+
+/**
+ * `available_skills_json` 列 → `SkillSummary[]`（[skill 清单](../../../../docs/terms.md)）。
+ *
+ * 列内容损坏时**当作空清单**并记一行 warn，与 `parseQueuedMessages` 同一取舍——
+ * 清单只是给 [composer](../../../../docs/terms.md) 列菜单用的缓存，不该让一次
+ * `GET .../conversations` 因为它而 500。菜单空着时用户仍能正常发消息，agent 也
+ * 照常能用 skill（`buildSession` 自己扫沙盒，不读这一列）。
+ *
+ * 单独导出的理由同 `parseQueuedMessages`：路由已把整行 `select` 出来了，直接解析
+ * 手上这一列比再查一次库便宜。
+ */
+export function parseAvailableSkills(
+  json: string,
+  conversationId: string,
+  log: Logger = defaultLogger,
+): SkillSummaryDto[] {
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(json);
+  } catch (error) {
+    log.warn(LOG_SCOPE, 'available skills column is not valid JSON', {
+      conversationId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
+
+  const result = availableSkillsSchema.safeParse(parsedJson);
+  if (!result.success) {
+    log.warn(LOG_SCOPE, 'available skills column failed validation', {
+      conversationId,
+      error: result.error.message,
+    });
+    return [];
+  }
+  return result.data;
+}
+
+/**
+ * 刷新 [skill 清单](../../../../docs/terms.md)缓存，**内容没变就不写**
+ * （docs/tech/composer-skill-mention.md §2.1）。返回落库的 JSON，调用方可直接拿去
+ * 拼 DTO，不必再查一次库。
+ *
+ * 调用点两处：会话创建时沙盒首次就绪（`routes/chat.ts`）、以及每轮
+ * [起轮装配](../../../../docs/terms.md)（`turn-launcher.ts`）。后者是每轮必经路径，
+ * 而清单绝大多数轮次纹丝不动——所以这里**由调用方把手上已有的当前值传进来**
+ * （`ConversationRow.availableSkillsJson`，起轮时早就 select 出来了）做一次字符串
+ * 比对，零额外查询地省掉那次无谓 `UPDATE`。
+ *
+ * 比对的是 `JSON.stringify` 后的字符串而不是深比较：清单来自
+ * `loadSkillsFromWorkspace`，那边已经按名字典序排过，同样的沙盒内容必然产出逐字节
+ * 相同的 JSON，字符串比对足够且更便宜。
+ *
+ * 覆盖语义、无合并：清单是「此刻沙盒里有什么」的快照。会话行不存在时
+ * `UPDATE ... WHERE id = ?` 匹配零行，静默 no-op——写缓存失败不该让起轮失败。
+ */
+export function syncAvailableSkills(
+  db: Db,
+  conversationId: string,
+  currentJson: string,
+  skills: readonly SkillSummaryDto[],
+): string {
+  const nextJson = JSON.stringify(skills);
+  if (nextJson === currentJson) return currentJson;
+  db.update(conversations)
+    .set({ availableSkillsJson: nextJson })
+    .where(eq(conversations.id, conversationId))
+    .run();
+  return nextJson;
+}
+
+/** 读回队列。会话不存在返回空数组（路由侧已先鉴权 404）。 */
+export function listQueuedMessages(
+  db: Db,
+  conversationId: string,
+  log: Logger = defaultLogger,
+): QueuedMessage[] {
+  const row = db
+    .select({ json: conversations.queuedMessagesJson })
+    .from(conversations)
+    .where(eq(conversations.id, conversationId))
+    .get();
+  if (row === undefined) return [];
+  return parseQueuedMessages(row.json, conversationId, log);
+}
+
+function writeQueue(
+  db: Db,
+  conversationId: string,
+  queue: QueuedMessage[],
+): QueuedMessage[] {
+  db.update(conversations)
+    .set({ queuedMessagesJson: JSON.stringify(queue) })
+    .where(eq(conversations.id, conversationId))
+    .run();
+  return queue;
+}
+
+export interface EnqueueMessageInput {
+  text: string;
+  /** 入队者——[出队](../../../../docs/terms.md)起轮时用它匹配[会话级授权](../../../../docs/terms.md)，见 `schemas/chat.ts` 的 `QueuedMessageSchema`。 */
+  userId: string;
+}
+
+export type EnqueueResult =
+  | { ok: true; queued: QueuedMessage; queue: QueuedMessage[] }
+  | { ok: false; reason: 'full'; queue: QueuedMessage[] };
+
+/** 入队到队尾（先到先发）。已满则原样返回当前队列 + `reason: 'full'`，不截断、不覆盖。 */
+export function enqueueMessage(
+  db: Db,
+  conversationId: string,
+  input: EnqueueMessageInput,
+  log: Logger = defaultLogger,
+): EnqueueResult {
+  const queue = listQueuedMessages(db, conversationId, log);
+  if (queue.length >= MAX_QUEUED_MESSAGES) {
+    return { ok: false, reason: 'full', queue };
+  }
+  const queued: QueuedMessage = {
+    id: randomUUID(),
+    text: input.text,
+    userId: input.userId,
+    createdAt: Date.now(),
+  };
+  return {
+    ok: true,
+    queued,
+    queue: writeQueue(db, conversationId, [...queue, queued]),
+  };
+}
+
+/** 删一条。`removed: false` = 这个 `messageId` 不在队列里（已发出/已删/从未存在）——路由转成 404。 */
+export function removeQueuedMessage(
+  db: Db,
+  conversationId: string,
+  messageId: string,
+  log: Logger = defaultLogger,
+): { removed: boolean; queue: QueuedMessage[] } {
+  const queue = listQueuedMessages(db, conversationId, log);
+  const next = queue.filter((message) => message.id !== messageId);
+  if (next.length === queue.length) return { removed: false, queue };
+  return { removed: true, queue: writeQueue(db, conversationId, next) };
+}
+
+export function clearQueuedMessages(
+  db: Db,
+  conversationId: string,
+): QueuedMessage[] {
+  return writeQueue(db, conversationId, []);
+}
+
+/**
+ * [出队](../../../../docs/terms.md)：取队首并**立即**从队列移除，一次读-改-写。
+ * 空队列返回 `message: undefined`。
+ *
+ * 「取出即移除」而不是「先读后删」是刻意的：`turn-launcher.ts` 的自动出队在一轮收尾
+ * 后跑，若起轮失败会调 `requeueFront` 把这条放回队首（见其注释）——先移除保证了任何
+ * 中途异常都不会让同一条消息被起两轮。
+ */
+export function dequeueMessage(
+  db: Db,
+  conversationId: string,
+  log: Logger = defaultLogger,
+): { message: QueuedMessage | undefined; queue: QueuedMessage[] } {
+  const queue = listQueuedMessages(db, conversationId, log);
+  const [head, ...rest] = queue;
+  if (head === undefined) return { message: undefined, queue };
+  return { message: head, queue: writeQueue(db, conversationId, rest) };
+}
+
+/**
+ * 起轮失败时把出队的那条放**回队首**，保住它原有的顺序位置（用户排的是「下一件事」，
+ * 退回队尾会让后面的消息插队）。刻意**不受 `MAX_QUEUED_MESSAGES` 约束**：这是回滚一次
+ * 已经发生的出队，不是新的入队请求；上限在此拦一下只会真的丢消息。
+ */
+export function requeueFront(
+  db: Db,
+  conversationId: string,
+  message: QueuedMessage,
+  log: Logger = defaultLogger,
+): QueuedMessage[] {
+  const queue = listQueuedMessages(db, conversationId, log);
+  return writeQueue(db, conversationId, [message, ...queue]);
 }

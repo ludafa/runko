@@ -65,6 +65,22 @@
  *    is just the `tool-ask-user` part's own `input-available`/
  *    `output-available` states, a normal tool call as far as the loop is
  *    concerned.
+ *
+ * 除这两件事外，本模块还有两个**纯通知点**，都不改变任何 chunk 流转/持久化行为：
+ * `onTurnSettled`（这一轮彻底结束了）与 `onMilestone`（这一轮的第一个 chunk /
+ * 第一个可见 chunk 抵达了，docs/tech/telemetry.md §2.4）。两者的共同姿态是「本模块
+ * 只报告生命周期事件，要不要因此起下一轮、要不要落一行遥测，是注入方的事」——所以
+ * 这里既不认识「队列」，也不认识「遥测」。
+ *
+ * ---- 停止本轮（docs/tech/turn-abort.md） ----
+ *
+ * 每一轮自带一个 `AbortController`（`ActiveTurn.abortController`），signal 经
+ * `session.stream(text, { signal })` 交给 `@nimbo/core`；`abortTurn()` 触发它。
+ * 被[停止](../../../../docs/terms.md)的一轮走的是 core 的**优雅收尾**路径
+ * （`status: 'interrupted'` 的 `message-metadata` + 正常 `return TurnResult`），所以
+ * 这里的落盘/GC/`onTurnSettled` 全部按既有路径跑完——本模块因此不需要为「停止」
+ * 新增任何 wire 形状或账本条目类型。唯一的额外动作在 `abortTurn` 里：把挂起的
+ * 人审/ask-user 就地结掉（core 正 `await` 那些 promise，abort 信号对它们无效）。
  */
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
@@ -85,6 +101,8 @@ import type {
   ChatReplayFrame,
   ChunkEnvelope,
   MessageFrame,
+  QueuedMessage,
+  QueueFrame,
 } from '../schemas/chat.js';
 import { grantSessionApproval } from './session-grants.js';
 import type { Db } from './store.js';
@@ -163,7 +181,17 @@ interface PendingToolSettlement {
  * error — via `ActiveTurn.steer`'s capture in `startTurn`.
  */
 export interface TurnDrivenSession {
-  stream(input: string): AsyncGenerator<NimboChunk, TurnResult>;
+  /**
+   * `opts` 是 `@nimbo/core` 的 `TurnOptions` 里本模块唯一用到的那一项
+   * （docs/tech/turn-abort.md §3.1）：每一轮自己的 `AbortController.signal`，
+   * [停止](../../../../docs/terms.md)靠它落地。声明成可选 + 只含 `signal`，所以
+   * 一个只实现了 `stream(input)` 的测试 fake 仍然满足这个接口（多余的实参在
+   * 运行期被忽略）——与 `steer` 同样的「比真类型更窄」姿态。
+   */
+  stream(
+    input: string,
+    opts?: { signal?: AbortSignal },
+  ): AsyncGenerator<NimboChunk, TurnResult>;
   toJSON(): SessionState;
   steer?(input: string): boolean;
 }
@@ -229,6 +257,44 @@ interface ReviewPendingEntry extends PendingEntry<HumanDecision> {
   input: JsonValue;
 }
 
+/**
+ * 一轮的两个「首次」时刻（docs/tech/telemetry.md §2.4）——本模块只**报告**它们，
+ * 拼遥测载荷、写库都在 `turn-launcher.ts`（与 `onTurnSettled` 同款姿态：turn-runner
+ * 不认识队列，也不认识遥测）。
+ *
+ * - `'first-chunk'`：这一轮的第一个 chunk 抵达。core 的 loop 在**发出模型请求之前**
+ *   就 yield `start`/`start-step`，所以这个时刻量的是「起轮到 `session.stream()` 真
+ *   正开跑」，**不含**模型首 token。
+ * - `'first-output'`：第一个**用户看得见**的 chunk 抵达（见 `isVisibleChunk`）。它减
+ *   去上一个就是模型首 token 的等待。
+ *
+ * 各触发**至多一次**，且 `'first-chunk'` 必然不晚于 `'first-output'`。
+ */
+export type TurnMilestone = 'first-chunk' | 'first-output';
+
+export interface TurnMilestoneInfo {
+  /** nimbo 会话 id（`session.toJSON().id`）——遥测的关联键前半段。 */
+  sessionId: string;
+  /** 本轮轮号（`session.toJSON().turn`，`session.stream()` 已在开跑时 `+1`）——关联键后半段。 */
+  turn: number;
+  /** 从 `driveTurn` 入口（≈`startTurn` 调用时刻）到这个时刻的毫秒数。 */
+  sinceStartMs: number;
+}
+
+/**
+ * 「用户在界面上看得见东西了」——第一段文字、第一段推理、或第一张工具调用卡片。
+ * 刻意不含 `start`/`start-step`（空气泡，界面上还是一片空白）与
+ * `data-*`/`tool-approval-request`（它们只可能出现在某个工具调用之后，永远抢不到
+ * 第一）。
+ */
+function isVisibleChunk(chunk: NimboChunk): boolean {
+  return (
+    chunk.type === 'text-start' ||
+    chunk.type === 'reasoning-start' ||
+    chunk.type === 'tool-input-available'
+  );
+}
+
 /** The outcome of one `ask-user` call (docs/tech/chat-webapp.md §2.2c（审批链）) — `'timeout'` never carries an `answer`, same as `HumanDecision`'s `deny` branch not requiring a `message`. */
 export type AskUserOutcome =
   { outcome: 'answered'; answer: string } | { outcome: 'timeout' };
@@ -236,6 +302,19 @@ export type AskUserOutcome =
 interface ActiveTurn {
   emitter: EventEmitter;
   done: boolean;
+  /**
+   * 这一轮的中止闸门（docs/tech/turn-abort.md §3）——`startTurn` 建、
+   * `session.stream(text, { signal })` 消费、`abortTurn` 触发。
+   */
+  abortController: AbortController;
+  /**
+   * 已请求[停止](../../../../docs/terms.md)。两个用途：`abortTurn` 的幂等判定，以及
+   * `requestReview`/`requestUserAnswer` 的「别再挂新的」闸门——停止之后 core 若还为
+   * 同一步里其它并行工具调用请求[人审](../../../../docs/terms.md)（`loop.ts` 的
+   * `mergeSettleStreams` 让一步内多个工具调用并发结算），那些请求必须立即被拒，
+   * 否则它们会各自挂到自己的超时（默认 240 秒），把「停止」拖成「四分钟后停止」。
+   */
+  aborted: boolean;
   /** Bound to this turn's own `session.steer` at registration time (STEER-3B) — see `steerTurn`. */
   steer: (input: string) => boolean;
   emit: TurnEmitter;
@@ -265,6 +344,58 @@ export function steerTurn(conversationId: string, text: string): boolean {
   const activeTurn = activeTurns.get(conversationId);
   if (activeTurn === undefined) return false;
   return activeTurn.steer(text);
+}
+
+/** 停止时给挂起的[审批卡片](../../../../docs/terms.md)回填的拒绝理由——会进模型上下文，故写成一句模型读得懂的话。 */
+const ABORT_DENY_MESSAGE =
+  'The user stopped this turn, so this tool call was not approved.';
+
+/**
+ * [停止](../../../../docs/terms.md)这个会话进行中的那一轮（docs/tech/turn-abort.md §3.1）
+ * ——`routes/chat.ts` 的 `POST .../abort` 调它。返回 `false` = 没有进行中的一轮可停
+ * （路由转 409）；`true` = 停止已请求（**不代表已经停住**，真正停下的时刻见
+ * docs/features/turn-abort.md §2.3）。
+ *
+ * 四步的顺序都是硬要求：
+ *
+ * 1. **幂等**：已经请求过就直接 `true` 返回，连点停止键不会重复走下面的收尾。
+ * 2. **先置 `aborted` 标志**，再做后面两步——它同时是 `requestReview`/
+ *    `requestUserAnswer` 的闸门（见 `ActiveTurn.aborted` 注释）。
+ * 3. **结掉已经挂起的人审/提问**：core 正 `await` 这些 promise 时，abort 信号对它
+ *    毫无作用（`loop.ts` 的 `settleToolCall` 只是在等一个普通 promise）——这是整个
+ *    功能里唯一一处「光有 abort 信号不够」的地方。快照 key 再遍历：`resolveReview`/
+ *    `settleQuestion` 会就地删 Map 条目，不能边删边迭代。
+ * 4. **最后 abort**：信号一放出去，这一轮随时可能收尾（`driveTurn` 的 `finally` 会
+ *    把它从 `activeTurns` 删掉），此后再碰 `activeTurn` 的状态就没有意义了。
+ */
+export function abortTurn(conversationId: string, logger?: Logger): boolean {
+  const log = logger ?? defaultLogger;
+  const activeTurn = activeTurns.get(conversationId);
+  if (activeTurn === undefined) return false;
+  if (activeTurn.aborted) return true;
+
+  activeTurn.aborted = true;
+
+  const pendingReviewIds = [...activeTurn.pendingReviews.keys()];
+  const pendingQuestionIds = [...activeTurn.pendingQuestions.keys()];
+  log.info(LOG_SCOPE, 'turn abort requested', {
+    conversationId,
+    pendingReviews: pendingReviewIds.length,
+    pendingQuestions: pendingQuestionIds.length,
+  });
+
+  for (const callId of pendingReviewIds) {
+    resolveReview(conversationId, callId, {
+      behavior: 'deny',
+      message: ABORT_DENY_MESSAGE,
+    });
+  }
+  for (const callId of pendingQuestionIds) {
+    settleQuestion(conversationId, callId, { outcome: 'timeout' });
+  }
+
+  activeTurn.abortController.abort(new Error('Turn stopped by the user.'));
+  return true;
 }
 
 function describeError(error: unknown): string {
@@ -536,15 +667,52 @@ function logChunk(
   }
 }
 
+/**
+ * 报告一个[起轮装配](../../../../docs/terms.md)里程碑（docs/tech/telemetry.md §2.4）。
+ * 两道防护，理由与「遥测永不影响 turn」同源：`session.toJSON()` 抛错（防御性，不
+ * 预期）就跳过这次报告而不是让整轮崩掉；回调自己抛错就地吞掉记一行——它是注入方
+ * 的事，不该污染这一轮。
+ */
+function reportMilestone(
+  session: TurnDrivenSession,
+  onMilestone:
+    ((milestone: TurnMilestone, info: TurnMilestoneInfo) => void) | undefined,
+  milestone: TurnMilestone,
+  sinceStartMs: number,
+  conversationId: string,
+  log: Logger,
+): void {
+  if (onMilestone === undefined) return;
+  try {
+    const state = session.toJSON();
+    onMilestone(milestone, {
+      sessionId: state.id,
+      turn: state.turn,
+      sinceStartMs,
+    });
+  } catch (error) {
+    log.error(LOG_SCOPE, 'onMilestone threw', {
+      conversationId,
+      milestone,
+      error: describeError(error),
+    });
+  }
+}
+
 async function driveTurn(
   db: Db,
   conversationId: string,
   session: TurnDrivenSession,
+  /** 用户原话——合成给界面看的 `NimboUIMessage` 用的就是它（见 `StartTurnParams.text`）。 */
   text: string,
+  /** 喂给模型的文本，可能比 `text` 多一行系统提示（见 `StartTurnParams.modelText`）。 */
+  modelText: string,
   priorMessageCount: number,
   turnStartSeq: number,
   emit: TurnEmitter,
   log: Logger,
+  signal: AbortSignal,
+  onMilestone?: (milestone: TurnMilestone, info: TurnMilestoneInfo) => void,
 ): Promise<void> {
   const turnStartedAt = Date.now();
   log.info(LOG_SCOPE, 'turn started', {
@@ -570,14 +738,26 @@ async function driveTurn(
     };
     emit.emitMessage(userMessage);
 
-    const gen = session.stream(text);
+    // `signal` = 这一轮自己的 `AbortController.signal`（docs/tech/turn-abort.md §3.1）
+    // ——[停止](../../../../docs/terms.md)后 core 的 loop 在下一个 step 边界优雅收尾
+    // （`status: 'interrupted'`），走的是下面那条**正常收尾**的路，不是 `catch` 分支。
+    // 这里用 `modelText` 而不是 `text`：上面那条合成的 `NimboUIMessage`（进账本、
+    // 进直播流）拿的是用户原话，模型这条路可以多带一行系统提示——两条路分开正是
+    // [skill 提及](../../../../docs/terms.md)「软提示」能生效又不脏账本的关键
+    // （docs/tech/composer-skill-mention.md §2.2）。没有提及时两者是同一个字符串。
+    const gen = session.stream(modelText, { signal });
     let step = await gen.next();
     let stepIndex = 0;
     let lastMessageMetadata: NimboMessageMetadata | undefined;
     const pendingApprovalRequests = new Map<string, number>();
     const pendingSettlements = new Map<string, PendingToolSettlement>();
+    // 两个「首次」的一次性闸门（docs/tech/telemetry.md §2.4）——时刻在 chunk 抵达的
+    // 那一刻取，报告放在 `emitChunk` 之后：观测绝不插在 chunk 送达用户的前面。
+    let firstChunkReported = false;
+    let firstOutputReported = false;
     while (!step.done) {
       const chunk = step.value;
+      const arrivedAt = Date.now();
       stepIndex = logChunk(
         log,
         conversationId,
@@ -590,6 +770,28 @@ async function driveTurn(
         lastMessageMetadata = chunk.messageMetadata;
       }
       emit.emitChunk(chunk);
+      if (!firstChunkReported) {
+        firstChunkReported = true;
+        reportMilestone(
+          session,
+          onMilestone,
+          'first-chunk',
+          arrivedAt - turnStartedAt,
+          conversationId,
+          log,
+        );
+      }
+      if (!firstOutputReported && isVisibleChunk(chunk)) {
+        firstOutputReported = true;
+        reportMilestone(
+          session,
+          onMilestone,
+          'first-output',
+          arrivedAt - turnStartedAt,
+          conversationId,
+          log,
+        );
+      }
       step = await gen.next();
     }
 
@@ -649,7 +851,23 @@ export interface StartTurnParams {
   db: Db;
   conversationId: string;
   session: TurnDrivenSession;
+  /**
+   * 用户**原话**——进[账本](../../../../docs/terms.md)、进[直播流](../../../../docs/terms.md)，
+   * 也就是界面上显示的那条用户消息。
+   */
   text: string;
+  /**
+   * 实际喂给模型的文本，缺省即 `text`（docs/tech/composer-skill-mention.md §2.2）。
+   *
+   * 两者分开，是为了让服务端能在**不污染账本**的前提下给模型追加话术——目前唯一的
+   * 用途是[skill 提及](../../../../docs/terms.md)的那行系统提示（`turn-launcher.ts`
+   * 里由 `buildModelText` 拼）：用户看到的仍是自己打的 `/frontend-design 改排版`，
+   * 模型收到的多一句「请先 load-skill 加载它」。
+   *
+   * 提示行刻意**不进账本**：界面上显示一段本该隐形的系统话术很丑，而且它对后续轮
+   * 没有价值（skill 那轮已经加载过了），留在账本里只是持续占 token。
+   */
+  modelText?: string;
   /**
    * Count of `kind = 'message'` rows already persisted for this session
    * *before* this turn starts (`routes/chat.ts` computes this off the same
@@ -674,6 +892,25 @@ export interface StartTurnParams {
    * sink })`) to assert on emitted lines without touching `process.stdout`.
    */
   logger?: Logger;
+  /**
+   * 「这一轮彻底结束了」的通知点（docs/tech/steer-and-queue.md §3）——在 `finally` 的
+   * 收尾**全部**做完、`activeTurns` 里这一轮已被删除之后调用。
+   *
+   * 「在 delete 之后」是硬要求而非风格问题：`turn-launcher.ts` 用它来起下一轮
+   * （自动[出队](../../../../docs/terms.md)），而 `startTurn` 开头就有「已有进行中的
+   * 一轮就拒绝」的守卫——delete 之前调，下一轮必然被自己这一轮挡掉。
+   *
+   * 本模块刻意**不认识**「队列」这个概念：它只报告一个生命周期事件，要不要因此起下
+   * 一轮是注入方的事（依赖方向见 `turn-launcher.ts` 文件头）。回调抛错只记日志，不
+   * 影响这一轮已经完成的收尾。
+   */
+  onTurnSettled?: () => void;
+  /**
+   * 这一轮的两个「首次」时刻（docs/tech/telemetry.md §2.4）——见 `TurnMilestone`。
+   * 与 `onTurnSettled` 同款：本模块只报告事件，落库/拼载荷是注入方
+   * （`turn-launcher.ts`）的事；回调抛错只记日志，不影响这一轮。
+   */
+  onMilestone?: (milestone: TurnMilestone, info: TurnMilestoneInfo) => void;
 }
 
 export interface StartTurnResult {
@@ -701,6 +938,8 @@ export function startTurn(params: StartTurnParams): StartTurnResult {
   const activeTurn: ActiveTurn = {
     emitter,
     done: false,
+    abortController: new AbortController(),
+    aborted: false,
     // Captured once, bound to *this* turn's `session` — `steerTurn` never
     // sees `session` directly, only this closure (STEER-3B).
     steer: (input) => session.steer?.(input) ?? false,
@@ -715,10 +954,13 @@ export function startTurn(params: StartTurnParams): StartTurnResult {
     conversationId,
     session,
     text,
+    params.modelText ?? text,
     priorMessageCount,
     turnStartSeq,
     activeTurn.emit,
     log,
+    activeTurn.abortController.signal,
+    params.onMilestone,
   ).finally(() => {
     // Defensive cleanup only — in the normal case both maps are already
     // empty by the time `driveTurn` settles, because the `@nimbo/core` loop
@@ -751,9 +993,43 @@ export function startTurn(params: StartTurnParams): StartTurnResult {
     emitter.emit('done');
     activeTurn.done = true;
     activeTurns.delete(conversationId);
+
+    // 严格在 `activeTurns.delete` 之后——见 `StartTurnParams.onTurnSettled` 的注释
+    // （下一轮的 `startTurn` 守卫依赖这个顺序）。回调是注入方的事，它抛错不该污染
+    // 这一轮已经完成的收尾，故就地吞掉并记一行。
+    try {
+      params.onTurnSettled?.();
+    } catch (error) {
+      log.error(LOG_SCOPE, 'onTurnSettled threw', {
+        conversationId,
+        error: describeError(error),
+      });
+    }
   });
 
   return { started: true };
+}
+
+/**
+ * 把一份[待发队列](../../../../docs/terms.md)快照广播给这个会话进行中那一轮的所有订阅者
+ * （多标签同步，docs/tech/steer-and-queue.md §4.3 的「时机 2」）。
+ *
+ * 没有进行中的一轮就是**无操作**且不是错误：队列只可能在一轮进行中被改动（没有进行中
+ * 的一轮时发消息直接起轮，不入队），而[出队](../../../../docs/terms.md)恰好发生在这一轮
+ * emitter 即将关闭的时刻——那一次的同步不靠广播，靠下一轮的 tail 连上时那帧权威快照
+ * （§4.3 的「时机 1」）。
+ *
+ * `QueueFrame` 没有 `seq`：它是[transient](../../../../docs/terms.md)档的状态快照，不落库、
+ * 不占 seq、不参与 `after=` 续传，因此这里绕过 `TurnEmitter` 直接 `emit`，不走
+ * `createTurnEmitter` 的持久化路径。
+ */
+export function broadcastQueue(
+  conversationId: string,
+  queue: QueuedMessage[],
+): void {
+  const activeTurn = activeTurns.get(conversationId);
+  if (activeTurn === undefined) return;
+  activeTurn.emitter.emit('event', { queue } satisfies QueueFrame);
 }
 
 /**
@@ -864,6 +1140,13 @@ export function requestReview(
       behavior: 'deny',
       message: 'No active turn to route this approval request to.',
     });
+  }
+
+  // 这一轮已被[停止](../../../../docs/terms.md)：立刻拒绝，不注册挂起项——否则这个
+  // 请求会挂到自己的超时（默认 240 秒）才动，把停止拖成「四分钟后停止」。发生在
+  // 停止的那一步里还有其它并行工具调用要审批时（`ActiveTurn.aborted` 注释）。
+  if (activeTurn.aborted) {
+    return Promise.resolve({ behavior: 'deny', message: ABORT_DENY_MESSAGE });
   }
 
   const timeoutMs = opts?.timeoutMs ?? resolveApprovalTimeoutMs();
@@ -1008,6 +1291,11 @@ export function requestUserAnswer(
 ): Promise<AskUserOutcome> {
   const activeTurn = activeTurns.get(conversationId);
   if (activeTurn === undefined) {
+    return Promise.resolve({ outcome: 'timeout' });
+  }
+
+  // 同 `requestReview` 的停止闸门：轮已停止就不再挂起等人回答。
+  if (activeTurn.aborted) {
     return Promise.resolve({ outcome: 'timeout' });
   }
 

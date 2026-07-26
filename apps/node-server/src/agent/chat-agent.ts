@@ -1,8 +1,9 @@
 /**
- * `buildSession` (docs/tech/chat-webapp.md §2.2 `chat-agent.ts`): loads
- * the frontend-design skill straight from the sandbox's filesystem
- * (`Skill.fromFS`, same as
- * examples/src/12-vercel-sandbox-real-project.ts), builds instructions
+ * `buildSession` (docs/tech/chat-webapp.md §2.2 `chat-agent.ts`): takes the
+ * turn's already-loaded skills (`opts.skills` — scanned off the sandbox by
+ * `skill-catalog.ts`'s `loadSkillsFromWorkspace`, called from
+ * `turn-launcher.ts`; before docs/tech/composer-skill-mention.md this file
+ * hard-read a single `frontend-design` path itself), builds instructions
  * with owner/repo/branch/defaultBranch baked in (the model is never asked to
  * guess them — same discipline as example 12's `buildInstructions`), and
  * hands the whole thing to `@nimbo/sdk`'s `createSession` — **not**
@@ -28,20 +29,34 @@ import type {
   Session,
   SessionState,
   SessionTelemetry,
+  Skill,
   Tool,
 } from '@nimbo/sdk';
-import { createSession, defineAgent, defineTool, Skill } from '@nimbo/sdk';
+import { createSession, defineAgent, defineTool } from '@nimbo/sdk';
 import type { LanguageModel } from 'ai';
 import { z } from 'zod';
 
 import type { ChatApprovalMode } from './approval-policy.js';
 import type { AskUserOutcome, RequestUserAnswerInput } from './turn-runner.js';
-
-const FRONTEND_DESIGN_SKILL_PATH = '/.agents/skills/frontend-design';
+import { createWebSearchToolFromEnv } from './web-search.js';
 
 export interface BuildSessionOptions {
   model: LanguageModel;
   workspace: NimboFS & NimboExec;
+  /**
+   * 这一轮可用的全部 [skill](../../../../docs/terms.md)（docs/tech/composer-skill-mention.md
+   * §1 改动 A）——**由调用方加载后传入**，不在这里读沙盒。
+   *
+   * 本功能之前这里是硬读 `/.agents/skills/frontend-design` 一个路径；改成扫描
+   * 全部之后，加载动作上移到了 `turn-launcher.ts`：它同一份结果还要另做两件事
+   * （刷新[skill 清单](../../../../docs/terms.md)缓存、按 skill 名解析
+   * [skill 提及](../../../../docs/terms.md)），没有理由为同一批数据扫两遍沙盒。
+   *
+   * 空数组是合法输入：core 的[条件内置](../../../../docs/terms.md)语义会因此不注册
+   * `load-skill`、不注入 `<available_skills>`——与本功能上线前「沙盒里一个 skill
+   * 都读不到」时的行为一致。
+   */
+  skills: Skill[];
   repoOwner: string;
   repoName: string;
   defaultBranch: string;
@@ -55,6 +70,8 @@ export interface BuildSessionOptions {
   approvalMode?: ChatApprovalMode;
   /** `routes/chat.ts`'s ask-user bridge (docs/tech/chat-webapp.md §2.2c（审批链）), wired to `turn-runner.ts`'s `requestUserAnswer` — registers the `ask-user` tool (see `createAskUserTool`) when present. Independent of `approvalMode`: `ask-user` is a product capability, not a safety gate, so it's registered the same way regardless of mode (including `'off'`). */
   onAskUser?: (req: RequestUserAnswerInput) => Promise<AskUserOutcome>;
+  /** [联网搜索](../../../../docs/terms.md)工具（docs/tech/web-search.md §5）——注入优先于 env 解析。不传时由 `createWebSearchToolFromEnv()` 按 `EXA_API_KEY` 决定注不注册；显式传入用于测试（假 `fetch`，零网络）与将来「按会话配 key」。 */
+  webSearchTool?: Tool;
   /** telemetry 事件集成透传（`@nimbo/core` 的 `SessionTelemetry`，docs/tech/chat-webapp.md §11.4）——生产由 `src/telemetry.ts` 的 SQLite 集成供给（routes 经 deps 注入），测试注入假集成或不传。 */
   telemetry?: SessionTelemetry;
 }
@@ -72,8 +89,15 @@ function buildInstructions(opts: {
   repoName: string;
   defaultBranch: string;
   branchName: string;
+  /** `web-search` 是否注册进了工具表——没注册就不提它，免得指令让模型去找一个不存在的工具（docs/tech/web-search.md §5）。 */
+  hasWebSearch: boolean;
 }): string {
   const { repoOwner, repoName, defaultBranch, branchName } = opts;
+  const webSearchLine =
+    opts.hasWebSearch ?
+      `
+- 遇到你不确定、或可能已经过时的外部信息（某个库的最新用法/版本、陌生的报错、时效性事实），先用 web-search 工具查一遍再动手，不要凭记忆猜；引用结论时带上来源网址。`
+    : '';
   return `你在一个已经 clone 好用户仓库 ${repoOwner}/${repoName}（默认分支 ${defaultBranch}）的 Vercel Sandbox 里工作，仓库根目录就是你的工作区根目录 "/"。你正在一段持续的多轮对话中协助用户维护这个仓库：
 
 - 本次会话固定使用工作分支 "${branchName}"（已经为你 checkout 好，之后每一轮都请继续在这个分支上工作，不要切换到其他分支，也不要自己新建分支）。
@@ -82,7 +106,7 @@ function buildInstructions(opts: {
 - 只有当用户明确要求提交/推送/开 PR 时，才执行 git 操作；push 前确保当前分支就是 "${branchName}"；开 PR 时用 curl 调 GitHub REST API（\`$GH_TOKEN\` 已是沙盒环境变量，直接引用，不要猜测、复述或打印它的值），head 用 "${branchName}"，base 用 "${defaultBranch}"。
 - 开 PR 前要先检查一下之前的 PR 是否已经被合入：若已合入，请新开个 PR。
 - 每次回复如实说明这一轮做了什么、为什么这么做，或者为什么这一轮没有改动代码——不要夸大、不要编造未发生的操作结果。
-- 当你需要用户做决定或澄清需求时，用 ask-user 工具直接提问，不要在回复文本里空等。`;
+- 当你需要用户做决定或澄清需求时，用 ask-user 工具直接提问，不要在回复文本里空等。${webSearchLine}`;
 }
 
 /**
@@ -170,6 +194,26 @@ function createAskUserTool(
 }
 
 /**
+ * 应用级工具表（core 内置工具之外的那几个，docs/tech/web-search.md §1）——两项
+ * 都是**条件注册**，条件不满足时那个键根本不出现，模型看不见也就不会去调：
+ *
+ * - `ask-user`：`opts.onAskUser` 存在时（产品能力，与 approvalMode 无关）。
+ * - `web-search`：`opts.webSearchTool` 显式注入，或 env 里配了 `EXA_API_KEY`。
+ *   两者都没有 → 不注册，行为与本功能上线前逐字节一致。
+ */
+function buildTools(opts: BuildSessionOptions): Record<string, Tool> {
+  const tools: Record<string, Tool> = {};
+  if (opts.onAskUser !== undefined) {
+    tools['ask-user'] = createAskUserTool(opts.onAskUser);
+  }
+  const webSearchTool = opts.webSearchTool ?? createWebSearchToolFromEnv();
+  if (webSearchTool !== undefined) {
+    tools['web-search'] = webSearchTool;
+  }
+  return tools;
+}
+
+/**
  * Builds a fresh nimbo `Session` for one turn: loads the skill, defines the
  * agent, and (re)creates the session — restoring message history from
  * `opts.resume` when this is a returning chat session.
@@ -186,14 +230,15 @@ function createAskUserTool(
 export async function buildSession(
   opts: BuildSessionOptions,
 ): Promise<Session<NimboFS & NimboExec>> {
-  const skill = await Skill.fromFS(opts.workspace, FRONTEND_DESIGN_SKILL_PATH);
+  const tools = buildTools(opts);
   const agent = defineAgent({
     model: opts.model,
-    skills: [skill],
-    instructions: buildInstructions(opts),
-    ...(opts.onAskUser !== undefined ?
-      { tools: { 'ask-user': createAskUserTool(opts.onAskUser) } }
-    : {}),
+    skills: opts.skills,
+    instructions: buildInstructions({
+      ...opts,
+      hasWebSearch: tools['web-search'] !== undefined,
+    }),
+    ...(Object.keys(tools).length > 0 ? { tools } : {}),
   });
   const approvalMode = opts.approvalMode ?? 'dangerous';
   const workspace =

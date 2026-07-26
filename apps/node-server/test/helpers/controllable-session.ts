@@ -26,12 +26,30 @@ import type { NimboChunk, SessionState, TurnResult } from '@nimbo/core';
 
 export interface ControllableSession {
   toJSONCalls: SessionState[];
+  /**
+   * `turn-runner.ts` 传进来的那个 [停止](../../../../docs/terms.md)信号
+   * （`ActiveTurn.abortController.signal`，docs/tech/turn-abort.md §3.1）——`stream()`
+   * 被调用后才有值。测试用它断言「signal 确实透传给了 core」，以及模拟 core 收到
+   * abort 后的优雅收尾（真 loop 在 step 边界收尾，这里由测试手动 `pushChunk` +
+   * `finish` 扮演同一件事）。
+   */
+  turnSignal: AbortSignal | undefined;
+  /**
+   * 每次 `stream(input)` 收到的文本，按调用顺序。用来断言**模型实际看到的那份**
+   * ——它可能与落[账本](../../../../docs/terms.md)的用户原话不同
+   * （[skill 提及](../../../../docs/terms.md)会追加一行系统提示，
+   * docs/tech/composer-skill-mention.md §2.2）。
+   */
+  streamInputs: string[];
   pushChunk(chunk: NimboChunk): void;
   finish(result: TurnResult): void;
   fail(error: unknown): void;
   /** Replaces the `SessionState` `toJSON()` returns from now on — see file header. Does not itself emit/persist anything; only affects future `toJSON()` calls. */
   setState(state: SessionState): void;
-  stream(input: string): AsyncGenerator<NimboChunk, TurnResult>;
+  stream(
+    input: string,
+    opts?: { signal?: AbortSignal },
+  ): AsyncGenerator<NimboChunk, TurnResult>;
   toJSON(): SessionState;
 }
 
@@ -53,7 +71,9 @@ export function createControllableSession(
     | { kind: 'error'; error: unknown }
     | undefined;
   let wake: (() => void) | undefined;
+  let turnSignal: AbortSignal | undefined;
   const toJSONCalls: SessionState[] = [];
+  const streamInputs: string[] = [];
 
   function scheduleWake(): void {
     const resolve = wake;
@@ -61,7 +81,12 @@ export function createControllableSession(
     resolve?.();
   }
 
-  async function* stream(): AsyncGenerator<NimboChunk, TurnResult> {
+  async function* stream(
+    input: string,
+    opts?: { signal?: AbortSignal },
+  ): AsyncGenerator<NimboChunk, TurnResult> {
+    streamInputs.push(input);
+    turnSignal = opts?.signal;
     for (;;) {
       const next = queue.shift();
       if (next !== undefined) {
@@ -80,6 +105,10 @@ export function createControllableSession(
 
   return {
     toJSONCalls,
+    streamInputs,
+    get turnSignal(): AbortSignal | undefined {
+      return turnSignal;
+    },
     pushChunk(chunk: NimboChunk): void {
       queue.push(chunk);
       scheduleWake();

@@ -18,6 +18,7 @@ import {
 } from '../../src/agent/store.js';
 import type { TurnDrivenSession } from '../../src/agent/turn-runner.js';
 import {
+  abortTurn,
   isTurnActive,
   requestReview,
   requestUserAnswer,
@@ -225,6 +226,57 @@ describe('agent/turn-runner', () => {
     unsubscribe();
   });
 
+  // [skill 提及](../../../../docs/terms.md)的核心不变量
+  // （docs/tech/composer-skill-mention.md §2.2）：界面/账本拿用户原话，模型拿加料版。
+  it('modelText and text are separate: the ledger + wire carry the user’s own words while the model receives the augmented text', async () => {
+    const fake = createControllableSession();
+    const displayText = '/frontend-design 帮我看看首页排版';
+    const modelText = `${displayText}\n\n[系统提示] 用户在本条消息中显式指定了 skill：frontend-design。`;
+
+    startTurn({
+      db,
+      conversationId,
+      session: fake,
+      text: displayText,
+      modelText,
+      priorMessageCount: 0,
+    });
+
+    // 账本里那条 turn-start 用户消息 = 用户原话，**不含**系统提示行。
+    const rows = listConversationEvents(db, conversationId);
+    expect(collectText(parseMessageRow(rows[0]))).toBe(displayText);
+
+    // 而 core 的 `session.stream()` 收到的是加料版。
+    await flushMicrotasks();
+    expect(fake.streamInputs).toEqual([modelText]);
+
+    fake.finish({ finalResponse: 'ok', usage: {} });
+    await flushMicrotasks();
+  });
+
+  it('modelText defaults to text — a turn with no skill mention feeds the model the exact same string it persists', async () => {
+    const fake = createControllableSession();
+
+    startTurn({
+      db,
+      conversationId,
+      session: fake,
+      text: '帮我看看首页排版',
+      priorMessageCount: 0,
+    });
+
+    await flushMicrotasks();
+    expect(fake.streamInputs).toEqual(['帮我看看首页排版']);
+    expect(
+      collectText(
+        parseMessageRow(listConversationEvents(db, conversationId)[0]),
+      ),
+    ).toBe('帮我看看首页排版');
+
+    fake.finish({ finalResponse: 'ok', usage: {} });
+    await flushMicrotasks();
+  });
+
   it('rejects a second startTurn while one is already active for the same session', () => {
     const fake = createControllableSession();
     const first = startTurn({
@@ -272,7 +324,9 @@ describe('agent/turn-runner', () => {
     await flushMicrotasks();
     expect(isTurnActive(conversationId)).toBe(false);
     // seq 1: the turn-start user message; seq 2 (the start chunk) got GC'd; seq 3: the assistant message.
-    expect(listConversationEvents(db, conversationId).map((r) => r.seq)).toEqual([1, 3]);
+    expect(
+      listConversationEvents(db, conversationId).map((r) => r.seq),
+    ).toEqual([1, 3]);
 
     const second = createControllableSession();
     const result = startTurn({
@@ -562,9 +616,9 @@ describe('agent/turn-runner', () => {
         expect('seq' in (received[0] ?? {})).toBe(false);
         // Only the turn-start user message (seq 1) — the ephemeral chunk
         // itself persisted nothing.
-        expect(listConversationEvents(db, conversationId).map((r) => r.kind)).toEqual([
-          'message',
-        ]);
+        expect(
+          listConversationEvents(db, conversationId).map((r) => r.kind),
+        ).toEqual(['message']);
 
         fake.finish({ finalResponse: '', usage: {} });
         await flushMicrotasks();
@@ -593,7 +647,14 @@ describe('agent/turn-runner', () => {
         await flushMicrotasks();
 
         expect(received).toHaveLength(1);
-        expect(received[0]?.seq).toBe(2); // seq 1 was already spent on the turn-start message
+        // `ChatReplayFrame` 现在是三支联合（多了无 seq 的 `QueueFrame`，
+        // docs/tech/steer-and-queue.md §4.3）——先按结构收窄到 chunk 帧再读 seq。
+        const firstFrame = received[0];
+        expect(
+          firstFrame !== undefined && 'chunk' in firstFrame ?
+            firstFrame.seq
+          : undefined,
+        ).toBe(2); // seq 1 was already spent on the turn-start message
         const persisted = listConversationEvents(db, conversationId);
         expect(persisted.map((r) => r.kind)).toEqual(['message', 'chunk']);
         // 旧 type 列已删（payload 判别字段的冗余镜像）——从 payload 里读回验证。
@@ -743,9 +804,9 @@ describe('agent/turn-runner', () => {
         const persisted = listConversationEvents(db, conversationId);
         expect(persisted.every((r) => r.kind === 'message')).toBe(true);
         expect(persisted).toHaveLength(2);
-        expect(getConversation(db, conversationId, 'user-1')?.agentSessionId).toBe(
-          'nimbo-sess-1',
-        );
+        expect(
+          getConversation(db, conversationId, 'user-1')?.agentSessionId,
+        ).toBe('nimbo-sess-1');
       },
     );
 
@@ -840,7 +901,9 @@ describe('agent/turn-runner', () => {
       });
       turn1.finish({ finalResponse: 'first', usage: {} });
       await flushMicrotasks();
-      expect(listConversationEvents(db, conversationId).map((r) => r.seq)).toEqual([1, 3]);
+      expect(
+        listConversationEvents(db, conversationId).map((r) => r.seq),
+      ).toEqual([1, 3]);
 
       // Turn 2: crashes mid-flight — its own turn-start user message (seq 4)
       // persists and is never GC'd (finalizeTurnPersistence never runs), and
@@ -1060,9 +1123,9 @@ describe('agent/turn-runner', () => {
         toolName: 'bash',
         input: { command: 'ls' },
       });
-      expect(resolveReview(conversationId, 'call_1', { behavior: 'allow' })).toBe(
-        true,
-      );
+      expect(
+        resolveReview(conversationId, 'call_1', { behavior: 'allow' }),
+      ).toBe(true);
       await expect(pending).resolves.toEqual({ behavior: 'allow' });
 
       fake.finish({ finalResponse: 'ok', usage: {} });
@@ -1120,12 +1183,12 @@ describe('agent/turn-runner', () => {
         toolName: 'bash',
         input: { command: 'ls' },
       });
-      expect(resolveReview(conversationId, 'call_1', { behavior: 'allow' })).toBe(
-        true,
-      );
-      expect(resolveReview(conversationId, 'call_1', { behavior: 'allow' })).toBe(
-        false,
-      );
+      expect(
+        resolveReview(conversationId, 'call_1', { behavior: 'allow' }),
+      ).toBe(true);
+      expect(
+        resolveReview(conversationId, 'call_1', { behavior: 'allow' }),
+      ).toBe(false);
       expect(
         resolveReview(conversationId, 'never-requested', { behavior: 'allow' }),
       ).toBe(false);
@@ -1255,9 +1318,9 @@ describe('agent/turn-runner', () => {
       // seq 1: the turn-start user message; seq 2: the approval-request chunk.
       expect(listConversationEvents(db, conversationId)).toHaveLength(2);
 
-      expect(resolveReview(conversationId, 'call_1', { behavior: 'allow' })).toBe(
-        true,
-      );
+      expect(
+        resolveReview(conversationId, 'call_1', { behavior: 'allow' }),
+      ).toBe(true);
       await flushMicrotasks();
 
       expect(decisions).toEqual([{ behavior: 'allow' }]);
@@ -1299,12 +1362,16 @@ describe('agent/turn-runner', () => {
         callId: 'call_1',
         question: 'continue?',
       });
-      expect(resolveUserAnswer(conversationId, 'call_1', 'yes please')).toBe(true);
+      expect(resolveUserAnswer(conversationId, 'call_1', 'yes please')).toBe(
+        true,
+      );
       await expect(pending).resolves.toEqual({
         outcome: 'answered',
         answer: 'yes please',
       });
-      expect(resolveUserAnswer(conversationId, 'call_1', 'yes again')).toBe(false);
+      expect(resolveUserAnswer(conversationId, 'call_1', 'yes again')).toBe(
+        false,
+      );
 
       fake.finish({ finalResponse: 'ok', usage: {} });
     });
@@ -1325,9 +1392,9 @@ describe('agent/turn-runner', () => {
         { timeoutMs: 10 },
       );
       expect(outcome).toEqual({ outcome: 'timeout' });
-      expect(resolveUserAnswer(conversationId, 'call_timeout', 'too late')).toBe(
-        false,
-      );
+      expect(
+        resolveUserAnswer(conversationId, 'call_timeout', 'too late'),
+      ).toBe(false);
 
       fake.finish({ finalResponse: 'ok', usage: {} });
     });
@@ -1399,9 +1466,9 @@ describe('agent/turn-runner', () => {
       });
 
       // The review's own pending entry was untouched by the question's resolve.
-      expect(resolveReview(conversationId, 'shared-id', { behavior: 'allow' })).toBe(
-        true,
-      );
+      expect(
+        resolveReview(conversationId, 'shared-id', { behavior: 'allow' }),
+      ).toBe(true);
       await expect(reviewPromise).resolves.toEqual({ behavior: 'allow' });
 
       fake.finish({ finalResponse: 'ok', usage: {} });
@@ -1445,10 +1512,420 @@ describe('agent/turn-runner', () => {
 
       // Resolving by hand after the sweep is a no-op — the pending entries
       // (and the whole turn) are already gone.
-      expect(resolveReview(conversationId, 'call_1', { behavior: 'allow' })).toBe(
+      expect(
+        resolveReview(conversationId, 'call_1', { behavior: 'allow' }),
+      ).toBe(false);
+      expect(resolveUserAnswer(conversationId, 'call_2', 'too late')).toBe(
         false,
       );
-      expect(resolveUserAnswer(conversationId, 'call_2', 'too late')).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 停止本轮（docs/tech/turn-abort.md §3.1）——`abortTurn`。这里断言的是 chat 层
+  // 那一半：signal 确实交给了 core、挂起的人审/提问被就地结掉、幂等。core 那一半
+  // （「看到 abort 就在 step 边界优雅收尾」）由 packages/core 的 loop.test.ts 覆盖，
+  // 这里的 fake session 只扮演它的产出（`message-metadata` + `finish`）。
+  // ---------------------------------------------------------------------------
+
+  describe('abortTurn', () => {
+    it('returns false when there is no active turn for the session (routes/chat.ts turns that into a 409)', () => {
+      expect(isTurnActive(conversationId)).toBe(false);
+      expect(abortTurn(conversationId)).toBe(false);
+    });
+
+    it('passes this turn’s own signal into session.stream() and aborts it — the same signal @nimbo/core’s loop checks at each step boundary', async () => {
+      const fake = createControllableSession();
+      startTurn({
+        db,
+        conversationId,
+        session: fake,
+        text: 'hi',
+        priorMessageCount: 0,
+      });
+      await flushMicrotasks();
+
+      const signal = fake.turnSignal;
+      expect(signal).toBeInstanceOf(AbortSignal);
+      expect(signal?.aborted).toBe(false);
+
+      expect(abortTurn(conversationId)).toBe(true);
+      expect(signal?.aborted).toBe(true);
+
+      fake.finish({ finalResponse: '', usage: {} });
+      await flushMicrotasks();
+    });
+
+    it('is idempotent: a second abort (a double-clicked stop key) returns true without re-running the teardown, and the turn still finalizes exactly once', async () => {
+      const fake = createControllableSession();
+      startTurn({
+        db,
+        conversationId,
+        session: fake,
+        text: 'hi',
+        priorMessageCount: 0,
+      });
+      await flushMicrotasks();
+
+      expect(abortTurn(conversationId)).toBe(true);
+      expect(abortTurn(conversationId)).toBe(true);
+      expect(abortTurn(conversationId)).toBe(true);
+
+      // 停止后 core 走优雅收尾：一条 interrupted 的 message-metadata + 正常 return。
+      fake.setState({
+        id: 'fake-session',
+        turn: 1,
+        messages: [
+          userTextMessage('u1', 'hi'),
+          assistantTextMessage('a1', '半截'),
+        ],
+        createdAt: 0,
+      });
+      fake.pushChunk(
+        messageMetadataChunk({
+          turn: 1,
+          usage: {},
+          status: 'interrupted',
+          error: { code: 'aborted', message: 'Turn stopped by the user.' },
+        }),
+      );
+      fake.finish({ finalResponse: '半截', usage: {} });
+      await flushMicrotasks();
+
+      // 优雅收尾这条路走的是既有的 finalizeTurnPersistence（本功能不新增落盘路径）：
+      // 已产出的内容留着，chunk 行被 GC，会话 header 更新。
+      expect(isTurnActive(conversationId)).toBe(false);
+      const rows = listConversationEvents(db, conversationId);
+      expect(rows.map((row) => row.kind)).toEqual(['message', 'message']);
+      expect(
+        getConversation(db, conversationId, 'user-1')?.agentSessionTurn,
+      ).toBe(1);
+    });
+
+    it('settles every pending review/question on the spot (deny/timeout) — a turn parked on an approval card stops now, not after CHAT_APPROVAL_TIMEOUT_MS', async () => {
+      const fake = createControllableSession();
+      startTurn({
+        db,
+        conversationId,
+        session: fake,
+        text: 'hi',
+        priorMessageCount: 0,
+      });
+
+      // Timeouts far beyond this test's lifetime: the only thing that can settle
+      // these is `abortTurn` itself (the same discipline the teardown-sweep test
+      // above uses).
+      const reviewPromise = requestReview(
+        conversationId,
+        {
+          callId: 'call_1',
+          toolName: 'bash',
+          input: { command: 'rm -rf build' },
+        },
+        { timeoutMs: 999_999 },
+      );
+      const questionPromise = requestUserAnswer(
+        conversationId,
+        { callId: 'call_2', question: 'which one?' },
+        { timeoutMs: 999_999 },
+      );
+      await flushMicrotasks();
+
+      expect(abortTurn(conversationId)).toBe(true);
+
+      const [decision, outcome] = await Promise.all([
+        reviewPromise,
+        questionPromise,
+      ]);
+      expect(decision).toEqual({
+        behavior: 'deny',
+        message:
+          'The user stopped this turn, so this tool call was not approved.',
+      });
+      expect(outcome).toEqual({ outcome: 'timeout' });
+
+      fake.finish({ finalResponse: '', usage: {} });
+      await flushMicrotasks();
+    });
+
+    it('a review/question requested AFTER the abort is refused immediately instead of registering a new pending entry (the other parallel tool calls of the step being stopped)', async () => {
+      const fake = createControllableSession();
+      startTurn({
+        db,
+        conversationId,
+        session: fake,
+        text: 'hi',
+        priorMessageCount: 0,
+      });
+      await flushMicrotasks();
+
+      expect(abortTurn(conversationId)).toBe(true);
+
+      // 999_999ms 的超时仍在，所以「立刻 resolve」只可能来自 aborted 闸门本身。
+      const decision = await requestReview(
+        conversationId,
+        { callId: 'call_late', toolName: 'bash', input: { command: 'ls' } },
+        { timeoutMs: 999_999 },
+      );
+      expect(decision).toEqual({
+        behavior: 'deny',
+        message:
+          'The user stopped this turn, so this tool call was not approved.',
+      });
+
+      const outcome = await requestUserAnswer(
+        conversationId,
+        { callId: 'q_late', question: 'still there?' },
+        { timeoutMs: 999_999 },
+      );
+      expect(outcome).toEqual({ outcome: 'timeout' });
+
+      // 没有注册挂起项：手动解也解不到（本来就不在 Map 里）。
+      expect(
+        resolveReview(conversationId, 'call_late', { behavior: 'allow' }),
+      ).toBe(false);
+      expect(resolveUserAnswer(conversationId, 'q_late', 'yes')).toBe(false);
+
+      fake.finish({ finalResponse: '', usage: {} });
+      await flushMicrotasks();
+    });
+
+    it('logs one "turn abort requested" line carrying how many pending reviews/questions it had to settle', async () => {
+      const lines: string[] = [];
+      const logger = createLogger({
+        sink: (line) => lines.push(line),
+        level: 'debug',
+      });
+      const fake = createControllableSession();
+      startTurn({
+        db,
+        conversationId,
+        session: fake,
+        text: 'hi',
+        priorMessageCount: 0,
+        logger,
+      });
+      void requestReview(
+        conversationId,
+        { callId: 'call_1', toolName: 'bash', input: { command: 'ls' } },
+        { timeoutMs: 999_999 },
+      );
+      await flushMicrotasks();
+
+      abortTurn(conversationId, logger);
+
+      const abortLine = lines.find((line) =>
+        line.includes('turn abort requested'),
+      );
+      expect(abortLine).toBeDefined();
+      expect(abortLine).toContain('"pendingReviews":1');
+      expect(abortLine).toContain('"pendingQuestions":0');
+
+      fake.finish({ finalResponse: '', usage: {} });
+      await flushMicrotasks();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 起轮装配打点的通知点（docs/tech/telemetry.md §2.4）——`onMilestone` 与
+  // `onTurnSettled` 同款：纯报告，不改变任何 chunk 流转/持久化行为。
+  // ---------------------------------------------------------------------------
+
+  describe('onMilestone', () => {
+    interface Reported {
+      milestone: string;
+      sessionId: string;
+      turn: number;
+    }
+
+    /** 记下每次报告（丢掉 `sinceStartMs`——真实墙钟，断言它的具体值只会得到一个 flaky 测试；「有这个字段且是非负数」在下面单独断言一次）。 */
+    function collectingMilestones(): {
+      reported: Reported[];
+      elapsed: number[];
+      onMilestone: (
+        milestone: string,
+        info: { sessionId: string; turn: number; sinceStartMs: number },
+      ) => void;
+    } {
+      const reported: Reported[] = [];
+      const elapsed: number[] = [];
+      return {
+        reported,
+        elapsed,
+        onMilestone: (milestone, info) => {
+          reported.push({
+            milestone,
+            sessionId: info.sessionId,
+            turn: info.turn,
+          });
+          elapsed.push(info.sinceStartMs);
+        },
+      };
+    }
+
+    it('reports first-chunk on the very first chunk and first-output on the first *visible* one, each exactly once, keyed by the session’s own id/turn', async () => {
+      const fake = createControllableSession({
+        id: 'nimbo-sess-9',
+        turn: 3,
+        messages: [],
+        createdAt: 0,
+      });
+      const { reported, elapsed, onMilestone } = collectingMilestones();
+
+      startTurn({
+        db,
+        conversationId,
+        session: fake,
+        text: 'hi',
+        priorMessageCount: 0,
+        onMilestone,
+      });
+
+      // `start`/`start-step` 是空气泡——只算 first-chunk，不算 first-output。
+      fake.pushChunk(startChunk('m1'));
+      await flushMicrotasks();
+      expect(reported).toEqual([
+        { milestone: 'first-chunk', sessionId: 'nimbo-sess-9', turn: 3 },
+      ]);
+
+      fake.pushChunk(startStepChunk());
+      await flushMicrotasks();
+      expect(reported).toHaveLength(1); // 仍然只有 first-chunk
+
+      // 第一段文字 = 用户第一次真的看见东西。
+      fake.pushChunk(textStartChunk('t1'));
+      await flushMicrotasks();
+      expect(reported).toEqual([
+        { milestone: 'first-chunk', sessionId: 'nimbo-sess-9', turn: 3 },
+        { milestone: 'first-output', sessionId: 'nimbo-sess-9', turn: 3 },
+      ]);
+
+      // 后续可见 chunk 不再触发（两个闸门都是一次性的）。
+      fake.pushChunk(textDeltaChunk('t1', 'a'));
+      fake.pushChunk(textEndChunk('t1'));
+      fake.pushChunk(toolInputAvailableChunk('c1', 'bash', { command: 'ls' }));
+      await flushMicrotasks();
+      expect(reported).toHaveLength(2);
+      expect(elapsed).toHaveLength(2);
+      expect(elapsed.every((ms) => Number.isFinite(ms) && ms >= 0)).toBe(true);
+
+      fake.finish({ finalResponse: 'ok', usage: {} });
+      await flushMicrotasks();
+    });
+
+    it('reports first-output on a tool call when the model calls a tool before writing any text (no text/reasoning at all)', async () => {
+      const fake = createControllableSession();
+      const { reported, onMilestone } = collectingMilestones();
+
+      startTurn({
+        db,
+        conversationId,
+        session: fake,
+        text: 'hi',
+        priorMessageCount: 0,
+        onMilestone,
+      });
+
+      fake.pushChunk(startChunk('m1'));
+      fake.pushChunk(startStepChunk());
+      fake.pushChunk(toolInputAvailableChunk('c1', 'bash', { command: 'ls' }));
+      await flushMicrotasks();
+
+      expect(reported.map((r) => r.milestone)).toEqual([
+        'first-chunk',
+        'first-output',
+      ]);
+
+      fake.finish({ finalResponse: 'ok', usage: {} });
+      await flushMicrotasks();
+    });
+
+    it('reports first-chunk but never first-output for a turn that produces no visible chunk at all (failed before the model said anything)', async () => {
+      const fake = createControllableSession();
+      const { reported, onMilestone } = collectingMilestones();
+
+      startTurn({
+        db,
+        conversationId,
+        session: fake,
+        text: 'hi',
+        priorMessageCount: 0,
+        onMilestone,
+      });
+
+      fake.pushChunk(
+        messageMetadataChunk({
+          turn: 1,
+          usage: {},
+          status: 'failed',
+          error: { code: 'provider_error', message: 'boom' },
+        }),
+      );
+      await flushMicrotasks();
+      fake.finish({ finalResponse: '', usage: {} });
+      await flushMicrotasks();
+
+      expect(reported.map((r) => r.milestone)).toEqual(['first-chunk']);
+    });
+
+    it('swallows a throwing callback (and a throwing toJSON) — the turn still drives and persists exactly as it would without any callback', async () => {
+      const { lines, logger } = (() => {
+        const collected: string[] = [];
+        return {
+          lines: collected,
+          logger: createLogger({
+            level: 'debug',
+            sink: (line) => {
+              collected.push(line);
+            },
+          }),
+        };
+      })();
+      const fake = createControllableSession();
+
+      startTurn({
+        db,
+        conversationId,
+        session: fake,
+        text: 'hi',
+        priorMessageCount: 0,
+        logger,
+        onMilestone: () => {
+          throw new Error('observer blew up');
+        },
+      });
+
+      fake.pushChunk(startChunk('m1'));
+      fake.pushChunk(textStartChunk('t1'));
+      fake.pushChunk(textDeltaChunk('t1', 'ok'));
+      fake.pushChunk(textEndChunk('t1'));
+      await flushMicrotasks();
+      fake.setState({
+        id: 'fake-session',
+        turn: 1,
+        createdAt: 0,
+        messages: [
+          userTextMessage('u1', 'hi'),
+          assistantTextMessage('m1', 'ok', {
+            turn: 1,
+            usage: {},
+            status: 'completed',
+          }),
+        ],
+      });
+      fake.finish({ finalResponse: 'ok', usage: {} });
+      await flushMicrotasks();
+
+      // 轮照常跑完并落盘（回调抛错被吞），只多了两行 error 日志。
+      expect(isTurnActive(conversationId)).toBe(false);
+      expect(
+        listConversationEvents(db, conversationId).filter(
+          (row) => row.kind === 'message',
+        ),
+      ).toHaveLength(2);
+      expect(
+        lines.filter((line) => line.includes('onMilestone threw')),
+      ).toHaveLength(2);
     });
   });
 
@@ -1512,7 +1989,10 @@ describe('agent/turn-runner', () => {
       expect(first.level).toBe('INFO');
       expect(first.scope).toBe('turn-runner');
       expect(first.message).toBe('turn started');
-      expect(first.fields).toMatchObject({ conversationId, text: 'hello there' });
+      expect(first.fields).toMatchObject({
+        conversationId,
+        text: 'hello there',
+      });
 
       fake.finish({ finalResponse: 'ok', usage: {} });
     });
@@ -1911,7 +2391,10 @@ describe('agent/turn-runner', () => {
         lines.find((l) => l.includes('turn finished')) ?? '',
       );
       expect(finished.level).toBe('INFO');
-      expect(finished.fields).toMatchObject({ conversationId, status: 'completed' });
+      expect(finished.fields).toMatchObject({
+        conversationId,
+        status: 'completed',
+      });
       expect(typeof finished.fields.durationMs).toBe('number');
     });
 
@@ -2000,7 +2483,10 @@ describe('agent/turn-runner', () => {
         lines.find((l) => l.includes('turn persistence finalized')) ?? '',
       );
       expect(finalized.level).toBe('DEBUG');
-      expect(finalized.fields).toMatchObject({ conversationId, messageCount: 1 }); // just the assistant message — the user message was already counted via priorMessageCount + 1
+      expect(finalized.fields).toMatchObject({
+        conversationId,
+        messageCount: 1,
+      }); // just the assistant message — the user message was already counted via priorMessageCount + 1
     });
 
     it('startTurn without a logger option uses the default singleton (writes to process.stdout) — the 158-strong pre-existing suite already exercises this path with no regressions', async () => {

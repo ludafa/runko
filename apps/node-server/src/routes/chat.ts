@@ -1,23 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
-import type {
-  ApprovalPolicy,
-  ApprovalReviewer,
-  HumanDecision,
-  SessionState,
-  SessionTelemetry,
-} from '@nimbo/core';
-import { sessionStateSchema } from '@nimbo/core';
+import type { HumanDecision, SessionTelemetry } from '@nimbo/core';
 import type { LanguageModel } from 'ai';
 import type { MiddlewareHandler } from 'hono';
 import { streamSSE } from 'hono/streaming';
 
-import {
-  classifyApproval,
-  resolveApprovalMode,
-} from '../agent/approval-policy.js';
-import { buildSession } from '../agent/chat-agent.js';
 import type { GitHubRepoRef } from '../agent/github-repo.js';
 import { resolveGithubPat, resolveRepo } from '../agent/github-repo.js';
 import { resolveModel } from '../agent/model.js';
@@ -32,40 +20,51 @@ import {
   resolveDefaultProvider,
   resolveIdleTimeoutMs,
 } from '../agent/sandbox-manager.js';
-import { hasSessionGrant } from '../agent/session-grants.js';
+import {
+  loadSkillsFromWorkspace,
+  resolveSkillCatalog,
+  toSkillSummaries,
+} from '../agent/skill-catalog.js';
 import type {
   ConversationEventRow,
   ConversationRow,
   Db,
 } from '../agent/store.js';
 import {
+  clearQueuedMessages,
   createConversation,
+  enqueueMessage,
   getConversation,
   listConversationEvents,
   listConversations,
-  updateConversation,
+  listQueuedMessages,
+  MAX_QUEUED_MESSAGES,
+  parseAvailableSkills,
+  parseQueuedMessages,
+  removeQueuedMessage,
+  syncAvailableSkills,
 } from '../agent/store.js';
-import type {
-  AskUserOutcome,
-  RequestUserAnswerInput,
-} from '../agent/turn-runner.js';
+import type { TurnLauncherDeps } from '../agent/turn-launcher.js';
+import { launchTurn } from '../agent/turn-launcher.js';
 import {
+  abortTurn,
+  broadcastQueue,
   isTurnActive,
-  requestReview,
-  requestUserAnswer,
   resolveReview,
   resolveUserAnswer,
-  startTurn,
   steerTurn,
   subscribeTurn,
 } from '../agent/turn-runner.js';
 import { db as defaultDb } from '../db/instance.js';
+import { logger as defaultLogger } from '../logger.js';
 import { requireAuth } from '../middleware/auth.js';
 import { ErrorSchema } from '../schemas/api.js';
 import type { ChatReplayFrame, ConversationDto } from '../schemas/chat.js';
 import {
+  AbortTurnAckSchema,
   ApprovalAckSchema,
   ChatApprovalParamsSchema,
+  ChatQueueParamsSchema,
   chatReplayFrameSchema,
   chunkEnvelopeSchema,
   ConversationEventsListSchema,
@@ -77,6 +76,7 @@ import {
   PostAnswerInputSchema,
   PostApprovalInputSchema,
   PostChatMessageInputSchema,
+  queueFrameSchema,
   StartTurnAckSchema,
   TurnTelemetryParamsSchema,
   TurnTelemetrySchema,
@@ -86,14 +86,20 @@ import { getChatTelemetry, getChatTelemetryStore } from '../telemetry.js';
 
 // ---------------------------------------------------------------------------
 // docs/tech/chat-webapp.md §2.2 `routes/chat.ts` (+ §2.2c（审批链）'s
-// `POST .../approvals/:callId` and `POST .../questions/:callId`) — seven
-// endpoints, login required on all of them (same `requireAuth` middleware as
-// `routes/example.ts`).
+// `POST .../approvals/:callId` and `POST .../questions/:callId`, + the queue
+// endpoints of docs/tech/steer-and-queue.md §4.2, + `POST .../abort` of
+// docs/tech/turn-abort.md §3.2) — login required on all of them (same
+// `requireAuth` middleware as `routes/example.ts`).
 // ---------------------------------------------------------------------------
 
 type ChatEnv = { Variables: { userId: string } };
 
-export interface ChatRouteDeps {
+/**
+ * `TurnLauncherDeps` 是「起一轮」需要的那一份（db / sandboxManager / resolveModel /
+ * telemetry，见 `agent/turn-launcher.ts`）；这里继承它再补路由自己的两项，好让
+ * `launchTurn(deps, …)` 直接吃这同一个对象，不必在每个调用点手工挑字段。
+ */
+export interface ChatRouteDeps extends TurnLauncherDeps {
   db: Db;
   sandboxManager: SandboxManager;
   resolveModel: () => LanguageModel;
@@ -107,7 +113,12 @@ export interface ChatRouteDeps {
   authMiddleware: MiddlewareHandler<ChatEnv>;
   /** telemetry 事件集成（`@nimbo/core` `SessionTelemetry`，docs/tech/chat-webapp.md §11.4）——注入后逐 turn 的模型调用事件落 SQLite；缺省 undefined = 不采集。生产默认装配见文件底部（`getChatTelemetry`）。 */
   telemetry?: SessionTelemetry;
-  /** 同上的读侧：turn 遥测明细端点用它查数（`TelemetryStore.list`）；缺省 undefined = 端点恒返回空数组。 */
+  /**
+   * 同一个遥测库的另一个口，两处在用：turn 遥测明细端点用它**查数**
+   * （`TelemetryStore.list`），`turn-launcher.ts` 用它**写**起轮装配事件
+   * （docs/tech/telemetry.md §2.4，声明在 `TurnLauncherDeps` 上）。缺省 undefined =
+   * 端点恒返回空数组、装配事件不采集。
+   */
   telemetryStore?: TelemetryStore;
 }
 
@@ -133,55 +144,16 @@ function toConversationDto(row: ConversationRow): ConversationDto {
     provider: row.provider,
     status: row.status === 'active' && idleElapsed ? 'sleeping' : row.status,
     lastActiveAt: row.lastActiveAt.toISOString(),
+    // 直接解析手上这一行已经 select 出来的列，不再查一次库（docs/tech/steer-and-queue.md §4.2）。
+    queuedMessages: parseQueuedMessages(row.queuedMessagesJson, row.id),
+    // 同上，[skill 清单](../../../../docs/terms.md)缓存（docs/tech/composer-skill-mention.md §2.1）
+    // ——读的是库里的快照，这条路径**不碰沙盒**，休眠会话也能列菜单。缓存为空时
+    // 退到兜底清单（本功能上线前建的会话就是这一档），否则用户打 `/` 什么都没有。
+    availableSkills: resolveSkillCatalog(
+      parseAvailableSkills(row.availableSkillsJson, row.id),
+    ),
     createdAt: row.createdAt.toISOString(),
   };
-}
-
-/**
- * Reassembles a `SessionState` from the UIMessage 单账本 (docs/tech/single-ledger.md §5 单-3): the session-scalar header (`row.agentSessionId`/
- * `agentSessionCreatedAt`/`agentSessionTurn`, `db/schema.ts`'s own doc comment) plus every
- * `kind = 'message'` row for this session, in seq order. `row.agentSessionId
- * === null` means this chat session has never completed a turn yet (no
- * nimbo `SessionState` has ever existed for it) — `undefined` here is what
- * tells `chat-agent.ts`'s `buildSession` to let `@nimbo/core` mint a fresh
- * one instead of resuming.
- *
- * Reuses `@nimbo/core`'s own exported `sessionStateSchema` (the same schema
- * `createSession({ resume })` validates against internally, defense in
- * depth, not redundant — this is the deserialization boundary) rather than
- * hand-rolling a `NimboUIMessage[]` validator here — the reassembled object
- * has the exact same shape a single `Session.toJSON()` blob used to, just
- * sourced from separate rows instead of one JSON column.
- */
-function loadResumeState(
-  db: Db,
-  row: ConversationRow,
-): SessionState | undefined {
-  // Resume off the persisted `kind = 'message'` rows, not the scalar header:
-  // the header (`agentSessionId`/`agentSessionTurn`/`agentSessionCreatedAt`) is only written
-  // by `finalizeTurnPersistence` on a *graceful* turn finish, but a
-  // turn-start user message row (turn-runner.ts) lands the moment a turn
-  // begins. So a first turn that *crashed* (driveTurn's `catch`, header never
-  // written) still leaves one `kind = 'message'` row — and it's replayed to
-  // the UI. Gating resume on `agentSessionId !== null` used to drop exactly
-  // that row from the model's context, so the user saw their message but the
-  // agent had no memory of it. Gate on "are there any message rows" instead:
-  // a crashed turn's user request is remembered (the model retries it next
-  // turn) while its half-done assistant work — only ever `kind = 'chunk'`
-  // rows, never read here — is not. When the header is absent, fall back to
-  // the chat session's own id/createdAt (stable across turns until the first
-  // graceful finish pins the real nimbo ids).
-  const messages = listConversationEvents(db, row.id)
-    .filter((eventRow) => eventRow.kind === 'message')
-    .map((eventRow): unknown => JSON.parse(eventRow.payloadJson));
-  if (messages.length === 0) return undefined;
-
-  return sessionStateSchema.parse({
-    id: row.agentSessionId ?? row.id,
-    turn: row.agentSessionTurn ?? 0,
-    messages,
-    createdAt: (row.agentSessionCreatedAt ?? row.createdAt).getTime(),
-  });
 }
 
 /** `GET .../events` / `GET .../stream`'s replay: one persisted `conversation_events` row → the wire frame it represents (a `kind = 'message'` row is a finished `NimboUIMessage`; a `kind = 'chunk'` row is a durable `NimboChunk` from the in-progress/crashed turn) — see `schemas/chat.ts`'s file header. */
@@ -192,9 +164,19 @@ function rowToReplayFrame(row: ConversationEventRow): ChatReplayFrame {
     : chunkEnvelopeSchema.parse({ seq: row.seq, chunk: payload });
 }
 
-/** The SSE `event:` name for a wire frame — `'message'` for a finished-message replay frame, `'chunk'` for everything else (live or replayed `NimboChunk`s alike). Structural, not a shared literal field: `ChunkEnvelope`/`MessageFrame` are told apart by which of `chunk`/`message` they actually carry (`schemas/chat.ts`'s own doc comment). */
-function frameEventName(frame: ChatReplayFrame): 'chunk' | 'message' {
-  return 'chunk' in frame ? 'chunk' : 'message';
+/** The SSE `event:` name for a wire frame — structural, not a shared literal field: the three frame kinds are told apart by which of `chunk`/`queue`/`message` they actually carry (`schemas/chat.ts`'s own doc comment). */
+function frameEventName(frame: ChatReplayFrame): 'chunk' | 'message' | 'queue' {
+  if ('chunk' in frame) return 'chunk';
+  return 'queue' in frame ? 'queue' : 'message';
+}
+
+/**
+ * 一个帧的 `seq`——`QueueFrame` **恒无 seq**（它是[待发队列](../../../../docs/terms.md)
+ * 的状态快照，不是[账本](../../../../docs/terms.md)事件，docs/tech/steer-and-queue.md §4.3），
+ * 所以在直播流里它和 ephemeral chunk 走同一条「不占 seq、不参与续传」的路径。
+ */
+function frameSeq(frame: ChatReplayFrame): number | undefined {
+  return 'queue' in frame ? undefined : frame.seq;
 }
 
 function generateSandboxName(conversationId: string): string {
@@ -288,7 +270,21 @@ export function createChatApp(deps: ChatRouteDeps) {
       // E2B's resume token is the server-assigned sandboxId (known only after create); Vercel resumes by name, so there's nothing to store.
       sandboxId: provider === 'e2b' ? acquired.resumeToken : null,
     });
-    return c.json(toConversationDto(row), 201);
+
+    // [skill 清单](../../../../docs/terms.md)首次填充（docs/tech/composer-skill-mention.md §2.1）：
+    // 沙盒此刻刚 clone 完、刚装完 frontend-design，就地扫一次写库——否则新会话要等
+    // 第一轮跑完才有菜单可用。`loadSkillsFromWorkspace` 自身不抛（扫不到就是空数组），
+    // 所以这一步不会让建会话失败。
+    const availableSkillsJson = syncAvailableSkills(
+      deps.db,
+      conversationId,
+      row.availableSkillsJson,
+      toSkillSummaries(
+        await loadSkillsFromWorkspace(acquired.workspace, defaultLogger),
+      ),
+    );
+
+    return c.json(toConversationDto({ ...row, availableSkillsJson }), 201);
   });
 
   // ---- GET /api/chat/conversations ----
@@ -446,7 +442,7 @@ export function createChatApp(deps: ChatRouteDeps) {
     path: '/api/chat/conversations/{id}/messages',
     tags: ['Chat'],
     summary:
-      'Start a turn for this message, or steer an in-progress one (STEER-3B): if the session has a turn running, `text` is injected into it via `Session.steer()` (mode "steered"); otherwise this acquires the sandbox, builds the session, and hands off to the in-process turn runner (mode "started"). Either way, events arrive over `GET .../stream`, not this response',
+      'Start a turn, queue this message for the next one, or steer the in-progress turn (docs/tech/steer-and-queue.md §4.1): with no turn running this acquires the sandbox, builds the session and hands off to the in-process turn runner (mode "started"); with one running it either queues `text` onto the conversation’s 待发队列 (mode "queued", the default) or injects it into the running turn via `Session.steer()` (mode "steered", `intent: "steer"`). Either way, events arrive over `GET .../stream`, not this response',
     request: {
       params: ConversationParamsSchema,
       body: {
@@ -458,7 +454,7 @@ export function createChatApp(deps: ChatRouteDeps) {
       202: {
         content: { 'application/json': { schema: StartTurnAckSchema } },
         description:
-          'Accepted — see `mode` ("started" | "steered"); poll/stream `GET .../stream` for its events',
+          'Accepted — see `mode` ("started" | "steered" | "queued"); poll/stream `GET .../stream` for its events',
       },
       401: {
         content: { 'application/json': { schema: ErrorSchema } },
@@ -471,7 +467,7 @@ export function createChatApp(deps: ChatRouteDeps) {
       409: {
         content: { 'application/json': { schema: ErrorSchema } },
         description:
-          'A turn is already in progress for this session and could not be steered either (narrow race — the turn ended between the steer attempt and the fallback start)',
+          'Either the 待发队列 is full (docs/features/steer-and-queue.md §2.3 — nothing is ever silently dropped), or a turn was already in progress and could not be steered either (narrow race — the turn ended between the steer attempt and the fallback start)',
       },
       500: {
         content: { 'application/json': { schema: ErrorSchema } },
@@ -483,153 +479,209 @@ export function createChatApp(deps: ChatRouteDeps) {
   app.openapi(postMessageRoute, async (c) => {
     const userId = c.get('userId');
     const { id } = c.req.valid('param');
-    const { text } = c.req.valid('json');
+    const { text, intent } = c.req.valid('json');
 
     const row = getConversation(deps.db, id, userId);
     if (row === undefined) return c.json({ error: 'Not found' }, 404);
 
-    // STEER-3B: try steering an in-progress turn first — cheap (no sandbox
-    // acquisition/session rebuild needed, `Session.steer()` just queues into
-    // the already-running turn). `false` covers both "no turn is active" and
-    // the narrow race where the turn just ended; either way, falling through
-    // to the normal start-a-new-turn flow below is correct. This route
-    // doesn't synthesize a live echo for a steered message itself — but
-    // unlike a turn-*starting* message (`turn-runner.ts`'s `driveTurn` does
-    // synthesize a `MessageFrame` for that one, this ticket's fix), a steered
-    // message doesn't need one: the injected user `NimboUIMessage` core's own
-    // loop produces at the real injection point (`loop.ts`'s
-    // `drainSteerMessages`, which *does* yield a `start`/`text-*`/`finish`
-    // chunk sequence for it) is what actually reaches the wire.
-    if (steerTurn(id, text)) {
-      try {
-        await deps.sandboxManager.touch(id); // still rolls the sandbox's idle timeout forward, same as a fresh turn
-      } catch (error) {
-        return c.json({ error: describeError(error) }, 500);
+    // 三路分流（docs/tech/steer-and-queue.md §4.1）——**有没有进行中的一轮**是第一
+    // 决策位，`intent` 只在有的时候才有意义：没有进行中的一轮时排队毫无意义（排给谁
+    // 收尾？），所以两种 intent 都直接起新一轮。判定权完全在服务端，客户端不预判。
+    if (isTurnActive(id)) {
+      if (intent === 'steer') {
+        // STEER-3B: steer 很便宜（不用取沙盒、不用重建 session，`Session.steer()`
+        // 只是排进已经在跑的那一轮）。`false` 覆盖「这一轮刚好结束了」的窄竞态——
+        // 落到下面的起新一轮是正确回落。本路由不为 steer 的消息合成 echo：与起轮
+        // 消息（`turn-runner.ts` 的 `driveTurn` 会合成一条 `MessageFrame`）不同，
+        // steer 的用户消息由 core 自己在真实注入点产出完整 chunk 序列
+        // （`loop.ts` 的 `drainSteerMessages`），那才是到达 wire 的东西。
+        if (steerTurn(id, text)) {
+          try {
+            await deps.sandboxManager.touch(id); // 与新起一轮一样，把沙盒空闲计时往后推
+          } catch (error) {
+            return c.json({ error: describeError(error) }, 500);
+          }
+          return c.json({ ok: true as const, mode: 'steered' as const }, 202);
+        }
+      } else {
+        // 默认路径：排队到下一轮。入队是纯 DB 读-改-写，不碰沙盒、不碰当前这一轮
+        // ——当前轮完全不受影响，这正是排队与 steer 的分野。
+        const result = enqueueMessage(deps.db, id, { text, userId });
+        if (!result.ok) {
+          return c.json(
+            {
+              error: `待发队列已满（最多 ${String(MAX_QUEUED_MESSAGES)} 条）`,
+            },
+            409,
+          );
+        }
+        // 多标签同步（§4.3 时机 2）：广播给这一轮的所有订阅者。
+        broadcastQueue(id, result.queue);
+        try {
+          await deps.sandboxManager.touch(id); // 用户还在场，沙盒别在这一轮跑完前睡掉
+        } catch {
+          // 刻意吞掉：消息已经入队了，续期失败不该让这次请求失败——真正的沙盒
+          // 可用性问题会在出队起轮时以 `launchTurn` 的错误浮现。
+        }
+        return c.json({ ok: true as const, mode: 'queued' as const }, 202);
       }
-      return c.json({ ok: true as const, mode: 'steered' as const }, 202);
     }
 
-    let model: LanguageModel;
-    let repoRef: GitHubRepoRef;
-    let githubPat: string;
-    try {
-      model = deps.resolveModel();
-      repoRef = resolveRepo();
-      githubPat = resolveGithubPat();
-    } catch (error) {
-      return c.json({ error: describeError(error) }, 500);
-    }
-
-    let acquired: AcquiredSandbox;
-    try {
-      acquired = await deps.sandboxManager.acquire({
-        conversationId: id,
-        provider: row.provider,
-        sandboxName: row.sandboxName,
-        // Vercel resumes by name; E2B by its stored sandboxId (null → treated as brand-new and re-created).
-        resumeToken:
-          row.provider === 'e2b' ?
-            (row.sandboxId ?? undefined)
-          : row.sandboxName,
-        branchName: row.branchName,
-        repoCloneUrl: repoRef.cloneUrl,
-        repoOwner: repoRef.owner,
-        repoName: repoRef.repo,
-        githubPat,
-      });
-      await deps.sandboxManager.touch(id); // every user message rolls the sandbox's idle timeout forward — see docs/tech/chat-webapp.md §2.2
-    } catch (error) {
-      return c.json({ error: describeError(error) }, 500);
-    }
-
-    // E2B only: an expired snapshot forces a re-create, giving a *new*
-    // sandboxId — persist it so the next message resumes the right sandbox
-    // (docs/tech/sandbox-provider.md §3.1). Vercel resumes by the stable name,
-    // so its resume token never changes and this is a no-op.
-    if (
-      row.provider === 'e2b' &&
-      acquired.resumeToken !== (row.sandboxId ?? undefined)
-    ) {
-      updateConversation(deps.db, id, { sandboxId: acquired.resumeToken });
-    }
-
-    // docs/tech/chat-webapp.md §2.2c（审批链）, docs/tech/single-ledger.md §6.2/§6.4: the session-level 审批分类器
-    // (`ApprovalPolicy`, three-value) — `classifyApproval` decides on the
-    // spot whether a call is `'allow'` or needs a human (`'review'`);
-    // `@nimbo/core`'s loop only ever calls `onReview` (below) for the
-    // latter, and only *after* it has already yielded a
-    // `tool-approval-request` chunk. Captures `id` (the *chat* session id,
-    // this route's own path param) — not `ctx.session.id`, which is
-    // `@nimbo/core`'s own internal session id and means nothing to
-    // `turn-runner.ts`'s `activeTurns` map.
-    // 会话级授权先行（session-grants.ts，conversation_grants 表）：这次具体调用
-    // （tool + 入参指纹）若已被**本轮发起者**（`userId`）在本会话「会话内都允许」过，
-    // 直接放行、不再进危险命令分类——这正是人在卡片上点「会话内都允许」后想要的
-    // 效果。按 userId 查（而非全会话），是为将来多用户时「每人管自己的授权」。
-    // 未命中才回落到 classifyApproval。
-    const approvalMode = resolveApprovalMode();
-    const onApproval: ApprovalPolicy = (input, ctx) =>
-      hasSessionGrant(deps.db, id, userId, ctx.toolName, input) ? 'allow' : (
-        classifyApproval(approvalMode, ctx.toolName, input)
-      );
-
-    // docs/tech/single-ledger.md §6.4: the 人审通道 (`ApprovalReviewer`) — `requestReview`
-    // registers a pending decision and suspends until a human (or a
-    // timeout) resolves it via `POST .../approvals/:callId`. Same "captures
-    // `id`, not an internal id" discipline as `onApproval` above.
-    const onReview: ApprovalReviewer = (request) =>
-      requestReview(id, {
-        callId: request.ctx.callId,
-        toolName: request.toolName,
-        input: request.input,
-      });
-
-    // docs/tech/chat-webapp.md §2.2c（审批链）: the ask-user bridge — same "captures `id`, not
-    // an internal id" discipline as `onApproval` above. Always wired in
-    // (unlike `onApproval`'s auto-allow branch, there's no "skip asking"
-    // mode for `ask-user` — see `chat-agent.ts`'s `BuildSessionOptions.onAskUser`).
-    const onAskUser = (req: RequestUserAnswerInput): Promise<AskUserOutcome> =>
-      requestUserAnswer(id, req);
-
-    // docs/tech/single-ledger.md §5 单-3: this turn's newly-appended messages are found by
-    // slicing `session.toJSON().messages` past however many `kind =
-    // 'message'` rows already existed for this session — the exact same
-    // resumed `SessionState` handed to `buildSession` below, so the count
-    // agrees with what the session itself started from.
-    const resumeState = loadResumeState(deps.db, row);
-    const priorMessageCount = resumeState?.messages.length ?? 0;
-
-    let session;
-    try {
-      session = await buildSession({
-        model,
-        workspace: acquired.workspace,
-        repoOwner: repoRef.owner,
-        repoName: repoRef.repo,
-        defaultBranch: acquired.defaultBranch,
-        branchName: row.branchName,
-        ...(resumeState !== undefined ? { resume: resumeState } : {}),
-        onApproval,
-        onReview,
-        approvalMode,
-        onAskUser,
-        ...(deps.telemetry !== undefined ? { telemetry: deps.telemetry } : {}),
-      });
-    } catch (error) {
-      return c.json({ error: describeError(error) }, 500);
-    }
-
-    const { started } = startTurn({
-      db: deps.db,
+    const outcome = await launchTurn(deps, {
       conversationId: id,
-      session,
+      userId,
       text,
-      priorMessageCount,
     });
-    if (!started) {
+    if (outcome.ok) {
+      return c.json({ ok: true as const, mode: 'started' as const }, 202);
+    }
+    if (outcome.reason === 'not_found') {
+      return c.json({ error: 'Not found' }, 404);
+    }
+    if (outcome.reason === 'busy') {
       return c.json({ error: 'turn already in progress' }, 409);
     }
-    return c.json({ ok: true as const, mode: 'started' as const }, 202);
+    return c.json({ error: outcome.message }, 500);
+  });
+
+  // ---- POST /api/chat/conversations/{id}/abort (docs/tech/turn-abort.md §3.2) ----
+
+  const abortTurnRoute = createRoute({
+    method: 'post',
+    path: '/api/chat/conversations/{id}/abort',
+    tags: ['Chat'],
+    summary:
+      '[停止](docs/terms.md)这个会话进行中的那一轮（docs/tech/turn-abort.md）：中止当前轮并清空[待发队列](docs/terms.md)。200 只表示「停止已请求」——真正停下的时刻取决于 agent 当时在做什么（最坏情况是一条 bash 命令响应中断信号的时间），「已停止」这个结果走 `GET .../stream` 上那条 `status: "interrupted"` 的 `message-metadata` chunk 送达',
+    request: { params: ConversationParamsSchema },
+    responses: {
+      200: {
+        content: { 'application/json': { schema: AbortTurnAckSchema } },
+        description:
+          'Stop requested — `queue` is the (now empty) 待发队列 snapshot',
+      },
+      401: {
+        content: { 'application/json': { schema: ErrorSchema } },
+        description: 'Unauthorized',
+      },
+      404: {
+        content: { 'application/json': { schema: ErrorSchema } },
+        description: 'Not found',
+      },
+      409: {
+        content: { 'application/json': { schema: ErrorSchema } },
+        description:
+          'No turn in progress on this conversation (nothing to stop) — also covers the narrow race where the turn finished on its own between the check and the abort. Nothing is changed in this case, the 待发队列 included',
+      },
+    },
+  });
+
+  app.openapi(abortTurnRoute, (c) => {
+    const userId = c.get('userId');
+    const { id } = c.req.valid('param');
+
+    const row = getConversation(deps.db, id, userId);
+    if (row === undefined) return c.json({ error: 'Not found' }, 404);
+
+    // 判定「有没有轮在跑」必须在清队列**之前**：没有轮在跑时清队列会把一次误点
+    // 变成一次丢消息（队列本来要等下一次轮收尾才发）。
+    if (!isTurnActive(id)) {
+      return c.json({ error: 'no turn in progress' }, 409);
+    }
+
+    // 清队列必须在 `abortTurn` **之前**（docs/tech/turn-abort.md §3.2）：这一轮收尾时
+    // `onTurnSettled` 会自动[出队](docs/terms.md)起下一轮，先 abort 再清存在真实竞态
+    // ——abort 解开挂起的审批后这一轮可能立刻收尾，队首那条就被发出去了，而用户刚
+    // 按的是「停止」。先清后 abort 则结构上不可能：出队时队列已空。
+    //
+    // 广播也必须趁这一轮还活着发（`broadcastQueue` 对已结束的轮是无操作），否则
+    // 界面待发区要等到下次刷新才清空——轮结束后前端不会再重连。
+    const queue = clearQueuedMessages(deps.db, id);
+    broadcastQueue(id, queue);
+
+    if (!abortTurn(id)) {
+      // 窄竞态：这一轮在上面那次 `isTurnActive` 与这里之间自己结束了。队列已经清了
+      // （用户按的就是停止，清掉正是他要的），但没有轮可停，照 409 报。
+      return c.json({ error: 'no turn in progress' }, 409);
+    }
+
+    return c.json({ ok: true as const, queue }, 200);
+  });
+
+  // ---- DELETE /api/chat/conversations/{id}/queue/{messageId} (docs/tech/steer-and-queue.md §4.2) ----
+
+  const deleteQueuedMessageRoute = createRoute({
+    method: 'delete',
+    path: '/api/chat/conversations/{id}/queue/{messageId}',
+    tags: ['Chat'],
+    summary:
+      '从[待发队列](docs/terms.md)里删掉一条还没发出的消息——返回变更后的完整队列快照（调用方一次往返拿到权威状态，不必删完再查）',
+    request: { params: ChatQueueParamsSchema },
+    responses: {
+      200: {
+        content: { 'application/json': { schema: queueFrameSchema } },
+        description: 'Queue after the removal',
+      },
+      401: {
+        content: { 'application/json': { schema: ErrorSchema } },
+        description: 'Unauthorized',
+      },
+      404: {
+        content: { 'application/json': { schema: ErrorSchema } },
+        description:
+          'Not found — either this conversation doesn’t exist (or isn’t the caller’s), or `messageId` isn’t in its queue anymore (already dequeued into a turn, already deleted, or never existed)',
+      },
+    },
+  });
+
+  app.openapi(deleteQueuedMessageRoute, (c) => {
+    const userId = c.get('userId');
+    const { id, messageId } = c.req.valid('param');
+
+    const row = getConversation(deps.db, id, userId);
+    if (row === undefined) return c.json({ error: 'Not found' }, 404);
+
+    const { removed, queue } = removeQueuedMessage(deps.db, id, messageId);
+    if (!removed) return c.json({ error: 'Not found' }, 404);
+
+    broadcastQueue(id, queue);
+    return c.json({ queue }, 200);
+  });
+
+  // ---- DELETE /api/chat/conversations/{id}/queue (docs/tech/steer-and-queue.md §4.2) ----
+
+  const clearQueueRoute = createRoute({
+    method: 'delete',
+    path: '/api/chat/conversations/{id}/queue',
+    tags: ['Chat'],
+    summary:
+      '清空[待发队列](docs/terms.md)——已经出队起轮的消息不受影响（那已经是一条正常的用户消息了）',
+    request: { params: ConversationParamsSchema },
+    responses: {
+      200: {
+        content: { 'application/json': { schema: queueFrameSchema } },
+        description: 'Queue after clearing (always empty)',
+      },
+      401: {
+        content: { 'application/json': { schema: ErrorSchema } },
+        description: 'Unauthorized',
+      },
+      404: {
+        content: { 'application/json': { schema: ErrorSchema } },
+        description: 'Not found',
+      },
+    },
+  });
+
+  app.openapi(clearQueueRoute, (c) => {
+    const userId = c.get('userId');
+    const { id } = c.req.valid('param');
+
+    const row = getConversation(deps.db, id, userId);
+    if (row === undefined) return c.json({ error: 'Not found' }, 404);
+
+    const queue = clearQueuedMessages(deps.db, id);
+    broadcastQueue(id, queue);
+    return c.json({ queue }, 200);
   });
 
   // ---- GET /api/chat/conversations/{id}/stream?after=<seq> (resumable live tail, docs/tech/chat-webapp.md §2.2b) ----
@@ -716,7 +768,11 @@ export function createChatApp(deps: ChatRouteDeps) {
           // chunk that arrives necessarily belongs to a message still in
           // progress, so it's safe to buffer and forward like any other live
           // chunk.
-          if (envelope.seq === undefined && !replayDone) return;
+          //
+          // 一个 `QueueFrame`（`frameSeq` 恒 undefined，docs/tech/steer-and-queue.md
+          // §4.3）走同一条路径，且在这里被丢弃同样无害：回放结束后本连接会主动发
+          // 一帧权威队列快照（见下方 `replayDone` 处），它必然比这里丢掉的更新。
+          if (frameSeq(envelope) === undefined && !replayDone) return;
           buffered.push(envelope);
           scheduleWake();
         },
@@ -751,15 +807,17 @@ export function createChatApp(deps: ChatRouteDeps) {
           for (;;) {
             const envelope = buffered.shift();
             if (envelope === undefined) break;
-            if (envelope.seq === undefined) {
-              // Ephemeral — forward as-is, no `maxSentSeq` bookkeeping
-              // (there's no seq to dedupe or advance by).
+            const seq = frameSeq(envelope);
+            if (seq === undefined) {
+              // Ephemeral chunk / `QueueFrame` — forward as-is, no
+              // `maxSentSeq` bookkeeping (there's no seq to dedupe or advance
+              // by).
               await writeFrame(envelope);
               continue;
             }
-            if (envelope.seq <= maxSentSeq) continue; // already covered by the replay query below — dedup
+            if (seq <= maxSentSeq) continue; // already covered by the replay query below — dedup
             await writeFrame(envelope);
-            maxSentSeq = envelope.seq;
+            maxSentSeq = seq;
           }
         }
 
@@ -770,10 +828,31 @@ export function createChatApp(deps: ChatRouteDeps) {
         }
 
         await flushBuffered();
+
+        // [待发队列](docs/terms.md)的权威快照（docs/tech/steer-and-queue.md §4.3 时机 1）：
+        // 每条连接在回放之后、进入直播之前都发一帧，因此**任何**时候连上/重连（新标签
+        // 页、刷新、断线退避重连、以及上一轮出队后接上来的下一轮）拿到的都是当下的
+        // 真实队列——出队恰好发生在上一轮 emitter 即将关闭的时刻，那一次的同步就靠
+        // 这里，而不是靠一次注定竞态的广播。放在 `replayDone = true` 之前，避免它被
+        // 上面那条「回放期间丢弃无 seq 帧」的规则误伤。
+        await writeFrame({ queue: listQueuedMessages(deps.db, id) });
+
         replayDone = true;
 
         if (wasActive) {
           while (!turnDone && !aborted) {
+            // `buffered` 非空就直接冲，不去 `await waitForMore`——`scheduleWake`
+            // 是「resolve 当前那个一次性 promise，同时换上新的」，所以一个在本循环
+            // **正在 flush**（`flushBuffered` 内部有 `await writeFrame`）时到达的
+            // 事件，唤醒的是已经没人等的旧 promise，而本循环下一轮 `await` 的是新
+            // 的——那次唤醒就丢了，帧会一直躺在 `buffered` 里直到下一个事件把它顺带
+            // 带出来（turn 恰好就此结束的话就永远躺着，tail 挂到超时）。改成「先看
+            // 有没有货，没货才等」后这个丢唤醒不再有后果。判空与 `await waitForMore`
+            // 之间没有 await，单线程下不会有事件插进来，所以不存在反向的漏等。
+            if (buffered.length > 0) {
+              await flushBuffered();
+              continue;
+            }
             await waitForMore;
             await flushBuffered();
           }

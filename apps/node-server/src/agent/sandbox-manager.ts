@@ -49,6 +49,12 @@ import { vercelWorkspace } from '@nimbo/sandbox-vercel';
 import { APIError, Sandbox } from '@vercel/sandbox';
 import { Sandbox as E2bSandbox } from 'e2b';
 
+import type { Logger } from '../logger.js';
+import { logger as defaultLogger } from '../logger.js';
+import { resolveE2bTemplate } from './e2b-template.js';
+
+const LOG_SCOPE = 'sandbox-manager';
+
 export const DEFAULT_SANDBOX_IDLE_TIMEOUT_MS = 300_000;
 
 export function resolveIdleTimeoutMs(): number {
@@ -101,6 +107,21 @@ export interface SandboxProvider {
   create(params: CreateSandboxParams): Promise<ProvisionedSandbox>;
   /** Resume by a previously persisted token; `unavailable` → caller re-creates. */
   resume(resumeToken: string): Promise<ResumeResult>;
+  /**
+   * Does this error mean "the sandbox behind that handle is gone/unusable"
+   * (paused-and-not-reconnectable, stopped, deleted, never existed)?
+   *
+   * Lives on the provider because each SDK spells it differently (Vercel:
+   * `APIError` 404/410; E2B: `SandboxNotFoundError` / a plain `Error` whose
+   * message reads "Sandbox … not found"). It is deliberately part of the
+   * **interface** rather than a provider-private helper: the manager has to
+   * classify failures raised by *any* operation — `extendIdle` on a stale
+   * handle, an `exec` against a paused sandbox — not just by `resume()`.
+   * Before this existed, only `resume()` consulted it, so a cached handle that
+   * went stale surfaced a raw 404 to the caller and never recovered
+   * (docs/plans/sandbox-provider.md SP-7).
+   */
+  isGone(error: unknown): boolean;
 }
 
 function requireEnv(name: string): string {
@@ -180,6 +201,7 @@ export function createVercelProvider(): SandboxProvider {
         throw error;
       }
     },
+    isGone: isRecoverableGetFailure,
   };
 }
 
@@ -231,6 +253,10 @@ export function createE2bProvider(): SandboxProvider {
       const apiKey = requireEnv('E2B_API_KEY');
       const sandbox = await E2bSandbox.create({
         apiKey,
+        // Our own template instead of E2B's stock `base` — the only way to get
+        // more than base's 512 MiB, which `npm install` blows through
+        // (resources are baked in at template build time; see e2b-template.ts).
+        template: resolveE2bTemplate(),
         timeoutMs: params.timeoutMs,
         // Parity with Vercel `persistent`: auto-pause on idle timeout + auto-resume on traffic (full memory snapshot). docs/tech/sandbox-provider.md §5.
         lifecycle: { onTimeout: 'pause', autoResume: true },
@@ -273,6 +299,7 @@ export function createE2bProvider(): SandboxProvider {
       if (isE2bSandboxGone(lastError)) return { kind: 'unavailable' };
       throw lastError;
     },
+    isGone: isE2bSandboxGone,
   };
 }
 
@@ -409,11 +436,22 @@ export interface AcquireInput {
   resumeToken?: string;
 }
 
+/**
+ * 这次 `acquire()` 实际走了文件头三态里的哪一条（docs/tech/telemetry.md §2.4）
+ * ——三者的耗时量级差着两个数量级（`cache` 零远程调用、`resume` 一次连接 +
+ * 续期 + 一次 `git` 探测、`create` 还要 clone + 装 skill + 切分支），是「这一轮
+ * 起得慢」时第一个要看的字段。纯观测用途：调用方不得据此改变行为，三态返回的
+ * `AcquiredSandbox` 在功能上完全等价。
+ */
+export type AcquireMode = 'cache' | 'resume' | 'create';
+
 export interface AcquiredSandbox {
   workspace: NimboFS & NimboExec;
   defaultBranch: string;
   /** Current resume token — the route persists it (E2B's sandboxId is only known after create; Vercel's equals the name and is a no-op). */
   resumeToken: string;
+  /** 观测字段，见 `AcquireMode`。 */
+  mode: AcquireMode;
 }
 
 export interface SandboxManager {
@@ -422,15 +460,39 @@ export interface SandboxManager {
   touch(conversationId: string): Promise<void>;
   /** Evicts the in-process cache entry (no provider call) — forces the next `acquire()` to go through `SandboxProvider.resume()` again. */
   release(conversationId: string): void;
+  /**
+   * Keepalive heartbeat for the duration of one turn (docs/plans/sandbox-provider.md SP-7 层 1).
+   * Returns the stop function; calling it twice is a no-op.
+   *
+   * Necessary because the platform timeout is an **absolute deadline**, not an
+   * activity-based idle timer: E2B's `POST /sandboxes/{id}/timeout` sets expiry
+   * "x seconds from the time of the request", and running commands does *not*
+   * push it back. Without a heartbeat, any turn that outlives the remaining TTL
+   * gets its sandbox paused out from under it mid-run.
+   *
+   * Deliberately **turn-scoped**, not manager-scoped: a heartbeat that ran for
+   * every cached sandbox would defeat idle-pause entirely and burn money.
+   */
+  startHeartbeat(conversationId: string): () => void;
 }
 
 interface ActiveSandbox {
   provisioned: ProvisionedSandbox;
   defaultBranch: string;
+  /** The provider that produced `provisioned` — needed to classify errors (`isGone`) raised by later operations on this handle. */
+  provider: SandboxProvider;
+  /**
+   * When the platform-side timeout is expected to fire, i.e. the last
+   * create/resume/`extendIdle` + `idleTimeoutMs`. This is the cache's
+   * invalidation clock: past it, the handle is presumed stale and `acquire()`
+   * goes back through `resume()` instead of handing out a dead sandbox.
+   */
+  expiresAt: number;
 }
 
 export interface SandboxManagerConfig {
   idleTimeoutMs?: number;
+  logger?: Logger;
 }
 
 export type SandboxProviderRegistry = Partial<
@@ -442,8 +504,67 @@ export function createSandboxManager(
   config: SandboxManagerConfig = {},
 ): SandboxManager {
   const idleTimeoutMs = config.idleTimeoutMs ?? resolveIdleTimeoutMs();
+  const log = config.logger ?? defaultLogger;
   const active = new Map<string, ActiveSandbox>();
   const inflight = new Map<string, Promise<AcquiredSandbox>>();
+  const heartbeats = new Map<string, NodeJS.Timeout>();
+
+  /**
+   * Half the timeout, so every tick has a full second tick's worth of slack
+   * before the platform deadline it is pushing back.
+   */
+  const heartbeatIntervalMs = Math.max(1000, Math.floor(idleTimeoutMs / 2));
+
+  /** Records that the platform-side deadline was just rolled forward to now + `idleTimeoutMs`. */
+  function markAlive(entry: ActiveSandbox): void {
+    entry.expiresAt = Date.now() + idleTimeoutMs;
+  }
+
+  /** Cache entry that is still within its platform deadline, else `undefined` (and evicted). */
+  function liveEntry(conversationId: string): ActiveSandbox | undefined {
+    const entry = active.get(conversationId);
+    if (entry === undefined) return undefined;
+    if (Date.now() < entry.expiresAt) return entry;
+    // Presumed paused/expired platform-side. Dropping it here is what makes the
+    // next acquire() reconnect instead of handing out a handle whose every call
+    // 404s (docs/plans/sandbox-provider.md SP-7 层 2).
+    log.info(LOG_SCOPE, 'sandbox cache entry expired, will reconnect', {
+      conversationId,
+    });
+    evict(conversationId);
+    return undefined;
+  }
+
+  function evict(conversationId: string): void {
+    active.delete(conversationId);
+    const timer = heartbeats.get(conversationId);
+    if (timer !== undefined) {
+      clearInterval(timer);
+      heartbeats.delete(conversationId);
+    }
+  }
+
+  /** The body behind both `touch()` and the heartbeat tick — see `touch` for why it evicts on a "gone" error. */
+  async function extendDeadline(conversationId: string): Promise<void> {
+    const entry = active.get(conversationId);
+    if (entry === undefined) {
+      throw new Error(
+        `touch(${conversationId}): no active sandbox in memory — call acquire() first.`,
+      );
+    }
+    try {
+      await entry.provisioned.extendIdle(idleTimeoutMs);
+    } catch (error) {
+      if (entry.provider.isGone(error)) {
+        log.warn(LOG_SCOPE, 'sandbox gone on keepalive, evicting cache', {
+          conversationId,
+        });
+        evict(conversationId);
+      }
+      throw error;
+    }
+    markAlive(entry);
+  }
 
   function resolveProvider(id: SandboxProviderId): SandboxProvider {
     const provider = providers[id];
@@ -455,17 +576,24 @@ export function createSandboxManager(
     return provider;
   }
 
-  function toAcquired(entry: ActiveSandbox): AcquiredSandbox {
+  function toAcquired(
+    entry: ActiveSandbox,
+    mode: AcquireMode,
+  ): AcquiredSandbox {
     return {
       workspace: entry.provisioned.workspace,
       defaultBranch: entry.defaultBranch,
       resumeToken: entry.provisioned.resumeToken,
+      mode,
     };
   }
 
   async function doAcquire(input: AcquireInput): Promise<AcquiredSandbox> {
-    const cached = active.get(input.conversationId);
-    if (cached !== undefined) return toAcquired(cached);
+    // State 1: a cached handle that is still inside its platform deadline.
+    // `liveEntry` (not `active.get`) is the fix for "the process happily reused
+    // a handle whose sandbox the platform had already paused".
+    const cached = liveEntry(input.conversationId);
+    if (cached !== undefined) return toAcquired(cached, 'cache');
 
     const provider = resolveProvider(input.provider);
 
@@ -473,19 +601,45 @@ export function createSandboxManager(
     if (input.resumeToken !== undefined) {
       const resumed = await provider.resume(input.resumeToken);
       if (resumed.kind === 'ok') {
+        // Roll the deadline forward explicitly rather than assuming what the
+        // platform did on resume — it is what makes `expiresAt` truthful for
+        // both providers (E2B's auto-resume resets the countdown with a 5-min
+        // floor; Vercel's `get` makes no such promise). One extra call, only on
+        // the resume path, never on a cache hit.
+        try {
+          await resumed.sandbox.extendIdle(idleTimeoutMs);
+        } catch (error) {
+          // Raced with the platform tearing it down between connect and
+          // extend → fall through to create rather than hand back a dead handle.
+          if (!provider.isGone(error)) throw error;
+          log.warn(LOG_SCOPE, 'resumed sandbox vanished before keepalive', {
+            conversationId: input.conversationId,
+          });
+          return await createAndRegister(input, provider);
+        }
         const defaultBranch = await detectDefaultBranch(
           resumed.sandbox.workspace,
         );
         const entry: ActiveSandbox = {
           provisioned: resumed.sandbox,
           defaultBranch,
+          provider,
+          expiresAt: 0,
         };
+        markAlive(entry);
         active.set(input.conversationId, entry);
-        return toAcquired(entry);
+        return toAcquired(entry, 'resume');
       }
     }
 
     // State 3: brand-new, or snapshot unavailable → create + re-run init + recover branch.
+    return await createAndRegister(input, provider);
+  }
+
+  async function createAndRegister(
+    input: AcquireInput,
+    provider: SandboxProvider,
+  ): Promise<AcquiredSandbox> {
     const provisioned = await provider.create({
       name: input.sandboxName,
       cloneUrl: input.repoCloneUrl,
@@ -500,9 +654,15 @@ export function createSandboxManager(
     const defaultBranch = await detectDefaultBranch(provisioned.workspace);
     await recoverSessionBranch(provisioned.workspace, input.branchName);
 
-    const entry: ActiveSandbox = { provisioned, defaultBranch };
+    const entry: ActiveSandbox = {
+      provisioned,
+      defaultBranch,
+      provider,
+      expiresAt: 0,
+    };
+    markAlive(entry); // create() already set the platform timeout to idleTimeoutMs
     active.set(input.conversationId, entry);
-    return toAcquired(entry);
+    return toAcquired(entry, 'create');
   }
 
   return {
@@ -516,17 +676,56 @@ export function createSandboxManager(
       inflight.set(input.conversationId, promise);
       return promise;
     },
-    async touch(conversationId: string): Promise<void> {
-      const activeSandbox = active.get(conversationId);
-      if (activeSandbox === undefined) {
-        throw new Error(
-          `touch(${conversationId}): no active sandbox in memory — call acquire() first.`,
-        );
-      }
-      await activeSandbox.provisioned.extendIdle(idleTimeoutMs);
-    },
+    /**
+     * Reactive half of cache invalidation (the TTL check in `acquire` is the
+     * proactive half): clocks drift, the platform may pause early, and a sandbox
+     * can be deleted out-of-band — so a "gone" error is also taken as proof the
+     * cached handle is dead, and the entry is evicted so the very next
+     * `acquire()` reconnects. Still rethrows: this call genuinely failed, and
+     * each caller decides whether that is fatal (the approval/question routes
+     * deliberately swallow it).
+     */
+    touch: extendDeadline,
     release(conversationId: string): void {
-      active.delete(conversationId);
+      evict(conversationId);
+    },
+    startHeartbeat(conversationId: string): () => void {
+      // One heartbeat per conversation: a second turn cannot legitimately start
+      // while one is running (`startTurn`'s guard), so an existing timer here
+      // would be a leak from a turn that never settled — replace it.
+      const existing = heartbeats.get(conversationId);
+      if (existing !== undefined) clearInterval(existing);
+
+      const timer = setInterval(() => {
+        void (async (): Promise<void> => {
+          try {
+            await extendDeadline(conversationId);
+          } catch (error) {
+            // Never let a keepalive failure escape into an unhandled rejection
+            // that kills the process. The turn will fail on its own next
+            // sandbox call, with a far better error than this one.
+            log.warn(LOG_SCOPE, 'sandbox heartbeat failed', {
+              conversationId,
+              message: error instanceof Error ? error.message : String(error),
+            });
+          }
+        })();
+      }, heartbeatIntervalMs);
+      // Don't hold the event loop open on shutdown just for a keepalive.
+      timer.unref();
+      heartbeats.set(conversationId, timer);
+
+      let stopped = false;
+      return () => {
+        if (stopped) return;
+        stopped = true;
+        // Only clear if it is still *this* turn's timer (a later turn may have
+        // replaced it above).
+        if (heartbeats.get(conversationId) === timer) {
+          clearInterval(timer);
+          heartbeats.delete(conversationId);
+        }
+      };
     },
   };
 }

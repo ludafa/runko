@@ -9,6 +9,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { DEFAULT_E2B_TEMPLATE_NAME } from '../../src/agent/e2b-template.js';
 import type { CreateSandboxParams } from '../../src/agent/sandbox-manager.js';
 
 const { createMock, connectMock } = vi.hoisted(() => ({
@@ -90,20 +91,24 @@ function createParams(
 }
 
 const ORIGINAL_KEY = process.env.E2B_API_KEY;
+const ORIGINAL_TEMPLATE = process.env.E2B_TEMPLATE;
 
 beforeEach(() => {
   createMock.mockReset();
   connectMock.mockReset();
   process.env.E2B_API_KEY = 'test-e2b-key';
+  delete process.env.E2B_TEMPLATE;
 });
 
 afterEach(() => {
   if (ORIGINAL_KEY === undefined) delete process.env.E2B_API_KEY;
   else process.env.E2B_API_KEY = ORIGINAL_KEY;
+  if (ORIGINAL_TEMPLATE === undefined) delete process.env.E2B_TEMPLATE;
+  else process.env.E2B_TEMPLATE = ORIGINAL_TEMPLATE;
 });
 
 describe('createE2bProvider', () => {
-  it('create(): creates with pause-on-timeout lifecycle + GH_TOKEN env, clones the repo into the workspace root, returns sandboxId as the resume token', async () => {
+  it('create(): creates from our own template with pause-on-timeout lifecycle + GH_TOKEN env, clones the repo into the workspace root, returns sandboxId as the resume token', async () => {
     const fake = fakeE2bSandbox('sbx_abc');
     createMock.mockResolvedValue(fake);
 
@@ -112,6 +117,8 @@ describe('createE2bProvider', () => {
     expect(createMock).toHaveBeenCalledTimes(1);
     expect(createMock.mock.calls[0]?.[0]).toMatchObject({
       apiKey: 'test-e2b-key',
+      // NOT E2B's stock `base` — that one is capped at 512 MiB (e2b-template.ts).
+      template: DEFAULT_E2B_TEMPLATE_NAME,
       timeoutMs: 1000,
       lifecycle: { onTimeout: 'pause', autoResume: true },
       envs: { GH_TOKEN: 'PAT123' },
@@ -126,6 +133,15 @@ describe('createE2bProvider', () => {
 
     await provisioned.extendIdle(4242);
     expect(fake.setTimeoutCalls).toEqual([4242]);
+  });
+
+  it('create(): E2B_TEMPLATE overrides the template (escape hatch back to stock `base` / a differently-sized variant, no code change)', async () => {
+    process.env.E2B_TEMPLATE = 'base';
+    createMock.mockResolvedValue(fakeE2bSandbox('sbx_abc'));
+
+    await createE2bProvider().create(createParams());
+
+    expect(createMock.mock.calls[0]?.[0]).toMatchObject({ template: 'base' });
   });
 
   it('create(): throws when the git clone fails', async () => {

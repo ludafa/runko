@@ -9,8 +9,11 @@ import {
   getMaxEventSeq,
   listConversationEvents,
   listConversations,
+  parseAvailableSkills,
+  syncAvailableSkills,
   updateConversation,
 } from '../../src/agent/store.js';
+import { createLogger } from '../../src/logger.js';
 import { createTestDb, seedUser } from '../helpers/test-db.js';
 
 describe('agent/store', () => {
@@ -446,6 +449,76 @@ describe('agent/store', () => {
         'chunk',
         'message',
       ]);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // [skill 清单](../../../../docs/terms.md)缓存列
+  // （docs/tech/composer-skill-mention.md §2.1/§3）：读回走 zod safeParse（坏数据
+  // 当空清单，不抛），写入在内容没变时不发 UPDATE。
+  // ---------------------------------------------------------------------------
+
+  describe('available skills column', () => {
+    beforeEach(() => {
+      createConversation(db, {
+        id: 'sess-1',
+        userId: 'user-1',
+        title: 'My session',
+        repo: 'acme/demo',
+        branchName: 'nimbo/chat-sess-1',
+        sandboxName: 'nimbo-chat-sess-1',
+      });
+    });
+
+    it('a fresh conversation starts with an empty catalog', () => {
+      const row = getConversation(db, 'sess-1', 'user-1');
+
+      expect(row?.availableSkillsJson).toBe('[]');
+      expect(
+        parseAvailableSkills(row?.availableSkillsJson ?? '', 'sess-1'),
+      ).toEqual([]);
+    });
+
+    it('round-trips a catalog through the column', () => {
+      const skills = [
+        { name: 'code-review', description: 'Review a diff.' },
+        { name: 'frontend-design', description: 'Improve a web UI.' },
+      ];
+
+      syncAvailableSkills(db, 'sess-1', '[]', skills);
+
+      const row = getConversation(db, 'sess-1', 'user-1');
+      expect(
+        parseAvailableSkills(row?.availableSkillsJson ?? '', 'sess-1'),
+      ).toEqual(skills);
+    });
+
+    it('returns the current json unchanged — and issues no write — when the catalog has not moved', () => {
+      const skills = [
+        { name: 'frontend-design', description: 'Improve a web UI.' },
+      ];
+      const firstJson = syncAvailableSkills(db, 'sess-1', '[]', skills);
+
+      // 第二次同样的清单：拿到同一个 json，且没有写库（这正是每轮起轮都调它却
+      // 不给 DB 添无谓写入的原因 —— 见 store.ts 的 syncAvailableSkills 注释）。
+      const secondJson = syncAvailableSkills(db, 'sess-1', firstJson, skills);
+
+      expect(secondJson).toBe(firstJson);
+    });
+
+    it('treats a corrupt column as an empty catalog instead of throwing', () => {
+      const lines: string[] = [];
+      const log = createLogger({ sink: (line) => lines.push(line) });
+
+      expect(parseAvailableSkills('not json at all', 'sess-1', log)).toEqual(
+        [],
+      );
+      expect(parseAvailableSkills('{"not":"an array"}', 'sess-1', log)).toEqual(
+        [],
+      );
+      // 形状不对（缺 description）也当空清单
+      expect(parseAvailableSkills('[{"name":"x"}]', 'sess-1', log)).toEqual([]);
+      expect(lines.length).toBe(3);
     });
   });
 });

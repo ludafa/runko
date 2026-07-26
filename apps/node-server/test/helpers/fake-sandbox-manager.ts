@@ -13,6 +13,7 @@ import { MemoryFS } from '@nimbo/sdk';
 import type {
   AcquiredSandbox,
   AcquireInput,
+  AcquireMode,
   SandboxManager,
 } from '../../src/agent/sandbox-manager.js';
 
@@ -40,6 +41,8 @@ export interface FakeSandboxManager extends SandboxManager {
   readonly acquireCalls: AcquireInput[];
   readonly touchCalls: string[];
   readonly releaseCalls: string[];
+  /** 每次 `startHeartbeat` 记一条 `{conversationId, stopped}`；`stopped` 由返回的停止函数翻真，用来断言心跳没有泄漏。 */
+  readonly heartbeats: { conversationId: string; stopped: boolean }[];
   /**
    * When set, the *next* `acquire()` call returns this string as
    * `resumeToken` instead of the default (`input.resumeToken ??
@@ -50,6 +53,8 @@ export interface FakeSandboxManager extends SandboxManager {
    * exercised without a real/fake `SandboxProvider`.
    */
   nextResumeToken?: string;
+  /** 覆盖 `acquire()` 报出的 `mode`（缺省 `'resume'`）——用来断言 `turn-launcher` 把它原样写进 `turn-prepare` 载荷（docs/tech/telemetry.md §2.4）。 */
+  nextAcquireMode?: AcquireMode;
 }
 
 export function createFakeSandboxManager(
@@ -58,13 +63,16 @@ export function createFakeSandboxManager(
   const acquireCalls: AcquireInput[] = [];
   const touchCalls: string[] = [];
   const releaseCalls: string[] = [];
+  const heartbeats: { conversationId: string; stopped: boolean }[] = [];
   const workspacePromise = buildFakeWorkspace();
 
   const manager: FakeSandboxManager = {
     acquireCalls,
     touchCalls,
     releaseCalls,
+    heartbeats,
     nextResumeToken: undefined,
+    nextAcquireMode: undefined,
     async acquire(input: AcquireInput): Promise<AcquiredSandbox> {
       acquireCalls.push(input);
       const resumeToken =
@@ -74,6 +82,10 @@ export function createFakeSandboxManager(
         workspace: await workspacePromise,
         defaultBranch: opts.defaultBranch ?? 'main',
         resumeToken,
+        // 假件恒报 'resume'（`nextAcquireMode` 可覆盖单次）——真件的三态判定
+        // 有自己的专属测试（test/agent/sandbox-manager.test.ts），这里只需要一个
+        // 合法值让 `turn-launcher` 的遥测载荷有东西可填。
+        mode: manager.nextAcquireMode ?? 'resume',
       };
     },
     async touch(conversationId: string): Promise<void> {
@@ -81,6 +93,14 @@ export function createFakeSandboxManager(
     },
     release(conversationId: string): void {
       releaseCalls.push(conversationId);
+    },
+    startHeartbeat(conversationId: string): () => void {
+      // 不真的起定时器（测试里没有需要保活的东西），只记账：谁开的、停没停。
+      const record = { conversationId, stopped: false };
+      heartbeats.push(record);
+      return () => {
+        record.stopped = true;
+      };
     },
   };
   return manager;

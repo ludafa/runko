@@ -144,20 +144,59 @@ export const messageFrameSchema = z
 export type MessageFrame = z.infer<typeof messageFrameSchema>;
 
 /**
+ * 一条[排队](../../../../docs/terms.md)中的待发消息（docs/tech/steer-and-queue.md §2.2）
+ * ——`conversations.queued_messages_json` 的数组元素，也是 wire 上 `QueueFrame` /
+ * 队列端点响应的元素。
+ *
+ * `userId` 不是冗余镜像 conversation owner：[出队](../../../../docs/terms.md)起轮时
+ * [会话级授权](../../../../docs/terms.md)按「本轮发起者」匹配（`session-grants.ts`），
+ * 必须知道这条消息是谁排的。
+ */
+export const QueuedMessageSchema = z
+  .object({
+    id: z.string(),
+    text: z.string().min(1),
+    userId: z.string(),
+    createdAt: z.number().int(),
+  })
+  .openapi('QueuedMessage');
+
+export type QueuedMessage = z.infer<typeof QueuedMessageSchema>;
+
+/**
+ * `{ queue }` — 队列状态快照（docs/tech/steer-and-queue.md §4.3）。两处共用一个形状：
+ *
+ * - **wire 帧**：[直播流](../../../../docs/terms.md)的第三种帧。刻意**没有 `seq`**——
+ *   它不是[账本](../../../../docs/terms.md)事件而是[transient](../../../../docs/terms.md)
+ *   档的状态快照（「此刻队列长这样」，重发一次即最新，没有回放价值），因此不落库、
+ *   不占 seq、不参与 `after=` 续传。
+ * - **队列端点响应**：`DELETE .../queue/{messageId}` 与 `DELETE .../queue` 都返回变更后的
+ *   完整快照，调用方一次往返拿到权威状态。
+ */
+export const queueFrameSchema = z
+  .object({ queue: z.array(QueuedMessageSchema) })
+  .openapi('ChatQueueFrame');
+
+export type QueueFrame = z.infer<typeof queueFrameSchema>;
+
+/**
  * Coverage enforcement (same discipline this file has always used for its
- * discriminated unions): every wire frame this app can ever produce is
- * *either* a `ChunkEnvelope` *or* a `MessageFrame` — distinguished by which
- * of `chunk`/`message` the object actually carries (no shared literal
- * discriminant field the way the old `SessionEvent`/`SessionItem` unions had
- * one; a `chunk` key and a `message` key never both appear on the same
- * frame, so structural presence is enough).
+ * discriminated unions): every wire frame this app can ever produce is a
+ * `ChunkEnvelope`, a `MessageFrame`, or a `QueueFrame` — distinguished by
+ * which of `chunk`/`message`/`queue` the object actually carries (no shared
+ * literal discriminant field the way the old `SessionEvent`/`SessionItem`
+ * unions had one; the three keys never co-occur on one frame, so structural
+ * presence is enough — and zod v4 treats a missing `z.any()` object key as a
+ * failure, so a `MessageFrame`/`QueueFrame` can't be silently absorbed by
+ * `chunkEnvelopeSchema`'s `chunk: z.any()`).
  */
 export const chatReplayFrameSchema = z.union([
   chunkEnvelopeSchema,
   messageFrameSchema,
+  queueFrameSchema,
 ]);
 
-export type ChatReplayFrame = ChunkEnvelope | MessageFrame;
+export type ChatReplayFrame = ChunkEnvelope | MessageFrame | QueueFrame;
 
 /**
  * `GET .../events` response shape (docs/tech/chat-webapp.md §2.2 "契约细化", front-end-consumed
@@ -180,6 +219,20 @@ export type ConversationEventsListDto = z.infer<
 // Request/response schemas for routes/chat.ts
 // ---------------------------------------------------------------------------
 
+/**
+ * [skill 清单](../../../../docs/terms.md)的一条（docs/tech/composer-skill-mention.md §5.2）——
+ * `name` 是目录名，同时也是 `load-skill` 的入参与 [skill 提及](../../../../docs/terms.md)
+ * 的字面量；`description` 是 SKILL.md frontmatter 里那句话，菜单里那行灰字。
+ */
+export const SkillSummarySchema = z
+  .object({
+    name: z.string(),
+    description: z.string(),
+  })
+  .openapi('SkillSummary');
+
+export type SkillSummaryDto = z.infer<typeof SkillSummarySchema>;
+
 export const ConversationSchema = z
   .object({
     id: z.string(),
@@ -191,6 +244,17 @@ export const ConversationSchema = z
     provider: z.enum(['vercel', 'e2b']),
     status: z.enum(['active', 'sleeping', 'expired']),
     lastActiveAt: z.string(),
+    /** 这个会话的[待发队列](../../../../docs/terms.md)（docs/tech/steer-and-queue.md §4.2）——页面加载时的初始快照，之后由 `QueueFrame` / 队列端点响应刷新。列表端点也带（侧边栏可显示「N 条待发」）。 */
+    queuedMessages: z.array(QueuedMessageSchema),
+    /**
+     * 这个会话当前可选的 [skill 清单](../../../../docs/terms.md)（docs/tech/composer-skill-mention.md
+     * §2.1）——[composer](../../../../docs/terms.md) 里打 `/` 时列的就是它。
+     *
+     * 读的是库缓存（`conversations.available_skills_json`），**不碰沙盒**：休眠中的
+     * 会话照样能列菜单，不会为此把沙盒唤醒。代价是最多滞后一轮。列表端点也带，
+     * 与 `queuedMessages` 同一姿态——前端拿到会话就拿到菜单，零额外往返。
+     */
+    availableSkills: z.array(SkillSummarySchema),
     createdAt: z.string(),
   })
   .openapi('Conversation');
@@ -208,23 +272,52 @@ export const CreateConversationInputSchema = z
 export const PostChatMessageInputSchema = z
   .object({
     text: z.string().min(1),
+    /**
+     * 这条消息**在已有进行中的一轮时**该走哪条路（docs/tech/steer-and-queue.md §4.1）：
+     * `'queue'`（默认）= [排队](../../../../docs/terms.md)到下一轮，`'steer'` =
+     * [中途插话](../../../../docs/terms.md)注入当前这一轮。**没有**进行中的一轮时两者
+     * 无差别，都是起新一轮——分流规则完全由服务端判定，客户端不预判。
+     */
+    intent: z.enum(['queue', 'steer']).optional(),
   })
   .openapi('PostChatMessageInput');
 
 /**
- * `POST .../messages`'s 202 body (docs/tech/chat-webapp.md §2.2b): the turn only starts or
- * the steer only lands here — events arrive over `GET .../stream`, not this
- * response. `mode` (STEER-3B) distinguishes the two ways this request could
- * have been handled: `'started'` — no turn was active for this session, so
- * this kicked off a new one; `'steered'` — a turn was already in progress
- * and `text` was injected into it (`Session.steer`) instead of starting
- * another.
+ * `POST .../messages`'s 202 body (docs/tech/chat-webapp.md §2.2b): the turn only starts, the
+ * steer only lands, or the message only gets queued here — events arrive over
+ * `GET .../stream`, not this response. `mode` distinguishes the three ways
+ * this request could have been handled: `'started'` — no turn was active for
+ * this session, so this kicked off a new one; `'steered'` (STEER-3B) — a turn
+ * was already in progress and `text` was injected into it (`Session.steer`);
+ * `'queued'` (docs/tech/steer-and-queue.md §4.1) — a turn was in progress and
+ * `text` went into the conversation's 待发队列 instead, to be dequeued as the
+ * next turn once this one finishes.
  */
 export const StartTurnAckSchema = z
-  .object({ ok: z.literal(true), mode: z.enum(['started', 'steered']) })
+  .object({
+    ok: z.literal(true),
+    mode: z.enum(['started', 'steered', 'queued']),
+  })
   .openapi('StartTurnAck');
 
 export type StartTurnAck = z.infer<typeof StartTurnAckSchema>;
+
+/**
+ * `POST .../abort`'s 200 body（docs/tech/turn-abort.md §3.2）：`ok` 只表示
+ * [停止](../../../../docs/terms.md)**已请求**——真正停下的时刻由 agent 当时在做什么
+ * 决定（docs/features/turn-abort.md §2.3），而「已停止」这个结果和其它轮收尾一样，
+ * 走[直播流](../../../../docs/terms.md)上那条 `status: 'interrupted'` 的
+ * `message-metadata` chunk 送达，不在本响应里。
+ *
+ * `queue` 是清空后的[待发队列](../../../../docs/terms.md)快照（恒为空数组）——停止即
+ * 清空队列（本功能定案），带上它让调用方一次往返就拿到权威状态，与
+ * `DELETE .../queue*` 返回快照同一姿态。
+ */
+export const AbortTurnAckSchema = z
+  .object({ ok: z.literal(true), queue: z.array(QueuedMessageSchema) })
+  .openapi('AbortTurnAck');
+
+export type AbortTurnAck = z.infer<typeof AbortTurnAckSchema>;
 
 export const ConversationParamsSchema = z.object({
   id: z
@@ -259,6 +352,17 @@ export const ChatApprovalParamsSchema = z.object({
   callId: z
     .string()
     .openapi({ param: { name: 'callId', in: 'path' }, examples: ['call_1'] }),
+});
+
+/** `DELETE .../queue/{messageId}`'s path params（docs/tech/steer-and-queue.md §4.2）：`id` 同 `ConversationParamsSchema`；`messageId` 是[待发队列](../../../../docs/terms.md)条目自己的 `QueuedMessage.id`（入队时 `randomUUID()` 生成，与工具调用的 `callId` 是两个不相干的 id 空间）。 */
+export const ChatQueueParamsSchema = z.object({
+  id: z
+    .string()
+    .openapi({ param: { name: 'id', in: 'path' }, examples: ['3f1b2c4d-...'] }),
+  messageId: z.string().openapi({
+    param: { name: 'messageId', in: 'path' },
+    examples: ['9c2e1f70-...'],
+  }),
 });
 
 /**
