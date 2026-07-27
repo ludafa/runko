@@ -19,6 +19,8 @@
 | **排队（queue）** | 待发队列 | agent 正在跑一轮时，用户发的消息**不进当前这一轮**，而是存进会话的待发队列；这一轮收尾后由服务端自动取队首、起下一轮。与 steer 相对，是 chat 应用运行中发消息的**默认**路径。队列存 `conversations.queued_messages_json`（不是[账本](#三数据存哪怎么传)——排队消息是「尚未发生的意图」，不是已发生的事件）。 |
 | **出队（dequeue）** | — | 一轮收尾后服务端自动取出待发队列队首、以它起下一轮的动作。出队即从队列移除；起轮失败则该条留在队列，等下一次轮收尾再试。 |
 | **起轮装配（turn launch）** | — | 从「服务端收到一条要起新一轮的消息」到「这一轮真正开始产出内容」之间那段准备工作：取沙盒 → 续期 → 从账本重建 `SessionState` → 建 agent 会话 → 交给 turn runner 驱动。落地为 `apps/node-server/src/agent/turn-launcher.ts` 的 `launchTurn`。它整段跑在 `POST .../messages` 的请求生命周期里，用户在界面上的等待有相当一部分花在这里，故单独打点（见 docs/tech/telemetry.md §2.4）。 |
+| **轮状态快照（turn-state frame）** | — | [直播流](#三数据存哪怎么传)上的一种状态快照帧（`{ turnActive: boolean }`）：每条 `GET .../stream` 在回放之后、进入直播之前必发一帧，内容是**服务端**对「这个会话此刻有没有[轮](#一agent-运行的基本单位)在跑」的权威答案。与[待发队列](#一agent-运行的基本单位)快照帧同构——没有 `seq`、不落库、不进[账本](#三数据存哪怎么传)。它取代了前端早先那个猜测（「回放最后一帧是不是 chunk」），因为崩溃残留会让那个猜法长期失准且永不自愈。见 docs/tech/chat-webapp.md §5.1。 |
+| **起轮占位（turn reservation）** | — | [起轮装配](#一agent-运行的基本单位)一进门就在服务端那张「进行中的轮」表里占下的位子：从装配的第一行代码起这一轮就算**存在**，于是它可以被[停止](#一agent-运行的基本单位)、同会话后来的消息也会走[排队](#一agent-运行的基本单位)而不是再起一轮。装配跑完则原地升级成真正在跑的那一轮，装配失败或装配期间被停止则撤销。落地为 `apps/node-server/src/agent/turn-runner.ts` 的 `reserveTurn`/`releaseTurn` 与 `ActiveTurn.phase`。 |
 | **停止（stop / abort）** | 硬打断（interrupt）、取消（cancel）、中止 | 用户在一轮进行中主动叫停它：当前轮不再进入下一个 [step](#一agent-运行的基本单位)、待发队列一并清空，已产出的内容全部留在账本里。落地为 `AbortController` → core `TurnOptions.signal`，收尾状态是 `status: 'interrupted'` + `NimboError.code: 'aborted'`（这两个是代码标识符，行文一律说「停止」/「已停止」）。与 steer 的分别：steer 是「往这一轮里加话」，停止是「让这一轮结束」。见 docs/features/turn-abort.md。 |
 
 ## 二、两种「消息」格式（AI SDK 的概念）
@@ -85,6 +87,8 @@
 | **续期闸门（renewal gate）** | — | [沙盒适配器](#五沙盒与生命周期)内部唯一真正调用厂商续期 API 的地方。[活动信号](#五沙盒与生命周期)、exec 期间的自打点、宿主的手动调用三个来源都汇到这里，由它按「补足」语义决定这次要不要真的打网络。 |
 | **审批保活预算（approval keepalive budget）** | — | 卡在人工审批时最多还愿意为沙盒续多久。与[单轮保活上限](#五沙盒与生命周期)相互独立；配 0 表示审批期间完全不续，沙盒可能在人点下按钮之前就休眠。 |
 | **单轮保活上限（turn keepalive cap）** | — | 一轮之内保活最多持续多久。到点就停止续期、让沙盒按自己的节奏休眠，防失控任务无限烧钱。 |
+| **优雅关闭（graceful shutdown）** | — | 服务端进程收到 SIGTERM/SIGINT（热重载、部署、pod 迁移、Ctrl-C）后，先把进行中的[轮](#一agent-运行的基本单位)主动[停止](#一agent-运行的基本单位)并等它收尾、再退出，而不是让它无声消失。落地为 `turn-runner.ts` 的 `shutdownTurns` + `index.ts` 的信号处理。见 docs/features/graceful-shutdown.md。 |
+| **孤儿轮（orphaned turn）** | — | 一个在[账本](#三数据存哪怎么传)里从未收尾的轮：驱动它的进程已经不在了（被强杀、OOM、断电），所以那条收尾 `message-metadata` 永远不会到来。识别特征是该会话的事件行**以 `kind='chunk'` 收尾**（优雅收尾会把本轮消息落成 message 行并 GC 掉 chunk 行）。服务端启动时扫出它们并补上「已中断」标记。 |
 | **代码快照（checkpoint）** | — | P13-2 计划：每轮结束把工作区完整状态推到用户仓库的快照引用，防平台快照过期丢未 push 的工作。 |
 | **快照引用（checkpoint ref）** | WIP ref、隐藏 ref | 存放代码快照的自定义 git 引用（如 `refs/nimbo/wip/<会话id>`），不在正常分支命名空间下：GitHub 界面看不到、不触发 CI。与代码快照同族——快照存进快照引用。 |
 | **VirtualFS（虚拟文件系统）** | — | nimbo 的 NimboFS 抽象的具体实现族——MemoryFS（纯内存）/ OverlayFS（真实目录零拷贝 overlay）/ 自定义实现；agent 视角是普通文件系统，宿主视角是可检查、可导出（diff/writeBack）、可丢弃的对象。 |
@@ -169,3 +173,18 @@
 | **sm 档密度** | — | 本项目对 ai-elements 出厂间距统一收一档的调校（消息 gap-8→gap-4、工具卡片 p-4→p-2.5 等）。改在**组件本体**里而不是调用点，否则下次重新 `add` 组件就全丢了。改动清单见 [tech/chat-ui §4](./tech/chat-ui.md)。 |
 | **设计工作台（design bench）** | 预览页 | dev-only 的 `/design` 路由：用固定假数据把 chat 页面每一档界面状态铺在同一屏，不连服务端、不需要登录，供改样式时对着迭代。生产构建下 404。 |
 | ~~轨道（rail）~~ | — | **已退役**（2026-07-25 当天提出又当天推翻）：一条贯穿一轮的竖线 + 节点。连同「打断 / 指令块 / 信号色 / 刻字面 / 结算行」都属于一版未被采纳的自研界面语言，现已全部换成 ai-elements。读旧 commit 时对照用，新文档不得再使用。 |
+
+## 十二、推送通知（见 docs/features/push-notification.md）
+
+| 主术语 | 同义词（退役） | 大白话定义 |
+|---|---|---|
+| **推送通知（push notification）** | 消息推送、push | 在需要你做决定或一轮跑完时，由服务端主动送到你设备上的系统级提醒。走 Web Push 标准：chat 页面已经关掉、浏览器最小化也收得到——这正是它区别于页面内提示的地方。 |
+| **推送订阅（push subscription）** | — | 浏览器替某个站点交给服务端的一张「投递地址」：一个 `endpoint` URL 加 `p256dh`/`auth` 两把密钥。服务端拿着它才能往这台设备投递。一台设备一个浏览器一条，用户点铃铛时产生，撤销权限或换浏览器即作废。 |
+| **VAPID 密钥对** | — | 服务端向推送服务（Chrome 走 FCM、Firefox 走 autopush）自证身份的一对公私钥。公钥交给浏览器订阅时用，私钥签名每次投递。一个部署一对；没配就等于整个推送功能不存在（不报错、不显示铃铛）。 |
+| **Service Worker（SW）** | — | 浏览器替站点常驻后台的一小段脚本，页面关了它也能被唤醒。收推送、弹通知、处理点击跳转都在它里面跑。本项目那份在 `apps/web/public/sw.js`，刻意做得很薄——不调 API、不做判断，只显示服务端拼好的文案。 |
+| **通知触发点（notification trigger）** | — | 值得打扰用户的四个时刻：要审批、agent 提问（`ask-user`）、一轮完成、一轮失败或被中断。除此之外一律不发。 |
+| **在场（presence）** | — | 「此刻这个用户正盯着这条会话」——页面可见 + 窗口聚焦 + 路由停在这条会话，三个条件缺一不可。只有页面自己知道，所以由前端每 20 秒心跳上报，服务端内存记 45 秒有效期。 |
+| **前台抑制（foreground suppression）** | — | [在场](#十二推送通知见-docsfeaturespush-notificationmd)时不发推送。人就在这条会话前面，[审批卡片](#四审批human-in-the-loop)已经在眼前了，再弹一条系统通知纯属打扰。判错方向都不致命：判成在场最坏漏一条通知，判成不在场最坏多弹一条。 |
+| **挂住不消失（sticky notification）** | — | 让一条通知停在屏幕上直到人动手处理，不几秒后自动收走（浏览器的 `requireInteraction`）。**只给"卡着一轮"的两类**——要审批、agent 提问；一轮完成/失败照旧自动消失，否则跑十轮就攒十条要一条条点掉。Firefox/Safari/Android Chrome 忽略这个字段；macOS 上还需把系统里 Chrome 的提醒样式从「横幅」改成「提示」才真挂得住。 |
+| **通知裁决按钮（notification action）** | — | 审批通知上直接挂的裁决按钮（允许 / 拒绝 / 本会话都允许），点了不用打开页面，[Service Worker](#十二推送通知见-docsfeaturespush-notificationmd) 直接调审批接口。**浏览器只渲染前两个**（Chrome 的 `Notification.maxActions` = 2），多的静默丢弃，所以顺序按"少了就残废"排；Safari 完全不支持。 |
+| **通知合并标签（notification tag）** | — | 每条通知带的一个字符串，形如 `approval:<会话 id>`。同一标签的新通知**替换**旧的而不是堆叠——同一条会话连着要三次审批，通知栏里始终只有一条。不同会话之间互不影响。 |

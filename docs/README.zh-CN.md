@@ -155,10 +155,11 @@ pnpm chat:web                 # web 开发服务器
   2. **builtin-tools（内置工具）** — [功能](./features/builtin-tools.md) · [技术](./tech/builtin-tools.md)
   3. **sandbox（云沙盒工作区）** — [功能](./features/sandbox.md) · [技术](./tech/sandbox.md) · [施工](./plans/sandbox.md)
   4. **chat-webapp（示例 chat 应用）** — [功能](./features/chat-webapp.md) · [技术](./tech/chat-webapp.md) · [施工](./plans/chat-webapp.md)
-  5. **turn-checkpoint（每轮代码快照与保活）** — [功能](./features/turn-checkpoint.md) · [技术](./tech/turn-checkpoint.md) · [施工](./plans/turn-checkpoint.md)
-  6. **single-ledger（UIMessage 单账本）** — [功能](./features/single-ledger.md) · [技术](./tech/single-ledger.md) · [施工](./plans/single-ledger.md)
-  7. **compaction（上下文压缩）** — [功能](./features/compaction.md) · [技术](./tech/compaction.md) · [施工](./plans/compaction.md)
-  8. **telemetry（遥测）** — [功能](./features/telemetry.md) · [技术](./tech/telemetry.md) · [施工](./plans/chat-observability.md)（属「chat 可观测性」拆单）
-  9. **verification（验证与验收）** — [施工](./plans/verification.md)（仅施工视角）
+  5. **sandbox-keepalive（沙盒保活）** — [功能](./features/sandbox-keepalive.md) · [技术](./tech/sandbox-keepalive.md) · [施工](./plans/sandbox-keepalive.md)（一轮跑多久沙盒就活多久；取代 turn-checkpoint §5 的保活部分）
+  6. **turn-checkpoint（每轮代码快照）** — [功能](./features/turn-checkpoint.md) · [技术](./tech/turn-checkpoint.md) · [施工](./plans/turn-checkpoint.md)
+  7. **single-ledger（UIMessage 单账本）** — [功能](./features/single-ledger.md) · [技术](./tech/single-ledger.md) · [施工](./plans/single-ledger.md)
+  8. **compaction（上下文压缩）** — [功能](./features/compaction.md) · [技术](./tech/compaction.md) · [施工](./plans/compaction.md)
+  9. **telemetry（遥测）** — [功能](./features/telemetry.md) · [技术](./tech/telemetry.md) · [施工](./plans/chat-observability.md)（属「chat 可观测性」拆单）
+  10. **verification（验证与验收）** — [施工](./plans/verification.md)（仅施工视角）
   - **术语表**：[terms.md](./terms.md)（写文档/讨论/代码注释引用术语一律以此为准）
 - **开发**：`corepack pnpm install && corepack pnpm build && corepack pnpm typecheck && corepack pnpm test`（顺序 build 先行——workspace 循环 devDep 下跨包类型解析指向 dist）。Node ≥ 20（examples 与 L3 `tools/*.ts` 动态加载需 ≥ 22.18 原生 TS）。根 build/typecheck/test 脚本只作用于 `./packages/*`；apps 有自己的 `chat:*` 脚本。
