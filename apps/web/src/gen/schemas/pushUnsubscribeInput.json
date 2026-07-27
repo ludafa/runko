@@ -1,0 +1,14 @@
+{
+  "type": "object",
+  "properties": {
+    "endpoint": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "description": "浏览器给出的推送投递 URL，本站点内唯一标识一台设备",
+      "examples": ["https://fcm.googleapis.com/fcm/send/abc123"]
+    }
+  },
+  "required": ["endpoint"],
+  "x-readme-ref-name": "PushUnsubscribeInput"
+}

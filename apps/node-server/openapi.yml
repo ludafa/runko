@@ -139,6 +139,7 @@ components:
               - $ref: "#/components/schemas/ChatChunkEnvelope"
               - $ref: "#/components/schemas/ChatMessageFrame"
               - $ref: "#/components/schemas/ChatQueueFrame"
+              - $ref: "#/components/schemas/ChatTurnStateFrame"
       required:
         - frames
     ChatChunkEnvelope:
@@ -164,6 +165,13 @@ components:
             $ref: "#/components/schemas/QueuedMessage"
       required:
         - queue
+    ChatTurnStateFrame:
+      type: object
+      properties:
+        turnActive:
+          type: boolean
+      required:
+        - turnActive
     TurnTelemetry:
       type: object
       properties:
@@ -199,6 +207,7 @@ components:
             - started
             - steered
             - queued
+            - aborted
       required:
         - ok
         - mode
@@ -238,6 +247,13 @@ components:
             - true
       required:
         - ok
+    PresenceInput:
+      type: object
+      properties:
+        focused:
+          type: boolean
+      required:
+        - focused
     PostApprovalInput:
       type: object
       properties:
@@ -259,6 +275,71 @@ components:
           minLength: 1
       required:
         - answer
+    PushConfig:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: 服务端是否配了 VAPID 密钥。false 时前端不渲染铃铛
+        publicKey:
+          type:
+            - string
+            - "null"
+          description: VAPID 公钥，前端 `pushManager.subscribe` 要用；未启用时为 null
+      required:
+        - enabled
+        - publicKey
+    PushAck:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          enum:
+            - true
+      required:
+        - ok
+    PushSubscribeInput:
+      type: object
+      properties:
+        endpoint:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          description: 浏览器给出的推送投递 URL，本站点内唯一标识一台设备
+          examples: &a1
+            - https://fcm.googleapis.com/fcm/send/abc123
+        keys:
+          type: object
+          properties:
+            p256dh:
+              type: string
+              minLength: 1
+              maxLength: 256
+            auth:
+              type: string
+              minLength: 1
+              maxLength: 256
+          required:
+            - p256dh
+            - auth
+        userAgent:
+          type: string
+          maxLength: 512
+          description: 只为让人认出「这是我哪台设备」，不参与任何判断
+      required:
+        - endpoint
+        - keys
+    PushUnsubscribeInput:
+      type: object
+      properties:
+        endpoint:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          description: 浏览器给出的推送投递 URL，本站点内唯一标识一台设备
+          examples: *a1
+      required:
+        - endpoint
   parameters: {}
 paths:
   /api/notes:
@@ -362,7 +443,7 @@ paths:
       parameters:
         - schema:
             type: string
-            examples: &a1
+            examples: &a2
               - 3f1b2c4d-...
           required: true
           name: id
@@ -394,7 +475,7 @@ paths:
       parameters:
         - schema:
             type: string
-            examples: *a1
+            examples: *a2
           required: true
           name: id
           in: path
@@ -482,7 +563,7 @@ paths:
       parameters:
         - schema:
             type: string
-            examples: *a1
+            examples: *a2
           required: true
           name: id
           in: path
@@ -494,8 +575,11 @@ paths:
               $ref: "#/components/schemas/PostChatMessageInput"
       responses:
         "202":
-          description: Accepted — see `mode` ("started" | "steered" | "queued");
-            poll/stream `GET .../stream` for its events
+          description: Accepted — see `mode` ("started" | "steered" | "queued" |
+            "aborted"); poll/stream `GET .../stream` for its events. "aborted"
+            (docs/tech/turn-abort.md §3.3) means the user stopped this turn
+            while it was still being assembled, so it never started running —
+            the stopped-turn frames are on the stream like any other outcome
           content:
             application/json:
               schema:
@@ -527,6 +611,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "503":
+          description: "The server is shutting down (docs/tech/graceful-shutdown.md §3.3)
+            — no new turn is accepted during shutdown. Retryable: resend once
+            the new process is up"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
   /api/chat/conversations/{id}/abort:
     post:
       tags:
@@ -538,7 +630,7 @@ paths:
       parameters:
         - schema:
             type: string
-            examples: *a1
+            examples: *a2
           required: true
           name: id
           in: path
@@ -619,7 +711,7 @@ paths:
       parameters:
         - schema:
             type: string
-            examples: *a1
+            examples: *a2
           required: true
           name: id
           in: path
@@ -653,7 +745,7 @@ paths:
       parameters:
         - schema:
             type: string
-            examples: *a1
+            examples: *a2
           required: true
           name: id
           in: path
@@ -680,6 +772,7 @@ paths:
                   - $ref: "#/components/schemas/ChatChunkEnvelope"
                   - $ref: "#/components/schemas/ChatMessageFrame"
                   - $ref: "#/components/schemas/ChatQueueFrame"
+                  - $ref: "#/components/schemas/ChatTurnStateFrame"
         "401":
           description: Unauthorized
           content:
@@ -688,6 +781,44 @@ paths:
                 $ref: "#/components/schemas/ApiError"
         "404":
           description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/chat/conversations/{id}/presence:
+    post:
+      tags:
+        - Chat
+      summary: 上报[在场](../../../../docs/terms.md)：这条会话此刻是否正在调用者眼前（docs/tech/push-notification.md
+        §5.2）。在场期间不向这个人推送本会话的通知
+      parameters:
+        - schema:
+            type: string
+            examples: *a2
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PresenceInput"
+      responses:
+        "200":
+          description: Recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalAck"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not found —— 会话不存在，或不属于调用者
           content:
             application/json:
               schema:
@@ -702,14 +833,14 @@ paths:
       parameters:
         - schema:
             type: string
-            examples: &a2
+            examples: &a3
               - 3f1b2c4d-...
           required: true
           name: id
           in: path
         - schema:
             type: string
-            examples: &a3
+            examples: &a4
               - call_1
           required: true
           name: callId
@@ -750,13 +881,13 @@ paths:
       parameters:
         - schema:
             type: string
-            examples: *a2
+            examples: *a3
           required: true
           name: id
           in: path
         - schema:
             type: string
-            examples: *a3
+            examples: *a4
           required: true
           name: callId
           in: path
@@ -783,6 +914,104 @@ paths:
           description: Not found — either this session doesn’t exist (or isn’t the
             caller’s), or `callId` has no pending question on it (already
             answered, timed out, or never existed)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/push/config:
+    get:
+      tags:
+        - Push
+      summary: 推送是否可用 + VAPID 公钥（docs/tech/push-notification.md §3.1）：前端据此决定渲不渲染铃铛
+      responses:
+        "200":
+          description: OK（未启用时 `{enabled:false, publicKey:null}`，不是错误）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushConfig"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/push/subscriptions:
+    post:
+      tags:
+        - Push
+      summary: 登记一条推送订阅（幂等，按 endpoint upsert）：页面每次加载都会重报一次，用来兜住浏览器悄悄换过 endpoint 的情况
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushSubscribeInput"
+      responses:
+        "200":
+          description: Stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushAck"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: Push disabled — 服务端没配 VAPID，存下来也永远发不出去，故不写库
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/push/unsubscribe:
+    post:
+      tags:
+        - Push
+      summary: 注销一条推送订阅（幂等：不存在也返回成功）。用 POST 而不是带 body 的 DELETE——后者在部分 HTTP 客户端/代理上会被丢掉
+        body
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushUnsubscribeInput"
+      responses:
+        "200":
+          description: Removed（本来就不存在时同样返回这个）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushAck"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/push/test:
+    post:
+      tags:
+        - Push
+      summary: 给自己的全部设备发一条测试通知——端到端验证推送通道是否打通（docs/plans/push-notification.md PN-10 用例
+        4）
+      responses:
+        "200":
+          description: Accepted —— 只表示「已交给推送服务」，不表示设备一定收到了
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushAck"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: Push disabled
           content:
             application/json:
               schema:

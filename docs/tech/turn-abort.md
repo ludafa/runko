@@ -29,6 +29,8 @@
 
 **没有 DB 改动**：停止时清空[待发队列](../terms.md)用的是既有的 `conversations.queued_messages_json` 与既有的 `clearQueuedMessages()`，业务数据领域没有新实体、没有新关系。
 
+> **2026-07-27 补丁**：上面这套只覆盖了「一轮**已经跑起来**之后按停止」。「刚点发送就点停止」当时停不下来（按钮毫无反应），因为那一刻服务端还不认这一轮存在。修法与改动落点见 [§3.3](#33-起轮装配窗口里的停止2026-07-27-修)。
+
 ## 2. core：step 边界的显式 abort 检查
 
 `packages/core/src/loop.ts` 的 `runTurn`，for 循环开头（在 drain steer 队列与上下文估算**之前**）：
@@ -92,6 +94,74 @@ handler 的顺序同样是硬要求：
 **为什么广播要在这一轮还活着的时候发**：`broadcastQueue` 只对进行中那一轮的订阅者有效（emitter 关了就是无操作）。轮结束后前端也不会重连（`turnInProgressRef` 已翻假），所以这一帧必须趁 emitter 还开着发出去，否则界面待发区要等到下次刷新才清空。
 
 **沙盒不额外 `touch`**：停止之后不再有活动，让它按既有的空闲超时自然休眠；心跳由既有的 `onTurnSettled → stopHeartbeat()` 停掉，无需改动。
+
+### 3.3 起轮装配窗口里的停止（2026-07-27 修）
+
+#### 问题：两边对「这一轮从何时开始存在」定义不一致
+
+用户报的现象是「发完消息立刻点停止，没有任何反应」。追下来是一段**空窗**：
+
+- **前端**认为这一轮从「用户点发送」起就存在：`sendMessage` 同步把 `turnInProgressRef` 置真、`status` 拍成 `streaming`，停止键当场可点，不等服务端回话。
+- **服务端**认为这一轮从「[起轮装配](../terms.md)跑完」起才存在：`launchTurn` 要先取沙盒 → `touch` 续期 → 扫沙盒里的 skill → `buildSession`，全部做完，**最后一步** `startTurn` 才把它记进 `activeTurns`。
+
+于是空窗期内 `isTurnActive()` 为假 → `POST .../abort` 回 409 → 前端按 [§4.1](#41-hookuse-chat-messagests) 的既有约定把 409 当成「这一轮已经自己结束了，用户要的结果已达成」**静默吞掉**。界面一个字都不变，而那一轮几秒后照样跑起来。
+
+空窗的宽度 = 一次沙盒 acquire + 一次 touch + 一次 skill 扫描 + 一次 `buildSession`，全是远程往返，冷启动可达数秒到数十秒——所以「刚发出就点停止」几乎**必然**落在窗口里，这不是窄竞态。
+
+#### 修法：把登记时机提前到装配的第一行（[起轮占位](../terms.md)）
+
+```ts
+type TurnPhase = 'preparing' | 'running';
+
+interface TurnReservation {
+  readonly conversationId: string;
+  /** 这一轮唯一的那个 signal：装配期间就已就绪，装配跑完原样交给 core。 */
+  readonly signal: AbortSignal;
+  /** 装配期间是否已被请求停止——`launchTurn` 在检查点读它。 */
+  readonly wasAborted: () => boolean;
+}
+
+/** 占位登记一轮，`isTurnActive` 立刻为真。已有轮（**装配中的也算**）→ `undefined`。 */
+export function reserveTurn(conversationId: string, logger?: Logger): TurnReservation | undefined;
+/** 撤销占位。被停止过则先补一次「已停止」收尾（见下），随后 `emit('done')` + 删登记。 */
+export function releaseTurn(db: Db, reservation: TurnReservation, text: string, logger?: Logger): void;
+/** 这个会话有没有一轮**卡在装配中**——路由给 steer 分流用（见下）。 */
+export function isTurnPreparing(conversationId: string): boolean;
+```
+
+三条纪律：
+
+1. **占位与真正跑起来的那一轮是同一个 `ActiveTurn` 对象。** `startTurn` 收到 `reservation` 时**原地升级** `phase: 'preparing' → 'running'`（补上 `steer`/`emit`），不是「删占位再登记」——那中间又是一个新空窗，等于把 bug 挪个位置。
+2. **`releaseTurn` 必须兜住装配的每一条退出路径**（凭据缺失、沙盒起不来、`buildSession` 抛错、期间被停止），所以 `launchTurn` 用 `try/finally` + 一个 `handedOff` 标志来保证，而不是在每个 `return` 前手写一遍。漏掉任何一条 = 把这个会话**永久锁死**：`isTurnActive` 恒真，此后所有消息只会排队、再也起不了轮。这是本次改动风险最高的一点。
+3. **`releaseTurn` 一定要 `emitter.emit('done')`。** 占位让 `isTurnActive` 为真，于是装配中的轮**已经能被 tail 订阅**（`GET .../stream` 的 `wasActive` 为真 → 它会挂着等 `done`）。不发就把那条 tail 挂到超时。
+
+#### 装配窗口里被停的那一轮，怎么收尾
+
+产品定案是「落[账本](../terms.md)+ 打『已停止』标记」（[features §2.5](../features/turn-abort.md)），所以 `releaseTurn` 在 `wasAborted()` 为真时补两帧——两者都用既有机制，**不新增任何 wire 形状**：
+
+1. 一条合成的用户消息 `MessageFrame`，与 `driveTurn` 开头那条同源同形（同一个 `createTurnEmitter`），落 `kind = 'message'` 行；
+2. 一条**独立**的 `message-metadata` chunk，`status: 'interrupted'` + `error.code: 'aborted'`，落 `kind = 'chunk'` 行——与 `driveTurn` 的 `catch` 分支发独立 metadata chunk 是同一姿态。`turn` 字段填 `undefined`：装配可能在 `buildSession` 之前就退出，此刻根本没有 session 可问轮号（`bestEffortTurn` 问不出来时也是 `undefined`，一致）。
+
+这条路上 `finalizeTurnPersistence` 不跑（没有 session、没有 `TurnResult`），所以那条 `kind = 'chunk'` 行不会被 GC——与 `catch` 分支同款的既有可接受残留（`schema.ts` 的注释），一轮只多一行。
+
+#### 前端要改的只有一处
+
+那两帧是**持久帧**，所以前端在 `POST .../messages` 返回后照旧 `openTail()`，tail 一连上就把它们当普通回放帧收下：`MessageLedger` 认出独立的 turn-end metadata → `interrupted` 归 idle（[§4.1](#41-hookuse-chat-messagests) 的既有映射）→ 时间线末尾中性「已停止」标记（[§4.3](#43-已停止的样子turn-markertsx)）。**全是既有代码，一行不改。**
+
+契约上多一档：`POST .../messages` 的 ack `mode` 加 `'aborted'`（诚实报告「这一轮在装配阶段就被停掉了，从没启动」）。要改的那一处前端是 **steer 的乐观回显**——见下。
+
+#### 顺带修掉的第二个 bug + steer 的分流
+
+占位让 `isTurnActive` 在空窗里就为真，于是空窗内发的第二条消息走[排队](../terms.md)，不再像以前那样触发**第二次完整装配**、最后被 `startTurn` 的 busy 守卫挡掉（白烧一次沙盒往返）。
+
+但 steer 这条路要重新分流：`steerTurn` 对 `phase === 'preparing'` 只能返回 `false`（那一轮还没有 `session`，插不进去），而路由原来的「steer 失败就回落起新一轮」会被自己的占位挡成 409。所以按**原因**分流：
+
+| steer 返回 false 的原因 | 怎么办 |
+|---|---|
+| `isTurnPreparing(id)` 为真——那一轮还在装配 | **入队**。它收尾时会自动[出队](../terms.md)，用户的话不会丢 |
+| 否则——这一轮刚好结束的窄竞态 | 回落起新一轮（既有行为，不变） |
+
+代价（可接受）：装配窗口内按 Alt+Enter 插话，实际会被排到下一轮而不是插进这一轮。前端那条乐观的「待注入」回显因此永远等不到注入，所以 `sendMessage` 要看 ack 的 `mode`——请求 `steer` 却拿回 `queued` 时撤掉那条回显（队列快照自会把它显示在待发区）。这是本次前端唯一的实质改动。
 
 ## 4. web：真停止 + 中性呈现
 
@@ -171,6 +241,43 @@ sequenceDiagram
     Note over U: 卡片落成「已拒绝」，末尾「已停止」——无需等 4 分钟审批超时
 ```
 
+### 5.3 刚发出就按停止（起轮装配窗口，2026-07-27 修）
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as 用户（浏览器）
+    participant R as routes/chat.ts
+    participant TL as turn-launcher.ts
+    participant TR as turn-runner.ts
+    participant SB as 沙盒
+
+    U->>R: POST .../messages（发送）
+    R->>TL: launchTurn
+    TL->>TR: reserveTurn → 占位（phase: preparing）
+    Note over TR: isTurnActive 从这一刻起为真
+    TL->>SB: acquire + touch + 扫 skill（数秒~数十秒）
+
+    U->>R: POST .../abort（用户此刻按下停止）
+    R->>R: isTurnActive? 是（占位在）
+    R->>TR: clearQueuedMessages + broadcastQueue([])
+    R->>TR: abortTurn() → aborted = true + signal.abort()
+    R-->>U: 200 { ok:true, queue:[] }
+
+    SB-->>TL: 装配跑完
+    TL->>TL: 检查点：wasAborted() 为真 → 不启动这一轮
+    TL->>TR: releaseTurn（补收尾）
+    TR->>TR: 落库：用户消息行 + interrupted metadata 行
+    TR->>TR: emit('done') + 删占位
+    TL-->>R: { ok:false, reason:'aborted' }
+    R-->>U: 202 { ok:true, mode:'aborted' }
+    U->>R: openTail（既有代码：POST 返回就开 tail）
+    R-->>U: 回放那两帧
+    U->>U: status → idle，时间线末尾「已停止」
+```
+
+对照 [§5.1](#51-主路径跑到中途按停止) 的差别只有一处：那一轮**从没启动**，所以收尾的两帧是 `releaseTurn` 补的，不是 core 的 loop 产出的。用户看到的东西完全一样。
+
 ## 6. 取舍与已知限制
 
 ### 6.1 为什么要改 core，而不是只靠 AI SDK 的 abort 行为
@@ -185,10 +292,18 @@ sequenceDiagram
 
 被停止的那一轮的半成品（已输出的文字、已完成的工具调用、已改的文件）全部留在账本与工作区里，也因此会进下一轮的[模型上下文](../terms.md)。这是刻意的：用户按停止是「别再往下做」，不是「假装没发生」。回滚是 git 的事，不在本功能内。
 
-### 6.4 进程重启仍然会「静默丢轮」
+### 6.4 进程重启仍然会「静默丢轮」（界面侧已收敛）
 
-`activeTurns` 是纯内存的（`turn-runner.ts` 文件头既有取舍）：服务端重启会让进行中的一轮无人驱动，那一轮既不会收到停止也不会自然收尾。本功能不改变这条既有限制，只是别再让它看起来像 bug——重启后页面回放会停在崩溃点，没有「已停止」标记（因为 `finalizeTurnPersistence` 从未跑）。
+`activeTurns` 是纯内存的（`turn-runner.ts` 文件头既有取舍）：服务端重启会让进行中的一轮无人驱动，那一轮既不会收到停止也不会自然收尾。本功能不改变这条既有限制——重启后页面回放会停在崩溃点，没有「已停止」标记（因为 `finalizeTurnPersistence` 从未跑）。
 
-### 6.5 停止不清理沙盒
+**2026-07-27 补**：界面侧的后果已经修掉了。此前前端会因此**永久**卡在流式态（它靠「回放最后一帧是不是 chunk」猜轮状态，而崩溃残留的 chunk 行永不 GC），于是这个会话之后每次打开都：发消息一律走[排队](../terms.md)且永远等不到[出队](../terms.md)、按停止只拿到 409 毫无反应。现在 tail 每次连上都会下发[轮状态快照](../terms.md)，前端据此落回空闲——账本里的残留仍在（那是上面这条限制），但界面不再骗人。见 [chat-webapp §5.1](./chat-webapp.md)。
+
+### 6.5 装配窗口里按停止，仍要等装配的那几个远程调用跑完
+
+[起轮占位](../terms.md)让停止**请求**能被立刻接住（`aborted` 当场置真），但它掐不断已经飞出去的那几个远程调用：`sandboxManager.acquire()` / `touch()` / 扫 skill 都不接受 `AbortSignal`（provider SDK 层面也未必支持）。所以「按下停止」到「这一轮确认不启动」之间，仍要等当前那个远程往返自己回来——冷启动最坏情况是几十秒。
+
+用户在这段时间里看到的是「正在停」（`stopping` 态），语义没有说错，只是比[跑到中途按停止](#51-主路径跑到中途按停止)慢。检查点因此放了两处（acquire+touch 之后、`startTurn` 之前），让它在**已经知道要停**的时候不再往下白跑 skill 扫描与 `buildSession`。把 signal 透进 sandbox-manager 是后续可做的收窄，不在本次范围。
+
+### 6.6 停止不清理沙盒
 
 沙盒继续按既有空闲超时休眠（`SANDBOX_IDLE_TIMEOUT_MS`）。停止不销毁沙盒，因为下一条消息大概率马上就来，重建的代价远大于让它空转到超时。

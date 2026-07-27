@@ -18,6 +18,8 @@ import {
   parseChatReplayFrame,
   type QueuedMessage,
   queueFrameSchema,
+  startTurnAckSchema,
+  type StartTurnMode,
   type TurnTelemetryEvent,
   turnTelemetrySchema,
 } from './schema';
@@ -128,14 +130,19 @@ export interface ChatFrameStreamHandlers {
  * Resolves once the server has accepted it (202); rejects with `ChatApiError`
  * on a non-2xx response — notably `409` for a full 待发队列, or (窄竞态) a turn
  * already in progress that couldn't be steered either.
+ *
+ * resolve 的值是服务端**实际**的分流结果（`mode`，见 `startTurnAckSchema`）：它可能与
+ * 请求的 `intent` 不一致，调用方需要据此修正自己的乐观状态——目前唯一的用处是
+ * `use-chat-messages.ts` 在「请求 steer 却拿回 `queued`」时撤掉那条「待注入」回显
+ * （docs/tech/turn-abort.md §3.3）。
  */
 export async function postChatMessage(
   conversationId: string,
   text: string,
   intent?: 'queue' | 'steer',
   signal?: AbortSignal,
-): Promise<void> {
-  await requestJson(
+): Promise<StartTurnMode> {
+  const json = await requestJson(
     `/api/chat/conversations/${encodeURIComponent(conversationId)}/messages`,
     {
       method: 'POST',
@@ -144,6 +151,7 @@ export async function postChatMessage(
       signal,
     },
   );
+  return startTurnAckSchema.parse(json).mode;
 }
 
 /**
@@ -244,6 +252,34 @@ export async function postQuestionAnswer(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ answer }),
       signal,
+    },
+  );
+}
+
+/**
+ * `POST .../presence`（[在场](../../../../docs/terms.md)心跳，
+ * docs/tech/push-notification.md §5.2）：上报"这条会话此刻是否正在我眼前"。服务端
+ * 据此决定要不要推送——在场就不推，因为审批卡片已经在眼前了。
+ *
+ * 与本文件其它函数不同，**这个接口失败一律吞掉**（由 `use-presence.ts` 负责）：
+ * 心跳是尽力而为的，报不上去最坏是多收一条通知，不该在界面上冒出任何错误。
+ *
+ * `keepalive` 给页面卸载时那一次用——普通 fetch 会随页面一起被取消，而"我不看了"
+ * 这条恰恰必须发出去。
+ */
+export async function postPresence(
+  conversationId: string,
+  focused: boolean,
+  opts?: { signal?: AbortSignal; keepalive?: boolean },
+): Promise<void> {
+  await requestJson(
+    `/api/chat/conversations/${encodeURIComponent(conversationId)}/presence`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ focused }),
+      ...(opts?.signal !== undefined ? { signal: opts.signal } : {}),
+      ...(opts?.keepalive === true ? { keepalive: true } : {}),
     },
   );
 }

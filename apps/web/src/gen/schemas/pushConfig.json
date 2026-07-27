@@ -1,0 +1,15 @@
+{
+  "type": "object",
+  "properties": {
+    "enabled": {
+      "type": "boolean",
+      "description": "服务端是否配了 VAPID 密钥。false 时前端不渲染铃铛"
+    },
+    "publicKey": {
+      "type": ["string", "null"],
+      "description": "VAPID 公钥，前端 `pushManager.subscribe` 要用；未启用时为 null"
+    }
+  },
+  "required": ["enabled", "publicKey"],
+  "x-readme-ref-name": "PushConfig"
+}

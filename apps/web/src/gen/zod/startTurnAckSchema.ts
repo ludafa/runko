@@ -7,5 +7,5 @@ import { z } from 'zod/v4';
 
 export const startTurnAckSchema = z.object({
   ok: z.literal(true),
-  mode: z.enum(['started', 'steered', 'queued']),
+  mode: z.enum(['started', 'steered', 'queued', 'aborted']),
 });

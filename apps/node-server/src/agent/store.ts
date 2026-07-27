@@ -16,7 +16,7 @@
 import { randomUUID } from 'node:crypto';
 
 import type { InferSelectModel } from 'drizzle-orm';
-import { and, asc, eq, gt, max } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, max } from 'drizzle-orm';
 import { z } from 'zod';
 
 import type { db as DbInstance } from '../db/instance.js';
@@ -151,6 +151,42 @@ export function getMaxEventSeq(db: Db, conversationId: string): number {
     .where(eq(conversationEvents.conversationId, conversationId))
     .get();
   return row?.value ?? 0;
+}
+
+/**
+ * 全部会话的 id（**不按用户过滤**）——给[崩溃恢复](../../../../docs/terms.md)扫
+ * [孤儿轮](../../../../docs/terms.md)用（`crash-recovery.ts`，启动时跑一次）。
+ *
+ * 这是本文件唯一一个不带 `userId` 的会话读函数，刻意如此：崩溃恢复是**系统级**维护
+ * 动作，不属于任何用户，也不该受某个用户的可见范围限制。别在请求路径上用它。
+ */
+export function listAllConversationIds(db: Db): string[] {
+  return db
+    .select({ id: conversations.id })
+    .from(conversations)
+    .all()
+    .map((row) => row.id);
+}
+
+/**
+ * 一个会话[账本](../../../../docs/terms.md)里的**最后一行**（按 seq），空会话返回
+ * `undefined`——[孤儿轮](../../../../docs/terms.md)的识别就看它是不是 `kind = 'chunk'`
+ * （docs/tech/graceful-shutdown.md §5）。
+ *
+ * 单独一条 `ORDER BY seq DESC LIMIT 1`，而不是 `listConversationEvents(...).at(-1)`：
+ * 崩溃恢复要对**每个**会话问一次，把整份历史读进内存再丢掉太浪费。
+ */
+export function getLastConversationEvent(
+  db: Db,
+  conversationId: string,
+): ConversationEventRow | undefined {
+  return db
+    .select()
+    .from(conversationEvents)
+    .where(eq(conversationEvents.conversationId, conversationId))
+    .orderBy(desc(conversationEvents.seq))
+    .limit(1)
+    .get();
 }
 
 export interface AppendConversationEventInput {

@@ -50,6 +50,7 @@ import {
   abortTurn,
   broadcastQueue,
   isTurnActive,
+  isTurnPreparing,
   resolveReview,
   resolveUserAnswer,
   steerTurn,
@@ -58,6 +59,8 @@ import {
 import { db as defaultDb } from '../db/instance.js';
 import { logger as defaultLogger } from '../logger.js';
 import { requireAuth } from '../middleware/auth.js';
+import { createChatNotifier } from '../push/notifier.js';
+import { clearPresent, markPresent } from '../push/presence.js';
 import { ErrorSchema } from '../schemas/api.js';
 import type { ChatReplayFrame, ConversationDto } from '../schemas/chat.js';
 import {
@@ -76,6 +79,7 @@ import {
   PostAnswerInputSchema,
   PostApprovalInputSchema,
   PostChatMessageInputSchema,
+  PresenceInputSchema,
   queueFrameSchema,
   StartTurnAckSchema,
   TurnTelemetryParamsSchema,
@@ -164,19 +168,24 @@ function rowToReplayFrame(row: ConversationEventRow): ChatReplayFrame {
     : chunkEnvelopeSchema.parse({ seq: row.seq, chunk: payload });
 }
 
-/** The SSE `event:` name for a wire frame — structural, not a shared literal field: the three frame kinds are told apart by which of `chunk`/`queue`/`message` they actually carry (`schemas/chat.ts`'s own doc comment). */
-function frameEventName(frame: ChatReplayFrame): 'chunk' | 'message' | 'queue' {
+/** The SSE `event:` name for a wire frame — structural, not a shared literal field: the four frame kinds are told apart by which of `chunk`/`queue`/`turnActive`/`message` they actually carry (`schemas/chat.ts`'s own doc comment). */
+function frameEventName(
+  frame: ChatReplayFrame,
+): 'chunk' | 'message' | 'queue' | 'turn-state' {
   if ('chunk' in frame) return 'chunk';
-  return 'queue' in frame ? 'queue' : 'message';
+  if ('queue' in frame) return 'queue';
+  return 'turnActive' in frame ? 'turn-state' : 'message';
 }
 
 /**
- * 一个帧的 `seq`——`QueueFrame` **恒无 seq**（它是[待发队列](../../../../docs/terms.md)
- * 的状态快照，不是[账本](../../../../docs/terms.md)事件，docs/tech/steer-and-queue.md §4.3），
- * 所以在直播流里它和 ephemeral chunk 走同一条「不占 seq、不参与续传」的路径。
+ * 一个帧的 `seq`——`QueueFrame` 与 [轮状态快照](../../../../docs/terms.md)`TurnStateFrame`
+ * **恒无 seq**（它们是状态快照，不是[账本](../../../../docs/terms.md)事件，
+ * docs/tech/steer-and-queue.md §4.3 / docs/tech/chat-webapp.md §5.1），所以在直播流里
+ * 它们和 ephemeral chunk 走同一条「不占 seq、不参与续传」的路径。
  */
 function frameSeq(frame: ChatReplayFrame): number | undefined {
-  return 'queue' in frame ? undefined : frame.seq;
+  if ('queue' in frame || 'turnActive' in frame) return undefined;
+  return frame.seq;
 }
 
 function generateSandboxName(conversationId: string): string {
@@ -454,7 +463,7 @@ export function createChatApp(deps: ChatRouteDeps) {
       202: {
         content: { 'application/json': { schema: StartTurnAckSchema } },
         description:
-          'Accepted — see `mode` ("started" | "steered" | "queued"); poll/stream `GET .../stream` for its events',
+          'Accepted — see `mode` ("started" | "steered" | "queued" | "aborted"); poll/stream `GET .../stream` for its events. "aborted" (docs/tech/turn-abort.md §3.3) means the user stopped this turn while it was still being assembled, so it never started running — the stopped-turn frames are on the stream like any other outcome',
       },
       401: {
         content: { 'application/json': { schema: ErrorSchema } },
@@ -472,6 +481,11 @@ export function createChatApp(deps: ChatRouteDeps) {
       500: {
         content: { 'application/json': { schema: ErrorSchema } },
         description: 'Model/sandbox configuration or provisioning error',
+      },
+      503: {
+        content: { 'application/json': { schema: ErrorSchema } },
+        description:
+          'The server is shutting down (docs/tech/graceful-shutdown.md §3.3) — no new turn is accepted during shutdown. Retryable: resend once the new process is up',
       },
     },
   });
@@ -497,11 +511,29 @@ export function createChatApp(deps: ChatRouteDeps) {
         // （`loop.ts` 的 `drainSteerMessages`），那才是到达 wire 的东西。
         if (steerTurn(id, text)) {
           try {
-            await deps.sandboxManager.touch(id); // 与新起一轮一样，把沙盒空闲计时往后推
+            await deps.sandboxManager.ensureLifetime(id); // 与新起一轮一样，把沙盒空闲计时往后推
           } catch (error) {
             return c.json({ error: describeError(error) }, 500);
           }
           return c.json({ ok: true as const, mode: 'steered' as const }, 202);
+        }
+        // steer 报 false 有两种原因，必须分开处理（docs/tech/turn-abort.md §3.3）：
+        // 这一轮还卡在[起轮装配](docs/terms.md)里（`preparing`，还没有 session 可插）
+        // → 转成[排队](docs/terms.md)，它收尾时会自动[出队](docs/terms.md)，用户的话不会丢。
+        // 回落去起新一轮是**错的**：会被这一轮自己的[起轮占位](docs/terms.md)挡成 409。
+        // 另一种原因（这一轮刚好结束的窄竞态）才走下面的回落，行为不变。
+        if (isTurnPreparing(id)) {
+          const result = enqueueMessage(deps.db, id, { text, userId });
+          if (!result.ok) {
+            return c.json(
+              {
+                error: `待发队列已满（最多 ${String(MAX_QUEUED_MESSAGES)} 条）`,
+              },
+              409,
+            );
+          }
+          broadcastQueue(id, result.queue);
+          return c.json({ ok: true as const, mode: 'queued' as const }, 202);
         }
       } else {
         // 默认路径：排队到下一轮。入队是纯 DB 读-改-写，不碰沙盒、不碰当前这一轮
@@ -518,7 +550,7 @@ export function createChatApp(deps: ChatRouteDeps) {
         // 多标签同步（§4.3 时机 2）：广播给这一轮的所有订阅者。
         broadcastQueue(id, result.queue);
         try {
-          await deps.sandboxManager.touch(id); // 用户还在场，沙盒别在这一轮跑完前睡掉
+          await deps.sandboxManager.ensureLifetime(id); // 用户还在场，沙盒别在这一轮跑完前睡掉
         } catch {
           // 刻意吞掉：消息已经入队了，续期失败不该让这次请求失败——真正的沙盒
           // 可用性问题会在出队起轮时以 `launchTurn` 的错误浮现。
@@ -540,6 +572,18 @@ export function createChatApp(deps: ChatRouteDeps) {
     }
     if (outcome.reason === 'busy') {
       return c.json({ error: 'turn already in progress' }, 409);
+    }
+    if (outcome.reason === 'shutting_down') {
+      // 进程正在[优雅关闭](docs/terms.md)（docs/tech/graceful-shutdown.md §3.3）——一个
+      // 明确、可恢复的拒绝：刷新重发即可。不能报 409（那是「你已经有一轮在跑」，会误导）。
+      return c.json({ error: '服务正在重启，请稍后重试' }, 503);
+    }
+    if (outcome.reason === 'aborted') {
+      // 用户在[起轮装配](docs/terms.md)期间按了[停止](docs/terms.md)
+      // （docs/tech/turn-abort.md §3.3）：这一轮从没启动。202 而不是错误——用户要的
+      // 结果达成了；收尾那两帧（用户消息 + 「已停止」）已落账本，客户端照常从
+      // `GET .../stream` 拿到。
+      return c.json({ ok: true as const, mode: 'aborted' as const }, 202);
     }
     return c.json({ error: outcome.message }, 500);
   });
@@ -837,6 +881,15 @@ export function createChatApp(deps: ChatRouteDeps) {
         // 上面那条「回放期间丢弃无 seq 帧」的规则误伤。
         await writeFrame({ queue: listQueuedMessages(deps.db, id) });
 
+        // [轮状态快照](docs/terms.md)（docs/tech/chat-webapp.md §5.1）：同样每条连接必发
+        // 一帧，紧跟队列快照。发的是**订阅那一刻**的 `wasActive`（不是这里重新查一次）
+        // ——它与下面「要不要进直播循环」用的是同一个读数，两者必须一致：告诉客户端
+        // 「有轮在跑」却立刻关掉连接，或反过来，都会让客户端的重连逻辑做出错误决定。
+        //
+        // 这一帧存在的理由见 `schemas/chat.ts` 的 `turnStateFrameSchema`：在它之前前端只能
+        // 靠「回放最后一帧是不是 chunk」猜，而崩溃残留会让那个猜法长期失准、且永不自愈。
+        await writeFrame({ turnActive: wasActive });
+
         replayDone = true;
 
         if (wasActive) {
@@ -861,6 +914,54 @@ export function createChatApp(deps: ChatRouteDeps) {
         unsubscribe();
       }
     });
+  });
+
+  // ---- POST /api/chat/conversations/{id}/presence (在场心跳, docs/tech/push-notification.md §5.2) ----
+
+  const presenceRoute = createRoute({
+    method: 'post',
+    path: '/api/chat/conversations/{id}/presence',
+    tags: ['Chat'],
+    summary:
+      '上报[在场](../../../../docs/terms.md)：这条会话此刻是否正在调用者眼前（docs/tech/push-notification.md §5.2）。在场期间不向这个人推送本会话的通知',
+    request: {
+      params: ConversationParamsSchema,
+      body: {
+        content: { 'application/json': { schema: PresenceInputSchema } },
+        required: true,
+      },
+    },
+    responses: {
+      200: {
+        content: { 'application/json': { schema: ApprovalAckSchema } },
+        description: 'Recorded',
+      },
+      401: {
+        content: { 'application/json': { schema: ErrorSchema } },
+        description: 'Unauthorized',
+      },
+      404: {
+        content: { 'application/json': { schema: ErrorSchema } },
+        description: 'Not found —— 会话不存在，或不属于调用者',
+      },
+    },
+  });
+
+  app.openapi(presenceRoute, (c) => {
+    const userId = c.get('userId');
+    const { id } = c.req.valid('param');
+    const { focused } = c.req.valid('json');
+
+    // 属主校验与本文件其它会话级接口一致（不存在与不属于自己都回 404，不泄露
+    // 存在性）。刻意**不** `touch()` 沙盒：心跳每 20 秒一次，让"盯着页面发呆"
+    // 无限续沙盒的命，既烧钱又把空闲休眠这套机制架空。
+    const row = getConversation(deps.db, id, userId);
+    if (row === undefined) return c.json({ error: 'Not found' }, 404);
+
+    if (focused) markPresent(userId, id);
+    else clearPresent(userId, id);
+
+    return c.json({ ok: true as const }, 200);
   });
 
   // ---- POST /api/chat/conversations/{id}/approvals/{callId} (resolve a pending approval, docs/tech/chat-webapp.md §2.2c（审批链）) ----
@@ -912,7 +1013,7 @@ export function createChatApp(deps: ChatRouteDeps) {
       // `exec()` itself surface whatever sandbox-availability problem there
       // is as a normal tool failure).
       try {
-        await deps.sandboxManager.touch(id);
+        await deps.sandboxManager.ensureLifetime(id);
       } catch {
         // intentionally swallowed — see comment above
       }
@@ -982,7 +1083,7 @@ export function createChatApp(deps: ChatRouteDeps) {
     // analog here): must never block the answer itself, same rationale as
     // the approval route's own touch-failure comment above.
     try {
-      await deps.sandboxManager.touch(id);
+      await deps.sandboxManager.ensureLifetime(id);
     } catch {
       // intentionally swallowed — see comment above
     }
@@ -1004,6 +1105,11 @@ export const chatApp = createChatApp({
   }),
   resolveModel,
   authMiddleware: requireAuth,
+  // 推送通知（docs/tech/push-notification.md §4）。**不加 vitest 守卫**（与
+  // `getChatTelemetry*` 不同）：`createChatNotifier` 只是把 db 存进一个闭包，
+  // 不建库、不起定时器、不碰网络；真正要发的时候还有「没配 VAPID 就整体禁用」
+  // 那道总闸挡着，测试环境下它恒为关。
+  notifier: createChatNotifier({ db: defaultDb }),
   // getChatTelemetry* 自带 vitest 守卫（模块顶层求值——任何 import 本文件的
   // 测试都会走到这里，没有守卫会在仓库里落 telemetry.db），返回 undefined
   // 时条件展开保持 deps 字段缺席。

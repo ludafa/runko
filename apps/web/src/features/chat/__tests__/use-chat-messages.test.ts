@@ -6,9 +6,11 @@ import { buildRenderEntries } from '../timeline';
 import { useChatMessages } from '../use-chat-messages';
 import { FakeChatFetch } from './helpers/fake-chat-fetch';
 import {
+  assistantMessage,
   finishChunk,
   messageMetadataChunk,
   startChunk,
+  textStepChunks,
   toolApprovalRequestChunk,
   toolInputAvailableChunk,
   userMessage,
@@ -92,6 +94,191 @@ describe('useChatMessages — mount / lastFrameIsChunk', () => {
     expect(fake.streamRequests[0]?.signal?.aborted).toBe(false);
     unmount();
     expect(fake.streamRequests[0]?.signal?.aborted).toBe(true);
+    stream.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 轮状态快照（docs/tech/chat-webapp.md §5.1）——服务端在每条 tail 连上时下发的权威
+// 「这个会话有没有轮在跑」。它取代了 `lastFrameIsChunk` 那个猜测：崩溃残留会让那个
+// 猜法长期失准且永不自愈（用户发的消息一律走排队、没有乐观回显、还等不到出队）。
+// ---------------------------------------------------------------------------
+
+describe('useChatMessages — 轮状态快照（turn-state 帧）', () => {
+  /** 崩溃残留的会话：历史以 chunk 收尾，所以挂载时 `lastFrameIsChunk` 猜「有轮在跑」。 */
+  const crashResidueHistory: ChatReplayFrame[] = [
+    { seq: 1, chunk: startChunk('m1') },
+  ];
+
+  it('回归：崩溃残留的会话收到 turnActive:false 后落回 idle，发消息重新走「起新一轮」并**有乐观上屏**', async () => {
+    const fake = setup();
+    const stream = fake.queueStream();
+    const { result } = renderHook(() =>
+      useChatMessages('sess_1', crashResidueHistory),
+    );
+
+    // 挂载时前端只能靠猜——这里就是猜错的那一档（服务端其实没有轮在跑）。
+    expect(result.current.status).toBe('streaming');
+
+    act(() => {
+      stream.pushFrame({ turnActive: false });
+    });
+    await waitFor(() => {
+      expect(result.current.status).toBe('idle');
+    });
+
+    // 病根修掉之后的直接后果：这条消息走「起新一轮」，于是立刻有乐观回显上屏
+    // （而不是被判成排队、悄悄进待发区、再也发不出去）。
+    //
+    // 注意判据不是请求体——起新一轮与排队发出的 body 是**同一个**（`intent` 恒为默认
+    // 的 `'queue'`，分流权在服务端）。真正区分两条分支的是这两件事：只有起新一轮会
+    // 产生乐观回显，也只有它会重开 tail。
+    const streamRequestsBefore = fake.streamRequests.length;
+    fake.queueStream(); // 起新一轮会重开一条 tail，给它备好
+    act(() => {
+      result.current.sendMessage('这条要立刻上屏');
+    });
+    await waitFor(() => {
+      expect(fake.messagePosts).toHaveLength(1);
+    });
+    expect(result.current.pendingUserEchoes).toHaveLength(1);
+    expect(result.current.pendingUserEchoes[0]).toMatchObject({
+      text: '这条要立刻上屏',
+    });
+    await waitFor(() => {
+      expect(fake.streamRequests.length).toBe(streamRequestsBefore + 1);
+    });
+
+    stream.close();
+  });
+
+  it('turnActive:true 让本端进入 streaming（另一个标签页起的轮，本端历史还停在上一轮收尾）', async () => {
+    const fake = setup();
+    const stream = fake.queueStream();
+    const { result } = renderHook(() =>
+      useChatMessages('sess_1', [
+        {
+          seq: 1,
+          message: {
+            id: 'm1',
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'done', state: 'done' }],
+            metadata: { status: 'completed' },
+          },
+        },
+      ] satisfies ChatReplayFrame[]),
+    );
+    expect(result.current.status).toBe('idle');
+
+    act(() => {
+      stream.pushFrame({ turnActive: true });
+    });
+    await waitFor(() => {
+      expect(result.current.status).toBe('streaming');
+    });
+
+    // 内部的 turnInProgressRef 也跟着翻真：此后发消息走排队，而不是又起一轮。
+    act(() => {
+      result.current.sendMessage('排到下一轮');
+    });
+    await waitFor(() => {
+      expect(fake.messagePosts).toHaveLength(1);
+    });
+    expect(fake.messagePosts[0]?.body).toEqual({
+      text: '排到下一轮',
+      intent: 'queue',
+    });
+
+    stream.close();
+  });
+
+  it('turnActive:false 不覆盖 error 态——那条红色的直播中断提示是另一件事', async () => {
+    const fake = setup();
+    const stream = fake.queueStream();
+    fake.setMessagePostStatus(500); // 起轮请求失败 → status 进 error
+    const { result } = renderHook(() => useChatMessages('sess_1', []));
+
+    act(() => {
+      result.current.sendMessage('起不来的一轮');
+    });
+    await waitFor(() => {
+      expect(result.current.status).toBe('error');
+    });
+
+    act(() => {
+      stream.pushFrame({ turnActive: false });
+    });
+    // 「没有轮在跑」本来就是 error 态的题中之意，不该把提示抹成 idle。
+    await waitFor(() => {
+      expect(result.current.error).toBeDefined();
+    });
+    expect(result.current.status).toBe('error');
+
+    stream.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 回放顺序（用户实测：对话流顺序错乱）——一段历史里**同时**有崩溃轮留下的 chunk 行
+// 与后续轮的 message 行时，两者的物化时机差着一个微任务（message 帧同步 upsert，
+// chunk 帧要等 `readUIMessageStream()` 异步吐出）。顺序必须按 **wire 到达先后**定，
+// 不能按「谁先物化完」定。
+// ---------------------------------------------------------------------------
+
+describe('useChatMessages — 混合帧的回放顺序', () => {
+  it('崩溃轮的 chunk 行排在后续轮的 message 行**前面**（按 wire 顺序，不按物化先后）', async () => {
+    const fake = setup();
+    const stream = fake.queueStream();
+
+    // 账本长这样：一轮崩在半路（只留下 chunk 行 + 启动时补的 interrupted 收尾），
+    // 用户之后又发了「继续」，那一轮正常收尾（落成 message 行）。
+    const crashedTurnChunks = textStepChunks({
+      messageId: 'm-crashed',
+      textId: 't1',
+      text: '我正在改 globals.css…',
+    });
+    const initialFrames: ChatReplayFrame[] = [
+      ...crashedTurnChunks.map((chunk, index) => ({ seq: index + 1, chunk })),
+      {
+        seq: crashedTurnChunks.length + 1,
+        chunk: messageMetadataChunk({
+          status: 'interrupted',
+          error: {
+            code: 'aborted',
+            message: 'The server shut down while this turn was running.',
+          },
+        }),
+      },
+      {
+        seq: crashedTurnChunks.length + 2,
+        message: userMessage('m-u', '继续'),
+      },
+      {
+        seq: crashedTurnChunks.length + 3,
+        message: assistantMessage(
+          'm-next',
+          [{ type: 'text', text: '好的，我接着来', state: 'done' }],
+          { status: 'completed' },
+        ),
+      },
+    ];
+
+    const { result } = renderHook(() =>
+      useChatMessages('sess_1', initialFrames),
+    );
+
+    // chunk 的物化是异步的——等它落位。
+    await waitFor(() => {
+      expect(result.current.messages).toHaveLength(3);
+    });
+
+    // 关键断言：崩溃轮在最前，不是被挤到末尾。
+    expect(result.current.messages.map((message) => message.id)).toEqual([
+      'm-crashed',
+      'm-u',
+      'm-next',
+    ]);
+
     stream.close();
   });
 });
@@ -658,6 +845,36 @@ describe('useChatMessages — 待发队列', () => {
     stream.close();
   });
 
+  // 请求 steer 但服务端回 `'queued'`：那一轮还卡在[起轮装配](../../../../../docs/terms.md)
+  // 里，没有 session 可插，服务端只能给它排队（docs/tech/turn-abort.md §3.3）。
+  it('steer 拿回 mode "queued" 时撤掉那条「待注入」回显——它永远等不到注入点', async () => {
+    const fake = setup();
+    fake.setMessagePostMode('queued');
+    const stream = fake.queueStream();
+    const { result } = renderHook(() =>
+      useChatMessages('sess_1', [{ seq: 1, chunk: startChunk('m1') }]),
+    );
+
+    act(() => {
+      result.current.sendMessage('插进这一轮', 'steer');
+    });
+    await waitFor(() => {
+      expect(fake.messagePosts).toHaveLength(1);
+    });
+    // 请求本身照旧带 intent steer（客户端不预判分流，判定权在服务端）。
+    expect(fake.messagePosts[0]?.body).toEqual({
+      text: '插进这一轮',
+      intent: 'steer',
+    });
+
+    // 回显被撤掉，且没有报错——这不是失败，是服务端换了条路。
+    await waitFor(() => {
+      expect(result.current.pendingUserEchoes).toEqual([]);
+    });
+    expect(result.current.error).toBeUndefined();
+    stream.close();
+  });
+
   it('一轮收尾时队列非空：保持 streaming 并重连 tail，接住服务端自动出队起的下一轮', async () => {
     const fake = setup();
     const stream = fake.queueStream();
@@ -683,6 +900,9 @@ describe('useChatMessages — 待发队列', () => {
       { timeout: 3000 },
     );
     expect(result.current.status).toBe('streaming');
+    // 下一轮同样要走一整段起轮装配才出第一帧——AI 侧要有「正在准备…」占位，
+    // 别让时间线静止在上一轮的收尾上（与手动发消息那条路一致）。
+    expect(result.current.awaitingFirstEvent).toBe(true);
 
     // 下一轮的 tail 连上后带来最新快照：那条已经出队了。
     act(() => {

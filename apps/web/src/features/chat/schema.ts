@@ -123,6 +123,23 @@ export const queueFrameSchema = z.object({
 export type QueueFrame = z.infer<typeof queueFrameSchema>;
 
 /**
+ * `POST .../messages` 的响应（`apps/node-server` 的 `StartTurnAckSchema` 的手写镜像，
+ * docs/tech/steer-and-queue.md §4.1）：`mode` 是服务端**实际**怎么处理了这条消息。
+ *
+ * 分流完全由服务端判定、客户端不预判，所以 `mode` 可能与请求的 `intent` 不一致——
+ * 目前有一档会：请求 [插话](../../../../../docs/terms.md) 但那一轮还卡在
+ * [起轮装配](../../../../../docs/terms.md)里时插不进去，服务端只能给它
+ * [排队](../../../../../docs/terms.md)，回 `'queued'`（docs/tech/turn-abort.md §3.3）。
+ * `'aborted'` 则是「这一轮在装配阶段就被用户按停止掐掉了，从没启动」。
+ */
+export const startTurnAckSchema = z.object({
+  ok: z.literal(true),
+  mode: z.enum(['started', 'steered', 'queued', 'aborted']),
+});
+
+export type StartTurnMode = z.infer<typeof startTurnAckSchema>['mode'];
+
+/**
  * `POST .../abort` 的响应（`apps/node-server` 的 `AbortTurnAckSchema` 的手写镜像，
  * docs/tech/turn-abort.md §3.2）：`ok` 只表示[停止](../../../../../docs/terms.md)**已
  * 请求**，「已停止」这个结果照旧走直播流上那条 `status: 'interrupted'` 的
@@ -134,22 +151,41 @@ export const abortTurnAckSchema = z.object({
 });
 
 /**
+ * `{ turnActive }` — [轮状态快照](../../../../../docs/terms.md)（`apps/node-server` 的
+ * `turnStateFrameSchema` 的手写镜像，docs/tech/chat-webapp.md §5.1）。每条
+ * `GET .../stream` 在回放之后、进入直播之前必发一帧，内容是**服务端**此刻对
+ * 「这个会话有没有[轮](../../../../../docs/terms.md)在跑」的权威答案。
+ *
+ * 它取代了本文件曾经唯一的信息源——「回放最后一帧是不是 chunk」那个猜测
+ * （`use-chat-messages.ts` 的 `lastFrameIsChunk`，现在只作 tail 连上前的临时初值）。
+ * 那个猜测在一轮**崩溃**后会长期失准且永不自愈，后果是用户发的消息一律走
+ * [排队](../../../../../docs/terms.md)、没有乐观回显、而且永远等不到
+ * [出队](../../../../../docs/terms.md)。
+ */
+export const turnStateFrameSchema = z.object({ turnActive: z.boolean() });
+
+export type TurnStateFrame = z.infer<typeof turnStateFrameSchema>;
+
+/**
  * Every wire frame this app can ever receive is a `ChunkEnvelope`, a
- * `MessageFrame`, or a `QueueFrame` — told apart structurally (which of
- * `chunk`/`message`/`queue` the object actually carries), same discipline
- * `apps/node-server`'s own `chatReplayFrameSchema` uses (no shared literal
- * discriminant field). 顺序无关紧要：zod v4 里 object schema 缺失的 `z.any()`
- * 字段算校验失败，所以三支互不吞并（服务端同一份注释）。
+ * `MessageFrame`, a `QueueFrame`, or a `TurnStateFrame` — told apart
+ * structurally (which of `chunk`/`message`/`queue`/`turnActive` the object
+ * actually carries), same discipline `apps/node-server`'s own
+ * `chatReplayFrameSchema` uses (no shared literal discriminant field).
+ * 顺序无关紧要：zod v4 里 object schema 缺失的 `z.any()` 字段算校验失败，所以四支
+ * 互不吞并（服务端同一份注释）。
  */
 export const chatReplayFrameSchema = z.union([
   chunkEnvelopeSchema,
   messageFrameSchema,
   queueFrameSchema,
+  turnStateFrameSchema,
 ]);
 
-export type ChatReplayFrame = ChunkEnvelope | MessageFrame | QueueFrame;
+export type ChatReplayFrame =
+  ChunkEnvelope | MessageFrame | QueueFrame | TurnStateFrame;
 
-/** 会进[账本](../../../../../docs/terms.md)物化的两支——`QueueFrame` 不属于账本，由 `use-chat-messages.ts` 在喂给 `MessageLedger` 之前就分流掉。 */
+/** 会进[账本](../../../../../docs/terms.md)物化的两支——`QueueFrame` 与 `TurnStateFrame` 都是状态快照、不属于账本，由 `use-chat-messages.ts` 在喂给 `MessageLedger` 之前就分流掉。 */
 export type LedgerFrame = ChunkEnvelope | MessageFrame;
 
 /** 参数取最宽的 `ChatReplayFrame`（而不是 `LedgerFrame`）——同一个判别在两处都要用：`MessageLedger` 里对已分流的账本帧，和还没分流的原始 wire 帧上。传 `LedgerFrame` 时 false 分支照样收窄到 `ChunkEnvelope`。 */
@@ -161,14 +197,21 @@ export function isQueueFrame(frame: ChatReplayFrame): frame is QueueFrame {
   return 'queue' in frame;
 }
 
+export function isTurnStateFrame(
+  frame: ChatReplayFrame,
+): frame is TurnStateFrame {
+  return 'turnActive' in frame;
+}
+
 /**
- * 一个帧的 `seq`——`QueueFrame` **恒无 seq**（它是[待发队列](../../../../../docs/terms.md)
- * 的状态快照，不是[账本](../../../../../docs/terms.md)事件，所以不落盘、不参与
- * `after=` 续传；docs/tech/steer-and-queue.md §4.3），于是与 ephemeral chunk 在
- * 去重/续传簿记上走同一条「没有 seq」的路径。
+ * 一个帧的 `seq`——`QueueFrame` 与 `TurnStateFrame` **恒无 seq**（都是状态快照，不是
+ * [账本](../../../../../docs/terms.md)事件，所以不落盘、不参与 `after=` 续传；
+ * docs/tech/steer-and-queue.md §4.3、docs/tech/chat-webapp.md §5.1），于是与 ephemeral
+ * chunk 在去重/续传簿记上走同一条「没有 seq」的路径。
  */
 export function frameSeq(frame: ChatReplayFrame): number | undefined {
-  return isQueueFrame(frame) ? undefined : frame.seq;
+  if (isQueueFrame(frame) || isTurnStateFrame(frame)) return undefined;
+  return frame.seq;
 }
 
 /** `GET .../events` response shape — `{ frames: ChatReplayFrame[] }`, not a bare array (docs/tech/chat-webapp.md §2.2 "契约细化"). */

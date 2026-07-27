@@ -20,7 +20,12 @@ import {
   listConversationEvents,
   updateConversation,
 } from '../../src/agent/store.js';
-import { startTurn } from '../../src/agent/turn-runner.js';
+import {
+  __resetShutdownForTests,
+  isTurnActive,
+  shutdownTurns,
+  startTurn,
+} from '../../src/agent/turn-runner.js';
 import { createChatApp } from '../../src/routes/chat.js';
 import type {
   ChatReplayFrame,
@@ -28,6 +33,7 @@ import type {
   ConversationDto,
   MessageFrame,
   QueueFrame,
+  TurnStateFrame,
 } from '../../src/schemas/chat.js';
 import {
   chatReplayFrameSchema,
@@ -44,7 +50,12 @@ import {
   stopOnlyModel,
   toolCallThenStopModel,
 } from '../helpers/mock-model.js';
-import { allToolParts, collectText } from '../helpers/nimbo-chunks.js';
+import {
+  allToolParts,
+  collectText,
+  startChunk,
+} from '../helpers/nimbo-chunks.js';
+import { silentLogger } from '../helpers/silent-logger.js';
 import { createTestDb, seedUser } from '../helpers/test-db.js';
 
 type ChatEnv = { Variables: { userId: string } };
@@ -113,6 +124,13 @@ function messageFrames(frames: ChatReplayFrame[]): MessageFrame[] {
 /** Narrows a frame list to its `QueueFrame`s（[待发队列](docs/terms.md)快照，docs/tech/steer-and-queue.md §4.3）——同样是结构判别（`'queue' in frame`）。 */
 function queueFrames(frames: ChatReplayFrame[]): QueueFrame[] {
   return frames.filter((frame): frame is QueueFrame => 'queue' in frame);
+}
+
+/** Narrows a frame list to its `TurnStateFrame`s（[轮状态快照](docs/terms.md)，docs/tech/chat-webapp.md §5.1）——同样是结构判别（`'turnActive' in frame`）。 */
+function turnStateFrames(frames: ChatReplayFrame[]): TurnStateFrame[] {
+  return frames.filter(
+    (frame): frame is TurnStateFrame => 'turnActive' in frame,
+  );
 }
 
 function chunksOnly(frames: ChatReplayFrame[]): NimboChunk[] {
@@ -338,36 +356,29 @@ function createHoldableSandboxManager(): SandboxManager & {
         mode: 'resume',
       };
     },
-    async touch(conversationId: string): Promise<void> {
+    async ensureLifetime(conversationId: string): Promise<void> {
       touchCalls.push(conversationId);
     },
     release(): void {
-      // no-op — this fake only cares about acquire()'s workspace and touch()'s call log.
-    },
-    startHeartbeat(): () => void {
-      return () => {
-        // no-op — keepalive timing is covered by sandbox-manager's own tests.
-      };
+      // no-op — 这个假件只关心 acquire() 的工作区与 ensureLifetime() 的调用记录。
     },
   };
 }
 
 /**
- * A `SandboxManager` whose first `touch()` call succeeds (so `POST .../messages`'s
- * own acquire+touch still lands normally) but every subsequent call rejects —
- * used to exercise `POST .../approvals/:callId`'s "allow" branch swallowing a
- * `touch()` failure instead of letting it block the decision (routes/chat.ts's
- * own comment on that branch).
+ * 一个 `SandboxManager`：第一次 `ensureLifetime()` 成功（让 `POST .../messages` 自己那次
+ * acquire + 续期正常落地），之后每次都拒绝——用来验证 `POST .../approvals/:callId` 的
+ * 「允许」分支会吞掉续期失败而不是让它挡住裁决（见 routes/chat.ts 该分支的注释）。
  */
 function createSandboxManagerWithFailingTouchAfterFirst(): SandboxManager {
   const base = createFakeSandboxManager();
-  let touchCalls = 0;
+  let calls = 0;
   return {
     acquire: (input) => base.acquire(input),
-    async touch(conversationId: string): Promise<void> {
-      touchCalls += 1;
-      if (touchCalls === 1) {
-        await base.touch(conversationId);
+    async ensureLifetime(conversationId: string): Promise<void> {
+      calls += 1;
+      if (calls === 1) {
+        await base.ensureLifetime(conversationId);
         return;
       }
       throw new Error('sandbox temporarily unavailable');
@@ -375,8 +386,6 @@ function createSandboxManagerWithFailingTouchAfterFirst(): SandboxManager {
     release: (conversationId: string) => {
       base.release(conversationId);
     },
-    startHeartbeat: (conversationId: string) =>
-      base.startHeartbeat(conversationId),
   };
 }
 
@@ -860,7 +869,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
     expect(messageFrames(frames)).toEqual([]);
   });
 
-  it('GET .../stream closes immediately after replay when there is no turn in progress (fresh session, never messaged) — the one frame it still sends is the 待发队列 snapshot', async () => {
+  it('GET .../stream closes immediately after replay when there is no turn in progress (fresh session, never messaged) — 它仍发两帧状态快照：待发队列 + 轮状态', async () => {
     const app = buildApp(() => stopOnlyModel('hi'));
     const created = await createSession(app);
 
@@ -868,10 +877,76 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       `/api/chat/conversations/${created.id}/stream`,
     );
     expect(response.status).toBe(200);
-    // docs/tech/steer-and-queue.md §4.3 时机 1：每条连接在回放之后都发一帧权威队列
-    // 快照，**包括**没有进行中那一轮的这种「连上即关」的连接——前端因此不必为
-    // 「刚起的会话」单独查一次队列。空队列也照发（空≠不发）。
-    expect(await response.text()).toBe('event: queue\ndata: {"queue":[]}\n\n');
+    // 两帧都是「每条连接回放后必发」的状态快照，**包括**没有进行中那一轮的这种
+    // 「连上即关」的连接：
+    //
+    // - 队列快照（docs/tech/steer-and-queue.md §4.3 时机 1）——前端因此不必为「刚起的
+    //   会话」单独查一次队列。空队列也照发（空≠不发）。
+    // - [轮状态快照](docs/terms.md)（docs/tech/chat-webapp.md §5.1）——`turnActive: false`
+    //   正是这条连接要告诉前端的关键事实：别再靠「回放最后一帧是不是 chunk」猜了。
+    expect(await response.text()).toBe(
+      'event: queue\ndata: {"queue":[]}\n\n' +
+        'event: turn-state\ndata: {"turnActive":false}\n\n',
+    );
+  });
+
+  // 崩溃残留的会话（docs/tech/chat-webapp.md §5.1）：账本最后一行是 chunk，但服务端
+  // 那边**没有**轮在跑。这一条钉住的正是「前端不该再靠回放猜」——它靠这一帧知道真相。
+  it('GET .../stream 对崩溃残留的会话报 turnActive:false——即便回放的最后一帧是 chunk', async () => {
+    const app = buildApp(() => stopOnlyModel('unused'));
+    const created = await createSession(app);
+
+    // 模拟一轮崩溃：chunk 行留在账本里（`finalizeTurnPersistence` 从没跑，所以它们
+    // 也从没被 GC），而 `activeTurns` 里什么都没有。
+    const fake = createControllableSession();
+    startTurn({
+      db,
+      conversationId: created.id,
+      session: fake,
+      text: '崩溃前发的',
+      priorMessageCount: 0,
+    });
+    await flushMicrotasks();
+    fake.pushChunk(startChunk('m1'));
+    await flushMicrotasks();
+    fake.fail(new Error('provider exploded')); // driveTurn 的 catch 分支：chunk 行不 GC
+    await flushMicrotasks();
+
+    const rows = listConversationEvents(db, created.id);
+    expect(rows.at(-1)?.kind).toBe('chunk'); // 前提成立：最后一帧确实是 chunk
+    expect(isTurnActive(created.id)).toBe(false); // 但服务端并没有轮在跑
+
+    const response = await app.request(
+      `/api/chat/conversations/${created.id}/stream`,
+    );
+    const frames = parseFrames(await response.text());
+    expect(turnStateFrames(frames).at(-1)?.turnActive).toBe(false);
+  });
+
+  it('GET .../stream 在一轮真在跑时报 turnActive:true（另一个标签页起的轮，本端靠这一帧进入流式态）', async () => {
+    const app = buildApp(() => stopOnlyModel('unused'));
+    const created = await createSession(app);
+    const fake = createControllableSession();
+    startTurn({
+      db,
+      conversationId: created.id,
+      session: fake,
+      text: 'first',
+      priorMessageCount: 0,
+    });
+    await flushMicrotasks();
+
+    const response = await app.request(
+      `/api/chat/conversations/${created.id}/stream`,
+    );
+    const reader = createIncrementalReader(response);
+    const seen = await reader.readUntil(
+      (frames) => turnStateFrames(frames).length > 0,
+    );
+    expect(turnStateFrames(seen).at(-1)?.turnActive).toBe(true);
+
+    fake.finish({ finalResponse: '', usage: {} });
+    await reader.drainToClose();
   });
 
   it('GET .../stream called while a turn is active replays the turn-start user MessageFrame (already persisted before the connection opened) plus the live chunk feed; a later GET .../stream (after the turn has finished) instead replays all its messages as MessageFrames, the now-GC’d chunk frames gone', async () => {
@@ -1189,7 +1264,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
 
     // acquire() ran twice total (session creation + this message), touch() once.
     expect(sandboxManager.acquireCalls).toHaveLength(2);
-    expect(sandboxManager.touchCalls).toEqual([created.id]);
+    expect(sandboxManager.ensureLifetimeCalls).toEqual([created.id]);
 
     // Now GET .../events (post-hoc): the durable chunk rows this turn wrote
     // have all been GC'd, replaced by 2 message rows.
@@ -1699,11 +1774,10 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       ).toBeDefined();
     });
 
-    it('一轮跑起来会开保活心跳，轮结束时停掉（docs/tech/sandbox-provider.md §5.1）', async () => {
+    it('一轮跑完只在起轮时补一次存活时长——轮内保活归适配器了（docs/tech/sandbox-keepalive.md）', async () => {
       const app = buildApp(() => stopOnlyModel('done'));
       const created = await createSession(app);
-
-      expect(sandboxManager.heartbeats).toHaveLength(0);
+      const before = sandboxManager.ensureLifetimeCalls.length;
 
       await app.request(`/api/chat/conversations/${created.id}/messages`, {
         method: 'POST',
@@ -1715,11 +1789,10 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       );
       await stream.text(); // 直播流关闭 = 这一轮收尾完毕
 
-      expect(sandboxManager.heartbeats).toHaveLength(1);
-      // 停掉是硬要求：不停的话每个跑过的会话都会永远留着一个保活定时器，
-      // 空闲自动暂停整套机制失效（还持续烧钱）。
-      expect(sandboxManager.heartbeats[0]?.stopped).toBe(true);
-      expect(sandboxManager.heartbeats[0]?.conversationId).toBe(created.id);
+      // 起轮那一次仍在（轮真正开跑前那段归宿主）；轮内的续期不再经过 manager，
+      // 由 e2bWorkspace/vercelWorkspace 自己按活动信号与 exec 状态做。
+      const calls = sandboxManager.ensureLifetimeCalls.slice(before);
+      expect(calls).toEqual([created.id]);
     });
 
     it('分段授权：allow-session 一条复合命令后，「其中一段」直接放行，「含新段」仍弹审批（docs/features/approval-grant-split.md）', async () => {
@@ -2187,6 +2260,30 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       return ConversationSchema.parse(await response.json()).queuedMessages;
     }
 
+    // 进程正在[优雅关闭](docs/terms.md)时不接新的轮（docs/tech/graceful-shutdown.md §3.3）。
+    // 关闭闸门是模块级状态，所以这条用例自己负责复位，否则会连累后面全部用例。
+    it('优雅关闭期间 POST .../messages 报 503（可恢复的拒绝，不是 409）', async () => {
+      const app = buildApp(() => stopOnlyModel('hi'));
+      const created = await createSession(app);
+
+      await shutdownTurns({ timeoutMs: 1000, logger: silentLogger });
+      try {
+        const response = await postMessage(app, created.id, {
+          text: '重启期间',
+        });
+        expect(response.status).toBe(503);
+        expect(await response.json()).toEqual({
+          error: '服务正在重启，请稍后重试',
+        });
+      } finally {
+        __resetShutdownForTests();
+      }
+
+      // 复位后照常起轮——闸门是关闭流程的一部分，不是永久拒绝。
+      const after = await postMessage(app, created.id, { text: '重启之后' });
+      expect(after.status).toBe(202);
+    });
+
     it('默认 intent：有进行中的一轮时消息入队（202 "queued"），当前轮不受影响，队列在会话详情里可见', async () => {
       const app = buildApp(() => stopOnlyModel('hi'));
       const created = await createSession(app);
@@ -2551,6 +2648,185 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
 
         stuck.finish({ finalResponse: '', usage: {} });
         await reader.drainToClose();
+      });
+
+      // ---------------------------------------------------------------------
+      // 起轮装配窗口里的停止（docs/tech/turn-abort.md §3.3）——用户实测报的
+      // 「发完消息立刻点停止，没有任何反应」。窗口靠 `nextAcquireGate` 撑开：
+      // `acquire()` 挂住 = 这一轮正卡在装配里，与真实的冷启动沙盒同形。
+      // ---------------------------------------------------------------------
+
+      describe('起轮装配窗口（docs/tech/turn-abort.md §3.3）', () => {
+        /** 起一轮并把它卡在 `acquire()` 里；返回「放行装配」的开关与那个还没 await 的 POST。 */
+        async function startTurnHeldInAssembly(
+          app: ReturnType<typeof buildApp>,
+          conversationId: string,
+          body: { text: string; intent?: 'queue' | 'steer' } = {
+            text: '发错了',
+          },
+        ): Promise<{ releaseAssembly: () => void; posted: Promise<Response> }> {
+          let releaseAssembly = (): void => undefined;
+          sandboxManager.nextAcquireGate = new Promise<void>((resolve) => {
+            releaseAssembly = resolve;
+          });
+          const acquiresBefore = sandboxManager.acquireCalls.length;
+          const posted = postMessage(app, conversationId, body);
+          // 装配确实进去了（`acquire` 已被调用、正挂在 gate 上）才算窗口张开。
+          await waitFor(() =>
+            sandboxManager.acquireCalls.length > acquiresBefore ?
+              true
+            : undefined,
+          );
+          return { releaseAssembly, posted };
+        }
+
+        it('装配窗口里按停止：这一轮从没启动，POST .../messages 回 202 mode "aborted"', async () => {
+          const app = buildApp(() => stopOnlyModel('这句话不该被生成'));
+          const created = await createSession(app);
+          const { releaseAssembly, posted } = await startTurnHeldInAssembly(
+            app,
+            created.id,
+          );
+
+          // 用户此刻按下停止——以前这里是 409、界面毫无反应，这一轮照样跑起来。
+          const abortResponse = await postAbort(app, created.id);
+          expect(abortResponse.status).toBe(200);
+
+          releaseAssembly();
+          const postResponse = await posted;
+          expect(postResponse.status).toBe(202);
+          expect(await postResponse.json()).toEqual({
+            ok: true,
+            mode: 'aborted',
+          });
+
+          await flushMicrotasks();
+          // 「从没启动」的证据：账本里只有用户那条消息，没有任何 assistant 内容。
+          // （不看 `resolveModel` 的调用数：它在装配的第一行就被调过一次，那只是
+          // 「解析出一个模型对象」，不是一次模型调用。）
+          expect(persistedMessages(db, created.id).map((m) => m.role)).toEqual([
+            'user',
+          ]);
+
+          // 占位也确实撤干净了：紧接着发下一条消息能正常起新一轮，会话没被锁死。
+          const next = await postMessage(app, created.id, { text: '重新发' });
+          expect(next.status).toBe(202);
+          expect(await next.json()).toEqual({ ok: true, mode: 'started' });
+        });
+
+        it('装配窗口里按停止：时间线上留着用户那条消息 + 一条 interrupted 收尾（与跑到中途按停止长得一样）', async () => {
+          const app = buildApp(() => stopOnlyModel('unused'));
+          const created = await createSession(app);
+          const { releaseAssembly, posted } = await startTurnHeldInAssembly(
+            app,
+            created.id,
+            { text: '发错了，撤回' },
+          );
+
+          await postAbort(app, created.id);
+          releaseAssembly();
+          await posted;
+          await flushMicrotasks();
+
+          // 落账本的两帧：用户原话 + `status: 'interrupted'` 的收尾。
+          expect(persistedUserTexts(db, created.id)).toEqual(['发错了，撤回']);
+          const chunkRow = listConversationEvents(db, created.id)
+            .filter((row) => row.kind === 'chunk')
+            .at(-1);
+          expect(chunkRow).toBeDefined();
+          // 与 `persistedMessages` 同一姿态：把行还原成它代表的那个信封再过 zod，
+          // `JSON.parse` 的 any 不落进具名变量。
+          const frame = chatReplayFrameSchema.parse({
+            seq: chunkRow?.seq,
+            chunk: JSON.parse(chunkRow?.payloadJson ?? '{}'),
+          });
+          expect('chunk' in frame && frame.chunk.type).toBe('message-metadata');
+          expect(
+            'chunk' in frame && frame.chunk.type === 'message-metadata' ?
+              frame.chunk.messageMetadata
+            : undefined,
+          ).toMatchObject({
+            status: 'interrupted',
+            error: { code: 'aborted' },
+          });
+        });
+
+        it('装配失败（沙盒起不来）后下一条消息仍能起轮——占位必须被撤掉，否则会话永久锁死', async () => {
+          let acquireCalls = 0;
+          const flakySandboxManager: SandboxManager = {
+            ...sandboxManager,
+            async acquire(input: AcquireInput): Promise<AcquiredSandbox> {
+              acquireCalls += 1;
+              // 建会话那次（第一次）要成功，之后第一条消息那次失败。
+              if (acquireCalls === 2) {
+                throw new Error('sandbox unavailable');
+              }
+              return sandboxManager.acquire(input);
+            },
+          };
+          const app = createChatApp({
+            db,
+            sandboxManager: flakySandboxManager,
+            resolveModel: () => stopOnlyModel('hi'),
+            authMiddleware: fakeAuthMiddleware(USER_ID),
+          });
+          const created = await createSession(app);
+
+          const failed = await postMessage(app, created.id, { text: '第一次' });
+          expect(failed.status).toBe(500);
+
+          // 关键回归：装配失败没有把这个会话卡在「一直有轮在跑」的状态里。
+          const retried = await postMessage(app, created.id, {
+            text: '第二次',
+          });
+          expect(retried.status).toBe(202);
+          expect(await retried.json()).toEqual({ ok: true, mode: 'started' });
+        });
+
+        it('装配窗口里再发一条消息：入队（不再触发第二次完整装配）', async () => {
+          const app = buildApp(() => stopOnlyModel('hi'));
+          const created = await createSession(app);
+          const acquiresAfterCreate = sandboxManager.acquireCalls.length;
+          const { releaseAssembly, posted } = await startTurnHeldInAssembly(
+            app,
+            created.id,
+            { text: '第一件事' },
+          );
+
+          const second = await postMessage(app, created.id, {
+            text: '第二件事',
+          });
+          expect(second.status).toBe(202);
+          expect(await second.json()).toEqual({ ok: true, mode: 'queued' });
+          // 第二条没有自己再走一遍装配：acquire 仍然只多了第一条那一次。
+          expect(sandboxManager.acquireCalls.length).toBe(
+            acquiresAfterCreate + 1,
+          );
+          expect(await readQueue(app, created.id)).toHaveLength(1);
+
+          releaseAssembly();
+          await posted;
+        });
+
+        it('装配窗口里插话：转成排队（那一轮还没有 session 可插），不报 409', async () => {
+          const app = buildApp(() => stopOnlyModel('hi'));
+          const created = await createSession(app);
+          const { releaseAssembly, posted } = await startTurnHeldInAssembly(
+            app,
+            created.id,
+            { text: '第一件事' },
+          );
+
+          const steered = await postMessage(app, created.id, {
+            text: '顺便也做这个',
+            intent: 'steer',
+          });
+          expect(steered.status).toBe(202);
+          expect(await steered.json()).toEqual({ ok: true, mode: 'queued' });
+
+          releaseAssembly();
+          await posted;
+        });
       });
     });
   });

@@ -7,6 +7,7 @@ import { QueuedMessages } from '@/features/chat/components/queued-messages';
 import { TimelineView } from '@/features/chat/components/timeline-view';
 import type { ChatReplayFrame, Conversation } from '@/features/chat/schema';
 import { useChatMessages } from '@/features/chat/use-chat-messages';
+import { usePresence } from '@/features/chat/use-presence';
 import { ChatLayout } from '@/layouts/chat-layout';
 
 /** 回放到达前的骨架：直接摆成轨道的样子，历史落位时不会跳版。 */
@@ -32,6 +33,11 @@ function HistoryLoadingSkeleton() {
 }
 
 function ConversationContent({ conversationId }: { conversationId: string }) {
+  // [在场](../../../docs/terms.md)上报（docs/tech/push-notification.md §5.2）：人正
+  // 盯着这条会话时，服务端不推送本会话的通知——卡片已经在眼前了。挂在这里而不是
+  // 更内层，是因为它只需要 conversationId，且历史还在加载时人就已经"在看"了。
+  usePresence(conversationId);
+
   const [conversation, setConversation] = useState<Conversation | undefined>(
     undefined,
   );
@@ -130,6 +136,12 @@ function ConversationTimeline({
           pendingUserEchoes={chat.pendingUserEchoes}
           submittingCallIds={chat.submittingCallIds}
           locallyExpiredCallIds={chat.locallyExpiredCallIds}
+          // 轮一结束，还挂着的审批/提问卡片就已经失效了（服务端的挂起项被结掉了）
+          // ——界面立刻如实画成「已失效」，而不是等用户点下去吃 404 才翻。
+          turnInProgress={chat.status === 'streaming'}
+          // 消息发出到这一轮第一帧到达之间（起轮装配，冷启动可达数十秒），AI 侧摆一个
+          // 「正在准备…」占位——否则用户只看到自己那条消息孤零零地挂着。
+          awaitingFirstEvent={chat.awaitingFirstEvent}
           onSubmitApproval={chat.submitApproval}
           onSubmitAnswer={chat.submitAnswer}
           conversationId={conversationId}

@@ -6,9 +6,14 @@ export { getApiChatConversationsIdEvents } from './getApiChatConversationsIdEven
 export { getApiChatConversationsIdStream } from './getApiChatConversationsIdStream.ts';
 export { getApiChatConversationsIdTurnsTurnTelemetry } from './getApiChatConversationsIdTurnsTurnTelemetry.ts';
 export { getApiNotes } from './getApiNotes.ts';
+export { getApiPushConfig } from './getApiPushConfig.ts';
 export { postApiChatConversations } from './postApiChatConversations.ts';
 export { postApiChatConversationsIdAbort } from './postApiChatConversationsIdAbort.ts';
 export { postApiChatConversationsIdApprovalsCallid } from './postApiChatConversationsIdApprovalsCallid.ts';
 export { postApiChatConversationsIdMessages } from './postApiChatConversationsIdMessages.ts';
+export { postApiChatConversationsIdPresence } from './postApiChatConversationsIdPresence.ts';
 export { postApiChatConversationsIdQuestionsCallid } from './postApiChatConversationsIdQuestionsCallid.ts';
 export { postApiNotes } from './postApiNotes.ts';
+export { postApiPushSubscriptions } from './postApiPushSubscriptions.ts';
+export { postApiPushTest } from './postApiPushTest.ts';
+export { postApiPushUnsubscribe } from './postApiPushUnsubscribe.ts';

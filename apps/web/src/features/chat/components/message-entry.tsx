@@ -55,6 +55,24 @@ export interface MessageEntryProps {
   message: NimboUIMessage;
   submittingCallIds: ReadonlySet<string>;
   locallyExpiredCallIds: ReadonlySet<string>;
+  /**
+   * **这条消息所属的那一轮**是否还活着——决定它里面还没落定的
+   * [审批卡片](../../../../../docs/terms.md)与提问卡片该不该显示成「已失效」。
+   *
+   * 为什么需要它：一张卡片处于「待审批」态，只有**它自己那一轮还在跑**时才可能真的还
+   * 在等人。轮一结束（正常收尾、被[停止](../../../../../docs/terms.md)、服务重启中断），
+   * 服务端的挂起项就已经被结掉了，再点任何按钮都只会拿到 404。此前界面要等用户**点下去**、
+   * 吃了 404 才翻成「已失效」（`locallyExpiredCallIds`），在那之前一直画着三个可点的
+   * 按钮——等于骗人。
+   *
+   * 注意是**这条消息所属的轮**，不是「会话里有没有轮在跑」：后者会让上一轮那张早该失效
+   * 的卡片在用户发出下一条消息、新一轮起来时**复活**成可点的「待审批」。合成这个布尔的
+   * 逻辑在 `TimelineView`（`settledMessageIds`）。
+   *
+   * 缺省 `true`（「假设还活着」）：[设计工作台](../../../../../docs/terms.md)与只关心
+   * 卡片长相的测试不传它时，卡片照常显示 pending 态。
+   */
+  turnLive?: boolean;
   onSubmitApproval: (
     callId: string,
     behavior: 'allow' | 'allow-session' | 'deny',
@@ -68,10 +86,13 @@ export function MessageEntry({
   message,
   submittingCallIds,
   locallyExpiredCallIds,
+  turnLive = true,
   onSubmitApproval,
   onSubmitAnswer,
   conversationId,
 }: MessageEntryProps) {
+  /** 这条消息所属的轮已结束 = 它里面还没落定的卡片都已失效（见 `turnLive` 的注释）。 */
+  const staleByTurnEnd = !turnLive;
   if (message.role === 'system') return null; // defensive — nimbo never pushes a system message onto the ledger (the system prompt is passed to streamText() separately, loop.ts's runOneStep)
 
   if (message.role === 'user') {
@@ -141,7 +162,13 @@ export function MessageEntry({
                       key={key}
                       part={questionPart}
                       submitting={submittingCallIds.has(part.toolCallId)}
-                      expired={locallyExpiredCallIds.has(part.toolCallId)}
+                      // 只有**还在等**的那一档（`input-available`）才叠加轮结束的判定：
+                      // `output-available` 是已回答，而卡片里 `expired` 的优先级高于
+                      // `answered`，叠上去会把一条已经答完的问题画成「已失效」。
+                      expired={
+                        locallyExpiredCallIds.has(part.toolCallId) ||
+                        (part.state === 'input-available' && staleByTurnEnd)
+                      }
                       onAnswer={(answer) => {
                         onSubmitAnswer(part.toolCallId, answer);
                       }}
@@ -158,7 +185,12 @@ export function MessageEntry({
                     key={key}
                     part={approvalPart}
                     submitting={submittingCallIds.has(part.toolCallId)}
-                    expired={locallyExpiredCallIds.has(part.toolCallId)}
+                    // `approval-requested` 本身就是「还在等人」，所以直接叠加：轮结束了
+                    // 就没人会来处理它了（服务端的挂起项早已被结掉）。
+                    expired={
+                      locallyExpiredCallIds.has(part.toolCallId) ||
+                      staleByTurnEnd
+                    }
                     onDecide={(behavior) => {
                       onSubmitApproval(part.toolCallId, behavior);
                     }}

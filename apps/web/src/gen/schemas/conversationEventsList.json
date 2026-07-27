@@ -36,6 +36,12 @@
             },
             "required": ["queue"],
             "x-readme-ref-name": "ChatQueueFrame"
+          },
+          {
+            "type": "object",
+            "properties": { "turnActive": { "type": "boolean" } },
+            "required": ["turnActive"],
+            "x-readme-ref-name": "ChatTurnStateFrame"
           }
         ]
       }

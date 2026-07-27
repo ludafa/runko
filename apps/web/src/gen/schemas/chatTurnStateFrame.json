@@ -1,0 +1,6 @@
+{
+  "type": "object",
+  "properties": { "turnActive": { "type": "boolean" } },
+  "required": ["turnActive"],
+  "x-readme-ref-name": "ChatTurnStateFrame"
+}

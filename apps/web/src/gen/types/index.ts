@@ -4,6 +4,7 @@ export type { ApprovalAck, ApprovalAckOkEnumKey } from './ApprovalAck.ts';
 export type { ChatChunkEnvelope } from './ChatChunkEnvelope.ts';
 export type { ChatMessageFrame } from './ChatMessageFrame.ts';
 export type { ChatQueueFrame } from './ChatQueueFrame.ts';
+export type { ChatTurnStateFrame } from './ChatTurnStateFrame.ts';
 export type {
   Conversation,
   ConversationProviderEnumKey,
@@ -77,6 +78,12 @@ export type {
   GetApiNotesQuery,
   GetApiNotesQueryResponse,
 } from './GetApiNotes.ts';
+export type {
+  GetApiPushConfig200,
+  GetApiPushConfig401,
+  GetApiPushConfigQuery,
+  GetApiPushConfigQueryResponse,
+} from './GetApiPushConfig.ts';
 export type { Note } from './Note.ts';
 export type { PostAnswerInput } from './PostAnswerInput.ts';
 export type {
@@ -111,11 +118,21 @@ export type {
   PostApiChatConversationsIdMessages404,
   PostApiChatConversationsIdMessages409,
   PostApiChatConversationsIdMessages500,
+  PostApiChatConversationsIdMessages503,
   PostApiChatConversationsIdMessagesMutation,
   PostApiChatConversationsIdMessagesMutationRequest,
   PostApiChatConversationsIdMessagesMutationResponse,
   PostApiChatConversationsIdMessagesPathParams,
 } from './PostApiChatConversationsIdMessages.ts';
+export type {
+  PostApiChatConversationsIdPresence200,
+  PostApiChatConversationsIdPresence401,
+  PostApiChatConversationsIdPresence404,
+  PostApiChatConversationsIdPresenceMutation,
+  PostApiChatConversationsIdPresenceMutationRequest,
+  PostApiChatConversationsIdPresenceMutationResponse,
+  PostApiChatConversationsIdPresencePathParams,
+} from './PostApiChatConversationsIdPresence.ts';
 export type {
   PostApiChatConversationsIdQuestionsCallid200,
   PostApiChatConversationsIdQuestionsCallid401,
@@ -133,6 +150,28 @@ export type {
   PostApiNotesMutationResponse,
 } from './PostApiNotes.ts';
 export type {
+  PostApiPushSubscriptions200,
+  PostApiPushSubscriptions401,
+  PostApiPushSubscriptions503,
+  PostApiPushSubscriptionsMutation,
+  PostApiPushSubscriptionsMutationRequest,
+  PostApiPushSubscriptionsMutationResponse,
+} from './PostApiPushSubscriptions.ts';
+export type {
+  PostApiPushTest200,
+  PostApiPushTest401,
+  PostApiPushTest503,
+  PostApiPushTestMutation,
+  PostApiPushTestMutationResponse,
+} from './PostApiPushTest.ts';
+export type {
+  PostApiPushUnsubscribe200,
+  PostApiPushUnsubscribe401,
+  PostApiPushUnsubscribeMutation,
+  PostApiPushUnsubscribeMutationRequest,
+  PostApiPushUnsubscribeMutationResponse,
+} from './PostApiPushUnsubscribe.ts';
+export type {
   PostApprovalInput,
   PostApprovalInputBehaviorEnumKey,
 } from './PostApprovalInput.ts';
@@ -140,6 +179,11 @@ export type {
   PostChatMessageInput,
   PostChatMessageInputIntentEnumKey,
 } from './PostChatMessageInput.ts';
+export type { PresenceInput } from './PresenceInput.ts';
+export type { PushAck, PushAckOkEnumKey } from './PushAck.ts';
+export type { PushConfig } from './PushConfig.ts';
+export type { PushSubscribeInput } from './PushSubscribeInput.ts';
+export type { PushUnsubscribeInput } from './PushUnsubscribeInput.ts';
 export type { QueuedMessage } from './QueuedMessage.ts';
 export type { SkillSummary } from './SkillSummary.ts';
 export type {
@@ -156,5 +200,6 @@ export { conversationStatusEnum } from './Conversation.ts';
 export { createConversationInputProviderEnum } from './CreateConversationInput.ts';
 export { postApprovalInputBehaviorEnum } from './PostApprovalInput.ts';
 export { postChatMessageInputIntentEnum } from './PostChatMessageInput.ts';
+export { pushAckOkEnum } from './PushAck.ts';
 export { startTurnAckModeEnum } from './StartTurnAck.ts';
 export { startTurnAckOkEnum } from './StartTurnAck.ts';

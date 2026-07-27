@@ -6,7 +6,7 @@ import type {
   NimboUIMessage,
   SessionState,
 } from '@nimbo/core';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ConversationEventRow, Db } from '../../src/agent/store.js';
 import {
@@ -18,12 +18,19 @@ import {
 } from '../../src/agent/store.js';
 import type { TurnDrivenSession } from '../../src/agent/turn-runner.js';
 import {
+  __resetShutdownForTests,
+  ABORT_REASON_SHUTDOWN,
   abortTurn,
+  isShuttingDown,
   isTurnActive,
+  isTurnPreparing,
+  releaseTurn,
   requestReview,
   requestUserAnswer,
+  reserveTurn,
   resolveReview,
   resolveUserAnswer,
+  shutdownTurns,
   startTurn,
   steerTurn,
   subscribeTurn,
@@ -67,6 +74,7 @@ import {
   toolOutputErrorChunk,
   userTextMessage,
 } from '../helpers/nimbo-chunks.js';
+import { silentLogger } from '../helpers/silent-logger.js';
 import { createTestDb, seedUser } from '../helpers/test-db.js';
 
 // `createControllableSession`'s internal wake/queue is driven purely by
@@ -1712,7 +1720,7 @@ describe('agent/turn-runner', () => {
       );
       await flushMicrotasks();
 
-      abortTurn(conversationId, logger);
+      abortTurn(conversationId, undefined, logger);
 
       const abortLine = lines.find((line) =>
         line.includes('turn abort requested'),
@@ -1723,6 +1731,295 @@ describe('agent/turn-runner', () => {
 
       fake.finish({ finalResponse: '', usage: {} });
       await flushMicrotasks();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 起轮占位（docs/tech/turn-abort.md §3.3）——`reserveTurn`/`releaseTurn`/
+  // `isTurnPreparing` + `startTurn` 的就地升级。这一组钉的是「刚发出就点停止毫无
+  // 反应」那个 bug 的修法：让一轮从[起轮装配](../../../../docs/terms.md)的第一行
+  // 起就算存在。
+  // ---------------------------------------------------------------------------
+
+  describe('reserveTurn / releaseTurn（起轮占位）', () => {
+    it('占位后这一轮立刻就算「存在」：isTurnActive 与 isTurnPreparing 同时为真，第二次占位被拒', () => {
+      expect(isTurnActive(conversationId)).toBe(false);
+
+      const reserved = reserveTurn(conversationId);
+      expect(reserved.ok).toBe(true);
+      expect(isTurnActive(conversationId)).toBe(true);
+      expect(isTurnPreparing(conversationId)).toBe(true);
+      expect(reserved.ok && reserved.reservation.wasAborted()).toBe(false);
+
+      // 同一个会话不能有两个占位——报 `busy`（路由转 409），与关闭期间的
+      // `shutting_down`（503）分开，见 docs/tech/graceful-shutdown.md §3.3。
+      expect(reserveTurn(conversationId)).toEqual({
+        ok: false,
+        reason: 'busy',
+      });
+
+      if (reserved.ok) {
+        releaseTurn(db, reserved.reservation, 'hi');
+      }
+      expect(isTurnActive(conversationId)).toBe(false);
+    });
+
+    it('没被停止就撤销：不落任何一行（这一轮什么都没发生过），但一定发 done', () => {
+      const reserved = reserveTurn(conversationId);
+      expect(reserved.ok).toBe(true);
+      if (!reserved.ok) return;
+      const { reservation } = reserved;
+
+      // 占位期就能被订阅（isTurnActive 为真 → tail 会挂着等 done）。
+      let doneSeen = false;
+      const unsubscribe = subscribeTurn(
+        conversationId,
+        () => undefined,
+        () => {
+          doneSeen = true;
+        },
+      );
+
+      releaseTurn(db, reservation, '装配失败了');
+
+      expect(doneSeen).toBe(true); // 不发 done 就把那条 tail 挂到超时
+      expect(listConversationEvents(db, conversationId)).toEqual([]);
+      unsubscribe();
+    });
+
+    it('装配窗口里被停止：abortTurn 停得住占位，releaseTurn 补上「用户消息 + interrupted」两帧', () => {
+      const reserved = reserveTurn(conversationId);
+      expect(reserved.ok).toBe(true);
+      if (!reserved.ok) return;
+      const { reservation } = reserved;
+
+      const frames: ChatReplayFrame[] = [];
+      const unsubscribe = subscribeTurn(
+        conversationId,
+        (frame) => frames.push(frame),
+        () => undefined,
+      );
+
+      // 用户按停止——这一轮还没启动，但它已经「存在」，所以停得住。
+      expect(abortTurn(conversationId)).toBe(true);
+      expect(reservation.wasAborted()).toBe(true);
+      expect(reservation.signal.aborted).toBe(true);
+
+      releaseTurn(db, reservation, '发错了');
+
+      // 直播流上依次是：用户那条消息、一条独立的 interrupted 收尾。
+      const messages = frames.filter(
+        (frame): frame is MessageFrame => 'message' in frame,
+      );
+      expect(messages).toHaveLength(1);
+      expect(collectText(messages[0]?.message)).toBe('发错了');
+
+      const chunks = frames.filter(
+        (frame): frame is ChunkEnvelope => 'chunk' in frame,
+      );
+      expect(chunks).toHaveLength(1);
+      const metadata = chunks[0]?.chunk;
+      expect(metadata?.type).toBe('message-metadata');
+      expect(
+        metadata?.type === 'message-metadata' ?
+          metadata.messageMetadata
+        : undefined,
+      ).toMatchObject({
+        status: 'interrupted',
+        error: { code: 'aborted' },
+      });
+
+      // 两帧都是持久帧——刷新页面靠回放看到「已停止」，不靠这条连接。
+      expect(
+        listConversationEvents(db, conversationId).map((row) => row.kind),
+      ).toEqual(['message', 'chunk']);
+      unsubscribe();
+    });
+
+    it('startTurn 就地升级占位：phase 转 running、复用占位期那个 abortController（装配期间按的停止对升级后的轮依然有效）', async () => {
+      const reserved = reserveTurn(conversationId);
+      expect(reserved.ok).toBe(true);
+      if (!reserved.ok) return;
+      const { reservation } = reserved;
+
+      // 装配期间就按了停止，但（比如检查点之间的窄缝）这一轮还是启动了。
+      abortTurn(conversationId);
+
+      const fake = createControllableSession();
+      const result = startTurn({
+        db,
+        conversationId,
+        session: fake,
+        text: 'hi',
+        priorMessageCount: 0,
+        reservation,
+      });
+      expect(result.started).toBe(true);
+      expect(isTurnPreparing(conversationId)).toBe(false); // 已升级成 running
+      await flushMicrotasks();
+
+      // core 收到的正是占位期那个已经 abort 的 signal——安全网成立：
+      // 即便漏过了检查点，这一轮也会在第一个 step 边界就收尾。
+      expect(fake.turnSignal?.aborted).toBe(true);
+
+      fake.finish({ finalResponse: '', usage: {} });
+      await flushMicrotasks();
+      expect(isTurnActive(conversationId)).toBe(false);
+    });
+
+    it('交棒之后 releaseTurn 是无操作：绝不能把一轮正在跑的轮从登记里抹掉', async () => {
+      const reserved = reserveTurn(conversationId);
+      expect(reserved.ok).toBe(true);
+      if (!reserved.ok) return;
+      const { reservation } = reserved;
+
+      const fake = createControllableSession();
+      startTurn({
+        db,
+        conversationId,
+        session: fake,
+        text: 'hi',
+        priorMessageCount: 0,
+        reservation,
+      });
+      await flushMicrotasks();
+
+      // `launchTurn` 的 `finally` 即便再调一次（handedOff 判断失灵的假想情况），
+      // 这一轮也必须还在跑。
+      releaseTurn(db, reservation, 'hi');
+      expect(isTurnActive(conversationId)).toBe(true);
+
+      fake.finish({ finalResponse: '', usage: {} });
+      await flushMicrotasks();
+      expect(isTurnActive(conversationId)).toBe(false);
+    });
+
+    it('steerTurn 对装配中的轮报 false（还没有 session 可插）——路由据此改走排队', () => {
+      const reserved = reserveTurn(conversationId);
+      expect(reserved.ok).toBe(true);
+
+      expect(steerTurn(conversationId, '插一句')).toBe(false);
+
+      if (reserved.ok) releaseTurn(db, reserved.reservation, 'hi');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 优雅关闭（docs/tech/graceful-shutdown.md §3.1）——`shutdownTurns`。
+  //
+  // 这一组的用例会把模块级的关闭闸门置真，而 `activeTurns`/`shuttingDown` 都是模块级
+  // 状态、跨用例存活，所以**每条都在最后把闸门复位**（`__resetShutdownForTests`）——
+  // 否则后面所有用例的 `reserveTurn` 都会被拒，整个文件连锁失败。
+  // ---------------------------------------------------------------------------
+
+  describe('shutdownTurns（优雅关闭）', () => {
+    afterEach(() => {
+      __resetShutdownForTests();
+    });
+
+    it('空闲时立刻返回，不产生任何收尾帧（成功标准 8）', async () => {
+      const result = await shutdownTurns({
+        timeoutMs: 1000,
+        logger: silentLogger,
+      });
+
+      expect(result).toEqual({ aborted: 0, settled: true, pending: 0 });
+      expect(listConversationEvents(db, conversationId)).toEqual([]);
+    });
+
+    it('中止全部进行中的轮并等到它们收尾', async () => {
+      const fake = createControllableSession();
+      startTurn({
+        db,
+        conversationId,
+        session: fake,
+        text: 'hi',
+        priorMessageCount: 0,
+      });
+      await flushMicrotasks();
+
+      // 关闭发起后，被中止的那一轮按 core 的优雅收尾方式结束（真 loop 里这是 abort
+      // 信号在 step 边界生效；这里由 fake 扮演同一件事）。
+      const shutdownPromise = shutdownTurns({
+        timeoutMs: 2000,
+        logger: silentLogger,
+      });
+      await flushMicrotasks();
+      expect(fake.turnSignal?.aborted).toBe(true);
+      fake.finish({ finalResponse: '', usage: {} });
+
+      expect(await shutdownPromise).toEqual({
+        aborted: 1,
+        settled: true,
+        pending: 0,
+      });
+      expect(isTurnActive(conversationId)).toBe(false);
+    });
+
+    it('中止理由透传到 core 的 signal——界面靠它区分「服务重启」与「用户按了停止」', async () => {
+      const fake = createControllableSession();
+      startTurn({
+        db,
+        conversationId,
+        session: fake,
+        text: 'hi',
+        priorMessageCount: 0,
+      });
+      await flushMicrotasks();
+
+      const shutdownPromise = shutdownTurns({
+        timeoutMs: 2000,
+        logger: silentLogger,
+      });
+      await flushMicrotasks();
+
+      // core 的 `abortMessage` 读的就是这个 reason，把它变成收尾 `NimboError.message`。
+      const { reason } = fake.turnSignal ?? {};
+      expect(reason).toBeInstanceOf(Error);
+      expect(reason instanceof Error ? reason.message : undefined).toBe(
+        ABORT_REASON_SHUTDOWN,
+      );
+
+      fake.finish({ finalResponse: '', usage: {} });
+      await shutdownPromise;
+    });
+
+    it('收尾卡住时撞超时并如实报告（那些轮成了孤儿轮，交给下次启动补收尾）', async () => {
+      const fake = createControllableSession();
+      startTurn({
+        db,
+        conversationId,
+        session: fake,
+        text: 'hi',
+        priorMessageCount: 0,
+      });
+      await flushMicrotasks();
+
+      // 故意不 finish：模拟一轮卡在收尾里（真实情形是某个工具吃掉了中断信号）。
+      const result = await shutdownTurns({
+        timeoutMs: 20,
+        logger: silentLogger,
+      });
+
+      expect(result.settled).toBe(false);
+      expect(result.aborted).toBe(1);
+      expect(result.pending).toBe(1);
+
+      // 关键：撞超时**不**强行清掉登记——那一轮还在跑，硬拆只会让状态更乱。
+      expect(isTurnActive(conversationId)).toBe(true);
+
+      fake.finish({ finalResponse: '', usage: {} });
+      await flushMicrotasks();
+    });
+
+    it('闸门置真后 reserveTurn 一律被拒（报 shutting_down 而不是 busy——路由据此转 503）', async () => {
+      await shutdownTurns({ timeoutMs: 1000, logger: silentLogger });
+
+      expect(isShuttingDown()).toBe(true);
+      expect(reserveTurn(conversationId)).toEqual({
+        ok: false,
+        reason: 'shutting_down',
+      });
     });
   });
 

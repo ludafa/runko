@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "properties": {
+    "endpoint": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "description": "浏览器给出的推送投递 URL，本站点内唯一标识一台设备",
+      "examples": ["https://fcm.googleapis.com/fcm/send/abc123"]
+    },
+    "keys": {
+      "type": "object",
+      "properties": {
+        "p256dh": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "auth": { "type": "string", "minLength": 1, "maxLength": 256 }
+      },
+      "required": ["p256dh", "auth"]
+    },
+    "userAgent": {
+      "type": "string",
+      "maxLength": 512,
+      "description": "只为让人认出「这是我哪台设备」，不参与任何判断"
+    }
+  },
+  "required": ["endpoint", "keys"],
+  "x-readme-ref-name": "PushSubscribeInput"
+}

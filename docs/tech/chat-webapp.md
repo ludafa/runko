@@ -147,8 +147,40 @@ sequenceDiagram
 - **`driveTurn` 落盘时序**：先合成并落 turn-start 用户消息（`kind=message`，本轮首帧）；再逐 chunk——耐久的落 `kind=chunk`(seq++) 并广播、过程帧只广播；优雅收尾走 `finalizeTurnPersistence`（append 本轮新消息为 `kind=message` → GC 本轮 chunk → 写 header/lastActiveAt），emit `done` 后摘除。生成器**抛错**（真正意外失败，区别于 `session.stream()` 自身的优雅降级 return）时，广播一条合成的 `message-metadata` chunk（复用 core 优雅失败同款 `status:'failed'` 形状，前端无需单独分支），**不**走 finalize（本轮 chunk 不 GC——同「进程崩溃残渣」取舍）。
 - **`GET /api/chat/conversations/{id}/stream?after=<seq>`**（可续传 tail）：先 `subscribeTurn` 订阅到缓冲、再回放 DB 中 `seq > after` 的行（记 `maxSentSeq`）、再 flush 缓冲里 `seq > maxSentSeq` 的实时帧（回放期到达的 ephemeral 丢弃）、随后持续转发直至 `done` 才关闭；若无进行中轮（`isTurnActive` false）则回放完即关。
 - **客户端**（`apps/web` 的 `use-chat-messages.ts`，「命令/订阅分离」）：`sendMessage` = 乐观插入 + `POST messages`（起轮/steer）+ 打开 tail；**组件挂载时总是打开 tail**（`after=lastSeq`）以续接刷新前遗留的进行中轮；tail 断开时若本轮尚未收尾就带 `after=lastSeq` 重开（指数退避、限次）。seq 去重 / `lastSeq` 推进 / 重连 `after=` **只看有 seq 的帧**；ephemeral 帧照常喂时间线（live 打字机），不进 seq 记账。回放流里天然不含 ephemeral，重连后由完工消息收敛终态。
-- **边界（v1 已知取舍）**：进程重启丢失内存态 turn（沙盒仍在跑但 nimbo loop 停）——DB 事件保留至崩溃点，重启后 tail 回放发现无进行中轮即静默收尾。
+- **边界（v1 已知取舍）**：进程重启丢失内存态 turn（沙盒仍在跑但 nimbo loop 停）——DB 事件保留至崩溃点，重启后 tail 回放发现无进行中轮即静默收尾。界面侧的收敛靠下面 §5.1 那帧。
 - **持久化恢复语义**：nimbo `SessionState`（消息史）与沙盒快照（文件态）分别恢复，模式 A 下天然一致（文件真身在沙盒里）。
+
+### 5.1 [轮状态快照](../terms.md)：别让前端猜「有没有轮在跑」（2026-07-27 修）
+
+**问题**：前端判断「这个会话有没有[轮](../terms.md)在跑」曾经只有一个来源——**猜**：历史回放的最后一帧不是 message 就算在跑（`use-chat-messages.ts` 的 `lastFrameIsChunk`）。依据是「优雅收尾会 GC 掉本轮的 `kind='chunk'` 行，所以正常结束的一轮只剩 `MessageFrame`」。
+
+这个推理少了一步：**以 chunk 收尾同时覆盖「真在跑」与「崩溃过」两种情况，而这两者的答案恰好相反。** 崩溃的轮（进程重启、`driveTurn` 抛错那条分支）永远不会送出收尾 `message-metadata`，它的 chunk 行也永不 GC（上面 §5 的既有取舍），于是此后**每次**打开这个会话，前端都猜「有轮在跑」，而且**永不自愈**——翻假只发生在收到收尾 metadata 时，那需要一个真在跑的轮。
+
+用户实际撞上的两个症状都出自这里：
+
+| 用户做的事 | 实际发生 |
+|---|---|
+| 发一条消息 | 走[排队](../terms.md)分支 → 没有乐观回显（消息不上屏，只出现在待发区）→ 而且**永远等不到[出队](../terms.md)**（没有轮会收尾去触发它） |
+| 按[停止](../terms.md) | 服务端 409（它那边确实没有轮）→ 前端按既有约定静默吞掉 → 界面毫无反应 |
+
+**修法**：服务端手上有权威答案（`isTurnActive`），下发它。`GET .../stream` 在回放之后、进入直播之前，紧跟队列快照再发一帧：
+
+```
+event: turn-state
+data: {"turnActive": false}
+```
+
+形状与[待发队列](../terms.md)快照帧完全同构（见 [steer-and-queue §4.3](./steer-and-queue.md)）：**没有 `seq`**、不落库、不进[账本](../terms.md)、不参与 `after=` 续传——它是「此刻状态长这样」，重发一次即最新。前端收到后设 `turnInProgressRef`/`status`（`applyTurnState`）。
+
+三条设计要点：
+
+1. **每条连接都发，不只第一条。** 因此修的不是「打开会话那一刻判断错」，而是**任何**前端与服务端的状态分叉：轮悄悄死了（进程重启）→ tail 关闭 → 前端重连 → 新连接告知 `false` → 落回空闲。这把 §5「边界」里那条「重启后界面停在崩溃点」的遗留问题一并收敛了。
+2. **发的是订阅那一刻的 `wasActive`**，与「要不要进直播循环」用同一个读数。告诉客户端「有轮在跑」却立刻关掉连接（或反过来），会让它的重连退避做出错误决定。
+3. **反向也修**：另一个标签页起的轮，这边 tail 连上会拿到 `true` 并正确进入流式态——以前这也是靠猜。
+
+`lastFrameIsChunk` 保留，但降级为「tail 连上前那几十毫秒的临时初值」，并且刻意仍然猜「在跑」：万一真有一轮在跑，这几十毫秒里用户发的消息会被正确排队，而不是去起第二轮。
+
+前端 `status` 的收敛有一条刻意的例外：**`'error'` 不被 `turnActive: false` 覆盖**。顶部那条红色的「直播中断」提示说的是连接坏了，而「没有轮在跑」本来就是它的题中之意，抹成空闲等于把故障信息吃掉。
 
 ## 6. 人在环上：bash 审批链与 ask-user 提问
 
@@ -168,7 +200,33 @@ P13-5 后的现行机制（三值审批 + 原生 chunk，取代旧的四对 wire
 **持久化到会话**：授权落 `conversation_grants` 子表（PK `(conversation_id, user_id, grant_key)`，`grant_key = tool + 入参指纹`，FK→conversations `ON DELETE CASCADE`），随会话存续、跨进程重启存活、会话删除即级联清（`clearSessionGrants` 为显式清理入口）。选持久化而非内存耗材,是因为「会话」在本 app = 持久的 conversation:工作区(快照+分支)、账本都跨重启存活,授权若唯独易失,重启后被重新询问只是摩擦;而粒度已窄到「精确命令 + 单会话 + 单用户」,持久化不显著扩大安全面。
 
 **按用户隔离(多用户前瞻)**:`user_id` = 做出授权的**审批人**;`hasSessionGrant` 按**本轮发起者**查。单用户下发起者≡审批人≡唯一用户、行为无差;将来一个 conversation 多用户时天然是「每人管自己的授权」——A 的授权不放行 B 的调用。至于多用户下审批卡片的可见性/可点性(只发起者可点,或全员可见但标注「等待 xxx 授权」),是未来的渲染层决策,不影响这张表。
-- **边界**：进程重启丢内存态 pending（与 `activeTurns` 同款 v1 取舍，web 端「已失效」兜底）；会话级授权同为内存态、会话结束/重启失效，不跨轮进 `SessionState`；审批/提问挂起期间 steer 照常排队，无冲突。
+- **边界**：进程重启丢内存态 pending（与 `activeTurns` 同款 v1 取舍，web 端「已失效」兜底，见 §6.1）；会话级授权同为内存态、会话结束/重启失效，不跨轮进 `SessionState`；审批/提问挂起期间 steer 照常排队，无冲突。
+
+### 6.1 卡片什么时候算「已失效」（2026-07-27 修）
+
+一张[审批卡片](../terms.md)/提问卡片处于「待审批」「待回答」态，**只有当前正在跑的那一轮**才可能还真在等人。轮一结束——正常收尾、被[停止](../terms.md)、[优雅关闭](../terms.md)中断、进程被强杀——服务端那边的挂起项就已经被结掉了（`startTurn` 的 `finally` 会把 `pendingReviews`/`pendingQuestions` 全部 resolve 并清空），此后再点任何按钮都只会拿到 404。
+
+此前界面要等用户**点下去**、吃了 404 才把卡片翻成「已失效」（`locallyExpiredCallIds`），在那之前一直画着三个可点的按钮。用户实测撞到的样子是：一张「待审批」卡片，紧接着下面就是「服务重启，这一轮已中断」——两条信息互相矛盾，而且按钮点了也没用。
+
+修法在 web 侧。判据是「**这张卡片自己那一轮**还活着吗」，由两个条件合成（`TimelineView`）：
+
+```
+turnLive = 会话里有轮在跑（status === 'streaming'）
+         && 这条消息不属于任何已经收尾的轮
+```
+
+**第二个条件不能省**（第一版就漏了它，用户实测撞到）：只看会话级的「有没有轮在跑」，那么上一轮停掉、卡片已正确显示「已失效」之后，用户再发一句「继续」起了新一轮——会话又「有轮在跑」了，于是**历史里那张早该失效的卡片跟着复活成可点的「待审批」**。
+
+「这条消息属不属于已收尾的轮」直接从[账本](../terms.md)结构读出来：每一轮都以一条带终态 `metadata.status` 的 assistant 消息收尾（`loop.ts` 的 `finalizeTurn`），所以从后往前扫，遇到的**第一条**收尾消息、以及它之前的所有消息，都属于已经结束的轮；只有它之后那一段才可能是当前这一轮。
+
+叠加规则：
+
+- **审批卡片**（`approval-requested`）：`expired = 本地404 || !turnLive`。
+- **提问卡片**：只有 `input-available`（还在等）那一档才叠加，**`output-available`（已回答）不能叠**——卡片内部 `expired` 的优先级高于 `answered`，叠上去会把一条答完的问题画成「已失效」。
+
+为什么放在 web 而不是让服务端补一条 wire 帧：这是**从已有状态推导得出**的结论（轮不在跑 ⇒ 挂起项必然已结），不需要新的事实来源；而且它天然覆盖「服务端来不及发那条 `tool-approval-response` 就退出了」的情形——那正是进程被强杀时的样子。与「不做乐观翻转」不冲突：这里推导的不是某个决策的结果，而是「这张卡片还有没有人在等」。
+
+**审批超时不中止这一轮**（常被误解，故在此写明）：`CHAT_APPROVAL_TIMEOUT_MS`（默认 240s）到点后走的是 `resolveReview(..., { behavior: 'deny', message: '…timed out…' })`——与人点「拒绝」**完全同一条路**。所以那次工具调用被拒、卡片落定成「已拒绝」，agent 继续跑下一步。「超时」与「人工拒绝」在 wire 上不可区分，是刻意的（多标签页/回放一致）。
 
 ## 7. 关键接口 / 数据结构
 

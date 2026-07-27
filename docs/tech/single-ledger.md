@@ -276,7 +276,8 @@ sequenceDiagram
 - **跨轮 reasoning 不回传**（实验发现 A/推理往返限制条款）：DeepSeek 的 OpenAI 兼容协议不要求携带历史推理，第二轮请求体会省略历史 reasoning——这是服务商协议行为，非账本损失（账本里 reasoning 部件完整保存，界面回放不受影响）。
 - **前缀缓存要把 system 纳入不变前缀**（方法论教训）：两轮 instructions 不同会直接毁掉前缀缓存，system 消息必须包含在「不变前缀」内。
 - **工具部件 input/output 落 unknown**：nimbo 工具集编译期完全动态，`NimboUIMessage` 的 TOOLS 类型参数取默认 `UITools`——与 `model/convert.ts` 的 `convertTool()`/`ToolSet` 是同一既有约束。
-- **崩溃残留不清理**：见 §6 崩溃路径。这是 v1 的既定取舍，不是待修 bug。
+- **崩溃残留不清理**：见 §6 崩溃路径。这是 v1 的既定取舍，不是待修 bug。启动时会给这类[孤儿轮](../terms.md)补一条「已中断」收尾标记（[graceful-shutdown §5](./graceful-shutdown.md)），但那些 `kind='chunk'` 行本身仍然留着——它们是那一轮唯一的内容记录。
+- **前端物化的顺序按 wire 到达先后定，不按「谁先物化完」**（2026-07-27 修的实现教训）：`materialize.ts` 的 `MessageLedger` 里，两种帧的物化时机差着一个微任务——`MessageFrame` 同步 `upsert` 落位，`ChunkEnvelope` 要经 `readUIMessageStream()` **异步**吐出消息才 upsert。所以渲染顺序**不能**由「upsert 到达的先后」决定：一段「先是崩溃轮的 chunk 行、后是后续轮的 message 行」的历史回放下来，同步那批会先占满顺序表，异步物化的旧轮消息排到末尾——界面上就是旧轮跑到新轮下面去（用户实测撞到）。正确做法是在**同步**可见的 `start` chunk（它已带 `messageId`）那一刻就把位子占下（`ensureOrder`），异步的 upsert 只填内容。这个洞此前一直没暴露，是因为崩溃的轮总是账本里的最后一轮；[优雅关闭](./graceful-shutdown.md)让崩溃轮之后还能继续对话，它才浮出来。
 
 ## 8. 实验发现（P13-5 立项时消化）
 

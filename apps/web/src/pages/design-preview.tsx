@@ -22,6 +22,7 @@ import {
   previewMessages,
   previewPendingEchoes,
   previewQueue,
+  previewShutdownInterruptedMessages,
   previewSkills,
   previewStoppedMessages,
 } from '@/features/chat/fixtures/design-preview-data';
@@ -90,8 +91,12 @@ export function DesignPreviewPage() {
                       ...previewMessages,
                       ...previewFailedMessages,
                       ...previewStoppedMessages,
+                      ...previewShutdownInterruptedMessages,
                     ]}
                     pendingUserEchoes={previewPendingEchoes}
+                    // 「已发出、第一帧还没到」那一档也摆进工作台——这个页面的职责就是
+                    // 「每一档界面状态都在同一屏」，新增一档不挂上去等于让它失效。
+                    awaitingFirstEvent
                     conversationId={active.id}
                   />
                 </div>

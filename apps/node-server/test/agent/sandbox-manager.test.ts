@@ -16,6 +16,7 @@ import {
   createSandboxManager,
   resolveDefaultProvider,
 } from '../../src/agent/sandbox-manager.js';
+import { createLogger } from '../../src/logger.js';
 
 // ---------------------------------------------------------------------------
 // A structurally-injected fake SandboxProvider (no @vercel/sandbox import, no
@@ -43,9 +44,9 @@ function rejectingFs(): VercelFileSystemLike {
 
 interface FakeProvisioned extends ProvisionedSandbox {
   readonly commands: string[];
-  readonly extendIdleCalls: number[];
-  /** 设成一个 Error 后，之后每次 `extendIdle` 都抛它——模拟「句柄背后的沙盒已经没了」。 */
-  extendIdleError?: Error;
+  readonly ensureLifetimeCalls: number[];
+  /** 设成一个 Error 后，之后每次 `ensureLifetime` 都抛它——模拟「句柄背后的沙盒已经没了」。 */
+  ensureLifetimeError?: Error;
 }
 
 function createFakeProvisioned(
@@ -53,7 +54,7 @@ function createFakeProvisioned(
   exitCodeFor: (script: string) => number = () => 0,
 ): FakeProvisioned {
   const commands: string[] = [];
-  const extendIdleCalls: number[] = [];
+  const ensureLifetimeCalls: number[] = [];
   const sandbox: VercelSandboxLike = {
     fs: rejectingFs(),
     async runCommand(params) {
@@ -70,12 +71,12 @@ function createFakeProvisioned(
     workspace: vercelWorkspace(sandbox),
     resumeToken: name,
     commands,
-    extendIdleCalls,
-    extendIdleError: undefined,
-    async extendIdle(idleTimeoutMs) {
-      if (provisioned.extendIdleError !== undefined)
-        throw provisioned.extendIdleError;
-      extendIdleCalls.push(idleTimeoutMs);
+    ensureLifetimeCalls,
+    ensureLifetimeError: undefined,
+    async ensureLifetime(targetMs) {
+      if (provisioned.ensureLifetimeError !== undefined)
+        throw provisioned.ensureLifetimeError;
+      ensureLifetimeCalls.push(targetMs);
     },
   };
   return provisioned;
@@ -137,6 +138,31 @@ function managerWith(fake: FakeProvider, idleTimeoutMs = 1000) {
   return createSandboxManager({ vercel: fake.provider }, { idleTimeoutMs });
 }
 
+/** 收集日志行的 manager——保活的可观测性是运维判断「它在不在工作」的唯一依据，得钉住。 */
+function managerWithLog(fake: FakeProvider, idleTimeoutMs = 1000) {
+  const lines: string[] = [];
+  const manager = createSandboxManager(
+    { vercel: fake.provider },
+    {
+      idleTimeoutMs,
+      logger: createLogger({
+        level: 'debug',
+        sink: (line) => lines.push(line),
+      }),
+    },
+  );
+  const parsed = (message: string): Record<string, unknown>[] =>
+    lines
+      .filter((line) => line.includes(message))
+      .map((line): Record<string, unknown> => {
+        const start = line.indexOf('{');
+        if (start === -1) return {};
+        const value: unknown = JSON.parse(line.slice(start));
+        return typeof value === 'object' && value !== null ? { ...value } : {};
+      });
+  return { manager, lines, parsed };
+}
+
 describe('sandbox-manager', () => {
   it('acquire(): resumes via SandboxProvider.resume() without re-running the init plan', async () => {
     const preExisting = createFakeProvisioned('nimbo-chat-session-1');
@@ -190,12 +216,14 @@ describe('sandbox-manager', () => {
     const result = await manager.acquire(input);
 
     expect(fake.resumeCalls).toEqual([input.resumeToken]);
-    expect(fake.createCalls).toEqual([
+    expect(fake.createCalls).toMatchObject([
       {
         name: input.sandboxName,
         cloneUrl: input.repoCloneUrl,
         githubPat: input.githubPat,
         timeoutMs: 1000,
+        // 保活配置也一并交给 provider（内容由专门的用例断言）
+        keepAlive: { idleTimeoutMs: 1000 },
       },
     ]);
     expect(result.defaultBranch).toBe('main');
@@ -270,7 +298,7 @@ describe('sandbox-manager', () => {
     expect((await managerWith(resuming).acquire(input)).mode).toBe('resume');
   });
 
-  it('touch(): extends the acquired sandbox’s idle timeout; rejects for a conversation never acquired', async () => {
+  it('ensureLifetime(): extends the acquired sandbox’s idle timeout; rejects for a conversation never acquired', async () => {
     const fake = createFakeProvider({
       resumeResult: async () => ({ kind: 'unavailable' }),
     });
@@ -278,10 +306,10 @@ describe('sandbox-manager', () => {
 
     const input = acquireInput();
     await manager.acquire(input);
-    await manager.touch(input.conversationId);
+    await manager.ensureLifetime(input.conversationId);
 
-    expect(fake.createdSandboxes[0]?.extendIdleCalls).toEqual([42_000]);
-    await expect(manager.touch('never-acquired')).rejects.toThrow(
+    expect(fake.createdSandboxes[0]?.ensureLifetimeCalls).toEqual([42_000]);
+    await expect(manager.ensureLifetime('never-acquired')).rejects.toThrow(
       /no active sandbox/,
     );
   });
@@ -332,7 +360,7 @@ describe('sandbox-manager', () => {
     }
   });
 
-  it('touch(): 成功保活把截止时间往后推，缓存继续有效', async () => {
+  it('ensureLifetime(): 成功保活把截止时间往后推，缓存继续有效', async () => {
     vi.useFakeTimers();
     try {
       const fake = createFakeProvider({
@@ -344,7 +372,7 @@ describe('sandbox-manager', () => {
       await manager.acquire(input);
 
       vi.setSystemTime(Date.now() + 200_000);
-      await manager.touch(input.conversationId); // 截止时间重置为 now + 300s
+      await manager.ensureLifetime(input.conversationId); // 截止时间重置为 now + 300s
 
       vi.setSystemTime(Date.now() + 200_000); // 距 acquire 已 400s，但距 touch 只 200s
       await manager.acquire(input);
@@ -354,7 +382,7 @@ describe('sandbox-manager', () => {
     }
   });
 
-  it('touch(): 抛「沙盒没了」→ 驱逐缓存（下次 acquire 重连），并把错误原样抛出', async () => {
+  it('ensureLifetime(): 抛「沙盒没了」→ 驱逐缓存（下次 acquire 重连），并把错误原样抛出', async () => {
     const fake = createFakeProvider({
       resumeResult: async () => ({ kind: 'unavailable' }),
     });
@@ -366,15 +394,17 @@ describe('sandbox-manager', () => {
     expect(sandbox).toBeDefined();
     if (sandbox === undefined) return;
 
-    sandbox.extendIdleError = fakeGoneError();
-    await expect(manager.touch(input.conversationId)).rejects.toThrow(/gone/);
+    sandbox.ensureLifetimeError = fakeGoneError();
+    await expect(manager.ensureLifetime(input.conversationId)).rejects.toThrow(
+      /gone/,
+    );
 
     // 关键断言：缓存已被驱逐，下一次 acquire 回到 provider 而不是继续用死句柄
     await manager.acquire(input);
     expect(fake.resumeCalls).toHaveLength(2);
   });
 
-  it('touch(): 抛「不是沙盒没了」的错误时不驱逐缓存（网络抖动别把好句柄扔了）', async () => {
+  it('ensureLifetime(): 抛「不是沙盒没了」的错误时不驱逐缓存（网络抖动别把好句柄扔了）', async () => {
     const fake = createFakeProvider({
       resumeResult: async () => ({ kind: 'unavailable' }),
     });
@@ -386,17 +416,17 @@ describe('sandbox-manager', () => {
     expect(sandbox).toBeDefined();
     if (sandbox === undefined) return;
 
-    sandbox.extendIdleError = new Error('ECONNRESET');
-    await expect(manager.touch(input.conversationId)).rejects.toThrow(
+    sandbox.ensureLifetimeError = new Error('ECONNRESET');
+    await expect(manager.ensureLifetime(input.conversationId)).rejects.toThrow(
       /ECONNRESET/,
     );
 
-    sandbox.extendIdleError = undefined;
+    sandbox.ensureLifetimeError = undefined;
     await manager.acquire(input);
     expect(fake.resumeCalls).toHaveLength(1); // 缓存还在
   });
 
-  it('startHeartbeat(): 按 idleTimeout/2 周期保活，停止函数一停就不再打', async () => {
+  it('manager 自己不再持有任何定时器——一轮进行期间的保活归适配器（KA-5）', async () => {
     vi.useFakeTimers();
     try {
       const fake = createFakeProvider({
@@ -410,61 +440,27 @@ describe('sandbox-manager', () => {
       expect(sandbox).toBeDefined();
       if (sandbox === undefined) return;
 
-      const stop = manager.startHeartbeat(input.conversationId);
-      expect(sandbox.extendIdleCalls).toHaveLength(0);
-
-      await vi.advanceTimersByTimeAsync(150_000);
-      expect(sandbox.extendIdleCalls).toEqual([300_000]);
-
-      await vi.advanceTimersByTimeAsync(150_000);
-      expect(sandbox.extendIdleCalls).toEqual([300_000, 300_000]);
-
-      stop();
+      // 光推进时钟：以前这里有个 turn 级心跳定时器会打出续期，现在一次都不该有。
       await vi.advanceTimersByTimeAsync(600_000);
-      expect(sandbox.extendIdleCalls).toHaveLength(2); // 停了就不再涨
+      expect(sandbox.ensureLifetimeCalls).toHaveLength(0);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('startHeartbeat(): 心跳里保活失败只吞掉，不冒成未处理拒绝', async () => {
-    vi.useFakeTimers();
-    try {
-      const fake = createFakeProvider({
-        resumeResult: async () => ({ kind: 'unavailable' }),
-      });
-      const manager = managerWith(fake, 300_000);
-
-      const input = acquireInput();
-      await manager.acquire(input);
-      const sandbox = fake.createdSandboxes[0];
-      expect(sandbox).toBeDefined();
-      if (sandbox === undefined) return;
-      sandbox.extendIdleError = fakeGoneError();
-
-      const stop = manager.startHeartbeat(input.conversationId);
-      await expect(vi.advanceTimersByTimeAsync(150_000)).resolves.not.toThrow();
-      stop();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('startHeartbeat(): 停止函数可重复调用（幂等）', async () => {
+  it('建盒时把保活配置交给适配器，`idleTimeoutMs` 与建盒 timeout 一致', async () => {
     const fake = createFakeProvider({
       resumeResult: async () => ({ kind: 'unavailable' }),
     });
-    const manager = managerWith(fake);
+    const manager = managerWith(fake, 42_000);
+
     await manager.acquire(acquireInput());
 
-    const stop = manager.startHeartbeat('session-1');
-    stop();
-    expect(() => {
-      stop();
-    }).not.toThrow();
+    expect(fake.createCalls[0]?.timeoutMs).toBe(42_000);
+    expect(fake.createCalls[0]?.keepAlive.idleTimeoutMs).toBe(42_000);
   });
 
-  it('release(): 同时停掉这个会话的心跳（不留下打死句柄的定时器）', async () => {
+  it('适配器内部续期经 onRenew 同步回缓存——长轮次之后不会白走一次 resume', async () => {
     vi.useFakeTimers();
     try {
       const fake = createFakeProvider({
@@ -474,18 +470,66 @@ describe('sandbox-manager', () => {
 
       const input = acquireInput();
       await manager.acquire(input);
-      const sandbox = fake.createdSandboxes[0];
-      expect(sandbox).toBeDefined();
-      if (sandbox === undefined) return;
 
-      manager.startHeartbeat(input.conversationId);
-      manager.release(input.conversationId);
+      // 模拟一轮跑了 20 分钟：适配器每 150 秒自己续一次，通过 onRenew 报回来。
+      const onRenew = fake.createCalls[0]?.keepAlive.onRenew;
+      expect(onRenew).toBeDefined();
+      for (let i = 0; i < 8; i++) {
+        vi.setSystemTime(Date.now() + 150_000);
+        onRenew?.({
+          ok: true,
+          trigger: 'exec',
+          expiresAt: Date.now() + 300_000,
+        });
+      }
 
-      await vi.advanceTimersByTimeAsync(600_000);
-      expect(sandbox.extendIdleCalls).toHaveLength(0);
+      // 缓存仍然有效 → 下一条消息直接命中，不回 provider（`resumeCalls` 停在
+      // 首次 acquire 那一次，不再增长）。
+      const again = await manager.acquire(input);
+      expect(again.mode).toBe('cache');
+      expect(fake.createCalls).toHaveLength(1);
+      expect(fake.resumeCalls).toHaveLength(1);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('没有续期通知时缓存照常过期——主动失效那一半没被削弱', async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = createFakeProvider({
+        resumeResult: async () => ({ kind: 'unavailable' }),
+      });
+      const manager = managerWith(fake, 300_000);
+
+      const input = acquireInput();
+      await manager.acquire(input);
+
+      const before = fake.resumeCalls.length;
+      vi.setSystemTime(Date.now() + 300_001); // 一次续期都没发生
+      await manager.acquire(input);
+
+      expect(fake.resumeCalls).toHaveLength(before + 1); // 驱逐后重新走 resume
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('续期失败的 onRenew 不会把缓存的到期时刻往前推', async () => {
+    const fake = createFakeProvider({
+      resumeResult: async () => ({ kind: 'unavailable' }),
+    });
+    const manager = managerWith(fake, 300_000);
+
+    const input = acquireInput();
+    await manager.acquire(input);
+    fake.createCalls[0]?.keepAlive.onRenew?.({
+      ok: false,
+      trigger: 'activity',
+      error: new Error('transient'),
+    });
+
+    expect((await manager.acquire(input)).mode).toBe('cache');
   });
 
   it('acquire(): resume 成功后显式保活一次，让缓存的截止时间可信', async () => {
@@ -496,12 +540,12 @@ describe('sandbox-manager', () => {
     const manager = managerWith(fake, 42_000);
 
     await manager.acquire(acquireInput());
-    expect(resumed.extendIdleCalls).toEqual([42_000]);
+    expect(resumed.ensureLifetimeCalls).toEqual([42_000]);
   });
 
   it('acquire(): resume 回来的句柄在保活时就已经没了 → 退回 create', async () => {
     const resumed = createFakeProvisioned('nimbo-chat-session-1');
-    resumed.extendIdleError = fakeGoneError();
+    resumed.ensureLifetimeError = fakeGoneError();
     const fake = createFakeProvider({
       resumeResult: async () => ({ kind: 'ok', sandbox: resumed }),
     });
@@ -580,5 +624,129 @@ describe('resolveDefaultProvider (docs/tech/sandbox-provider.md §6)', () => {
 
     process.env.SANDBOX_PROVIDER = '';
     expect(resolveDefaultProvider()).toBe('vercel');
+  });
+});
+
+describe('sandbox-manager: 保活的可观测性', () => {
+  it('沙盒登记时打一行「保活已就位」，带上该等的续期节奏', async () => {
+    const fake = createFakeProvider({
+      resumeResult: async () => ({ kind: 'unavailable' }),
+    });
+    const { manager, parsed } = managerWithLog(fake, 300_000);
+
+    await manager.acquire(acquireInput());
+
+    const armed = parsed('sandbox keepalive armed');
+    expect(armed).toHaveLength(1);
+    expect(armed[0]).toMatchObject({
+      conversationId: 'session-1',
+      mode: 'create',
+      provider: 'vercel',
+      idleTimeoutMs: 300_000,
+      expectRenewEveryMs: 150_000,
+    });
+  });
+
+  it('每次真实续期打一行，带 trigger 与 ttlMs', async () => {
+    const fake = createFakeProvider({
+      resumeResult: async () => ({ kind: 'unavailable' }),
+    });
+    const { manager, parsed } = managerWithLog(fake, 300_000);
+
+    const input = acquireInput();
+    await manager.acquire(input);
+    fake.createCalls[0]?.keepAlive.onRenew?.({
+      ok: true,
+      trigger: 'exec',
+      expiresAt: Date.now() + 300_000,
+    });
+
+    const renewed = parsed('sandbox keepalive renewed');
+    expect(renewed).toHaveLength(1);
+    expect(renewed[0]).toMatchObject({
+      conversationId: input.conversationId,
+      trigger: 'exec',
+    });
+    // ttlMs 是「续完还能活多久」，允许一点执行耗时的抖动。
+    expect(Number(renewed[0]?.ttlMs)).toBeGreaterThan(299_000);
+  });
+
+  it('第二次起带 sinceLastMs——长轮次期间它应稳定在续期节奏附近，是判断保活是否正常的主要依据', async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = createFakeProvider({
+        resumeResult: async () => ({ kind: 'unavailable' }),
+      });
+      const { manager, parsed } = managerWithLog(fake, 300_000);
+
+      await manager.acquire(acquireInput());
+      const onRenew = fake.createCalls[0]?.keepAlive.onRenew;
+
+      onRenew?.({ ok: true, trigger: 'exec', expiresAt: Date.now() + 300_000 });
+      vi.setSystemTime(Date.now() + 150_000);
+      onRenew?.({ ok: true, trigger: 'exec', expiresAt: Date.now() + 300_000 });
+
+      const renewed = parsed('sandbox keepalive renewed');
+      expect(renewed).toHaveLength(2);
+      expect(renewed[0]?.sinceLastMs).toBeUndefined(); // 第一次没有「上一次」
+      expect(renewed[1]?.sinceLastMs).toBe(150_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('续期失败打 warn，并报出距上次成功续期多久（离到期还剩多少余量）', async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = createFakeProvider({
+        resumeResult: async () => ({ kind: 'unavailable' }),
+      });
+      const { manager, parsed } = managerWithLog(fake, 300_000);
+
+      await manager.acquire(acquireInput());
+      const onRenew = fake.createCalls[0]?.keepAlive.onRenew;
+
+      onRenew?.({ ok: true, trigger: 'exec', expiresAt: Date.now() + 300_000 });
+      vi.setSystemTime(Date.now() + 200_000);
+      onRenew?.({
+        ok: false,
+        trigger: 'exec',
+        error: new Error('sandbox gone'),
+      });
+
+      const failed = parsed('sandbox keepalive failed');
+      expect(failed).toHaveLength(1);
+      expect(failed[0]).toMatchObject({
+        trigger: 'exec',
+        sinceLastMs: 200_000,
+        message: 'sandbox gone',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('失败不刷新 sinceLastMs 的基准——下一次成功仍以上一次**成功**为准', async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = createFakeProvider({
+        resumeResult: async () => ({ kind: 'unavailable' }),
+      });
+      const { manager, parsed } = managerWithLog(fake, 300_000);
+
+      await manager.acquire(acquireInput());
+      const onRenew = fake.createCalls[0]?.keepAlive.onRenew;
+
+      onRenew?.({ ok: true, trigger: 'exec', expiresAt: Date.now() + 300_000 });
+      vi.setSystemTime(Date.now() + 100_000);
+      onRenew?.({ ok: false, trigger: 'exec', error: new Error('blip') });
+      vi.setSystemTime(Date.now() + 50_000);
+      onRenew?.({ ok: true, trigger: 'exec', expiresAt: Date.now() + 300_000 });
+
+      const renewed = parsed('sandbox keepalive renewed');
+      expect(renewed[1]?.sinceLastMs).toBe(150_000); // 100k + 50k，不是 50k
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

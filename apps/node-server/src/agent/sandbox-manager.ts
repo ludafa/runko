@@ -35,14 +35,37 @@
  * known after `create()`, so `acquire()` returns the current token in
  * `AcquiredSandbox.resumeToken` for the route to persist).
  *
- * `touch()` is the whole "sleep" mechanism (docs/tech/chat-webapp.md §1.4): it
- * only calls the sandbox's own keepalive (`ProvisionedSandbox.extendIdle` —
- * Vercel `extendTimeout` / E2B `setTimeout`) — there is no server-side timer.
- * When a conversation goes idle past `SANDBOX_IDLE_TIMEOUT_MS`, the platform
- * stops + snapshots the sandbox on its own (Vercel `persistent`, E2B
- * `onTimeout:'pause'`); the next `acquire()` (state 2 or 3) recovers.
+ * `ensureLifetime()` is the whole "sleep" mechanism (docs/tech/chat-webapp.md §1.4):
+ * it only asks the workspace to top its own lifetime back up — there is no
+ * server-side timer. When a conversation goes idle past
+ * `SANDBOX_IDLE_TIMEOUT_MS`, the platform stops + snapshots the sandbox on its
+ * own (Vercel `persistent`, E2B `onTimeout:'pause'`); the next `acquire()`
+ * (state 2 or 3) recovers.
+ *
+ * ---- 保活归 SDK 了（docs/tech/sandbox-keepalive.md，KA-5） ----
+ *
+ * 这个文件以前自己起过一个 turn 级心跳定时器（`startHeartbeat`），现在**整个删掉**：
+ * 一轮进行期间的续期由适配器自己做（`e2bWorkspace`/`vercelWorkspace` 的 `keepAlive`
+ * 选项），它有两个这里拿不到的信号——core 推来的[活动信号](../../../../docs/terms.md)、
+ * 以及 exec 调用自身的进行状态。这里只剩下**轮之外**的手动补足（起轮前、审批/提问
+ * 路由），走 `ensureLifetime()`。
+ *
+ * 两个语义变化值得记住：
+ *
+ * 1. **「补足」不是「加时」。** 旧的 `extendIdle` 对 Vercel 调 `extendTimeout(idleTimeout)`，
+ *    而那个 API 是**累加**的——每条用户消息盲加 5 分钟，高频对话后沙盒多活几十分钟
+ *    白计费。新的 `ensureLifetime` 是「补到至少 X，够了就什么都不做」，天然免疫。
+ * 2. **`expiresAt` 由 `onRenew` 回调驱动。** 续期发生在适配器内部，这里看不见；
+ *    不接这个回调的话，一轮跑 30 分钟之后本地这本账还停在起轮时的值，下一条消息
+ *    会误判缓存过期、白走一次 `resume()`（见 `keepAliveOptionsFor`）。
  */
-import type { NimboExec, NimboFS } from '@nimbo/core';
+import type {
+  KeepAliveOptions,
+  NimboActivityAware,
+  NimboExec,
+  NimboFS,
+  NimboKeepAliveCapable,
+} from '@nimbo/core';
 import { e2bWorkspace } from '@nimbo/sandbox-e2b';
 import type { VercelSandboxLike } from '@nimbo/sandbox-vercel';
 import { vercelWorkspace } from '@nimbo/sandbox-vercel';
@@ -83,19 +106,31 @@ export interface CreateSandboxParams {
   cloneUrl: string;
   githubPat: string;
   timeoutMs: number;
+  /** 交给适配器的[保活](../../../../docs/terms.md)配置，见 `keepAliveOptionsFor`。 */
+  keepAlive: KeepAliveOptions;
 }
+
+/** 工作区在这里的完整形状：两个功能面 + 两个保活面（适配器在开了 `keepAlive` 时才挂上）。 */
+export type ManagedWorkspace = NimboFS &
+  NimboExec &
+  NimboActivityAware &
+  NimboKeepAliveCapable;
 
 /**
  * A ready sandbox whose repo is already cloned at the workspace root. The
- * provider hides three things behind this handle: the `NimboFS & NimboExec`
- * view, the token to persist for the next resume, and the keepalive call.
+ * provider hides three things behind this handle: the workspace view, the token
+ * to persist for the next resume, and the keepalive call.
  */
 export interface ProvisionedSandbox {
-  readonly workspace: NimboFS & NimboExec;
+  readonly workspace: ManagedWorkspace;
   /** Persist this to resume later: Vercel = the sandbox name (= the input token), E2B = the newly assigned sandboxId. */
   readonly resumeToken: string;
-  /** Roll the sandbox's idle timeout forward (Vercel `extendTimeout` / E2B `setTimeout`). */
-  extendIdle(idleTimeoutMs: number): Promise<void>;
+  /**
+   * 把沙盒剩余[存活时长](../../../../docs/terms.md)**补足**到 `targetMs`
+   * （够了就什么都不做——不是无脑加时，见文件头）。转发到适配器的
+   * `workspace.keepAlive`，厂商差异全在那边。
+   */
+  ensureLifetime(targetMs: number): Promise<void>;
 }
 
 export type ResumeResult =
@@ -106,7 +141,10 @@ export interface SandboxProvider {
   /** Create a fresh sandbox with the repo cloned at the workspace root. */
   create(params: CreateSandboxParams): Promise<ProvisionedSandbox>;
   /** Resume by a previously persisted token; `unavailable` → caller re-creates. */
-  resume(resumeToken: string): Promise<ResumeResult>;
+  resume(
+    resumeToken: string,
+    keepAlive: KeepAliveOptions,
+  ): Promise<ResumeResult>;
   /**
    * Does this error mean "the sandbox behind that handle is gone/unusable"
    * (paused-and-not-reconnectable, stopped, deleted, never existed)?
@@ -115,13 +153,38 @@ export interface SandboxProvider {
    * `APIError` 404/410; E2B: `SandboxNotFoundError` / a plain `Error` whose
    * message reads "Sandbox … not found"). It is deliberately part of the
    * **interface** rather than a provider-private helper: the manager has to
-   * classify failures raised by *any* operation — `extendIdle` on a stale
+   * classify failures raised by *any* operation — `ensureLifetime` on a stale
    * handle, an `exec` against a paused sandbox — not just by `resume()`.
    * Before this existed, only `resume()` consulted it, so a cached handle that
    * went stale surfaced a raw 404 to the caller and never recovered
    * (docs/plans/sandbox-provider.md SP-7).
    */
   isGone(error: unknown): boolean;
+}
+
+/**
+ * 把工作区的可选 `keepAlive` 收成必有的转发函数。
+ *
+ * **刻意显式判空抛错，不写成 `workspace.keepAlive?.(ms)`**——那会把「这家不支持保活」
+ * 静默变成 no-op，正好复现已经修过的那个线上 bug（沙盒被平台从底下暂停），而且更难查：
+ * 什么都不报，只是沙盒莫名其妙死了。
+ */
+function forwardKeepAlive(
+  workspace: ManagedWorkspace,
+  providerId: SandboxProviderId,
+): (targetMs: number) => Promise<void> {
+  return (targetMs) => {
+    const keepAlive = workspace.keepAlive;
+    if (keepAlive === undefined) {
+      return Promise.reject(
+        new Error(
+          `provider "${providerId}": the workspace has no keepAlive capability — the adapter was built ` +
+            'without a keepAlive option, or the sandbox instance lacks the vendor lifetime API.',
+        ),
+      );
+    }
+    return keepAlive(targetMs);
+  };
 }
 
 function requireEnv(name: string): string {
@@ -144,17 +207,16 @@ function isRecoverableGetFailure(error: unknown): boolean {
   );
 }
 
-/** Wraps a live `@vercel/sandbox` instance as a `ProvisionedSandbox` (its name is the resume token, `extendTimeout` is the keepalive). */
+/** Wraps a live `@vercel/sandbox` instance as a `ProvisionedSandbox` (its name is the resume token; keepalive lives inside the adapter). */
 function vercelProvisioned(
-  sandbox: VercelSandboxLike & {
-    name: string;
-    extendTimeout(durationMs: number): Promise<void>;
-  },
+  sandbox: VercelSandboxLike & { name: string },
+  keepAlive: KeepAliveOptions,
 ): ProvisionedSandbox {
+  const workspace = vercelWorkspace(sandbox, { keepAlive });
   return {
-    workspace: vercelWorkspace(sandbox),
+    workspace,
     resumeToken: sandbox.name,
-    extendIdle: (idleTimeoutMs) => sandbox.extendTimeout(idleTimeoutMs),
+    ensureLifetime: forwardKeepAlive(workspace, 'vercel'),
   };
 }
 
@@ -182,9 +244,12 @@ export function createVercelProvider(): SandboxProvider {
         },
         env: { GH_TOKEN: params.githubPat },
       });
-      return vercelProvisioned(sandbox);
+      return vercelProvisioned(sandbox, params.keepAlive);
     },
-    async resume(resumeToken: string): Promise<ResumeResult> {
+    async resume(
+      resumeToken: string,
+      keepAlive: KeepAliveOptions,
+    ): Promise<ResumeResult> {
       const token = requireEnv('VERCEL_TOKEN');
       const teamId = requireEnv('VERCEL_TEAM_ID');
       const projectId = requireEnv('VERCEL_PROJECT_ID');
@@ -195,7 +260,7 @@ export function createVercelProvider(): SandboxProvider {
           teamId,
           projectId,
         });
-        return { kind: 'ok', sandbox: vercelProvisioned(sandbox) };
+        return { kind: 'ok', sandbox: vercelProvisioned(sandbox, keepAlive) };
       } catch (error) {
         if (isRecoverableGetFailure(error)) return { kind: 'unavailable' };
         throw error;
@@ -232,12 +297,19 @@ const E2B_RESUME_BACKOFF_MS = 500;
 const delay = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Wraps a live `e2b` sandbox as a `ProvisionedSandbox` (its sandboxId is the resume token, `setTimeout` is the keepalive). */
-function e2bProvisioned(sandbox: E2bSandbox): ProvisionedSandbox {
+/** Wraps a live `e2b` sandbox as a `ProvisionedSandbox` (its sandboxId is the resume token; keepalive lives inside the adapter). */
+function e2bProvisioned(
+  sandbox: E2bSandbox,
+  keepAlive: KeepAliveOptions,
+): ProvisionedSandbox {
+  const workspace = e2bWorkspace(sandbox, {
+    root: E2B_WORKSPACE_ROOT,
+    keepAlive,
+  });
   return {
-    workspace: e2bWorkspace(sandbox, { root: E2B_WORKSPACE_ROOT }),
+    workspace,
     resumeToken: sandbox.sandboxId,
-    extendIdle: (idleTimeoutMs) => sandbox.setTimeout(idleTimeoutMs),
+    ensureLifetime: forwardKeepAlive(workspace, 'e2b'),
   };
 }
 
@@ -273,9 +345,12 @@ export function createE2bProvider(): SandboxProvider {
           `E2B: git clone into ${E2B_WORKSPACE_ROOT} failed (exit ${String(clone.exitCode)}). ${clone.stderr}`,
         );
       }
-      return e2bProvisioned(sandbox);
+      return e2bProvisioned(sandbox, params.keepAlive);
     },
-    async resume(resumeToken: string): Promise<ResumeResult> {
+    async resume(
+      resumeToken: string,
+      keepAlive: KeepAliveOptions,
+    ): Promise<ResumeResult> {
       const apiKey = requireEnv('E2B_API_KEY');
       // A sandbox that just auto-paused (lifecycle.onTimeout:'pause') can
       // transiently 404 on `connect` for a moment while the platform settles
@@ -289,7 +364,7 @@ export function createE2bProvider(): SandboxProvider {
       for (let attempt = 1; attempt <= E2B_RESUME_ATTEMPTS; attempt++) {
         try {
           const sandbox = await E2bSandbox.connect(resumeToken, { apiKey });
-          return { kind: 'ok', sandbox: e2bProvisioned(sandbox) };
+          return { kind: 'ok', sandbox: e2bProvisioned(sandbox, keepAlive) };
         } catch (error) {
           lastError = error;
           if (attempt < E2B_RESUME_ATTEMPTS)
@@ -456,24 +531,16 @@ export interface AcquiredSandbox {
 
 export interface SandboxManager {
   acquire(input: AcquireInput): Promise<AcquiredSandbox>;
-  /** Extends the sandbox's platform-side timeout — throws if this conversation has no in-memory active sandbox (call `acquire()` first). */
-  touch(conversationId: string): Promise<void>;
+  /**
+   * 手动把沙盒[存活时长](../../../../docs/terms.md)补足一次——这个会话没有进程内活
+   * 沙盒时抛错（先 `acquire()`）。
+   *
+   * 只用于**轮之外**的时机（起轮前、审批/提问路由）。一轮进行期间的续期由适配器
+   * 自己做，不需要也不该由这里驱动，见文件头。
+   */
+  ensureLifetime(conversationId: string): Promise<void>;
   /** Evicts the in-process cache entry (no provider call) — forces the next `acquire()` to go through `SandboxProvider.resume()` again. */
   release(conversationId: string): void;
-  /**
-   * Keepalive heartbeat for the duration of one turn (docs/plans/sandbox-provider.md SP-7 层 1).
-   * Returns the stop function; calling it twice is a no-op.
-   *
-   * Necessary because the platform timeout is an **absolute deadline**, not an
-   * activity-based idle timer: E2B's `POST /sandboxes/{id}/timeout` sets expiry
-   * "x seconds from the time of the request", and running commands does *not*
-   * push it back. Without a heartbeat, any turn that outlives the remaining TTL
-   * gets its sandbox paused out from under it mid-run.
-   *
-   * Deliberately **turn-scoped**, not manager-scoped: a heartbeat that ran for
-   * every cached sandbox would defeat idle-pause entirely and burn money.
-   */
-  startHeartbeat(conversationId: string): () => void;
 }
 
 interface ActiveSandbox {
@@ -507,17 +574,105 @@ export function createSandboxManager(
   const log = config.logger ?? defaultLogger;
   const active = new Map<string, ActiveSandbox>();
   const inflight = new Map<string, Promise<AcquiredSandbox>>();
-  const heartbeats = new Map<string, NodeJS.Timeout>();
-
-  /**
-   * Half the timeout, so every tick has a full second tick's worth of slack
-   * before the platform deadline it is pushing back.
-   */
-  const heartbeatIntervalMs = Math.max(1000, Math.floor(idleTimeoutMs / 2));
 
   /** Records that the platform-side deadline was just rolled forward to now + `idleTimeoutMs`. */
   function markAlive(entry: ActiveSandbox): void {
     entry.expiresAt = Date.now() + idleTimeoutMs;
+  }
+
+  /**
+   * 交给适配器的[保活](../../../../docs/terms.md)配置。
+   *
+   * `onRenew` 是**必需**的，不是可选的观测口：续期发生在适配器内部，这里看不见。
+   * 不把它同步回 `entry.expiresAt` 的话，一轮跑 30 分钟（期间适配器一直在续、沙盒
+   * 好好的）之后来了新消息，`liveEntry()` 会看到起轮时那个早过期的时间戳 → 驱逐 →
+   * 白走一次 `resume()`。不是正确性 bug，但每轮多一次连接往返，正好打在
+   * `AcquireMode` 遥测最在意的地方。
+   *
+   * 闭包按 `conversationId` **惰性**取 entry——工作区是在 entry 存进 `active` 之前
+   * 就造好的，早绑会拿到 undefined。
+   */
+  function keepAliveOptionsFor(conversationId: string): KeepAliveOptions {
+    /**
+     * 上一次**真实**续期发生的时刻（闸门判定「水位还够」而跳过的不算）。只为算
+     * 日志里的 `sinceLastMs`——见 `onRenew` 里对这个字段的说明。
+     */
+    let lastRenewAt: number | undefined;
+
+    return {
+      idleTimeoutMs,
+      onRenew: (info) => {
+        const now = Date.now();
+        const sinceLastMs =
+          lastRenewAt === undefined ? undefined : now - lastRenewAt;
+
+        if (!info.ok) {
+          log.warn(LOG_SCOPE, 'sandbox keepalive failed', {
+            conversationId,
+            trigger: info.trigger,
+            // 距上次成功续期多久——直接说明这个盒离到期还有多少余量。
+            sinceLastMs,
+            message:
+              info.error instanceof Error ?
+                info.error.message
+              : String(info.error),
+          });
+          return;
+        }
+
+        lastRenewAt = now;
+        const entry = active.get(conversationId);
+        if (entry !== undefined && info.expiresAt !== undefined)
+          entry.expiresAt = info.expiresAt;
+
+        /**
+         * 保活的**唯一**可观测出口（docs/features/sandbox-keepalive.md §3.5）：
+         * 续期动作发生在适配器内部，不打这行日志的话运维完全看不见它在不在工作。
+         *
+         * 怎么看这行判断正常：
+         * - `sinceLastMs` 是**最诊断性**的数字。一轮长跑期间它应该稳定在
+         *   `idleTimeoutMs / 2` 左右（默认 150000）。中间突然拉大到接近
+         *   `idleTimeoutMs`，说明有一段时间没人喂信号——沙盒离被平台暂停不远了。
+         * - `trigger` 说明是哪条路在喂：`exec` = 有条命令正在跑（这段 core 不产
+         *   chunk，全靠适配器自打点）；`activity` = 一轮在正常推进；`approval` =
+         *   卡在等人；`manual` = 宿主在轮之外主动补的（起轮前、审批路由）。
+         * - `ttlMs` 是续完之后还能活多久，正常应等于 `idleTimeoutMs`。
+         *
+         * 用 info 而不是 debug：这是判断「保活到底在不在工作」的主要依据，得默认
+         * 可见。频率不高——补足语义把绝大多数调用挡在门外，真正落到这里的大约
+         * 每 `idleTimeoutMs / 2` 一次。
+         */
+        log.info(LOG_SCOPE, 'sandbox keepalive renewed', {
+          conversationId,
+          trigger: info.trigger,
+          sinceLastMs,
+          ttlMs:
+            info.expiresAt === undefined ? undefined : info.expiresAt - now,
+        });
+      },
+    };
+  }
+
+  /**
+   * 登记一个新拿到的沙盒句柄，并打一行「保活已就位」。
+   *
+   * 这行日志是为了让**没有** `sandbox keepalive renewed` 这件事变得可读：光看不到
+   * 续期日志，分不清是「保活没配上」还是「还没到该续的时候」。有了这行就分得清——
+   * 它出现过，说明这个盒的保活是开着的，`expectRenewEveryMs` 就是该等的节奏。
+   */
+  function register(
+    conversationId: string,
+    entry: ActiveSandbox,
+    mode: Exclude<AcquireMode, 'cache'>,
+  ): void {
+    active.set(conversationId, entry);
+    log.info(LOG_SCOPE, 'sandbox keepalive armed', {
+      conversationId,
+      mode,
+      provider: entry.provider.id,
+      idleTimeoutMs,
+      expectRenewEveryMs: Math.max(1000, Math.floor(idleTimeoutMs / 2)),
+    });
   }
 
   /** Cache entry that is still within its platform deadline, else `undefined` (and evicted). */
@@ -537,23 +692,18 @@ export function createSandboxManager(
 
   function evict(conversationId: string): void {
     active.delete(conversationId);
-    const timer = heartbeats.get(conversationId);
-    if (timer !== undefined) {
-      clearInterval(timer);
-      heartbeats.delete(conversationId);
-    }
   }
 
-  /** The body behind both `touch()` and the heartbeat tick — see `touch` for why it evicts on a "gone" error. */
+  /** `ensureLifetime()` 的实现——见接口上的注释解释为什么 gone 错误要顺手驱逐缓存。 */
   async function extendDeadline(conversationId: string): Promise<void> {
     const entry = active.get(conversationId);
     if (entry === undefined) {
       throw new Error(
-        `touch(${conversationId}): no active sandbox in memory — call acquire() first.`,
+        `ensureLifetime(${conversationId}): no active sandbox in memory — call acquire() first.`,
       );
     }
     try {
-      await entry.provisioned.extendIdle(idleTimeoutMs);
+      await entry.provisioned.ensureLifetime(idleTimeoutMs);
     } catch (error) {
       if (entry.provider.isGone(error)) {
         log.warn(LOG_SCOPE, 'sandbox gone on keepalive, evicting cache', {
@@ -563,6 +713,10 @@ export function createSandboxManager(
       }
       throw error;
     }
+    /**
+     * 兜底：闸门判定「水位还够」时不会触发 `onRenew`，这里也就拿不到新的到期时刻。
+     * 但那正说明沙盒离到期还远，把本地账推到满水位是安全的（真实到期只会更晚）。
+     */
     markAlive(entry);
   }
 
@@ -599,7 +753,10 @@ export function createSandboxManager(
 
     // State 2: resume an existing snapshot by its persisted token.
     if (input.resumeToken !== undefined) {
-      const resumed = await provider.resume(input.resumeToken);
+      const resumed = await provider.resume(
+        input.resumeToken,
+        keepAliveOptionsFor(input.conversationId),
+      );
       if (resumed.kind === 'ok') {
         // Roll the deadline forward explicitly rather than assuming what the
         // platform did on resume — it is what makes `expiresAt` truthful for
@@ -607,7 +764,7 @@ export function createSandboxManager(
         // floor; Vercel's `get` makes no such promise). One extra call, only on
         // the resume path, never on a cache hit.
         try {
-          await resumed.sandbox.extendIdle(idleTimeoutMs);
+          await resumed.sandbox.ensureLifetime(idleTimeoutMs);
         } catch (error) {
           // Raced with the platform tearing it down between connect and
           // extend → fall through to create rather than hand back a dead handle.
@@ -627,7 +784,7 @@ export function createSandboxManager(
           expiresAt: 0,
         };
         markAlive(entry);
-        active.set(input.conversationId, entry);
+        register(input.conversationId, entry, 'resume');
         return toAcquired(entry, 'resume');
       }
     }
@@ -645,6 +802,7 @@ export function createSandboxManager(
       cloneUrl: input.repoCloneUrl,
       githubPat: input.githubPat,
       timeoutMs: idleTimeoutMs,
+      keepAlive: keepAliveOptionsFor(input.conversationId),
     });
     await installSkillAndConfigureGit(
       provisioned.workspace,
@@ -661,7 +819,7 @@ export function createSandboxManager(
       expiresAt: 0,
     };
     markAlive(entry); // create() already set the platform timeout to idleTimeoutMs
-    active.set(input.conversationId, entry);
+    register(input.conversationId, entry, 'create');
     return toAcquired(entry, 'create');
   }
 
@@ -685,47 +843,9 @@ export function createSandboxManager(
      * each caller decides whether that is fatal (the approval/question routes
      * deliberately swallow it).
      */
-    touch: extendDeadline,
+    ensureLifetime: extendDeadline,
     release(conversationId: string): void {
       evict(conversationId);
-    },
-    startHeartbeat(conversationId: string): () => void {
-      // One heartbeat per conversation: a second turn cannot legitimately start
-      // while one is running (`startTurn`'s guard), so an existing timer here
-      // would be a leak from a turn that never settled — replace it.
-      const existing = heartbeats.get(conversationId);
-      if (existing !== undefined) clearInterval(existing);
-
-      const timer = setInterval(() => {
-        void (async (): Promise<void> => {
-          try {
-            await extendDeadline(conversationId);
-          } catch (error) {
-            // Never let a keepalive failure escape into an unhandled rejection
-            // that kills the process. The turn will fail on its own next
-            // sandbox call, with a far better error than this one.
-            log.warn(LOG_SCOPE, 'sandbox heartbeat failed', {
-              conversationId,
-              message: error instanceof Error ? error.message : String(error),
-            });
-          }
-        })();
-      }, heartbeatIntervalMs);
-      // Don't hold the event loop open on shutdown just for a keepalive.
-      timer.unref();
-      heartbeats.set(conversationId, timer);
-
-      let stopped = false;
-      return () => {
-        if (stopped) return;
-        stopped = true;
-        // Only clear if it is still *this* turn's timer (a later turn may have
-        // replaced it above).
-        if (heartbeats.get(conversationId) === timer) {
-          clearInterval(timer);
-          heartbeats.delete(conversationId);
-        }
-      };
     },
   };
 }

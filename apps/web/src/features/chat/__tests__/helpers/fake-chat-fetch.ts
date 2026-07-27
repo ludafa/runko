@@ -11,7 +11,25 @@
  */
 import type { NimboChunk, NimboUIMessage } from '@nimbo/core';
 
-import type { ChatReplayFrame, QueuedMessage } from '../../schema';
+import type {
+  ChatReplayFrame,
+  QueuedMessage,
+  StartTurnMode,
+} from '../../schema';
+
+/**
+ * 请求体里的 `intent`（没有/不认识就是 `undefined`）——`POST .../messages` 的默认
+ * `mode` 据它推断，让 fake 的分流结果与真服务端一致：有进行中的一轮时 `intent: 'steer'`
+ * → `'steered'`，其余 → `'started'`。测试要覆盖不一致的那几档（比如装配窗口里 steer 被
+ * 转成排队，docs/tech/turn-abort.md §3.3）就用 `setMessagePostMode` 显式指定。
+ */
+function requestedIntent(body: unknown): 'queue' | 'steer' | undefined {
+  if (typeof body !== 'object' || body === null || !('intent' in body)) {
+    return undefined;
+  }
+  const { intent } = body;
+  return intent === 'steer' || intent === 'queue' ? intent : undefined;
+}
 
 /** One controllable `text/event-stream` body — push SSE-framed lines on demand, close or error it whenever the test wants. */
 export class ControllableSSEStream {
@@ -101,6 +119,8 @@ export class FakeChatFetch {
   readonly queueDeletes: RecordedQueueDelete[] = [];
 
   private messagePostStatus = 202;
+  /** 缺省 = 按请求的 `intent` 推断（见 `requestedIntent`）；显式设了就一律回这一档。 */
+  private messagePostMode: StartTurnMode | undefined = undefined;
   private approvalStatus = 200;
   private answerStatus = 200;
   private queueDeleteStatus = 200;
@@ -125,6 +145,15 @@ export class FakeChatFetch {
 
   setMessagePostStatus(status: number): void {
     this.messagePostStatus = status;
+  }
+
+  /**
+   * 固定 `POST .../messages` 的 `mode`（服务端实际分流结果，见 `startTurnAckSchema`）。
+   * 唯一必须用它的场景是「请求 steer 却拿回 `'queued'`」——那一轮还卡在
+   * [起轮装配](../../../../../../docs/terms.md)里，插不进去（docs/tech/turn-abort.md §3.3）。
+   */
+  setMessagePostMode(mode: StartTurnMode): void {
+    this.messagePostMode = mode;
   }
 
   setApprovalStatus(status: number): void {
@@ -167,9 +196,13 @@ export class FakeChatFetch {
     const kind = segments[conversationsIndex + 2] ?? '';
 
     if (method === 'POST' && kind === 'messages') {
-      this.messagePosts.push({ conversationId, body: this.parseBody(init) });
+      const body = this.parseBody(init);
+      this.messagePosts.push({ conversationId, body });
+      const mode =
+        this.messagePostMode ??
+        (requestedIntent(body) === 'steer' ? 'steered' : 'started');
       return Promise.resolve(
-        new Response(JSON.stringify({ ok: true }), {
+        new Response(JSON.stringify({ ok: true, mode }), {
           status: this.messagePostStatus,
         }),
       );

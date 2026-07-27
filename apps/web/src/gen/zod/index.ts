@@ -4,6 +4,7 @@ export { approvalAckSchema } from './approvalAckSchema.ts';
 export { chatChunkEnvelopeSchema } from './chatChunkEnvelopeSchema.ts';
 export { chatMessageFrameSchema } from './chatMessageFrameSchema.ts';
 export { chatQueueFrameSchema } from './chatQueueFrameSchema.ts';
+export { chatTurnStateFrameSchema } from './chatTurnStateFrameSchema.ts';
 export { conversationEventsListSchema } from './conversationEventsListSchema.ts';
 export { conversationSchema } from './conversationSchema.ts';
 export { createConversationInputSchema } from './createConversationInputSchema.ts';
@@ -62,6 +63,11 @@ export {
   getApiNotes401Schema,
   getApiNotesQueryResponseSchema,
 } from './getApiNotesSchema.ts';
+export {
+  getApiPushConfig200Schema,
+  getApiPushConfig401Schema,
+  getApiPushConfigQueryResponseSchema,
+} from './getApiPushConfigSchema.ts';
 export { noteSchema } from './noteSchema.ts';
 export { postAnswerInputSchema } from './postAnswerInputSchema.ts';
 export {
@@ -86,10 +92,19 @@ export {
   postApiChatConversationsIdMessages404Schema,
   postApiChatConversationsIdMessages409Schema,
   postApiChatConversationsIdMessages500Schema,
+  postApiChatConversationsIdMessages503Schema,
   postApiChatConversationsIdMessagesMutationRequestSchema,
   postApiChatConversationsIdMessagesMutationResponseSchema,
   postApiChatConversationsIdMessagesPathParamsSchema,
 } from './postApiChatConversationsIdMessagesSchema.ts';
+export {
+  postApiChatConversationsIdPresence200Schema,
+  postApiChatConversationsIdPresence401Schema,
+  postApiChatConversationsIdPresence404Schema,
+  postApiChatConversationsIdPresenceMutationRequestSchema,
+  postApiChatConversationsIdPresenceMutationResponseSchema,
+  postApiChatConversationsIdPresencePathParamsSchema,
+} from './postApiChatConversationsIdPresenceSchema.ts';
 export {
   postApiChatConversationsIdQuestionsCallid200Schema,
   postApiChatConversationsIdQuestionsCallid401Schema,
@@ -111,8 +126,32 @@ export {
   postApiNotesMutationRequestSchema,
   postApiNotesMutationResponseSchema,
 } from './postApiNotesSchema.ts';
+export {
+  postApiPushSubscriptions200Schema,
+  postApiPushSubscriptions401Schema,
+  postApiPushSubscriptions503Schema,
+  postApiPushSubscriptionsMutationRequestSchema,
+  postApiPushSubscriptionsMutationResponseSchema,
+} from './postApiPushSubscriptionsSchema.ts';
+export {
+  postApiPushTest200Schema,
+  postApiPushTest401Schema,
+  postApiPushTest503Schema,
+  postApiPushTestMutationResponseSchema,
+} from './postApiPushTestSchema.ts';
+export {
+  postApiPushUnsubscribe200Schema,
+  postApiPushUnsubscribe401Schema,
+  postApiPushUnsubscribeMutationRequestSchema,
+  postApiPushUnsubscribeMutationResponseSchema,
+} from './postApiPushUnsubscribeSchema.ts';
 export { postApprovalInputSchema } from './postApprovalInputSchema.ts';
 export { postChatMessageInputSchema } from './postChatMessageInputSchema.ts';
+export { presenceInputSchema } from './presenceInputSchema.ts';
+export { pushAckSchema } from './pushAckSchema.ts';
+export { pushConfigSchema } from './pushConfigSchema.ts';
+export { pushSubscribeInputSchema } from './pushSubscribeInputSchema.ts';
+export { pushUnsubscribeInputSchema } from './pushUnsubscribeInputSchema.ts';
 export { queuedMessageSchema } from './queuedMessageSchema.ts';
 export { skillSummarySchema } from './skillSummarySchema.ts';
 export { startTurnAckSchema } from './startTurnAckSchema.ts';

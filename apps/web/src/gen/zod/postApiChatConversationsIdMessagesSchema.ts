@@ -13,7 +13,7 @@ export const postApiChatConversationsIdMessagesPathParamsSchema = z.object({
 });
 
 /**
- * @description Accepted — see `mode` (\"started\" | \"steered\" | \"queued\"); poll/stream `GET .../stream` for its events
+ * @description Accepted — see `mode` (\"started\" | \"steered\" | \"queued\" | \"aborted\"); poll/stream `GET .../stream` for its events. \"aborted\" (docs/tech/turn-abort.md §3.3) means the user stopped this turn while it was still being assembled, so it never started running — the stopped-turn frames are on the stream like any other outcome
  */
 export const postApiChatConversationsIdMessages202Schema = z.lazy(
   () => startTurnAckSchema,
@@ -44,6 +44,13 @@ export const postApiChatConversationsIdMessages409Schema = z.lazy(
  * @description Model/sandbox configuration or provisioning error
  */
 export const postApiChatConversationsIdMessages500Schema = z.lazy(
+  () => apiErrorSchema,
+);
+
+/**
+ * @description The server is shutting down (docs/tech/graceful-shutdown.md §3.3) — no new turn is accepted during shutdown. Retryable: resend once the new process is up
+ */
+export const postApiChatConversationsIdMessages503Schema = z.lazy(
   () => apiErrorSchema,
 );
 

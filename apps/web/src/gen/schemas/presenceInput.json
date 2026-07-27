@@ -1,0 +1,6 @@
+{
+  "type": "object",
+  "properties": { "focused": { "type": "boolean" } },
+  "required": ["focused"],
+  "x-readme-ref-name": "PresenceInput"
+}

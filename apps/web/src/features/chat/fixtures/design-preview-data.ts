@@ -408,3 +408,39 @@ export const previewStoppedMessages: NimboUIMessage[] = [
     ],
   },
 ];
+
+/**
+ * 第三组之二：同样是 `code: 'aborted'`，但**不是用户按的**——服务端
+ * [优雅关闭](../../../../../docs/terms.md)时中止的（docs/features/graceful-shutdown.md）。
+ * 与上面那组并排，是为了盯住唯一的差别：标题与正文如实说「服务重启」，而不是让用户
+ * 以为自己按过停止。`message` 必须与 `turn-marker.tsx` 的 `SHUTDOWN_ABORT_MESSAGE`
+ * 逐字一致，否则这一档就退回成「已停止」——这组样例同时也是那个文案契约的哨兵。
+ */
+export const previewShutdownInterruptedMessages: NimboUIMessage[] = [
+  {
+    id: 'm-user-5',
+    role: 'user',
+    parts: [{ type: 'text', text: '把所有组件迁到新的设计 token' }],
+  },
+  {
+    id: 'm-assistant-5',
+    role: 'assistant',
+    metadata: {
+      turn: 3,
+      status: 'interrupted',
+      durationMs: 12_100,
+      error: {
+        code: 'aborted',
+        message: 'The server shut down while this turn was running.',
+      },
+    },
+    parts: [
+      { type: 'step-start' },
+      {
+        type: 'text',
+        text: '已经迁完 Button 与 Card，正在处理 Dialog……',
+        state: 'done',
+      },
+    ],
+  },
+];

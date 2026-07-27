@@ -32,15 +32,15 @@ describe('postChatMessage', () => {
     vi.unstubAllGlobals();
   });
 
-  it('POSTs { text } and resolves on a 202 (no body assumptions beyond ok)', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(
-        new Response(JSON.stringify({ ok: true }), { status: 202 }),
-      );
+  it('POSTs { text } and resolves with the server’s own 分流结果 (`mode`) on a 202', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, mode: 'started' }), {
+        status: 202,
+      }),
+    );
     vi.stubGlobal('fetch', fetchMock);
 
-    await postChatMessage('sess_1', 'hello');
+    await expect(postChatMessage('sess_1', 'hello')).resolves.toBe('started');
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/chat/conversations/sess_1/messages',
@@ -49,6 +49,23 @@ describe('postChatMessage', () => {
         credentials: 'include',
         body: JSON.stringify({ text: 'hello' }),
       }),
+    );
+  });
+
+  // 请求 steer 却拿回 `'queued'`：那一轮还卡在[起轮装配](../../../../../docs/terms.md)里，
+  // 插不进去（docs/tech/turn-abort.md §3.3）。调用方靠这个返回值撤掉「待注入」回显。
+  it('resolves with `queued` even when `steer` was requested (server is the one that decides)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ ok: true, mode: 'queued' }), {
+          status: 202,
+        }),
+      ),
+    );
+
+    await expect(postChatMessage('sess_1', 'hello', 'steer')).resolves.toBe(
+      'queued',
     );
   });
 

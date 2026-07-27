@@ -33,6 +33,7 @@ import type { LanguageModel } from 'ai';
 
 import type { Logger } from '../logger.js';
 import { logger as defaultLogger } from '../logger.js';
+import type { ChatNotifier } from '../push/notifier.js';
 import type { TelemetryStore } from '../telemetry.js';
 import { classifyApproval, resolveApprovalMode } from './approval-policy.js';
 import { buildSession } from './chat-agent.js';
@@ -64,8 +65,17 @@ import type {
   RequestUserAnswerInput,
   TurnMilestone,
   TurnMilestoneInfo,
+  TurnReservation,
 } from './turn-runner.js';
-import { requestReview, requestUserAnswer, startTurn } from './turn-runner.js';
+import {
+  releaseTurn,
+  requestReview,
+  requestUserAnswer,
+  reserveTurn,
+  resolveApprovalTimeoutMs,
+  resolveAskUserTimeoutMs,
+  startTurn,
+} from './turn-runner.js';
 
 const LOG_SCOPE = 'turn-launcher';
 
@@ -84,7 +94,7 @@ interface LaunchTimings {
   acquireMs: number;
   /** 这次 acquire 走的哪条路（`sandbox-manager.ts` 的 `AcquireMode`）：缓存命中/恢复/重建。 */
   acquireMode: AcquireMode;
-  /** `sandboxManager.touch()`——沙盒续期的远程往返，每轮必做。 */
+  /** `sandboxManager.ensureLifetime()`——沙盒续期的远程往返，每轮必做。 */
   touchMs: number;
   /** `loadResumeState()`——读全部 message 行 + zod 校验，本地 SQLite。 */
   loadStateMs: number;
@@ -162,6 +172,15 @@ export interface TurnLauncherDeps {
    * 与整个遥测通道「可关、可删、消费方按缺席设计」的定位一致。
    */
   telemetryStore?: TelemetryStore;
+  /**
+   * 推送通知（docs/tech/push-notification.md §4）——本文件在三个已知时刻调它：要审批、
+   * agent 提问、一轮结束。缺省 undefined = 不发通知，与遥测同样的「可关、可删、消费方
+   * 按缺席设计」定位。生产装配见 `routes/chat.ts` 底部。
+   *
+   * 为什么接在本文件而不是 `turn-runner.ts`：那是运行内核，不该长出对可选外围功能的
+   * 认识——与 `onMilestone`（遥测）完全同构的分工，见 docs/tech/telemetry.md §2.4。
+   */
+  notifier?: ChatNotifier;
   /** 缺省 stdout 单例；测试注入自己的 sink 以断言日志。 */
   logger?: Logger;
 }
@@ -181,8 +200,27 @@ export type LaunchTurnOutcome =
   | { ok: true }
   /** 会话不存在或不属于这个 `userId`——路由转 404；自动出队遇到它只记日志（会话在排队期间被删了）。 */
   | { ok: false; reason: 'not_found' }
-  /** 已有进行中的一轮（`startTurn` 的守卫）——路由转 409。窄竞态，正常流程走不到。 */
+  /** 已有进行中的一轮（`reserveTurn`/`startTurn` 的守卫）——路由转 409。窄竞态，正常流程走不到。 */
   | { ok: false; reason: 'busy' }
+  /**
+   * 用户在[起轮装配](../../../../docs/terms.md)期间按了[停止](../../../../docs/terms.md)
+   * （docs/tech/turn-abort.md §3.3）——这一轮**从没启动**，路由转 202 `mode: 'aborted'`
+   * （不是错误：用户要的结果达成了）。收尾那两帧已由 `releaseTurn` 补上。
+   *
+   * 自动[出队](../../../../docs/terms.md)遇到它**不 requeue**：用户按的就是停止，把这条
+   * 放回队首等于没停。
+   */
+  | { ok: false; reason: 'aborted' }
+  /**
+   * 进程正在[优雅关闭](../../../../docs/terms.md)（docs/tech/graceful-shutdown.md §3.3）
+   * ——路由转 **503**「服务正在重启，请稍后重试」。
+   *
+   * 自动[出队](../../../../docs/terms.md)遇到它把消息 `requeueFront` **放回队首**
+   * （那一步已经把它 dequeue 了）：服务重启不该吞掉用户排的消息，重启后下一次有轮收尾
+   * 时它会被自然重试——与既有的「起轮失败不吞消息」一致。这与 `'aborted'` 那档刚好
+   * 相反：那是用户主动按了停止，放回去等于没停。
+   */
+  | { ok: false; reason: 'shutting_down' }
   /** 模型/仓库凭据/沙盒装配失败——路由转 500；自动出队遇到它把消息放回队首。 */
   | { ok: false; reason: 'error'; message: string };
 
@@ -248,8 +286,52 @@ export async function launchTurn(
   deps: TurnLauncherDeps,
   input: LaunchTurnInput,
 ): Promise<LaunchTurnOutcome> {
-  const { conversationId, userId, text } = input;
   const log = deps.logger ?? defaultLogger;
+
+  // [起轮占位](../../../../docs/terms.md)（docs/tech/turn-abort.md §3.3）——**装配的第一
+  // 件事**：从这一刻起这一轮就算「存在」，于是用户在装配期间按停止停得住它，同会话
+  // 后来的消息也会走[排队](../../../../docs/terms.md)而不是再起一轮。占位之前那段空窗
+  // 正是「刚发出就点停止毫无反应」这个 bug 的根因。
+  const reserved = reserveTurn(input.conversationId, log);
+  if (!reserved.ok) {
+    // 两种拒绝原样透出：`busy` → 409（已有轮），`shutting_down` → 503（进程正在
+    // [优雅关闭](../../../../docs/terms.md)，稍后重试，docs/tech/graceful-shutdown.md §3.3）。
+    return { ok: false, reason: reserved.reason };
+  }
+  const { reservation } = reserved;
+
+  // `try/finally` 而不是在每个 `return` 前手写一次 `releaseTurn`：装配有六七条退出路径
+  // （凭据、沙盒、buildSession、被停止、busy…），漏掉任何一条就把这个会话**永久锁死**
+  // ——`isTurnActive` 恒真，此后所有消息只会排队、再也起不了轮。
+  let handedOff = false;
+  try {
+    const outcome = await assembleAndStartTurn(deps, input, reservation, log);
+    handedOff = outcome.ok; // 只有真的交给 `startTurn` 跑起来了才算交棒
+    return outcome;
+  } finally {
+    if (!handedOff) {
+      // 被停止过的占位会在这里补上「用户消息 + 已停止」两帧（`releaseTurn` 自己判断）；
+      // 其余情况只是把登记撤掉。
+      releaseTurn(deps.db, reservation, input.text, log);
+    }
+  }
+}
+
+/**
+ * `launchTurn` 的装配主体——从 `launchTurn` 整段抽出来只为一件事：让上面那个
+ * `try/finally`（[起轮占位](../../../../docs/terms.md)的撤销）能包住**全部**退出路径，
+ * 而不必给这几百行重排缩进。
+ *
+ * `reservation` 贯穿全程：两个检查点读它的 `wasAborted()`，最后连同 session 一起交给
+ * `startTurn`（就地升级成真正在跑的那一轮）。
+ */
+async function assembleAndStartTurn(
+  deps: TurnLauncherDeps,
+  input: LaunchTurnInput,
+  reservation: TurnReservation,
+  log: Logger,
+): Promise<LaunchTurnOutcome> {
+  const { conversationId, userId, text } = input;
   // 起轮装配打点（docs/tech/telemetry.md §2.4）：秒表从进入本函数就起，各段就地
   // 量、攒进 `timings`，等第一个 chunk 抵达才落库（见 `createMilestoneRecorder`）。
   const launchStopwatch = startStopwatch();
@@ -288,7 +370,7 @@ export async function launchTurn(
     });
     acquireMs = acquireStopwatch();
     const touchStopwatch = startStopwatch();
-    await deps.sandboxManager.touch(conversationId); // every user message rolls the sandbox's idle timeout forward — see docs/tech/chat-webapp.md §2.2
+    await deps.sandboxManager.ensureLifetime(conversationId); // 每条用户消息把沙盒存活时长补足一次 — 见 docs/tech/chat-webapp.md §2.2
     touchMs = touchStopwatch();
   } catch (error) {
     return { ok: false, reason: 'error', message: describeError(error) };
@@ -306,6 +388,12 @@ export async function launchTurn(
       sandboxId: acquired.resumeToken,
     });
   }
+
+  // 停止检查点 1（docs/tech/turn-abort.md §3.3）：沙盒那几个远程调用不接受
+  // `AbortSignal`，掐不断（§6.5），但既然已经知道用户要停，就别再往下白跑 skill 扫描
+  // 与 `buildSession`。放在上面那次 E2B [重连令牌](../../../../docs/terms.md)回写**之后**
+  // ——那是有价值的副作用（下一轮要靠它恢复同一个沙盒），不该因为这一轮被停就丢掉。
+  if (reservation.wasAborted()) return { ok: false, reason: 'aborted' };
 
   // docs/tech/chat-webapp.md §2.2c（审批链）, docs/tech/single-ledger.md §6.2/§6.4: the session-level 审批分类器
   // (`ApprovalPolicy`, three-value) — `classifyApproval` decides on the
@@ -336,18 +424,44 @@ export async function launchTurn(
   // docs/tech/single-ledger.md §6.4: the 人审通道 (`ApprovalReviewer`) — `requestReview`
   // registers a pending decision and suspends until a human (or a
   // timeout) resolves it via `POST .../approvals/:callId`.
-  const onReview: ApprovalReviewer = (request) =>
-    requestReview(conversationId, {
+  const onReview: ApprovalReviewer = (request) => {
+    // **顺序是硬要求**（docs/tech/push-notification.md §3.2）：先 `requestReview` 把
+    // 挂起项登记好——审批卡片走 SSE 直播那条路，一步没改；通知是可选支路，绝不能
+    // 排在它前面拖慢或拖挂它。同「观测绝不插在 chunk 送达用户的前面」。
+    const decision = requestReview(conversationId, {
       callId: request.ctx.callId,
       toolName: request.toolName,
       input: request.input,
     });
+    deps.notifier?.approvalPending({
+      conversationId,
+      userId,
+      // 与上面 `requestReview` 登记用的是同一个 callId——通知上的裁决按钮就是靠它
+      // 找回这条挂起项（docs/tech/push-notification.md §6.5）。
+      callId: request.ctx.callId,
+      toolName: request.toolName,
+      input: request.input,
+      // 与上面那次 `requestReview` 用的是同一个函数的同一次取值口径——通知的 TTL
+      // 因此永远跟着审批超时走，不会各定各的（技术方案 §6.3）。
+      timeoutMs: resolveApprovalTimeoutMs(),
+    });
+    return decision;
+  };
 
   // docs/tech/chat-webapp.md §2.2c（审批链）: the ask-user bridge. Always wired in
   // (unlike `onApproval`'s auto-allow branch, there's no "skip asking" mode
   // for `ask-user` — see `chat-agent.ts`'s `BuildSessionOptions.onAskUser`).
-  const onAskUser = (req: RequestUserAnswerInput): Promise<AskUserOutcome> =>
-    requestUserAnswer(conversationId, req);
+  const onAskUser = (req: RequestUserAnswerInput): Promise<AskUserOutcome> => {
+    // 同 `onReview`：先挂起、后通知。
+    const outcome = requestUserAnswer(conversationId, req);
+    deps.notifier?.questionPending({
+      conversationId,
+      userId,
+      question: req.question,
+      timeoutMs: resolveAskUserTimeoutMs(),
+    });
+    return outcome;
+  };
 
   // docs/tech/single-ledger.md §5 单-3: this turn's newly-appended messages are found by
   // slicing `session.toJSON().messages` past however many `kind =
@@ -400,15 +514,18 @@ export async function launchTurn(
     return { ok: false, reason: 'error', message: describeError(error) };
   }
   const buildSessionMs = buildSessionStopwatch();
+
+  // 停止检查点 2（docs/tech/turn-abort.md §3.3）：装配全部做完、真正启动之前的最后一道关。
+  if (reservation.wasAborted()) return { ok: false, reason: 'aborted' };
+
   /** `startTurn` 返回后即定，见下方 `onMilestone` 处的注释。 */
   let launchMs = 0;
 
-  // 轮进行期间的保活心跳（docs/tech/sandbox-provider.md §5.1）：沙盒超时是**绝对
-  // 截止时间**，跑命令不会把它往后推（E2B 的 set-timeout 明说「从请求时刻起 x 秒」）。
-  // 上面那次 touch 只保证「从现在起还有 idleTimeout」，一轮跑得比它长就会被平台从
-  // 底下暂停掉。心跳只在这一轮存活期间跑，`onTurnSettled` 停——不能常驻，否则
-  // 空闲自动暂停这套机制就整个失效了（还烧钱）。
-  const stopHeartbeat = deps.sandboxManager.startHeartbeat(conversationId);
+  // 轮进行期间的保活**不在这里**了（docs/tech/sandbox-keepalive.md，KA-5）：以前这里起
+  // 一个 turn 级心跳定时器，现在归适配器自己管。理由是适配器有两个这里拿不到的信号——
+  // core 推来的[活动信号](../../../../docs/terms.md)、以及 exec 调用自身的进行状态
+  // （一条跑十分钟的命令期间 core 一个 chunk 都不产出，只有适配器知道自己还在等）。
+  // 上面那次 ensureLifetime 仍然要留：它管的是「这一轮真正开跑之前」那段。
 
   // [skill 提及](../../../../docs/terms.md)（docs/tech/composer-skill-mention.md §2.2）：
   // 扫出用户这条消息里点名的 skill，拼一行系统提示给模型。白名单是**这一轮真加载
@@ -431,10 +548,21 @@ export async function launchTurn(
     modelText,
     priorMessageCount,
     logger: log,
+    // 交棒：把[起轮占位](../../../../docs/terms.md)就地升级成真正在跑的这一轮
+    // （同一个 emitter 与 abortController，docs/tech/turn-abort.md §3.3）。
+    reservation,
     // 这一轮彻底结束（`activeTurns` 已清空）后接着起下一条排队消息——见文件头的
     // 依赖方向图。`void` 是刻意的：`turn-runner.ts` 的 `finally` 不等待也不关心它。
-    onTurnSettled: () => {
-      stopHeartbeat();
+    onTurnSettled: (settled) => {
+      // 通知排在起下一轮**之前**：`notifier` 的队列抑制（技术方案 §5.3）要读的是
+      // 「这一轮结束时队列里还有没有货」，而 `startNextQueuedTurn` 的第一件事就是
+      // 出队。顺序反了，最后一条排队消息起轮时队列刚好空了，就会误报一次「跑完了」。
+      // `notifier` 本身同步返回、内部自 catch，不会拖慢出队。
+      deps.notifier?.turnSettled({
+        conversationId,
+        userId,
+        status: settled.status,
+      });
       void startNextQueuedTurn(deps, conversationId);
     },
     // 起轮装配打点（docs/tech/telemetry.md §2.4）。载荷是**惰性**求值的（传函数不传
@@ -456,11 +584,7 @@ export async function launchTurn(
     ),
   });
   launchMs = launchStopwatch();
-  // 起轮被「已有进行中的一轮」守卫挡掉时 `onTurnSettled` 永远不会来，心跳得就地收掉。
-  if (!started) {
-    stopHeartbeat();
-    return { ok: false, reason: 'busy' };
-  }
+  if (!started) return { ok: false, reason: 'busy' };
 
   return { ok: true };
 }
@@ -503,7 +627,29 @@ export async function startNextQueuedTurn(
     return;
   }
 
+  if (outcome.reason === 'aborted') {
+    // 用户在这一轮的[起轮装配](../../../../docs/terms.md)期间按了[停止](../../../../docs/terms.md)
+    // （docs/tech/turn-abort.md §3.3）——**不 requeue**：放回队首等于没停，下一次有轮
+    // 收尾时它又会被发出去。这条消息的「已停止」收尾帧已由 `releaseTurn` 落账本。
+    log.info(LOG_SCOPE, 'queued message stopped before it started', {
+      conversationId,
+      messageId: message.id,
+    });
+    return;
+  }
+
   requeueFront(deps.db, conversationId, message, log);
+
+  if (outcome.reason === 'shutting_down') {
+    // 进程正在[优雅关闭](../../../../docs/terms.md)——消息已放回队首，重启后下一次有轮
+    // 收尾时自然重试。这是**正常关闭流程的一部分**，不是故障，所以记 info 不记 error。
+    log.info(LOG_SCOPE, 'shutting down, queued message put back', {
+      conversationId,
+      messageId: message.id,
+    });
+    return;
+  }
+
   log.error(LOG_SCOPE, 'failed to start queued turn, message put back', {
     conversationId,
     messageId: message.id,

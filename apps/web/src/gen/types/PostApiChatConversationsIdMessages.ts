@@ -15,7 +15,7 @@ export type PostApiChatConversationsIdMessagesPathParams = {
 };
 
 /**
- * @description Accepted — see `mode` (\"started\" | \"steered\" | \"queued\"); poll/stream `GET .../stream` for its events
+ * @description Accepted — see `mode` (\"started\" | \"steered\" | \"queued\" | \"aborted\"); poll/stream `GET .../stream` for its events. \"aborted\" (docs/tech/turn-abort.md §3.3) means the user stopped this turn while it was still being assembled, so it never started running — the stopped-turn frames are on the stream like any other outcome
  */
 export type PostApiChatConversationsIdMessages202 = StartTurnAck;
 
@@ -39,6 +39,11 @@ export type PostApiChatConversationsIdMessages409 = ApiError;
  */
 export type PostApiChatConversationsIdMessages500 = ApiError;
 
+/**
+ * @description The server is shutting down (docs/tech/graceful-shutdown.md §3.3) — no new turn is accepted during shutdown. Retryable: resend once the new process is up
+ */
+export type PostApiChatConversationsIdMessages503 = ApiError;
+
 export type PostApiChatConversationsIdMessagesMutationRequest =
   PostChatMessageInput;
 
@@ -53,5 +58,6 @@ export type PostApiChatConversationsIdMessagesMutation = {
     | PostApiChatConversationsIdMessages401
     | PostApiChatConversationsIdMessages404
     | PostApiChatConversationsIdMessages409
-    | PostApiChatConversationsIdMessages500;
+    | PostApiChatConversationsIdMessages500
+    | PostApiChatConversationsIdMessages503;
 };

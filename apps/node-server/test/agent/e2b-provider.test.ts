@@ -86,6 +86,7 @@ function createParams(
     cloneUrl: 'https://github.com/acme/demo.git',
     githubPat: 'PAT123',
     timeoutMs: 1000,
+    keepAlive: { idleTimeoutMs: 1000 },
     ...overrides,
   };
 }
@@ -131,7 +132,8 @@ describe('createE2bProvider', () => {
     );
     expect(provisioned.resumeToken).toBe('sbx_abc');
 
-    await provisioned.extendIdle(4242);
+    // 保活转发到适配器：补足语义下第一次必定真的打一次 setTimeout。
+    await provisioned.ensureLifetime(4242);
     expect(fake.setTimeoutCalls).toEqual([4242]);
   });
 
@@ -156,7 +158,9 @@ describe('createE2bProvider', () => {
     const fake = fakeE2bSandbox('sbx_resumed');
     connectMock.mockResolvedValue(fake);
 
-    const result = await createE2bProvider().resume('sbx_resumed');
+    const result = await createE2bProvider().resume('sbx_resumed', {
+      idleTimeoutMs: 1000,
+    });
 
     expect(connectMock).toHaveBeenCalledWith('sbx_resumed', {
       apiKey: 'test-e2b-key',
@@ -180,7 +184,9 @@ describe('createE2bProvider', () => {
         )
         .mockResolvedValueOnce(fake);
 
-      const promise = createE2bProvider().resume('sbx_resumed');
+      const promise = createE2bProvider().resume('sbx_resumed', {
+        idleTimeoutMs: 1000,
+      });
       await vi.runAllTimersAsync(); // advance the retry backoff
       const result = await promise;
 
@@ -203,7 +209,9 @@ describe('createE2bProvider', () => {
         }),
       );
 
-      const promise = createE2bProvider().resume('sbx_missing');
+      const promise = createE2bProvider().resume('sbx_missing', {
+        idleTimeoutMs: 1000,
+      });
       await vi.runAllTimersAsync();
 
       await expect(promise).resolves.toEqual({ kind: 'unavailable' });
@@ -220,7 +228,9 @@ describe('createE2bProvider', () => {
 
       // Attach the rejection expectation synchronously (before advancing
       // timers) so the promise never rejects into an unobserved window.
-      const promise = createE2bProvider().resume('sbx_x');
+      const promise = createE2bProvider().resume('sbx_x', {
+        idleTimeoutMs: 1000,
+      });
       await Promise.all([
         expect(promise).rejects.toThrow(/network boom/),
         vi.runAllTimersAsync(),
@@ -236,9 +246,9 @@ describe('createE2bProvider', () => {
     await expect(createE2bProvider().create(createParams())).rejects.toThrow(
       /E2B_API_KEY/,
     );
-    await expect(createE2bProvider().resume('sbx_x')).rejects.toThrow(
-      /E2B_API_KEY/,
-    );
+    await expect(
+      createE2bProvider().resume('sbx_x', { idleTimeoutMs: 1000 }),
+    ).rejects.toThrow(/E2B_API_KEY/);
     expect(createMock).not.toHaveBeenCalled();
     expect(connectMock).not.toHaveBeenCalled();
   });

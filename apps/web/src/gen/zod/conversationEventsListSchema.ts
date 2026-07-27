@@ -6,6 +6,7 @@
 import { chatChunkEnvelopeSchema } from './chatChunkEnvelopeSchema.ts';
 import { chatMessageFrameSchema } from './chatMessageFrameSchema.ts';
 import { chatQueueFrameSchema } from './chatQueueFrameSchema.ts';
+import { chatTurnStateFrameSchema } from './chatTurnStateFrameSchema.ts';
 import { z } from 'zod/v4';
 
 export const conversationEventsListSchema = z.object({
@@ -15,6 +16,7 @@ export const conversationEventsListSchema = z.object({
         chatChunkEnvelopeSchema,
         chatMessageFrameSchema,
         chatQueueFrameSchema,
+        chatTurnStateFrameSchema,
       ]),
     );
   },

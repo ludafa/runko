@@ -10,14 +10,26 @@
  * up exactly where the last connection left off.
  *
  * `turnInProgressRef` is the hook's own belief about whether *this* conversation
- * currently has a turn running — seeded from `initialFrames` on mount (see
- * `lastFrameIsChunk` below) and flipped by the `MessageLedger`'s own
- * `onTurnEnd` callback (docs/tech/single-ledger.md §5 单-3's
- * turn-ending `message-metadata` chunk — `materialize.ts`'s file header) the
- * moment a turn actually concludes. It gates: (a) which of the two
- * `sendMessage` branches below runs (start a new turn vs. steer the
- * in-progress one — STEER-3B), (b) whether a tail that just ended (cleanly or
- * via error) should reconnect.
+ * currently has a turn running. It gates: (a) which of the two `sendMessage`
+ * branches below runs (start a new turn vs. queue/steer the in-progress one —
+ * STEER-3B), (b) whether a tail that just ended (cleanly or via error) should
+ * reconnect.
+ *
+ * 它有三个写入源，权威性递增：
+ *
+ * 1. **挂载时的临时猜测**（`lastFrameIsChunk`）：只用来撑到 tail 连上的那几十毫秒。
+ * 2. **`MessageLedger` 的 `onTurnEnd`**（docs/tech/single-ledger.md §5 单-3 那条收尾
+ *    `message-metadata`）：一轮真正结束的那一刻翻假。
+ * 3. **[轮状态快照](../../../../../docs/terms.md)**（`applyTurnState`，
+ *    docs/tech/chat-webapp.md §5.1）：**服务端的权威答案**，每条 tail 连上必发一帧。
+ *
+ * 第 3 条是后来加的，补的正是前两条都盖不住的那个洞：一轮**崩溃**时（进程重启、
+ * `driveTurn` 的 catch 分支）收尾 metadata 永远不会到，而崩溃残留的 `kind = 'chunk'`
+ * 行又永不 GC，于是第 1 条那个猜测此后**每次**打开这个会话都猜「有轮在跑」，且永不
+ * 自愈。后果是用户发的消息一律走[排队](../../../../../docs/terms.md)、没有下面那套
+ * 乐观回显、而且永远等不到[出队](../../../../../docs/terms.md)（没有轮会收尾去触发
+ * 它）；按[停止](../../../../../docs/terms.md)也只会拿到 409。现在**任何**前端与服务端
+ * 的分叉都会被下一次 tail 连接纠正。
  *
  * ---- optimistic user echo (short-lived — this ticket's fix) ----
  *
@@ -58,7 +70,7 @@ import {
 } from './api';
 import { MessageLedger } from './materialize';
 import type { ChatReplayFrame, QueuedMessage } from './schema';
-import { frameSeq, isQueueFrame } from './schema';
+import { frameSeq, isQueueFrame, isTurnStateFrame } from './schema';
 import type { PendingUserEcho } from './timeline';
 
 export type ChatTurnStatus = 'idle' | 'streaming' | 'error';
@@ -136,12 +148,19 @@ function isAbortError(error: unknown): boolean {
 }
 
 /**
- * `finalizeTurnPersistence` (`apps/node-server`'s `turn-runner.ts`) only ever GCs a
- * turn's `kind = 'chunk'` rows *after* it finishes gracefully — a cleanly-
- * completed turn's history therefore ends in `MessageFrame`s only, while an
- * in-progress or crashed one's tail end is still `ChunkEnvelope`s (never
- * finalized, nothing to GC yet). This is a structural invariant of the
- * server's own persistence, not a heuristic.
+ * 「历史以 chunk 收尾」——`turnInProgressRef` 挂载时的**临时**初值，只用来撑到 tail 连上
+ * （那一刻[轮状态快照](../../../../../docs/terms.md)给出服务端的权威答案，见文件头）。
+ *
+ * 依据：`finalizeTurnPersistence`（`apps/node-server` 的 `turn-runner.ts`）只在一轮**优雅
+ * 收尾**后才 GC 它的 `kind = 'chunk'` 行，所以正常结束的一轮，历史里只剩 `MessageFrame`。
+ *
+ * **但它推不出「有轮在跑」**——这里曾经写着「这是服务端持久化的结构性不变量，不是
+ * 启发式」，那句话是错的：以 chunk 收尾同时覆盖了「真在跑」与「崩溃过」两种情况，而
+ * 这两者对「有没有轮在跑」的答案**恰好相反**。崩溃的轮（进程重启、`driveTurn` 的 catch
+ * 分支）永远不会来收尾 metadata，它那些 chunk 行也永不 GC，于是这个判断此后每次都猜
+ * 「在跑」并且永不自愈（后果见文件头）。所以它现在降级为一个明确的猜测：猜错的代价被
+ * 限制在 tail 连上前那几十毫秒，而且刻意猜「在跑」而不是「空闲」——万一真有一轮在跑，
+ * 这几十毫秒里用户发的消息会被正确地排队，而不是去起第二轮。
  */
 function lastFrameIsChunk(frames: readonly ChatReplayFrame[]): boolean {
   const last = frames.at(-1);
@@ -251,6 +270,34 @@ export function useChatMessages(
     setQueuedMessages(queue);
   }, []);
 
+  /**
+   * [轮状态快照](../../../../../docs/terms.md)的唯一落点（docs/tech/chat-webapp.md §5.1）
+   * ——服务端在**每条** tail 连上时告诉我们「这个会话到底有没有轮在跑」，这里据它校正
+   * `turnInProgressRef` 与 `status`。
+   *
+   * 为什么需要它：本 hook 曾经只能**猜**这件事（`lastFrameIsChunk`，见文件头），而那个
+   * 猜测在一轮崩溃后长期失准、且永不自愈——用户发的消息一律走排队、没有乐观回显、
+   * 还永远等不到出队，按停止也只拿到 409。现在任何「前端与服务端的分叉」都会被下一次
+   * tail 连接纠正。
+   *
+   * 两处刻意的克制：
+   *
+   * - **不覆盖 `'error'`**：那条红色的直播中断提示是另一件事（连接坏了），不该被一帧
+   *   「没有轮在跑」抹掉——它本来就意味着没有轮在跑。只把 `'streaming'` 落回 `'idle'`。
+   * - **`turnActive: true` 时不动 `status` 之外的东西**：不清 `error`、不碰队列，那些各有
+   *   自己的权威来源。
+   */
+  const applyTurnState = useCallback((turnActive: boolean) => {
+    turnInProgressRef.current = turnActive;
+    if (turnActive) {
+      setStatus('streaming');
+      return;
+    }
+    setAwaitingFirstEvent(false);
+    setStatus((prev) => (prev === 'streaming' ? 'idle' : prev));
+    setStopping(false); // 「正在停」的中间态也该结束：服务端已经没有轮可停了
+  }, []);
+
   const ledgerRef = useRef<MessageLedger | undefined>(undefined);
   const initializedRef = useRef(false);
   useEffect(() => {
@@ -276,6 +323,10 @@ export function useChatMessages(
         if (queuedMessagesRef.current.length > 0) {
           turnInProgressRef.current = true;
           setStatus('streaming');
+          // 下一轮同样要走一整段[起轮装配](../../../../../docs/terms.md)才会出第一帧
+          // ——与用户手动发消息那条路一样，AI 侧先摆上「正在准备…」占位，别让时间线
+          // 静止在上一轮的收尾上。第一帧一到（或轮状态快照告知没轮在跑）就复位。
+          setAwaitingFirstEvent(true);
           return;
         }
 
@@ -296,10 +347,12 @@ export function useChatMessages(
     );
     ledgerRef.current = ledger;
     for (const frame of initialFrames) {
-      // `QueueFrame` 不属于账本（docs/tech/steer-and-queue.md §4.3）——跳过，
-      // 不喂 `MessageLedger`。它对队列状态的贡献已经在 `queuedMessages` 的初值里
-      // 算过了（见上），所以这里只需跳过，不用（也不该）在 effect 里再 setState。
-      if (isQueueFrame(frame)) continue;
+      // 两种状态快照帧都不属于账本（`QueueFrame`，docs/tech/steer-and-queue.md §4.3；
+      // [轮状态快照](../../../../../docs/terms.md)，docs/tech/chat-webapp.md §5.1）
+      // ——跳过，不喂 `MessageLedger`。队列快照对状态的贡献已经在 `queuedMessages` 的
+      // 初值里算过了（见上）；轮状态快照根本不会出现在 `initialFrames` 里（`GET .../events`
+      // 只回放持久行，它只走直播流），这里跳过它纯粹是让类型收窄在一处说清。
+      if (isQueueFrame(frame) || isTurnStateFrame(frame)) continue;
       ledger.applyFrame(frame);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `initialFrames` is this hook instance's fixed seed, not a reactive prop (see comment above)
@@ -310,6 +363,10 @@ export function useChatMessages(
       if (isQueueFrame(frame)) {
         // 权威快照（每条 tail 连上必发一帧，队列变化再广播一帧）——多标签一致靠它。
         applyQueueSnapshot(frame.queue);
+        return;
+      }
+      if (isTurnStateFrame(frame)) {
+        applyTurnState(frame.turnActive);
         return;
       }
       const seq = frame.seq;
@@ -326,7 +383,7 @@ export function useChatMessages(
       // calls this, it's always set. Guarded rather than asserted non-null.
       ledgerRef.current?.applyFrame(frame);
     },
-    [applyQueueSnapshot],
+    [applyQueueSnapshot, applyTurnState],
   );
 
   // `openTailRef` always holds *this* render's `startTail` closure (fresh
@@ -432,7 +489,18 @@ export function useChatMessages(
               steered: true,
             },
           ]);
-          postChatMessage(conversationId, trimmed, intent).catch(
+          postChatMessage(conversationId, trimmed, intent).then(
+            (mode) => {
+              // 服务端可能**没有**真把它插进这一轮：那一轮还卡在
+              // [起轮装配](../../../../../docs/terms.md)里时插不进去（还没有 session），
+              // 只能给它排队（docs/tech/turn-abort.md §3.3）。这条「待注入」回显因此
+              // 永远等不到注入点，撤掉——它的可见位置改由队列快照给（待发区）。
+              if (mode === 'queued') {
+                setPendingUserEchoes((prev) =>
+                  prev.filter((echo) => echo.id !== steerEchoId),
+                );
+              }
+            },
             (postError: unknown) => {
               // 没递出去就别在时间线上留一条「待注入」——它永远等不到注入。
               setPendingUserEchoes((prev) =>

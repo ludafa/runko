@@ -180,23 +180,52 @@ export const queueFrameSchema = z
 export type QueueFrame = z.infer<typeof queueFrameSchema>;
 
 /**
+ * `{ turnActive }` — [轮状态快照](../../../../docs/terms.md)（docs/tech/chat-webapp.md §5.1）。
+ * 与上面的队列快照同构（**没有 `seq`**、不落库、不参与 `after=` 续传），每条
+ * `GET .../stream` 在回放之后、进入直播之前必发一帧。
+ *
+ * **为什么要有这一帧**：在它之前，前端只能**猜**这个会话有没有轮在跑——「历史回放的最后
+ * 一帧不是 message 就算在跑」（`use-chat-messages.ts` 的 `lastFrameIsChunk`）。这个猜法在
+ * 一轮**崩溃**后就长期失准：崩溃的轮从不跑 `finalizeTurnPersistence`，它的 `kind = 'chunk'`
+ * 行永不 GC（`db/schema.ts` 的既有取舍），于是账本最后一行永远是 chunk，此后每次打开这个
+ * 会话前端都以为有轮在跑，而且**永不自愈**（翻假只发生在收到收尾 `message-metadata` 时，
+ * 那需要一个真在跑的轮）。后果是用户发的消息一律走[排队](../../../../docs/terms.md)、
+ * 不再有乐观回显，而且永远等不到[出队](../../../../docs/terms.md)（没有轮会收尾去触发它）；
+ * 按[停止](../../../../docs/terms.md)也只会拿到 409。
+ *
+ * 服务端手上有权威答案（`isTurnActive`），下发它即可。因为**每条**连接都发一帧，任何
+ * 「前端与服务端对轮状态的分叉」都会被下一次 tail 连接纠正——不只是打开会话那一刻。
+ */
+export const turnStateFrameSchema = z
+  .object({ turnActive: z.boolean() })
+  .openapi('ChatTurnStateFrame');
+
+export type TurnStateFrame = z.infer<typeof turnStateFrameSchema>;
+
+/**
  * Coverage enforcement (same discipline this file has always used for its
  * discriminated unions): every wire frame this app can ever produce is a
- * `ChunkEnvelope`, a `MessageFrame`, or a `QueueFrame` — distinguished by
- * which of `chunk`/`message`/`queue` the object actually carries (no shared
- * literal discriminant field the way the old `SessionEvent`/`SessionItem`
- * unions had one; the three keys never co-occur on one frame, so structural
- * presence is enough — and zod v4 treats a missing `z.any()` object key as a
- * failure, so a `MessageFrame`/`QueueFrame` can't be silently absorbed by
- * `chunkEnvelopeSchema`'s `chunk: z.any()`).
+ * `ChunkEnvelope`, a `MessageFrame`, a `QueueFrame`, or a `TurnStateFrame` —
+ * distinguished by which of `chunk`/`message`/`queue`/`turnActive` the object
+ * actually carries (no shared literal discriminant field the way the old
+ * `SessionEvent`/`SessionItem` unions had one; the four keys never co-occur on
+ * one frame, so structural presence is enough — and zod v4 treats a missing
+ * `z.any()` object key as a failure, so a `MessageFrame`/`QueueFrame`/
+ * `TurnStateFrame` can't be silently absorbed by `chunkEnvelopeSchema`'s
+ * `chunk: z.any()`).
  */
 export const chatReplayFrameSchema = z.union([
   chunkEnvelopeSchema,
   messageFrameSchema,
   queueFrameSchema,
+  turnStateFrameSchema,
 ]);
 
-export type ChatReplayFrame = ChunkEnvelope | MessageFrame | QueueFrame;
+export type ChatReplayFrame =
+  | ChunkEnvelope
+  | MessageFrame
+  | QueueFrame
+  | TurnStateFrame;
 
 /**
  * `GET .../events` response shape (docs/tech/chat-webapp.md §2.2 "契约细化", front-end-consumed
@@ -292,11 +321,16 @@ export const PostChatMessageInputSchema = z
  * `'queued'` (docs/tech/steer-and-queue.md §4.1) — a turn was in progress and
  * `text` went into the conversation's 待发队列 instead, to be dequeued as the
  * next turn once this one finishes.
+ *
+ * 第四档 `'aborted'`（docs/tech/turn-abort.md §3.3）：这一轮起来了一半——正在
+ * [起轮装配](../../../../docs/terms.md)——就被用户按[停止](../../../../docs/terms.md)
+ * 掐掉了，**从没启动**。它仍是 202 而不是错误：用户要的结果达成了。这一档的收尾
+ * （用户消息 + 「已停止」标记）照常走 `GET .../stream`，与其余三档一致。
  */
 export const StartTurnAckSchema = z
   .object({
     ok: z.literal(true),
-    mode: z.enum(['started', 'steered', 'queued']),
+    mode: z.enum(['started', 'steered', 'queued', 'aborted']),
   })
   .openapi('StartTurnAck');
 
@@ -405,6 +439,18 @@ export const PostAnswerInputSchema = z
     answer: z.string().min(1),
   })
   .openapi('PostAnswerInput');
+
+/**
+ * `POST .../presence`'s body（[在场](../../../../docs/terms.md)心跳，
+ * docs/tech/push-notification.md §5.2）：`focused` = 「此刻这条会话正在这个人眼前」
+ * ——页面可见 **且** 窗口聚焦 **且** 路由停在这条会话，三者缺一即为 false。
+ *
+ * 只有页面自己知道这三件事，所以必须由它上报：服务端能看到的「有没有活的 SSE
+ * 连接」在被切到后台的标签页上照样为真，恰恰是最需要通知的情形。
+ */
+export const PresenceInputSchema = z
+  .object({ focused: z.boolean() })
+  .openapi('PresenceInput');
 
 /** `GET .../turns/{turn}/telemetry`'s path params（docs/tech/chat-webapp.md §11.4）：`id` 同 `ConversationParamsSchema`；`turn` 是账本 metadata 里的轮次号（1 起）。 */
 export const TurnTelemetryParamsSchema = z.object({

@@ -28,14 +28,33 @@ const KNOWN_ERROR_TITLE: Record<NimboError['code'], string> = {
   aborted: '已停止',
 };
 
+/**
+ * `apps/node-server` 的 `ABORT_REASON_SHUTDOWN` 的**手写镜像**（本仓库既有的镜像纪律，
+ * 同 `schema.ts`）——服务端[优雅关闭](../../../../../docs/terms.md)时中止一轮用的就是这句
+ * 话，它经 core 透传成 `NimboError.message`（docs/tech/graceful-shutdown.md §4）。
+ *
+ * 为什么靠文案而不是靠一个专门的 `code`：「服务要关闭了」是宿主的运维概念，不该塞进
+ * `@nimbo/core` 的类型联合（理由见 docs/tech/graceful-shutdown.md §2）。**改这个常量要
+ * 同时改服务端那份**，否则服务重启会被显示成「用户按了停止」。
+ */
+const SHUTDOWN_ABORT_MESSAGE =
+  'The server shut down while this turn was running.';
+
 export function TurnFailedBar({ error }: { error: NimboError }) {
   if (error.code === 'aborted') {
+    // 两档都不是故障、都走中性呈现，差别只在「是谁停的」——用户没按任何按钮却看到
+    // 「已停止」会困惑，所以服务重启那一档要如实说是服务重启。
+    const byShutdown = error.message === SHUTDOWN_ABORT_MESSAGE;
     return (
       <Alert className="mb-2" data-testid="turn-stopped-bar">
         <CircleStopIcon />
-        <AlertTitle>{KNOWN_ERROR_TITLE.aborted}</AlertTitle>
+        <AlertTitle>
+          {byShutdown ? '服务重启，这一轮已中断' : KNOWN_ERROR_TITLE.aborted}
+        </AlertTitle>
         <AlertDescription>
-          这一轮由你停止；已经做过的事都保留着，接着发消息即可继续。
+          {byShutdown ?
+            '服务端重启了，这一轮没能跑完；已经做过的事都保留着，接着发消息即可继续。'
+          : '这一轮由你停止；已经做过的事都保留着，接着发消息即可继续。'}
         </AlertDescription>
       </Alert>
     );

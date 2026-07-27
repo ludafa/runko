@@ -91,6 +91,45 @@ describe('TimelineView — message part rendering', () => {
     expect(screen.getByTestId('error-bar')).toHaveTextContent('出错了');
   });
 
+  // 消息发出到这一轮第一帧到达之间（整段起轮装配，冷启动可达数十秒），AI 侧不该是空的
+  // ——用户只看到自己那条消息孤零零挂着，不知道有没有被收到。
+  it('awaitingFirstEvent 时在时间线末尾摆一个 AI 侧等待占位', () => {
+    render(
+      <TimelineView
+        messages={[]}
+        pendingUserEchoes={[
+          { id: 1, text: '帮我改个样式', afterMessageCount: 0 },
+        ]}
+        awaitingFirstEvent
+      />,
+    );
+
+    expect(screen.getByTestId('awaiting-first-event')).toBeInTheDocument();
+    // 文案刻意不是「思考中…」：那一刻 agent 还没开始跑，说它在思考是假的。
+    expect(screen.getByText('正在准备…')).toBeInTheDocument();
+    expect(screen.queryByText('思考中…')).not.toBeInTheDocument();
+    // 用户那条消息照常在（占位是**追加**在末尾，不是替代）。
+    expect(screen.getByText('帮我改个样式')).toBeInTheDocument();
+  });
+
+  it('第一帧到达后（awaitingFirstEvent 为假）不再有占位', () => {
+    const messages: NimboUIMessage[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          { type: 'text', text: '好的', state: 'done' },
+        ],
+      },
+    ];
+    render(<TimelineView messages={messages} awaitingFirstEvent={false} />);
+
+    expect(
+      screen.queryByTestId('awaiting-first-event'),
+    ).not.toBeInTheDocument();
+  });
+
   it('a gated tool call in approval-requested state renders ApprovalCard, not ToolCallCard', () => {
     const messages: NimboUIMessage[] = [
       {
@@ -110,6 +149,145 @@ describe('TimelineView — message part rendering', () => {
     ];
     render(<TimelineView messages={messages} />);
     expect(screen.getByTestId('approval-card')).toBeInTheDocument();
+  });
+
+  // 轮结束后，还挂着的审批卡片就已经失效了——服务端那边的挂起项在轮收尾时就被结掉了，
+  // 再点任何按钮都只会拿到 404。此前界面要等用户点下去吃了 404 才翻，在那之前一直画着
+  // 三个可点的按钮（用户实测报告：一张「待审批」卡片下面就是「服务重启，这一轮已中断」）。
+  it('轮已结束时，还停在 approval-requested 的卡片直接显示「已失效」且不给按钮', () => {
+    const messages: NimboUIMessage[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          {
+            type: 'tool-bash',
+            toolCallId: 'call-1',
+            state: 'approval-requested',
+            input: { command: 'git commit -m "wip"' },
+            approval: { id: 'call-1' },
+          },
+        ],
+      },
+    ];
+    render(<TimelineView messages={messages} turnInProgress={false} />);
+
+    const card = screen.getByTestId('approval-card');
+    expect(card).toHaveAttribute('data-status', 'expired');
+    expect(screen.getByText('已失效')).toBeInTheDocument();
+    expect(screen.queryByText('待审批')).not.toBeInTheDocument();
+    // 三个决策按钮一个都不该在——点了也只会拿到 404。
+    expect(
+      screen.queryByRole('button', { name: '允许' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: '会话内都允许' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: '拒绝' }),
+    ).not.toBeInTheDocument();
+  });
+
+  // 回归（用户实测）：上一轮停掉、卡片已显示「已失效」，用户再发一句「继续」起了新一轮，
+  // 那张历史卡片**又活了**——因为判据当时只看「会话里有没有轮在跑」。正确判据是「**这张
+  // 卡片自己那一轮**还在跑吗」：账本里每一轮以一条带终态 metadata 的消息收尾，收尾消息
+  // 及其之前的一切都属于已结束的轮。
+  it('新一轮起来后，上一轮那张卡片仍然是「已失效」，不会跟着复活', () => {
+    const messages: NimboUIMessage[] = [
+      // ---- 上一轮：卡片还挂着，就被停止收尾了 ----
+      {
+        id: 'm1',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          {
+            type: 'tool-bash',
+            toolCallId: 'call-1',
+            state: 'approval-requested',
+            input: { command: 'git commit -m "wip"' },
+            approval: { id: 'call-1' },
+          },
+        ],
+        metadata: {
+          status: 'interrupted',
+          error: { code: 'aborted', message: 'Turn stopped by the user.' },
+        },
+      },
+      // ---- 用户发「继续」，新一轮起来了 ----
+      { id: 'm2', role: 'user', parts: [{ type: 'text', text: '继续' }] },
+      {
+        id: 'm3',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          { type: 'text', text: '好的，我接着来', state: 'done' },
+        ],
+      },
+    ];
+    // 会话级：确实有轮在跑（新那一轮）。
+    render(<TimelineView messages={messages} turnInProgress />);
+
+    // 但旧卡片属于已收尾的那一轮，必须仍然是失效态。
+    expect(screen.getByTestId('approval-card')).toHaveAttribute(
+      'data-status',
+      'expired',
+    );
+    expect(screen.queryByText('待审批')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: '允许' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('轮还在跑时同一张卡片照常是「待审批」（默认档不受影响）', () => {
+    const messages: NimboUIMessage[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          {
+            type: 'tool-bash',
+            toolCallId: 'call-1',
+            state: 'approval-requested',
+            input: { command: 'git commit -m "wip"' },
+            approval: { id: 'call-1' },
+          },
+        ],
+      },
+    ];
+    render(<TimelineView messages={messages} turnInProgress />);
+
+    expect(screen.getByTestId('approval-card')).toHaveAttribute(
+      'data-status',
+      'pending',
+    );
+    expect(screen.getByText('待审批')).toBeInTheDocument();
+  });
+
+  // 已回答的提问卡片不能被轮结束「追认」成失效——`expired` 在卡片里优先于 `answered`，
+  // 叠错了会把一条答完的问题画成「已失效」。
+  it('轮已结束不影响已回答的提问卡片（仍是「已回答」）', () => {
+    const messages: NimboUIMessage[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          {
+            type: 'tool-ask-user',
+            toolCallId: 'call-2',
+            state: 'output-available',
+            input: { question: '用哪个包管理器？' },
+            output: 'pnpm',
+          },
+        ],
+      },
+    ];
+    render(<TimelineView messages={messages} turnInProgress={false} />);
+
+    expect(screen.getByText('已回答')).toBeInTheDocument();
+    expect(screen.queryByText('已失效')).not.toBeInTheDocument();
   });
 
   it('a gated tool call resolved to approval-responded(denied) renders ToolCallCard with the deny reason, not ApprovalCard', async () => {
@@ -364,6 +542,43 @@ describe('TimelineView — turn-stats / turn-failed bar placement', () => {
     ).not.toBeInTheDocument();
     // 已产出的内容照旧留在时间线上（停止不是撤销）。
     expect(screen.getByText('做到一半')).toBeInTheDocument();
+  });
+
+  // 同一个 `code: 'aborted'`，但不是用户按的——服务端[优雅关闭](../../../../../docs/terms.md)
+  // 中止的（docs/tech/graceful-shutdown.md §4）。判档靠 message 与服务端那个常量逐字相等，
+  // 所以这条用例同时是那个跨端文案契约的哨兵：服务端改了文案而这里没跟，它就会红。
+  it('服务重启导致的中断走「服务重启，这一轮已中断」，与用户按停止分开', () => {
+    const messages: NimboUIMessage[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          { type: 'text', text: '迁到一半', state: 'done' },
+        ],
+        metadata: {
+          status: 'interrupted',
+          error: {
+            code: 'aborted',
+            message: 'The server shut down while this turn was running.',
+          },
+        },
+      },
+    ];
+    render(<TimelineView messages={messages} />);
+
+    // 仍是中性标记（不是红色失败条）——这不是故障。
+    expect(screen.getByTestId('turn-stopped-bar')).toBeInTheDocument();
+    expect(screen.queryByTestId('turn-failed-bar')).not.toBeInTheDocument();
+
+    expect(screen.getByText('服务重启，这一轮已中断')).toBeInTheDocument();
+    // 关键：不能显示成「已停止」，用户没按过任何按钮。
+    expect(screen.queryByText('已停止')).not.toBeInTheDocument();
+    // core 那句英文同样不抛给用户。
+    expect(
+      screen.queryByText('The server shut down while this turn was running.'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('迁到一半')).toBeInTheDocument();
   });
 
   it('a "turn signal" placeholder message (empty parts, only metadata) renders just the trailing bar, no bubble', () => {

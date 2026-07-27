@@ -203,6 +203,8 @@ export type UserMessageListener = () => void;
 
 export class MessageLedger {
   private readonly order: string[] = [];
+  /** `order` 的成员集（O(1) 判重）——`order` 会长到几百条，每次占位都线性扫一遍不划算。 */
+  private readonly ordered = new Set<string>();
   private readonly byId = new Map<string, NimboUIMessage>();
   private openController:
     ReadableStreamDefaultController<NimboChunk> | undefined;
@@ -243,6 +245,8 @@ export class MessageLedger {
         chunk.messageMetadata?.steered === true &&
         chunk.messageId !== undefined
       ) {
+        // 与下面那条同理：在 `start` 这一刻（同步）就把位子占下，内容等 `finish` 才 upsert。
+        this.ensureOrder(chunk.messageId);
         this.steerBuilder = startSteerMessage(
           chunk.messageId,
           chunk.messageMetadata,
@@ -252,8 +256,12 @@ export class MessageLedger {
         // `upsert()` calls — so a trailing standalone `message-metadata`
         // chunk always knows the right target id, even if this message's
         // content hasn't materialized yet (see file header, "P13-5-5 fix").
-        if (chunk.messageId !== undefined)
+        if (chunk.messageId !== undefined) {
           this.lastAssistantId = chunk.messageId;
+          // 顺序在这里就定死（`ensureOrder` 的注释说明了为什么不能等异步物化）：
+          // `start` chunk 已经带着 messageId，而它是**同步**到达的。
+          this.ensureOrder(chunk.messageId);
+        }
         const stream = new ReadableStream<NimboChunk>({
           start: (controller) => {
             this.openController = controller;
@@ -324,8 +332,27 @@ export class MessageLedger {
     this.onTurnEnd?.(metadata);
   }
 
+  /**
+   * 在渲染顺序里给 `id` 占一个位子（幂等）。**顺序按 wire 上的到达先后定，与内容什么
+   * 时候物化出来无关**——这是本类顺序正确性的唯一依据。
+   *
+   * 为什么必须单独占位、不能等 `upsert`：两种帧的物化时机差着一个微任务。
+   * `MessageFrame` 走 `upsert` **同步**落位；`ChunkEnvelope` 要经
+   * `readUIMessageStream()` **异步**产出消息才 upsert。所以一段「先是崩溃轮的 chunk
+   * 行、后是新轮的 message 行」的历史回放下来，同步那批会先把 `order` 占满，异步物化
+   * 的旧轮消息只能排到**末尾**——界面上就是旧轮跑到新轮下面去了（用户实测）。
+   *
+   * 崩溃的轮以前总是账本里的最后一轮（崩溃即终止），所以这个洞一直没机会暴露；现在
+   * 崩溃轮之后还能继续对话（docs/tech/graceful-shutdown.md），它就浮出来了。
+   */
+  private ensureOrder(id: string): void {
+    if (this.ordered.has(id)) return;
+    this.ordered.add(id);
+    this.order.push(id);
+  }
+
   private upsert(message: NimboUIMessage): void {
-    if (!this.byId.has(message.id)) this.order.push(message.id);
+    this.ensureOrder(message.id);
     this.byId.set(message.id, message);
     this.notifyChange();
   }
@@ -335,18 +362,20 @@ export class MessageLedger {
   }
 
   private snapshot(): NimboUIMessage[] {
-    return this.order.map((id) => {
+    return this.order.flatMap((id) => {
       const message = this.byId.get(id);
-      if (message === undefined) {
-        throw new Error(`unreachable: MessageLedger id "${id}" vanished`);
-      }
+      // 占了位、内容还没物化出来（`ensureOrder` 在 `start` chunk 就占位，而
+      // `readUIMessageStream` 要一个微任务之后才吐出第一版消息）——这一格暂时跳过，
+      // 等物化完成的那次 `notifyChange` 它自然出现在**这个位置**上，而不是末尾。
+      // 刻意不塞一条空 assistant 消息占坑：那会在界面上闪一个空气泡。
+      if (message === undefined) return [];
       const pending = this.pendingMetadata.get(id);
-      if (pending === undefined) return message;
+      if (pending === undefined) return [message];
       const mergedMetadata: NimboMessageMetadata =
         message.metadata === undefined ?
           pending
         : { ...message.metadata, ...pending };
-      return { ...message, metadata: mergedMetadata };
+      return [{ ...message, metadata: mergedMetadata }];
     });
   }
 }
