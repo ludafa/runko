@@ -5,7 +5,8 @@
  * `test/type-conformance.ts`），不在此包运行时 import "e2b"。
  */
 export { e2bWorkspace } from "./workspace.js";
-export type { E2bWorkspaceOptions } from "./workspace.js";
+export type { E2bWorkspace, E2bWorkspaceOptions } from "./workspace.js";
+export { KEEPALIVE_UNSUPPORTED_MESSAGE } from "./keepalive.js";
 export type {
   E2bCommandResult,
   E2bCommandRunOpts,

@@ -13,6 +13,7 @@
  * 类型，不是 `@vercel/sandbox` 的类型），因为我们确实要构造一个真的 `Writable`
  * 传给它。
  */
+import type { KeepAliveOptions } from "@nimbo/core";
 import type { Writable } from "node:stream";
 
 /** `fs.readdir(path, { withFileTypes: true })` 的单条目——结构对齐 node `fs.Dirent`。 */
@@ -61,11 +62,33 @@ export interface VercelCommandResultLike {
 export interface VercelSandboxLike {
   readonly fs: VercelFileSystemLike;
   runCommand(params: VercelRunCommandParams): Promise<VercelCommandResultLike>;
+  /**
+   * 当前会话什么时候到期（官方 `get expiresAt(): Date | undefined`）。**可选**，
+   * 理由同 E2B 侧的 `setTimeout`：只有开[保活](../../../docs/terms.md)时才用得上，
+   * 列成必填会打死既有的手写 fake。
+   *
+   * ⚠️ 别跟 `sandbox.timeout` 搞混——那个是**建盒时配的默认时长**（官方 d.ts 原文
+   * "The default timeout of this sandbox"），不是剩余量。用错了会把「还剩多久」
+   * 恒当成建盒时的配置值，补足判定整个失效。
+   */
+  readonly expiresAt?: Date;
+  /**
+   * 在**现有租期上加时**（官方 d.ts 例子原文："Extends timeout by 5 minutes, to a
+   * total of 15 minutes"）——与 E2B `setTimeout` 的重置语义相反，所以补足到目标值
+   * 必须自己算差额，见 `keepalive.ts`。
+   */
+  extendTimeout?(duration: number): Promise<void>;
 }
 
 export interface VercelWorkspaceOptions {
   /** 虚拟绝对路径锚定到的沙盒内真实目录；默认 Vercel Sandbox 的默认工作目录。 */
   root?: string;
+  /**
+   * 开启[保活](../../../docs/terms.md)。**不传 = 不保活**（默认行为不变）。
+   *
+   * `idleTimeoutMs` 应与建盒时 `Sandbox.create({ timeout })` 的值一致。
+   */
+  keepAlive?: KeepAliveOptions;
 }
 
 export const DEFAULT_ROOT = "/vercel/sandbox";

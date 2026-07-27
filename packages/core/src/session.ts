@@ -122,7 +122,18 @@ import { createLoadSkillTool } from "./tools/builtin/load-skill.js";
 import { createPlanStore, createUpdatePlanTool } from "./tools/builtin/update-plan.js";
 import type { PlanStore } from "./tools/builtin/update-plan.js";
 import { jsonValueSchema } from "./types.js";
-import type { ApprovalPolicy, ApprovalReviewer, DirEntry, FileStat, JsonValue, NimboExec, NimboFS, Tool } from "./types.js";
+import type {
+  ActivitySignal,
+  ApprovalPolicy,
+  ApprovalReviewer,
+  DirEntry,
+  FileStat,
+  JsonValue,
+  NimboActivityAware,
+  NimboExec,
+  NimboFS,
+  Tool,
+} from "./types.js";
 import type { NimboError, Usage } from "./events.js";
 
 // ---- Input / InputBlock（docs/tech/core-sdk.md §4.2） ----
@@ -427,6 +438,41 @@ function hasRestoreCapability(candidate: NimboFS): candidate is NimboFS & FSRest
   return "restore" in candidate && typeof candidate.restore === "function";
 }
 
+// ---- 活动信号（docs/tech/sandbox-keepalive.md §5.2） ----
+
+/**
+ * core 侧节流间隔，**只为降噪**：一轮里 chunk 可能每秒来几十个，逐个通知远端
+ * 毫无意义。它**不是**保活策略——真正「多久续一次」由适配器的[续期闸门](../../../docs/terms.md)
+ * 按自己知道的沙盒超时值决定。正因如此这个值可以写死：core 不知道、也不该被迫
+ * 决定沙盒的超时是 5 分钟还是 1 小时。
+ */
+const ACTIVITY_THROTTLE_MS = 5_000;
+
+/** 结构探测（同 `hasSnapshotCapability`，是信任声明不是结构验证）：这个工作区面收不收活动信号。 */
+function hasActivityCapability<T extends object>(
+  candidate: T,
+): candidate is T & Required<NimboActivityAware> {
+  return "onActivity" in candidate && typeof candidate.onActivity === "function";
+}
+
+/**
+ * 把 `fs`/`exec` 两个面上所有能收活动信号的实现收成一个通知函数（同一个对象同时
+ * 当 fs 和 exec 时只收一次——[模式 A（同源工作区）](../../../docs/terms.md)正是这种形态）。
+ * 都不支持就返回 `undefined`，调用点据此整段跳过。
+ */
+function collectActivityTargets(
+  fs: NimboFS,
+  exec: NimboExec | undefined,
+): ((signal: ActivitySignal) => void) | undefined {
+  const targets: Required<NimboActivityAware>[] = [];
+  if (hasActivityCapability(fs)) targets.push(fs);
+  if (exec !== undefined && hasActivityCapability(exec) && !targets.includes(exec)) targets.push(exec);
+  if (targets.length === 0) return undefined;
+  return (signal) => {
+    for (const target of targets) target.onActivity(signal);
+  };
+}
+
 /**
  * `fs.snapshot()` 只是"结构上像 JsonValue"的信任声明（`FSSnapshotCapable`），不是
  * 运行时保证——施工中实测发现 `@nimbo/virtual-fs` 的 `MemoryFS.snapshot()` 会在
@@ -479,6 +525,8 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
   const id = resumedState?.id ?? randomUUID();
   const createdAt = resumedState?.createdAt ?? Date.now();
   const { fs, exec } = resolveExecutionSurfaces(opts);
+  /** 见 `collectActivityTargets`：装配期探测一次，之后 `stream()` 里零探测开销；都不支持时恒为 `undefined`。 */
+  const notifyActivityTarget = collectActivityTargets(fs, exec);
   if (resumedState?.fsSnapshot !== undefined) {
     if (!hasRestoreCapability(fs)) throw new Error(FS_RESTORE_NOT_SUPPORTED_MESSAGE);
     fs.restore(resumedState.fsSnapshot);
@@ -554,6 +602,34 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
       turn += 1;
       messages.push(toUserUIMessage(input));
 
+      /**
+       * [活动信号](../../../docs/terms.md)的 turn 作用域节流状态（docs/tech/sandbox-keepalive.md §5.2）。
+       * 每轮重置，所以一轮的第一个 chunk 必定发信号——新一轮开始就该让远端知道。
+       */
+      let lastActivityAt = 0;
+      let lastSignalWasApproval = false;
+      const notifyActivity = (chunk: NimboChunk): void => {
+        if (notifyActivityTarget === undefined) return;
+        const isApprovalRequest = chunk.type === "tool-approval-request";
+        /**
+         * 两种边沿必须立刻送达、不能被节流吃掉：
+         *   1. **进入**等人状态——`loop.ts` 产出 `tool-approval-request` 后就去
+         *      `await` 人审通道了，在裁决落定前不再产出任何 chunk（可能几小时）；
+         *   2. **离开**等人状态——实现方靠这一条停掉自己的审批保活，晚一拍都是多烧的钱。
+         *      裁决后必定有后续 chunk（`loop.ts` 允许/拒绝两条路径都 yield
+         *      `tool-approval-response`），所以这条边沿一定等得到。
+         */
+        const isEdge = isApprovalRequest || lastSignalWasApproval;
+        const now = Date.now();
+        if (!isEdge && now - lastActivityAt < ACTIVITY_THROTTLE_MS) return;
+        lastActivityAt = now;
+        lastSignalWasApproval = isApprovalRequest;
+        notifyActivityTarget({
+          session: { id, turn },
+          reason: isApprovalRequest ? "awaiting-approval" : "progress",
+        });
+      };
+
       const turnGen = runTurn({
         model,
         system,
@@ -593,6 +669,9 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
         if (chunk.type === "message-metadata") {
           turnActive = false;
         }
+        // 在 `yield` **之前**：`yield` 把控制权交给消费者，消费者可能很慢，
+        // 而「还在干活」这个事实此刻就已成立。
+        notifyActivity(chunk);
         yield chunk;
         next = await turnGen.next();
       }

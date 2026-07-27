@@ -22,7 +22,7 @@
  * `background:true` + `CommandHandle.kill()` 的另一条调用路径，不在这份
  * 结构接口内，超出本工单范围）。
  */
-import type { ExecOptions, ExecRequest, ExecResult, NimboExec } from "@nimbo/core";
+import type { ExecOptions, ExecRequest, ExecResult, KeepAlive, NimboExec } from "@nimbo/core";
 import { describeError, isCommandExitErrorLike, isE2bErrorNamed } from "./errors.js";
 import type { PathAnchor } from "./path.js";
 import type { E2bSandboxLike } from "./types.js";
@@ -77,7 +77,7 @@ function raceAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
-export function createE2bExec(sandbox: E2bSandboxLike, anchor: PathAnchor): NimboExec {
+export function createE2bExec(sandbox: E2bSandboxLike, anchor: PathAnchor, keepAlive?: KeepAlive): NimboExec {
   return {
     // docs/tech/single-ledger.md §6.1（@nimbo/core 审批三值重构，P13-5-2c）：旧 "never" → "allow"（沙盒实现，隔离即边界）。
     defaultApproval: "allow",
@@ -91,6 +91,17 @@ export function createE2bExec(sandbox: E2bSandboxLike, anchor: PathAnchor): Nimb
       const timeoutController = new AbortController();
       const timer = req.timeoutMs !== undefined ? setTimeout(() => timeoutController.abort(), req.timeoutMs) : undefined;
       const combined = AbortSignal.any([req.signal, timeoutController.signal]);
+
+      /**
+       * [保活](../../../docs/terms.md)的第二个信号源（docs/tech/sandbox-keepalive.md §3.1）：
+       * 命令跑起来之后 core **一个 chunk 都不会产出**——`@nimbo/core` 的 `loop.ts`
+       * 把工具进度先缓冲、等命令 resolve 之后才重放。所以一条跑十分钟的命令，这十分钟
+       * 里 core 侧的活动信号是零。而这恰恰是最容易把沙盒跑没的场景。
+       *
+       * 补法就在这里：适配器自己就是那个在 `await` 的人，手里握着一个没落定的远程调用，
+       * 这是比 chunk 更硬的「还活着」证据，根本不需要谁来通知。
+       */
+      const stopKeepAlive = keepAlive?.beginExec();
 
       const work = sandbox.commands.run(req.command, {
         cwd,
@@ -136,6 +147,7 @@ export function createE2bExec(sandbox: E2bSandboxLike, anchor: PathAnchor): Nimb
         };
       } finally {
         if (timer !== undefined) clearTimeout(timer);
+        stopKeepAlive?.();
       }
     },
   };

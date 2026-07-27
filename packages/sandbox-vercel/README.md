@@ -45,6 +45,24 @@ function vercelWorkspace(sandbox: VercelSandboxLike, opts?: { root?: string }): 
 - **BYO 实例**是唯一入口：`vercelWorkspace()` 不创建、不销毁沙盒——创建（`Sandbox.create()`）、超时延长、`stop()` 完全由宿主自己管理。
 - `opts.root`（默认 `/vercel/sandbox`，Vercel Sandbox 的默认工作目录）：虚拟绝对路径 `/` 锚定到的沙盒内真实目录；FS 七方法仍拒绝 `..` 越出这个 root（与 `MemoryFS`/`DirFS` 同一套边界语义），但 `bash` 本身不受此限制（见下）。
 
+## 保活（keepalive）
+
+**沙盒的租期是倒计时，在里面跑命令不会把它往后推。** 所以一轮 agent 只要跑得比租期长，就会在跑到一半时被平台停掉。传 `keepAlive` 即可让适配器自动续期：
+
+```ts
+const sandbox = await Sandbox.create({ timeout: 300_000, persistent: true });
+const workspace = vercelWorkspace(sandbox, {
+  keepAlive: { idleTimeoutMs: 300_000 },   // 与建盒 timeout 保持一致
+});
+```
+
+- **不传 `keepAlive` = 完全不保活**，一次网络调用都不会发生。保活会花钱，不该在你没要求时悄悄发生。
+- 续期是**补足**语义：先读 `sandbox.expiresAt` 拿真实剩余，只补差额。这一点对 Vercel 尤其要紧——`extendTimeout(duration)` 是**加时**（官方文档原话 "Extends timeout **by** 5 minutes, to a total of 15 minutes"），直接传目标值会让租期反复累加，高频对话后沙盒多活几十分钟白计费。
+- 这一轮真的卡死时信号自然停止，沙盒会正常停机——它不会给一个已经死掉的任务无限续命。
+- 其余可调项（`maxTurnMs` 单轮上限、`approvalBudgetMs` 审批预算、`onRenew` 观测回调）见 `@nimbo/core` 的 `KeepAliveOptions` 与 [docs/features/sandbox-keepalive.md](../../docs/features/sandbox-keepalive.md)。
+
+⚠️ 查剩余用的是 **`sandbox.expiresAt`**（"When the currently running session will time out"），**不是 `sandbox.timeout`**——后者是建盒时配的默认时长，不是剩余量。
+
 ## 已知限制（docs/tech/sandbox.md §8.2 / docs/plans/core-sdk.md P10-2 实际改动，如实照抄不发明）
 
 - **非递归删除目录走 `fs.rmdir()` 而非 `fs.rm()`**：实测推翻了调研文档"`fs.rm(path, {recursive})` 原生对齐"的假设——`@vercel/sandbox` 的 `fs.rm(path)`（非递归）对**任何**目录都抛 `ERR_FS_EISDIR`，不区分空/非空；真正带"空则成功、非空则 `ENOTEMPTY`"语义的是 `fs.rmdir()`。适配器按目标类型分流：文件走 `fs.rm()`，非递归删目录走 `fs.rmdir()`，`{recursive: true}` 统一走 `fs.rm(path, {recursive:true, force:true})`——代价是非递归删目录多一次 `stat` 判断类型。

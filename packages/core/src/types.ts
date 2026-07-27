@@ -159,6 +159,50 @@ export interface NimboExec {
   defaultApproval?: ApprovalPolicy;
 }
 
+// ---- 活动信号：让远端工作区知道「这一轮还在干活」（docs/tech/sandbox-keepalive.md §5.1） ----
+
+/**
+ * 一次[活动信号](../../../docs/terms.md)的载荷。
+ *
+ * `reason` 区分两种「还活着」：`progress` 是这一轮在正常推进（模型在产出、工具在
+ * 交付结果）；`awaiting-approval` 是 loop 已经停在 `tool-approval-request` 上、
+ * 正 `await` 人审通道。两者值得区别对待——干活该续期，等人可能只该续一小会儿
+ * （云沙盒适配器据此给两者不同的预算，见 `@nimbo/sandbox-e2b` 的 `keepAlive`）。
+ */
+export interface ActivitySignal {
+  /** 会话与轮次。实现方据此识别「新的一轮开始了」，重置自己的预算计数。 */
+  session: { id: string; turn: number };
+  /** 现在在等什么。 */
+  reason: "progress" | "awaiting-approval";
+}
+
+/**
+ * 工作区的可选能力：接收[活动信号](../../../docs/terms.md)。
+ *
+ * 与 `NimboFS.searchFiles?` / `NimboExec.describe?` 同类——远端实现（云沙盒适配器）
+ * 实现它来做[保活](../../../docs/terms.md)，内存态/本机实现不实现，core 结构探测
+ * 后直接跳过，**没实现就完全不发生任何事**。
+ *
+ * **必须同步返回 void，绝不能返回 Promise、绝不能抛错。** core 是在 chunk 流的
+ * 推进路径上调它的（`session.ts` 的 `stream()`），既不 `await` 也不 `catch`：
+ * 续期是网络往返，要是 core 等它，整条流就被拖住，用户看到的打字机效果会一顿一顿。
+ * 实现方内部自己 fire-and-forget、自己吞错。
+ */
+export interface NimboActivityAware {
+  onActivity?(signal: ActivitySignal): void;
+}
+
+/**
+ * 工作区的可选能力：**手动**把沙盒存活时长补足一次（[保活](../../../docs/terms.md)）。
+ *
+ * 与 `NimboActivityAware` 分工不同——那条是 core 在一轮**进行中**自动推的，这条是
+ * 宿主在轮**之外**主动调的（起轮前、审批路由等 core 的轮还没起或已经结束的时刻）。
+ * 自动那套内部就建在这个动作上，两者打同一个[续期闸门](../../../docs/terms.md)。
+ */
+export interface NimboKeepAliveCapable {
+  keepAlive?(targetMs: number): Promise<void>;
+}
+
 // ---- 审批链（docs/tech/single-ledger.md §6，P13-5-2c 三值重构；术语见 docs/terms.md §4） ----
 
 export interface ApprovalContext {

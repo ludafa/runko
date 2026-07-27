@@ -65,8 +65,23 @@ export interface E2bCommandsLike {
   run(command: string, opts?: E2bCommandRunOpts): Promise<E2bCommandResult>;
 }
 
-/** `e2bWorkspace()` 接受的最小面——BYO 已创建好的 e2b `Sandbox` 实例即满足这个形状。 */
+/**
+ * `e2bWorkspace()` 接受的最小面——BYO 已创建好的 e2b `Sandbox` 实例即满足这个形状。
+ *
+ * `setTimeout` 是**可选**的，这一点是刻意的：它只有开[保活](../../../docs/terms.md)
+ * 时才用得上，而把它列成必填会当场打死所有手写 fake（`examples/09` 的假沙盒、
+ * `test/helpers.ts` 的 `FakeE2bSandbox`），违背 [BYO 实例](../../../docs/terms.md)
+ * 与「最小结构面」两条纪律。真实 `Sandbox` 天然带这个方法，所以宿主零改动即可获得能力。
+ */
 export interface E2bSandboxLike {
   files: E2bFilesystemLike;
   commands: E2bCommandsLike;
+  /**
+   * 把沙盒的存活时长**重置**为「从现在起 `timeoutMs`」（不是加时——E2B 与 Vercel
+   * 在这里语义相反，见 docs/tech/sandbox-keepalive.md §1）。
+   *
+   * 上限：Pro 账户 24 小时、Hobby 账户 1 小时（`e2b@2.32.0` 的 `Sandbox.setTimeout`
+   * 文档注释），超了会报错。
+   */
+  setTimeout?(timeoutMs: number): Promise<void>;
 }

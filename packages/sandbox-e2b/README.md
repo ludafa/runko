@@ -33,12 +33,36 @@ try {
 ## 结构化接口 / BYO
 
 ```ts
-function e2bWorkspace(sandbox: E2bSandboxLike, opts?: { root?: string }): NimboFS & NimboExec;
+function e2bWorkspace(
+  sandbox: E2bSandboxLike,
+  opts?: { root?: string; keepAlive?: KeepAliveOptions },
+): E2bWorkspace;
 ```
 
 - `E2bSandboxLike` 是以 e2b 官方 d.ts 为蓝本手写的结构化最小子集（`files.read/write/list/remove/makeDir/getInfo` + `commands.run`）——本包运行时零 `import "e2b"`，`e2bWorkspace()` 收的是这份结构接口而非具体类，真实 e2b `Sandbox` 实例无需任何转换即可直接传入（`test/type-conformance.ts` 的编译期证明），任何实现了同一结构的对象（例如测试/演示用的进程内 fake）同样可以传入。
-- **BYO 实例**是唯一入口：`e2bWorkspace()` 不创建、不销毁沙盒——创建（`Sandbox.create()`）、超时延长、暂停/恢复、`kill()` 完全由宿主自己管理。
+- **BYO 实例**是唯一入口：`e2bWorkspace()` 不创建、不销毁沙盒——创建（`Sandbox.create()`）、暂停/恢复、`kill()` 完全由宿主自己管理。唯一的例外是[保活](../../docs/terms.md)，见下。
 - `opts.root`（默认 `/home/user`，e2b 官方模板的登录用户主目录）：虚拟绝对路径 `/` 锚定到的沙盒内真实目录。
+
+## 保活（keepalive）
+
+**沙盒的存活时长是倒计时，在里面跑命令不会把它往后推。** 所以一轮 agent 只要跑得比沙盒超时长，就会在跑到一半时被平台暂停掉。传 `keepAlive` 即可让适配器自动续期：
+
+```ts
+const sandbox = await Sandbox.create({ timeoutMs: 300_000 });
+const workspace = e2bWorkspace(sandbox, {
+  keepAlive: { idleTimeoutMs: 300_000 },   // 与建盒 timeoutMs 保持一致
+});
+```
+
+- **不传 `keepAlive` = 完全不保活**，一次网络调用都不会发生，行为与没有这个功能时一致。保活会花钱，不该在你没要求时悄悄发生。
+- 续期是**补足**语义（补到至少 `idleTimeoutMs`，够了就什么都不做），不是无脑加时。
+- 这一轮真的卡死时信号自然停止，沙盒会正常休眠——它不会给一个已经死掉的任务无限续命。
+- 其余可调项（`maxTurnMs` 单轮上限、`approvalBudgetMs` 审批预算、`onRenew` 观测回调）见 `@nimbo/core` 的 `KeepAliveOptions` 与 [docs/features/sandbox-keepalive.md](../../docs/features/sandbox-keepalive.md)。
+
+⚠️ 两个要注意的：
+
+- **`idleTimeoutMs` 要和建盒时的 `timeoutMs` 一致。** 不一致很难查——比如建盒 5 分钟、这里按 10 分钟补足，就永远补不上去。
+- **E2B 有硬上限**：Pro 账户 24 小时、Hobby 账户 1 小时（`Sandbox.setTimeout` 的官方文档）。超了会报错。保活不是长生药。
 
 ## 已知限制（docs/tech/sandbox.md §8.2 / docs/plans/core-sdk.md P10-1 实际改动，如实照抄不发明）
 

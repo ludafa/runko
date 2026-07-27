@@ -29,6 +29,7 @@ export * from "./structured.js";
 export * from "./model/convert.js";
 export * from "./model/step.js";
 export * from "./approval.js";
+export * from "./keepalive.js";
 export * from "./runtime.js";
 export * from "./tools/builtin/update-plan.js";
 export * from "./tools/builtin/load-skill.js";
