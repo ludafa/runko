@@ -5,6 +5,7 @@ import { cors } from 'hono/cors';
 import { authApp } from './routes/auth.js';
 import { chatApp } from './routes/chat.js';
 import { exampleApp } from './routes/example.js';
+import { pushApp } from './routes/push.js';
 
 const app = new OpenAPIHono();
 
@@ -27,6 +28,7 @@ app.use(
 app.route('/', authApp);
 app.route('/', exampleApp);
 app.route('/', chatApp);
+app.route('/', pushApp);
 
 // OpenAPI spec + Swagger UI
 app.doc31('/doc', {

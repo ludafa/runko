@@ -1,4 +1,5 @@
 import {
+  index,
   integer,
   primaryKey,
   sqliteTable,
@@ -196,6 +197,48 @@ export const conversationEvents = sqliteTable(
 // owner；记它是为**将来一个 conversation 多用户**时按用户隔离授权留好数据——授权
 // 只放行**授权者本人**的调用（`hasSessionGrant` 按本轮发起者查），A 的授权不会
 // 悄悄放行 B 的操作。多用户的卡片可见性/可点性是未来的渲染层决策，不影响这张表。
+// [推送订阅](docs/terms.md)（docs/tech/push-notification.md §2）：一台设备的一个
+// 浏览器一行——用户点铃铛开启通知时，浏览器生成一张「投递地址」（endpoint URL +
+// 两把加密密钥）交给我们，服务端拿着它才能往这台设备投递。
+//
+// 三个设计点：
+//
+// - **`endpoint` 当主键，不另发 id**。它本来就是「一台设备 + 一个站点」的唯一
+//   地址，由浏览器保证。拿它当主键，重复上报（页面每次加载都会幂等重报一次，
+//   见 docs/tech/push-notification.md §3.1）天然是 upsert，不需要先查再插。
+// - **`user_id` 可以被覆盖**。同一台设备换个账号登录，浏览器给的还是同一个
+//   endpoint——upsert 时直接把归属改成新的人。这是对的：通知该跟着「这台设备
+//   现在是谁在用」走，而不是跟着第一个用它登录过的人。
+// - **不存偏好**。这一期没有按事件类型的用户开关（docs/features/push-notification.md
+//   附录 A.2）：服务端总闸是环境变量（`CHAT_PUSH_EVENTS`），设备级开关就是
+//   「这一行在不在」。将来真要做 per-user 偏好，是另一张表，不是往这里加列。
+//
+// `last_sent_at`/`last_error` 纯属运维可见性（"这台设备最后一次投递成功/失败是
+// 什么时候"），没有任何代码读它们做判断——投递失败的**处置**是就地删行
+// （404/410）或原样留着（其余错误），见 src/push/sender.ts。
+export const pushSubscriptions = sqliteTable(
+  'push_subscriptions',
+  {
+    /** 浏览器给的投递 URL（FCM/autopush 的一个端点），天然唯一，故直接当主键。 */
+    endpoint: text('endpoint').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    /** 载荷加密用的公钥（浏览器生成，Base64URL）。 */
+    p256dh: text('p256dh').notNull(),
+    /** 载荷加密用的认证密钥（浏览器生成，Base64URL）。 */
+    auth: text('auth').notNull(),
+    /** 只为让人认出「这是我哪台设备」，不参与任何判断；浏览器没给就是 null。 */
+    userAgent: text('user_agent'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    /** 最后一次投递成功的时刻；null = 还没成功投过。 */
+    lastSentAt: integer('last_sent_at', { mode: 'timestamp' }),
+    /** 最后一次投递失败的原因；null = 没失败过（每次成功都会清回 null）。 */
+    lastError: text('last_error'),
+  },
+  (table) => [index('push_subscriptions_user_id_idx').on(table.userId)],
+);
+
 export const conversationGrants = sqliteTable(
   'conversation_grants',
   {

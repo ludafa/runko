@@ -33,6 +33,7 @@
     "drizzle-orm": "^0.45.2",
     "e2b": "catalog:",
     "hono": "^4.12.16",
+    "web-push": "^3.6.7",
     "yaml": "^2.8.3",
     "zod": "^4.4.2"
   },
@@ -40,6 +41,7 @@
     "@eslint/js": "^10.0.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "catalog:",
+    "@types/web-push": "^3.6.4",
     "@vitest/coverage-v8": "^4.1.5",
     "drizzle-kit": "^0.31.10",
     "eslint": "^10.3.0",

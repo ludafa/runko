@@ -70,5 +70,15 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // Service Worker（docs/tech/push-notification.md §7）跑在完全另一套全局环境里
+    // ——`self` 是 `ServiceWorkerGlobalScope`，`clients`/`registration` 都是它的成员，
+    // 浏览器全局那一套（`window`/`document`）反而一个都没有。不整体 ignore 它：这份
+    // 文件没有类型检查兜底（裸 JS，见附录 B.1），eslint 是它唯一的静态检查。
+    files: ['public/sw.js'],
+    languageOptions: {
+      globals: { ...globals.serviceworker },
+    },
+  },
   prettierConfig,
 );
