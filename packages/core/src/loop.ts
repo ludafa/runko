@@ -172,6 +172,29 @@ function statusForError(error: NimboError): "failed" | "interrupted" {
   return error.code === "aborted" ? "interrupted" : "failed";
 }
 
+/**
+ * 宿主中止时 `NimboError.message` 用什么——**优先用宿主自己给的理由**
+ * （`abortController.abort(reason)`），缺席才回落到 `fallback`。
+ *
+ * 为什么要透传：`code: "aborted"` 只说了「被宿主中止了」，而**为什么**中止是宿主的
+ * 概念——用户按了停止键、进程要关闭、pod 要迁移——core 不该认识这些词，也没必要为
+ * 它们各加一个 code。宿主把理由放进 `reason`，它的界面就能如实解释给用户看
+ * （chat 应用正是这么区分「已停止」与「服务重启，这一轮已中断」的，见
+ * docs/tech/graceful-shutdown.md §2）。
+ *
+ * `abort()` **不带参数**时 `reason` 是运行时自造的 `AbortError`（"This operation was
+ * aborted"）——那不是宿主的解释，当作没给：否则收尾消息里会出现这句与调用方无关的
+ * 第三方措辞，比原本的默认文案更没信息量。
+ */
+function abortMessage(signal: AbortSignal, fallback: string): string {
+  const { reason } = signal;
+  if (typeof reason === "string" && reason.length > 0) return reason;
+  if (reason instanceof Error && reason.name !== "AbortError" && reason.message.length > 0) {
+    return reason.message;
+  }
+  return fallback;
+}
+
 function appendPlaceholderAssistantMessage(messages: NimboUIMessage[]): NimboUIMessage {
   const placeholder: NimboUIMessage = { id: randomUUID(), role: "assistant", parts: [{ type: "step-start" }] };
   messages.push(placeholder);
@@ -952,7 +975,8 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<NimboChunk,
     if (abortSignal.aborted) {
       const error: NimboError = {
         code: "aborted",
-        message: "Turn aborted by the host before this step began.",
+        // 宿主给了理由就用它（见 `abortMessage`）——它比这句通用文案能解释得多。
+        message: abortMessage(abortSignal, "Turn aborted by the host before this step began."),
       };
       yield finalizeTurn({ messages: opts.messages, lastAssistantMessage, turn: opts.session.turn, turnStartedAt, turnMessagesStart, usage, status: statusForError(error), error });
       return { finalResponse, usage };
@@ -1007,7 +1031,9 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<NimboChunk,
       stepOutcome = next.value;
     } catch (error) {
       const nimboError: NimboError = abortSignal.aborted
-        ? { code: "aborted", message: describeError(error) }
+        ? // 这条路上 `error` 通常是 AI SDK 自己抛的 `AbortError`（"This operation was
+          // aborted"）——宿主给了理由就优先用它，回落才是那句第三方措辞。
+          { code: "aborted", message: abortMessage(abortSignal, describeError(error)) }
         : { code: "provider_error", message: describeError(error) };
       // Bug fix (P13-5-2 返工): don't rely on `lastAssistantMessage` alone — it's
       // only ever assigned *after* `runOneStep` returns successfully (see below),

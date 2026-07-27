@@ -1003,6 +1003,49 @@ describe("runTurn", () => {
     expect(lastAssistantMessage(messages)?.metadata?.status).toBe("interrupted");
   });
 
+  // 宿主给的中止理由要透传进收尾 message（docs/tech/graceful-shutdown.md §2）——
+  // 宿主靠它区分「用户按了停止」和「进程要关闭了」，core 自己不认识这些概念。
+  it("abort reason: the host's own `abort(reason)` message is what lands in NimboError.message", async () => {
+    const controller = new AbortController();
+    controller.abort(new Error("The server shut down while this turn was running."));
+
+    const model = mockModel(() => ({
+      doStream: async () => {
+        throw new Error("unreachable — the step boundary check fires first");
+      },
+    }));
+
+    const messages: NimboUIMessage[] = [userTextMessage("u1", "hi")];
+    const { chunks } = await drainTurn(runTurn(turnOptions(model, { messages, signal: controller.signal })));
+
+    const metadataChunks = chunksOfType(chunks, "message-metadata");
+    expect(metadataChunks[0]?.messageMetadata.error).toEqual({
+      code: "aborted",
+      message: "The server shut down while this turn was running.",
+    });
+  });
+
+  it("abort reason: a bare `abort()` falls back to the default wording (the runtime's own AbortError is not the host's explanation)", async () => {
+    const controller = new AbortController();
+    controller.abort(); // reason 是运行时自造的 AbortError
+
+    const model = mockModel(() => ({
+      doStream: async () => {
+        throw new Error("unreachable — the step boundary check fires first");
+      },
+    }));
+
+    const messages: NimboUIMessage[] = [userTextMessage("u1", "hi")];
+    const { chunks } = await drainTurn(runTurn(turnOptions(model, { messages, signal: controller.signal })));
+
+    const metadataChunks = chunksOfType(chunks, "message-metadata");
+    expect(metadataChunks[0]?.messageMetadata.error?.code).toBe("aborted");
+    // 不是 "This operation was aborted"（那是运行时的措辞，与调用方无关）。
+    expect(metadataChunks[0]?.messageMetadata.error?.message).toBe(
+      "Turn aborted by the host before this step began.",
+    );
+  });
+
   it("provider error (not abort-related): message-metadata status:'failed', error.code:'provider_error' carries the underlying message", async () => {
     const model = mockModel(() => ({
       doStream: async () => {
