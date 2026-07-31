@@ -10,7 +10,7 @@
 
 三个关键结论（也是本方案能这么小的原因）：
 
-1. **不需要新的账本条目类型、不需要 DB 迁移。** 被停止的一轮走的是 core 既有的「优雅中途降级」路径（`loop.ts` 的 `finalizeTurn` 产出一条带 `status: 'interrupted'` 的 `message-metadata` chunk 后正常 `return TurnResult`），因此 `turn-runner.ts` 的 `finalizeTurnPersistence` 照常执行：这一轮的消息落 `kind = 'message'` 行、`kind = 'chunk'` 行 GC、会话 header 更新。刷新页面的回放与正常收尾的一轮**走同一段代码**。
+1. **不需要新的账本条目类型、不需要 DB 迁移。** 被停止的一轮走的是 core 既有的「优雅中途降级」路径（`loop.ts` 的 `finalizeTurn` 产出一条带 `status: 'interrupted'` 的 `message-metadata` chunk 后正常 `return TurnResult`），因此 `turn-runner/persistence.ts` 的 `finalizeTurnPersistence` 照常执行：这一轮的消息落 `kind = 'message'` 行、`kind = 'chunk'` 行 GC、会话 header 更新。刷新页面的回放与正常收尾的一轮**走同一段代码**。
 2. **「停止」的可见性不需要新的 wire 帧。** 界面靠那条 `message-metadata`（`status: 'interrupted'`、`error.code: 'aborted'`）认出「已停止」，与它认「已失败」是同一个机制。
 3. **`@nimbo/core` 只需要一处小改**：在 `runTurn` 的 step 循环开头显式检查 `abortSignal.aborted`。不加这一处也能停（AI SDK 的 `streamText` 遇到已 abort 的 signal 会 reject，落进 loop 既有的 catch → `code: 'aborted'`），但那要多打**一次**模型调用才停得下来，而且把停止时机的确定性外包给了第三方库的行为细节。见 §6.1。
 
@@ -19,7 +19,7 @@
 | 层 | 文件 | 改什么 |
 |---|---|---|
 | core | `packages/core/src/loop.ts` | `runTurn` step 循环开头检查 `abortSignal.aborted` → `finalizeTurn(status: 'interrupted')` + return |
-| server | `agent/turn-runner.ts` | 每轮一个 `AbortController`；`stream(text, { signal })`；新增 `abortTurn()`；挂起的[人审通道](../terms.md)/ask-user 在停止时就地结掉 |
+| server | `agent/turn-runner/` | 每轮一个 `AbortController`；`stream(text, { signal })`；新增 `abortTurn()`；挂起的[人审通道](../terms.md)/ask-user 在停止时就地结掉 |
 | server | `routes/chat.ts` | 新增 `POST /api/chat/conversations/{id}/abort` |
 | server | `schemas/chat.ts` | 新增 `AbortTurnAckSchema` |
 | web | `features/chat/api.ts` + `schema.ts` | `postAbortTurn()` + 响应解析 |
@@ -49,7 +49,9 @@ if (abortSignal.aborted) {
 
 ## 3. server：每轮一个 AbortController
 
-### 3.1 `turn-runner.ts`
+### 3.1 `turn-runner/`
+
+（下面的 `ActiveTurn` 字段在 `registry.ts`，`abortTurn` 在 `abort.ts`。）
 
 ```ts
 interface ActiveTurn {
@@ -89,7 +91,7 @@ handler 的顺序同样是硬要求：
 3. `clearQueuedMessages(db, id)` + `broadcastQueue(id, [])`。
 4. `abortTurn(id)`；`false` → 409。
 
-**为什么清队列必须在 abort 之前**：`turn-runner.ts` 的 `onTurnSettled` 会在这一轮彻底结束后自动[出队](../terms.md)起下一轮（[steer-and-queue §3](./steer-and-queue.md)）。反过来（先 abort 再清）存在真实竞态——abort 解开挂起的审批后这一轮可能很快收尾，队首那条就被自动发出去了，而用户刚刚按的是「停止」。先清后 abort 则从结构上不可能：出队时队列已空。
+**为什么清队列必须在 abort 之前**：`turn-runner/start.ts` 的 `onTurnSettled` 会在这一轮彻底结束后自动[出队](../terms.md)起下一轮（[steer-and-queue §3](./steer-and-queue.md)）。反过来（先 abort 再清）存在真实竞态——abort 解开挂起的审批后这一轮可能很快收尾，队首那条就被自动发出去了，而用户刚刚按的是「停止」。先清后 abort 则从结构上不可能：出队时队列已空。
 
 **为什么广播要在这一轮还活着的时候发**：`broadcastQueue` 只对进行中那一轮的订阅者有效（emitter 关了就是无操作）。轮结束后前端也不会重连（`turnInProgressRef` 已翻假），所以这一帧必须趁 emitter 还开着发出去，否则界面待发区要等到下次刷新才清空。
 
@@ -197,7 +199,7 @@ sequenceDiagram
     autonumber
     participant U as 用户（浏览器）
     participant R as routes/chat.ts
-    participant TR as turn-runner.ts
+    participant TR as turn-runner
     participant L as core loop（runTurn）
     participant S as 沙盒/模型
 
@@ -226,7 +228,7 @@ sequenceDiagram
     autonumber
     participant U as 用户（浏览器）
     participant R as routes/chat.ts
-    participant TR as turn-runner.ts
+    participant TR as turn-runner
     participant L as core loop（settleToolCall）
 
     Note over L: loop 正 await onReview（人审通道），abort 信号对它无效
@@ -249,7 +251,7 @@ sequenceDiagram
     participant U as 用户（浏览器）
     participant R as routes/chat.ts
     participant TL as turn-launcher.ts
-    participant TR as turn-runner.ts
+    participant TR as turn-runner
     participant SB as 沙盒
 
     U->>R: POST .../messages（发送）
@@ -294,7 +296,7 @@ sequenceDiagram
 
 ### 6.4 进程重启仍然会「静默丢轮」（界面侧已收敛）
 
-`activeTurns` 是纯内存的（`turn-runner.ts` 文件头既有取舍）：服务端重启会让进行中的一轮无人驱动，那一轮既不会收到停止也不会自然收尾。本功能不改变这条既有限制——重启后页面回放会停在崩溃点，没有「已停止」标记（因为 `finalizeTurnPersistence` 从未跑）。
+`activeTurns` 是纯内存的（`turn-runner/registry.ts` 文件头既有取舍）：服务端重启会让进行中的一轮无人驱动，那一轮既不会收到停止也不会自然收尾。本功能不改变这条既有限制——重启后页面回放会停在崩溃点，没有「已停止」标记（因为 `finalizeTurnPersistence` 从未跑）。
 
 **2026-07-27 补**：界面侧的后果已经修掉了。此前前端会因此**永久**卡在流式态（它靠「回放最后一帧是不是 chunk」猜轮状态，而崩溃残留的 chunk 行永不 GC），于是这个会话之后每次打开都：发消息一律走[排队](../terms.md)且永远等不到[出队](../terms.md)、按停止只拿到 409 毫无反应。现在 tail 每次连上都会下发[轮状态快照](../terms.md)，前端据此落回空闲——账本里的残留仍在（那是上面这条限制），但界面不再骗人。见 [chat-webapp §5.1](./chat-webapp.md)。
 

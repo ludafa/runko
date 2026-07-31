@@ -1,6 +1,6 @@
 /**
  * 起轮装配打点（docs/tech/telemetry.md §2.4）的落库验证：`launchTurn` 逐段计时，
- * 经 `turn-runner.ts` 的 `onMilestone` 在这一轮**第一个 chunk 抵达时**写
+ * 经 `turn-runner/` 的 `onMilestone` 在这一轮**第一个 chunk 抵达时**写
  * `turn-prepare`、在**第一个可见 chunk** 抵达时写 `turn-first-output`。
  *
  * 这里跑的是真 `launchTurn` + 真 `buildSession` + 真 core loop（模型是

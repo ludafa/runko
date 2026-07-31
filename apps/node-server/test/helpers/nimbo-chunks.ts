@@ -231,7 +231,7 @@ export function messageMetadataChunk(
  * 的 `toolTimingDataSchema`/`loop.ts` 的 `upsertToolTimingPart`）——`id` 恒等于
  * `toolCallId`（每次调用各一个，同 id 覆盖）。`completedAt` 省略时对应
  * `startToolTiming`（只打 `startedAt`）那次更新；传入时对应
- * `completeToolTiming`（补上 `completedAt`）那次——`turn-runner.ts`'s
+ * `completeToolTiming`（补上 `completedAt`）那次——`turn-runner/log.ts`'s
  * `logChunk` 只在后者才落一行"tool call completed/errored/denied"日志。
  */
 export function dataToolTimingChunk(

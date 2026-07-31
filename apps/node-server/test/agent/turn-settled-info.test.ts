@@ -11,8 +11,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { Db } from '../../src/agent/store.js';
 import { createConversation } from '../../src/agent/store.js';
-import type { TurnSettledInfo } from '../../src/agent/turn-runner.js';
-import { startTurn } from '../../src/agent/turn-runner.js';
+import type { TurnSettledInfo } from '../../src/agent/turn-runner/index.js';
+import { startTurn } from '../../src/agent/turn-runner/index.js';
 import { createControllableSession } from '../helpers/controllable-session.js';
 import { silentLogger } from '../helpers/silent-logger.js';
 import { createTestDb, seedUser } from '../helpers/test-db.js';

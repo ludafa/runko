@@ -4,7 +4,7 @@
  * `docs/tech/*` 的既有教训），而这里要的能力（分级、单行结构化、可注入
  * sink）用 `process.stdout.write` + 几个纯函数就够。
  *
- * 用法：`turn-runner.ts` 等调用方经 `createLogger()` 拿一个 `Logger`，或直接
+ * 用法：`turn-runner/` 等调用方经 `createLogger()` 拿一个 `Logger`，或直接
  * 用默认单例 `logger`（未显式注入时的兜底——现有调用方不传 logger 也能跑）。
  * 测试要断言具体输出时，用 `createLogger({ sink })` 注入一个收集数组的假
  * sink，不用碰 `process.stdout`。

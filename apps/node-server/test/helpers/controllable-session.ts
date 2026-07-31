@@ -1,5 +1,5 @@
 /**
- * A hand-driven fake `TurnDrivenSession` (turn-runner.ts's structural seam
+ * A hand-driven fake `TurnDrivenSession` (turn-runner/session.ts's structural seam
  * onto `@nimbo/sdk`'s `Session`) — no model, no sandbox, just an
  * `AsyncGenerator<NimboChunk, TurnResult>` this test file's caller advances by
  * hand (`pushChunk`), pausing between chunks until told to `finish`/`fail`.
@@ -16,7 +16,7 @@
  * with a `TurnResult` (`{ finalResponse, usage }`, no `items` field anymore —
  * "this turn 发生了什么" is read off the ledger's `NimboUIMessage`s, not a
  * parallel item list). `setState` is new: `finalizeTurnPersistence`
- * (turn-runner.ts) reads `session.toJSON().messages` at turn end to find
+ * (turn-runner/persistence.ts) reads `session.toJSON().messages` at turn end to find
  * *this turn's* newly-appended messages (sliced past
  * `StartTurnParams.priorMessageCount`) — tests that exercise that path call
  * `setState` before `finish()` to control exactly what that slice contains,
@@ -27,7 +27,7 @@ import type { NimboChunk, SessionState, TurnResult } from '@nimbo/core';
 export interface ControllableSession {
   toJSONCalls: SessionState[];
   /**
-   * `turn-runner.ts` 传进来的那个 [停止](../../../../docs/terms.md)信号
+   * `turn-runner/` 传进来的那个 [停止](../../../../docs/terms.md)信号
    * （`ActiveTurn.abortController.signal`，docs/tech/turn-abort.md §3.1）——`stream()`
    * 被调用后才有值。测试用它断言「signal 确实透传给了 core」，以及模拟 core 收到
    * abort 后的优雅收尾（真 loop 在 step 边界收尾，这里由测试手动 `pushChunk` +
@@ -60,7 +60,7 @@ const DEFAULT_STATE: SessionState = {
   createdAt: 0,
 };
 
-/** One turn's worth of hand-driven control — call `session.stream(text)` at most once per instance, same as `turn-runner.ts` does. */
+/** One turn's worth of hand-driven control — call `session.stream(text)` at most once per instance, same as `turn-runner/drive.ts` does. */
 export function createControllableSession(
   initialState: SessionState = DEFAULT_STATE,
 ): ControllableSession {
@@ -134,14 +134,14 @@ export function createControllableSession(
 
 /**
  * `createControllableSession()` deliberately has no `steer` method at all —
- * that's what covers `turn-runner.ts`'s "session can't be steered" case
+ * that's what covers `turn-runner/registry.ts`'s "session can't be steered" case
  * (`TurnDrivenSession.steer` is optional; `steerTurn` treats a missing one
  * as `false`, same as a `false` return). This variant is for the other two
  * `steerTurn` cases that need an actual `steer()` to control: `steerCalls`
  * records every `input` it was invoked with (call-order assertions), and
  * `setSteerResult` controls what the *next* call returns — default `true`
  * ("queued"), settable to `false` to simulate the narrow race
- * `turn-runner.ts`'s own header comment documents (the turn finished between
+ * `turn-runner/index.ts`'s own header comment documents (the turn finished between
  * `steerTurn` finding it in `activeTurns` and `session.steer()` itself
  * checking its in-flight state).
  */

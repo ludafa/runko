@@ -1,7 +1,7 @@
 # 中途插话与排队（技术方案）
 
 > 相关：产品/使用视角见 [../features/steer-and-queue.md](../features/steer-and-queue.md)，施工进展见 [../plans/steer-and-queue.md](../plans/steer-and-queue.md)。
-> 依赖/延续：[tech/chat-webapp](./chat-webapp.md)（`routes/chat.ts` 七端点、`turn-runner.ts` 的[轮](../terms.md)驱动、`sandbox-manager.ts` 生命周期）· [tech/single-ledger](./single-ledger.md)（[账本](../terms.md) `seq` 空间与 durable/transient 分档）· [tech/core-sdk](./core-sdk.md) §4.2（`Session.steer()` 的软 steer 语义）。
+> 依赖/延续：[tech/chat-webapp](./chat-webapp.md)（`routes/chat.ts` 七端点、`turn-runner/` 的[轮](../terms.md)驱动、`sandbox-manager.ts` 生命周期）· [tech/single-ledger](./single-ledger.md)（[账本](../terms.md) `seq` 空间与 durable/transient 分档）· [tech/core-sdk](./core-sdk.md) §4.2（`Session.steer()` 的软 steer 语义）。
 
 ## 1. 现状与增量
 
@@ -10,7 +10,7 @@
 | 层 | 现状 | 本期改动 |
 |---|---|---|
 | `@nimbo/core` | `Session.steer(input)`、loop 的 `drainSteerMessages`（step 边界 A/B 两个 checkpoint） | **不动** |
-| `apps/node-server` | `turn-runner.ts` 的 `steerTurn()`；`POST .../messages` 有活跃轮就无条件 steer | 改为按 `intent` 分流，新增[排队](../terms.md)/[出队](../terms.md) |
+| `apps/node-server` | `turn-runner/registry.ts` 的 `steerTurn()`；`POST .../messages` 有活跃轮就无条件 steer | 改为按 `intent` 分流，新增[排队](../terms.md)/[出队](../terms.md) |
 | `apps/web` | 流式中发送即 steer（隐式，无 UI 表达） | 默认排队 + 显式插话入口 + 待发区 |
 
 增量是**排队**这条路径，外加把 steer 从「隐式唯一」降级为「显式可选」。
@@ -87,12 +87,12 @@ interface QueuedMessage {
 **依赖方向**（不成环）：
 
 ```
-routes/chat.ts ──→ turn-launcher.ts ──→ turn-runner.ts（startTurn）
+routes/chat.ts ──→ turn-launcher.ts ──→ turn-runner/start.ts（startTurn）
                           ↑                     │
                           └─── onTurnSettled ───┘（回调由 launchTurn 注入，turn-runner 不 import launcher）
 ```
 
-`turn-runner.ts` 只多一个可选入参 `onTurnSettled?: () => void`，在 `driveTurn(...).finally()` 里、**`activeTurns.delete()` 之后**调用——顺序是硬要求，否则下一轮的 `startTurn` 会被「已有活跃轮」守卫挡掉。turn-runner 依然不认识队列这个概念。
+`turn-runner/start.ts` 只多一个可选入参 `onTurnSettled?: () => void`，在 `driveTurn(...)` 收尾之后、**`activeTurns.delete()` 之后**调用——顺序是硬要求，否则下一轮的 `startTurn` 会被「已有活跃轮」守卫挡掉。turn-runner 依然不认识队列这个概念。
 
 ## 4. wire 契约
 
@@ -155,7 +155,7 @@ sequenceDiagram
     participant R as routes/chat.ts
     participant S as store.ts（conversations 行）
     participant L as turn-launcher.ts
-    participant T as turn-runner.ts
+    participant T as turn-runner
     participant C as session.stream()（core loop）
 
     Note over T,C: 第 N 轮进行中（activeTurns 有该会话）
@@ -192,7 +192,7 @@ sequenceDiagram
 sequenceDiagram
     participant U as 用户（Alt+Enter / 插话按钮）
     participant R as routes/chat.ts
-    participant T as turn-runner.ts
+    participant T as turn-runner
     participant C as core loop
 
     U->>R: POST .../messages { text, intent:"steer" }

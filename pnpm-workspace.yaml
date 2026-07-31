@@ -22,6 +22,11 @@ packages:
 # 不批准构建脚本——保持"零二进制依赖"（tech-spec §1 原则 1），未安装原生绑定时
 # 这两种压缩格式在 just-bash 里会优雅降级为不可用，不影响本包其余全部功能。
 allowBuilds:
+  # ↑ 上面那条决定的落地。必须**显式**写成 false：不写不等于拒绝，pnpm 会把它当成
+  # "还没表态"，于是每次 pnpm install 都以 ERR_PNPM_IGNORED_BUILDS 退出 1（全新
+  # worktree 上尤其明显——连 pre-commit 的 pnpm test 都跑不起来）。
+  '@mongodb-js/zstd': false
+  node-liblzma: false
   # P12 apps 侧（docs/08 §2.1）：零二进制原则约束的是发布的 @nimbo/* 包；
   # apps 是消费侧产品代码，seed 技术栈（drizzle+better-sqlite3 等）按需放行。
   better-sqlite3: true

@@ -1,7 +1,7 @@
 /**
  * Chat approval-bridge policy (docs/tech/chat-webapp.md §2.2c（审批链），
  * docs/tech/single-ledger.md §6 三值重构): pure, side-effect-free
- * helpers only — no I/O, no reference to `turn-runner.ts`'s in-memory
+ * helpers only — no I/O, no reference to `turn-runner/`'s in-memory
  * `activeTurns`. `routes/chat.ts`'s `POST .../messages` handler is the one
  * place `classifyApproval` gets wired in as the session-level "审批分类器"
  * (`@nimbo/core`'s `SessionOptions.onApproval`, the `ApprovalPolicy`
@@ -10,14 +10,14 @@
  *   `classifyApproval(mode, ctx.toolName, input)` decides on the spot
  *   whether a tool call is safe enough to run unattended (`'allow'`) or
  *   needs a human (`'review'`) — `@nimbo/core`'s loop only escalates to the
- *   session's 人审通道 (`onReview`, `turn-runner.ts`'s `requestReview`) for the
+ *   session's 人审通道 (`onReview`, `turn-runner/human-bridge.ts`'s `requestReview`) for the
  *   latter, and only *after* it has already yielded a `tool-approval-request`
  *   chunk (docs/tech/single-ledger.md §6.1) — this module has no part in that visibility step
  *   anymore (the old boolean-driven `shouldAutoAllow` predates that fix).
  *
  * This module never sees an `ApprovalContext`/`callId` — those only matter
  * once a request actually needs to be routed to a pending human decision,
- * which is `turn-runner.ts`'s job, not this one's. Chat never hands out a
+ * which is `turn-runner/`'s job, not this one's. Chat never hands out a
  * hard `'deny'` from this classifier — every escalation is a `'review'`, a
  * human always gets to decide (matches the pre-3-value behavior, where
  * `false` always meant "ask a human", never "silently reject").

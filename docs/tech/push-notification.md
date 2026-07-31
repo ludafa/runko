@@ -15,7 +15,7 @@
 | **决策** | 四个触发点各产出一条载荷；[在场](../terms.md)、队列、事件白名单三道闸门决定发不发 | `apps/node-server/src/push/notifier.ts` |
 | **投递** | 按订阅扇出，加密投给推送服务；失效订阅就地回收 | `apps/node-server/src/push/sender.ts` + `apps/web/public/sw.js` |
 
-**依赖方向是单向的**：`turn-runner.ts` 不认识推送，也不认识[在场](../terms.md)——它只多**一个**生命周期通知点（`onTurnSettled` 多带一个"这一轮怎么结束的"）。拼载荷、查闸门、发投递全在 `push/` 下。这与[遥测](./telemetry.md)当初的接法完全同构，理由也一样：运行内核不该长出对可选外围功能的认识。
+**依赖方向是单向的**：`turn-runner/` 不认识推送，也不认识[在场](../terms.md)——它只多**一个**生命周期通知点（`onTurnSettled` 多带一个"这一轮怎么结束的"）。拼载荷、查闸门、发投递全在 `push/` 下。这与[遥测](./telemetry.md)当初的接法完全同构，理由也一样：运行内核不该长出对可选外围功能的认识。
 
 ## 2. 业务数据领域设计图
 
@@ -189,7 +189,7 @@ sequenceDiagram
 
 ## 4. 四个触发点怎么接
 
-全部接在 `turn-launcher.ts`——那里本来就是"拼装一轮、认识 db 与依赖"的地方，`turn-runner.ts` 只需要一处极小的扩展。
+全部接在 `turn-launcher.ts`——那里本来就是"拼装一轮、认识 db 与依赖"的地方，`turn-runner/` 只需要一处极小的扩展。
 
 | 触发 | 接在哪 | 需要改 turn-runner 吗 |
 |---|---|---|
@@ -198,7 +198,7 @@ sequenceDiagram
 | 一轮完成 | `onTurnSettled` 回调 | 要：多带一个 `TurnSettledInfo` |
 | 一轮失败/中断 | 同上，按 `status` 分流 | 同上 |
 
-`turn-runner.ts` 唯一的改动：
+`turn-runner/` 唯一的改动：
 
 ```ts
 export interface TurnSettledInfo {
@@ -393,7 +393,7 @@ Chrome（桌面与 Android）是 **2**。所以排序把「少了就残废」的
 
 | 值 | 现在是多少 | 谁定的 |
 |---|---|---|
-| 审批超时 | 240 秒（4 分钟） | `turn-runner.ts` 的 `DEFAULT_APPROVAL_TIMEOUT_MS` |
+| 审批超时 | 240 秒（4 分钟） | `turn-runner/human-bridge.ts` 的 `DEFAULT_APPROVAL_TIMEOUT_MS` |
 | 审批保活预算 | 300 秒（5 分钟） | `@nimbo/core` `keepalive.ts` 的 `DEFAULT_APPROVAL_BUDGET_MS`——chat 侧没显式传，吃的是这个默认 |
 
 两者现在是**自洽**的：人 4 分钟不点就自动拒绝，而沙盒在这 4 分钟里一直被续着。所以今天不存在"人还没点、沙盒先睡了"。
@@ -410,7 +410,7 @@ Chrome（桌面与 Android）是 **2**。所以排序把「少了就残废」的
 2. chat 侧的 `keepAliveOptionsFor`（`sandbox-manager.ts`）**显式传** `approvalBudgetMs`，取值 ≥ 上面那个超时——不能再吃 core 的 5 分钟默认。
 3. 通知载荷的 TTL 已经跟着超时走（§6.3，`turn-launcher.ts` 从 `resolveApprovalTimeoutMs()` 取值传给 `notifier`），这一步无需再改。
 
-**不变量**：**审批超时 ≤ 审批保活预算**。两个值分别住在 `turn-runner.ts` 与 `sandbox-manager.ts`，没有任何机制强制它们对齐——改任何一个都要回来看另一个。
+**不变量**：**审批超时 ≤ 审批保活预算**。两个值分别住在 `turn-runner/human-bridge.ts` 与 `sandbox-manager.ts`，没有任何机制强制它们对齐——改任何一个都要回来看另一个。
 
 **为什么是 15 分钟而不是更长**：等人期间沙盒是活的，是**在烧钱**。15 分钟是"收到通知、掏出手机、看清命令、做决定"的合理上限，同时把一次无人值守挂起的成本压在可接受范围。
 
@@ -440,7 +440,7 @@ Chrome（桌面与 Android）是 **2**。所以排序把「少了就残废」的
 3. **iPhone / iPad 收不到**：不做 PWA 的直接后果（[附录 B.5](#b5-不做-pwa-独立应用ios-因此收不到)）。
 4. **没有重试**：投递失败就是失败（§6.6）。
 5. **通知里不能直接批准**（[产品文档附录 A.1](../features/push-notification.md) 说明了为什么这是有意的）。
-6. **一轮在起轮装配窗口里被停止不发通知**：那条路径走 `releaseTurn`（turn-runner.ts），它没有 `onTurnSettled`。可接受——那一刻是用户自己刚按的停止，他知道。
+6. **一轮在起轮装配窗口里被停止不发通知**：那条路径走 `releaseTurn`（turn-runner/reservation.ts），它没有 `onTurnSettled`。可接受——那一刻是用户自己刚按的停止，他知道。
 
 ---
 

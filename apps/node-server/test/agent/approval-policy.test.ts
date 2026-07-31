@@ -6,7 +6,7 @@
  * rework) and `classifyApproval` (the mode-dispatch entry point
  * `routes/chat.ts` wires in as the session's 审批分类器, now returning a
  * three-value `ApprovalOutcome` — `'allow'` or `'review'`; this module never
- * hands out `'deny'`, see its own file header). No I/O, no `turn-runner.ts`
+ * hands out `'deny'`, see its own file header). No I/O, no `turn-runner/`
  * involved — these are the same pure inputs/outputs the module's own header
  * comment promises.
  */

@@ -98,7 +98,7 @@ erDiagram
 
 **为什么在第一个 chunk 抵达时才落库，而不是装配一结束就写**：遥测的关联键是 `functionId = "<nimbo 会话 id>#<turn>"`，而首轮的 nimbo 会话 id 是 `createSession` 现场 mint 的，装配阶段根本不知道；`turn` 号同理要等 `session.stream()` 把它 `+1`。第一个 chunk 抵达时两者都已确定，`session.toJSON()` 一读即得，且与 core 注入 `streamText` 的那个 functionId **逐字节相同**——同轮数据自然 join 得上。代价是这一轮若在产出任何 chunk 之前就崩了（沙盒装配失败），就没有 `turn-prepare` 行；那种失败会以 500 响应 + `turn-launcher` 的 error 日志现身，不靠遥测。
 
-**依赖方向**：`turn-runner.ts` 不认识遥测，也不认识计时——它只多了两个生命周期通知点（`onMilestone`），与既有的 `onTurnSettled`（不认识「队列」只报告事件）是同一姿态；拼载荷、写库都在 `turn-launcher.ts`。
+**依赖方向**：`turn-runner/` 不认识遥测，也不认识计时——它只多了两个生命周期通知点（`onMilestone`），与既有的 `onTurnSettled`（不认识「队列」只报告事件）是同一姿态；拼载荷、写库都在 `turn-launcher.ts`。
 
 ```mermaid
 sequenceDiagram

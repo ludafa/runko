@@ -10,7 +10,7 @@
  * `NimboUIMessage`/`NimboChunk` types (same discipline the pre-migration
  * version already had for `SessionEvent`) — every helper here trades in
  * plain strings (`payloadJson`) and the `kind` discriminator; typed
- * parsing/serialization is the caller's job (`turn-runner.ts` writes,
+ * parsing/serialization is the caller's job (`turn-runner/` writes,
  * `routes/chat.ts` reads back via `schemas/chat.ts`'s zod schemas).
  */
 import { randomUUID } from 'node:crypto';
@@ -109,7 +109,7 @@ export interface ConversationPatch {
   /**
    * The nimbo session-scalar header (docs/tech/single-ledger.md §5 单-3, schema.ts's own doc
    * comment) — all three always written together, at the end of every turn
-   * that finishes gracefully (`turn-runner.ts`'s `finalizeTurnPersistence`).
+   * that finishes gracefully (`turn-runner/persistence.ts`'s `finalizeTurnPersistence`).
    * There is no partial-update case, so this is one combined optional group
    * rather than three independent optional fields.
    */
@@ -244,7 +244,7 @@ export function listConversationEvents(
  * Turn-finalization GC (docs/tech/single-ledger.md §5 单-3 "turn 收尾…GC 本轮的 chunk 条目"):
  * deletes every `kind = 'chunk'` row with `seq > afterSeq` for this session.
  * `afterSeq` is the session's `getMaxEventSeq` reading taken at the *start*
- * of the turn being finalized (`turn-runner.ts`'s `startTurn`) — since a
+ * of the turn being finalized (`turn-runner/start.ts`'s `startTurn`) — since a
  * session only ever has one turn driving it at a time (`startTurn` rejects a
  * second concurrent one), every `chunk`-kind row with a higher seq than that
  * necessarily belongs to *this* turn (any earlier turn's stray chunk rows,

@@ -14,11 +14,11 @@ import type { NimboChunk, NimboUIMessage } from '@nimbo/core';
 // - `session.stream()` now yields `NimboChunk` (ai's `UIMessageChunk`
 //   vocabulary, instantiated for `NimboUIMessage` — `@nimbo/core`'s
 //   `state.ts`) directly — the wire's live tail forwards these verbatim
-//   (`turn-runner.ts`'s `driveTurn`), no server-invented wrapper events left.
+//   (`turn-runner/drive.ts`'s `driveTurn`), no server-invented wrapper events left.
 // - Approval visibility is now a `tool-approval-request`/
 //   `tool-approval-response` chunk pair `@nimbo/core`'s own loop produces
 //   (docs/tech/single-ledger.md §6.1) — the server no longer emits its own `approval.*` events
-//   (`turn-runner.ts`'s 人审通道 bridge, `requestReview`/`resolveReview`, is
+//   (`turn-runner/human-bridge.ts`'s 人审通道 bridge, `requestReview`/`resolveReview`, is
 //   pure in-memory promise routing now, no `TurnEmitter` calls at all).
 // - `ask-user` visibility is the `tool-ask-user` part's own
 //   `input-available`/`output-available` states (already a normal tool call
@@ -26,13 +26,13 @@ import type { NimboChunk, NimboUIMessage } from '@nimbo/core';
 // - The turn-starting user message now has a real wire position of its own
 //   (closing what used to be a known gap inherited from `@nimbo/core`'s
 //   `Session.stream()`, which pushes it onto its own internal ledger but
-//   never yields anything for it): `turn-runner.ts`'s `driveTurn` synthesizes
+//   never yields anything for it): `turn-runner/drive.ts`'s `driveTurn` synthesizes
 //   a user `NimboUIMessage` (its own `id`, a single `text` part — chat input
 //   is always plain text) *before* it ever starts consuming
 //   `session.stream()`, persists it as a `kind = 'message'` row, and
 //   broadcasts it as a `MessageFrame` — sharing the exact same monotonic
 //   `seq` counter the turn's subsequent chunks use
-//   (`turn-runner.ts`'s `createTurnEmitter`), so any listener sees it
+//   (`turn-runner/persistence.ts`'s `createTurnEmitter`), so any listener sees it
 //   strictly before anything else from that turn. `finalizeTurnPersistence`
 //   skips over `@nimbo/core`'s own (structurally-identical, different-`id`)
 //   copy of that same message when persisting the turn's newly-appended
@@ -46,7 +46,7 @@ import type { NimboChunk, NimboUIMessage } from '@nimbo/core';
 //
 // - **Live tail** (`GET .../stream`, its non-replay portion): mostly a
 //   stream of `ChunkEnvelope`s (`{ seq?, chunk }`) — `seq` present ⇔ this
-//   chunk was durable (persisted, replayable — `turn-runner.ts`'s
+//   chunk was durable (persisted, replayable — `turn-runner/persistence.ts`'s
 //   `isDurableChunk`); absent ⇔ ephemeral (`text-delta`/`reasoning-delta`/any
 //   `transient: true` data part — P13-1's durable/ephemeral split, carried
 //   over verbatim) — plus exactly one `MessageFrame` per turn, its very
@@ -127,10 +127,10 @@ export type ChunkEnvelope = z.infer<typeof chunkEnvelopeSchema>;
  * `{ seq, message }` — usually replay-only (see file header): a finished
  * `NimboUIMessage`, read back verbatim from a `kind = 'message'` row. Most
  * `kind = 'message'` rows are only ever written once a turn has already
- * finished (`turn-runner.ts`'s `finalizeTurnPersistence`), by which point
+ * finished (`turn-runner/persistence.ts`'s `finalizeTurnPersistence`), by which point
  * there's no "live" activity left for that turn to broadcast — the one
  * exception is the turn-start synthesized user message, which *is*
- * broadcast live (as the turn's very first frame, `turn-runner.ts`'s
+ * broadcast live (as the turn's very first frame, `turn-runner/drive.ts`'s
  * `driveTurn`) the same instant it's persisted, precisely so a client never
  * has to guess at its own just-sent message's final wire shape.
  */

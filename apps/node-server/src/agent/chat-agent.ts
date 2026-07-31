@@ -37,7 +37,10 @@ import type { LanguageModel } from 'ai';
 import { z } from 'zod';
 
 import type { ChatApprovalMode } from './approval-policy.js';
-import type { AskUserOutcome, RequestUserAnswerInput } from './turn-runner.js';
+import type {
+  AskUserOutcome,
+  RequestUserAnswerInput,
+} from './turn-runner/index.js';
 import { createWebSearchToolFromEnv } from './web-search.js';
 
 export interface BuildSessionOptions {
@@ -68,7 +71,7 @@ export interface BuildSessionOptions {
   onReview?: ApprovalReviewer;
   /** Defaults to `'dangerous'` (`approval-policy.ts`'s own default) — controls whether/how the workspace's `bash` tool is gated, not what the model is allowed to do overall. */
   approvalMode?: ChatApprovalMode;
-  /** `routes/chat.ts`'s ask-user bridge (docs/tech/chat-webapp.md §2.2c（审批链）), wired to `turn-runner.ts`'s `requestUserAnswer` — registers the `ask-user` tool (see `createAskUserTool`) when present. Independent of `approvalMode`: `ask-user` is a product capability, not a safety gate, so it's registered the same way regardless of mode (including `'off'`). */
+  /** `routes/chat.ts`'s ask-user bridge (docs/tech/chat-webapp.md §2.2c（审批链）), wired to `turn-runner/human-bridge.ts`'s `requestUserAnswer` — registers the `ask-user` tool (see `createAskUserTool`) when present. Independent of `approvalMode`: `ask-user` is a product capability, not a safety gate, so it's registered the same way regardless of mode (including `'off'`). */
   onAskUser?: (req: RequestUserAnswerInput) => Promise<AskUserOutcome>;
   /** [联网搜索](../../../../docs/terms.md)工具（docs/tech/web-search.md §5）——注入优先于 env 解析。不传时由 `createWebSearchToolFromEnv()` 按 `EXA_API_KEY` 决定注不注册；显式传入用于测试（假 `fetch`，零网络）与将来「按会话配 key」。 */
   webSearchTool?: Tool;
@@ -159,7 +162,7 @@ const askUserInputSchema = z.object({
   options: z.array(z.string()).optional(),
 });
 
-/** `requestUserAnswer`'s own timeout (`turn-runner.ts`) surfaces as this outcome — a normal tool result (`status: "completed"`, not a thrown error), so the model can react instead of the turn just dying. */
+/** `requestUserAnswer`'s own timeout (`turn-runner/human-bridge.ts`) surfaces as this outcome — a normal tool result (`status: "completed"`, not a thrown error), so the model can react instead of the turn just dying. */
 const ASK_USER_TIMEOUT_MESSAGE =
   'The user did not respond within the time limit. Proceed with your best judgment, or ask again later.';
 

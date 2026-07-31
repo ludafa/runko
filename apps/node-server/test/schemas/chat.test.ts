@@ -55,7 +55,7 @@ describe('schemas/chat: chunkEnvelopeSchema', () => {
   // Documents actual behavior, not a claim this should be relied on: the
   // schema only constrains `seq` with `.int()`, not `.nonnegative()` — a
   // negative value round-trips fine here even though the server itself never
-  // produces one (`createEmitWire` in turn-runner.ts only ever counts up from
+  // produces one (`createEmitWire` in turn-runner/ only ever counts up from
   // `getMaxEventSeq`). Carried over verbatim from the pre-migration
   // `chatEventEnvelopeSchema` coverage this schema replaces.
   it('does NOT reject a negative seq — the schema has no .nonnegative() constraint', () => {

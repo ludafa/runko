@@ -122,7 +122,7 @@ export const askUserTurnFrames: LedgerFrame[] = [
 
 /**
  * An already-finished turn's replay, GC'd down to `MessageFrame`s only
- * (`apps/node-server`'s `turn-runner.ts` only keeps a finished turn's durable
+ * (`apps/node-server`'s `turn-runner/persistence.ts` only keeps a finished turn's durable
  * chunks around until `finalizeTurnPersistence` GCs them — replay history
  * ends up as finished messages verbatim, `use-chat-messages.ts`'s
  * `lastFrameIsChunk` doc comment). A `MessageFrame` never goes through chunk
