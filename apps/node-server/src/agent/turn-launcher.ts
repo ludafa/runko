@@ -3,7 +3,7 @@
  * `POST .../messages` handler 里整段抽出来的：解析模型/仓库凭据 → 取沙盒
  * （`sandboxManager.acquire` + `touch`）→ 回写 E2B [重连令牌](../../../../docs/terms.md)
  * → 装配[审批链](../../../../docs/terms.md)的三个回调 → 从[账本](../../../../docs/terms.md)
- * 重建 `SessionState` → `buildSession` → `turn-runner.ts` 的 `startTurn`。
+ * 重建 `SessionState` → `buildSession` → `turn-runner/` 的 `startTurn`。
  *
  * **为什么要抽**：这段装配有两个调用方，其中一个不在任何 HTTP 请求上下文里——
  *
@@ -14,12 +14,12 @@
  * **依赖方向**（不成环，docs/tech/steer-and-queue.md §3）：
  *
  * ```
- * routes/chat.ts ──→ turn-launcher.ts ──→ turn-runner.ts（startTurn）
+ * routes/chat.ts ──→ turn-launcher.ts ──→ turn-runner/（startTurn）
  *                           ↑                     │
  *                           └─── onTurnSettled ───┘（回调由本文件注入，turn-runner 不 import 本文件）
  * ```
  *
- * `turn-runner.ts` 因此完全不认识「队列」这个概念，它只多了一个「这一轮彻底结束了」
+ * `turn-runner/` 因此完全不认识「队列」这个概念，它只多了一个「这一轮彻底结束了」
  * 的通知点。
  */
 import type {
@@ -66,7 +66,7 @@ import type {
   TurnMilestone,
   TurnMilestoneInfo,
   TurnReservation,
-} from './turn-runner.js';
+} from './turn-runner/index.js';
 import {
   releaseTurn,
   requestReview,
@@ -75,7 +75,7 @@ import {
   resolveApprovalTimeoutMs,
   resolveAskUserTimeoutMs,
   startTurn,
-} from './turn-runner.js';
+} from './turn-runner/index.js';
 
 const LOG_SCOPE = 'turn-launcher';
 
@@ -177,7 +177,7 @@ export interface TurnLauncherDeps {
    * agent 提问、一轮结束。缺省 undefined = 不发通知，与遥测同样的「可关、可删、消费方
    * 按缺席设计」定位。生产装配见 `routes/chat.ts` 底部。
    *
-   * 为什么接在本文件而不是 `turn-runner.ts`：那是运行内核，不该长出对可选外围功能的
+   * 为什么接在本文件而不是 `turn-runner/`：那是运行内核，不该长出对可选外围功能的
    * 认识——与 `onMilestone`（遥测）完全同构的分工，见 docs/tech/telemetry.md §2.4。
    */
   notifier?: ChatNotifier;
@@ -251,7 +251,7 @@ export function loadResumeState(
   // Resume off the persisted `kind = 'message'` rows, not the scalar header:
   // the header (`agentSessionId`/`agentSessionTurn`/`agentSessionCreatedAt`) is only written
   // by `finalizeTurnPersistence` on a *graceful* turn finish, but a
-  // turn-start user message row (turn-runner.ts) lands the moment a turn
+  // turn-start user message row (turn-runner/drive.ts) lands the moment a turn
   // begins. So a first turn that *crashed* (driveTurn's `catch`, header never
   // written) still leaves one `kind = 'message'` row — and it's replayed to
   // the UI. Gating resume on `agentSessionId !== null` used to drop exactly
@@ -276,7 +276,7 @@ export function loadResumeState(
 }
 
 /**
- * 起一轮：装配好一切并交给 `turn-runner.ts` 的 `startTurn` 在进程内驱动（不 `await`
+ * 起一轮：装配好一切并交给 `turn-runner/` 的 `startTurn` 在进程内驱动（不 `await`
  * 这一轮跑完——本函数只负责把它**启动**起来，事件走 `GET .../stream`）。
  *
  * 注入的 `onTurnSettled` 是[排队](../../../../docs/terms.md)链条的关节：这一轮彻底结束
@@ -402,7 +402,7 @@ async function assembleAndStartTurn(
   // latter, and only *after* it has already yielded a
   // `tool-approval-request` chunk. Captures `conversationId` (the *chat*
   // session id) — not `ctx.session.id`, which is `@nimbo/core`'s own internal
-  // session id and means nothing to `turn-runner.ts`'s `activeTurns` map.
+  // session id and means nothing to `turn-runner/registry.ts`'s `activeTurns` map.
   // 会话级授权先行（session-grants.ts，conversation_grants 表）：这次具体调用
   // （tool + 入参指纹）若已被**本轮发起者**（`userId`——自动出队时是排队者本人，
   // 见 `LaunchTurnInput.userId`）在本会话「会话内都允许」过，直接放行、不再进
@@ -552,7 +552,7 @@ async function assembleAndStartTurn(
     // （同一个 emitter 与 abortController，docs/tech/turn-abort.md §3.3）。
     reservation,
     // 这一轮彻底结束（`activeTurns` 已清空）后接着起下一条排队消息——见文件头的
-    // 依赖方向图。`void` 是刻意的：`turn-runner.ts` 的 `finally` 不等待也不关心它。
+    // 依赖方向图。`void` 是刻意的：`turn-runner/` 的收尾不等待也不关心它。
     onTurnSettled: (settled) => {
       // 通知排在起下一轮**之前**：`notifier` 的队列抑制（技术方案 §5.3）要读的是
       // 「这一轮结束时队列里还有没有货」，而 `startNextQueuedTurn` 的第一件事就是
@@ -591,7 +591,7 @@ async function assembleAndStartTurn(
 
 /**
  * 自动[出队](../../../../docs/terms.md)：取[待发队列](../../../../docs/terms.md)队首起下一轮。
- * 由上一轮的 `onTurnSettled` 触发（`turn-runner.ts` 在 `activeTurns.delete()` **之后**
+ * 由上一轮的 `onTurnSettled` 触发（`turn-runner/start.ts` 在 `activeTurns.delete()` **之后**
  * 调用——顺序是硬要求，否则这里的 `startTurn` 会被「已有进行中的一轮」守卫挡掉）。
  *
  * 失败处理（docs/features/steer-and-queue.md §2.5「出错时不吞消息」）：起轮失败就把这条

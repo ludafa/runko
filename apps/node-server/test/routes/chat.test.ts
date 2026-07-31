@@ -25,7 +25,7 @@ import {
   isTurnActive,
   shutdownTurns,
   startTurn,
-} from '../../src/agent/turn-runner.js';
+} from '../../src/agent/turn-runner/index.js';
 import { createChatApp } from '../../src/routes/chat.js';
 import type {
   ChatReplayFrame,
@@ -728,7 +728,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
     // Occupy the turn slot directly (a fake that never finishes on its own)
     // instead of racing a real mock-model turn, which could complete before
     // the second POST below ever runs. `ControllableSession` deliberately has
-    // no `steer` (turn-runner.ts's `TurnDrivenSession.steer` is optional), so
+    // no `steer` (turn-runner/session.ts's `TurnDrivenSession.steer` is optional), so
     // `steerTurn` returns false and the route falls back to starting a new
     // turn — which `startTurn`'s own guard then rejects. That fallback path is
     // the only way a 409 "turn already in progress" is still reachable now

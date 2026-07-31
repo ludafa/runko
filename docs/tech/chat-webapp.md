@@ -127,13 +127,21 @@ sequenceDiagram
 在 seed 骨架上叠加：
 
 - **`model.ts`**：DeepSeek 直连（默认 `deepseek-v4-pro`，`NIMBO_MODEL` 覆盖）——同 07 示例。
-- **`store.ts`**：`conversations` + `conversation_events` 的纯函数读写（注入 `Db`，测试可指向内存库）。刻意不认 `NimboUIMessage`/`NimboChunk` 具体类型，只吞吐 `payloadJson` 字符串 + `kind`；typed 解析/序列化是调用方的事（`turn-runner.ts` 写、`routes/chat.ts` 读）。关键函数：`getMaxEventSeq`（seq 续接点，跨两 kind 共一条计数器）、`appendAgentEvent`、`listAgentEvents(afterSeq)`、`deleteChunkEventsAfter`（收尾 GC）、`loadResumeState` 用到的 `nimboHeader` 组合更新。
+- **`store.ts`**：`conversations` + `conversation_events` 的纯函数读写（注入 `Db`，测试可指向内存库）。刻意不认 `NimboUIMessage`/`NimboChunk` 具体类型，只吞吐 `payloadJson` 字符串 + `kind`；typed 解析/序列化是调用方的事（`turn-runner/` 写、`routes/chat.ts` 读）。关键函数：`getMaxEventSeq`（seq 续接点，跨两 kind 共一条计数器）、`appendAgentEvent`、`listAgentEvents(afterSeq)`、`deleteChunkEventsAfter`（收尾 GC）、`loadResumeState` 用到的 `nimboHeader` 组合更新。
 - **`sandbox-manager.ts`**（核心生命周期）：全服务里唯一碰 `@vercel/sandbox`/`@nimbo/sandbox-vercel` 的模块，其余只见结构接口 `SandboxClient`/`ManagedSandbox`（可 fake，测试零网络/凭证）。进程内 `Map<sessionId, ActiveSandbox>` + `inflight` 去重：
   - `acquire(input)`：三态——① 内存命中 → 直接复用，零 Vercel 调用；② `SandboxClient.get()` 成功（Vercel 从快照恢复，**分支代码含未提交改动原样还原**）→ 原样复用；③ `get()` 失败（404「从未建过」或 410「停机后无法从快照恢复=快照过期」）→ `create()`（`persistent:true` + `runtime:node24` + git source）+ 重跑 init 计划（装 skill、git identity、remote auth、git exclude）+ `recoverSessionBranch`（`git fetch origin <branch> && git checkout`，失败则 `git checkout -b` 重建——一条路径覆盖「全新」与「过期」两子情形）。
   - `touch(sessionId)`：**沙盒「休眠」机制本体**——只调 Vercel 的 `extendTimeout(idleTimeoutMs)`，无服务端定时器。会话空闲超过 `SANDBOX_IDLE_TIMEOUT_MS`（默认 5 分钟，env 可调）时 Vercel 自己 stop + 快照；下条消息的 `acquire`（态 ② 或 ③）恢复。进程重启也不漏。无内存态时 `touch` 抛错（须先 `acquire`）。
 - **`chat-agent.ts`**：`buildSession(opts)`——`Skill.fromFS(workspace, "/.agents/skills/frontend-design")` + instructions（owner/repo/分支/默认分支烤进去，模型不用猜；分支固定为会话 `branchName`，多轮在同一分支累积，且明确要求「用户没让改就只读」）+ 调 **`@nimbo/sdk`** 的 `createSession`（不是 `@nimbo/core` 的——只有 sdk facade 版打包了八件套文件工具默认装配，才让 agent 真能改沙盒里 checkout 的仓库）。**每轮 fresh 重建**，无跨请求长驻 `Session`；消息史经 `conversation_events` 的 `kind='message'` 行 + `nimbo` 标量 header round-trip（`resume`），沙盒文件态另走快照。
 - **`web-search.ts`**：[联网搜索](../terms.md)工具（`web-search`，后端 Exa `/search`）——应用级工具，**条件注册**：`EXA_API_KEY` 有值才进 `agent.tools`，没配则模型看不见它。与 `ask-user` 同构、core 零改动，详见 [tech/web-search](./web-search.md)。
-- **`turn-runner.ts`**：turn 执行/连接解耦的核心（详见 §5）。
+- **`turn-runner/`**：turn 执行/连接解耦的核心（详见 §5）。按「一轮的生命周期」拆成一个目录，`index.ts` 只做门面（re-export，不放实现）：
+  - `registry.ts`——「进行中的轮」登记表（`activeTurns`/`ActiveTurn`）+ 查询/订阅/广播/[插话](../terms.md)。
+  - `reservation.ts`——[起轮占位](../terms.md)：`reserveTurn`/`releaseTurn`。
+  - `start.ts`——`startTurn`：登记（或把占位就地升级）、放出后台驱动、收尾与 `onTurnSettled`。
+  - `drive.ts`——一轮的主循环 `driveTurn`，以及两个「首次」里程碑（`onMilestone`）。
+  - `persistence.ts`——落盘：`createTurnEmitter`（过程中）/ `finalizeTurnPersistence`（收尾）/ `isDurableChunk`。
+  - `human-bridge.ts`——[人审通道](../terms.md)与 ask-user 两条人在环上的通道（§6）。
+  - `abort.ts` / `shutdown.ts` / `abort-reasons.ts`——[停止](../terms.md)本轮 / [优雅关闭](../terms.md) / 跨模块共用的停止文案常量。
+  - `session.ts` / `log.ts`——`TurnDrivenSession` 接缝（对接 `@nimbo/sdk`）/ 日志旁路 tap。
 - **`approval-policy.ts`**：审批放行/拦截策略的纯函数（`classifyApproval`/`resolveApprovalMode`），三档 `CHAT_APPROVAL_MODE`（详见 §6）。
 - **`routes/chat.ts`**（`@hono/zod-openapi`，十二个端点，全登录态强制）：见 §7 契约。本页只写其中的会话/直播流/审批那几个；[待发队列](../terms.md)的三个见 [tech/steer-and-queue §4.2](./steer-and-queue.md)，`POST .../abort`（[停止](../terms.md)本轮）见 [tech/turn-abort §3.2](./turn-abort.md)。
 
@@ -143,7 +151,7 @@ sequenceDiagram
 
 **修法：turn registry + 可续传 live-tail。**
 
-- **`agent/turn-runner.ts` 的 turn registry**：进程内 `Map<sessionId, ActiveTurn>`；`ActiveTurn` 持一个 `EventEmitter`、一个 seq 计数+落盘+广播的 `emit` 闭包（`createTurnEmitter`）、以及审批/提问的 pending maps。`startTurn()` 若该 session 已有进行中轮则拒绝（`{started:false}` → 路由转 409），否则**后台异步驱动** `driveTurn`（`void` 不 `await`、不绑定任何 HTTP 请求生命周期）。同步注册 `ActiveTurn`（`isTurnActive`/`subscribeTurn` 立即可见）后才 spawn。
+- **`agent/turn-runner/registry.ts` 的 turn registry**：进程内 `Map<sessionId, ActiveTurn>`；`ActiveTurn` 持一个 `EventEmitter`、一个 seq 计数+落盘+广播的 `emit` 闭包（`createTurnEmitter`）、以及审批/提问的 pending maps。`startTurn()` 若该 session 已有进行中轮则拒绝（`{started:false}` → 路由转 409），否则**后台异步驱动** `driveTurn`（`void` 不 `await`、不绑定任何 HTTP 请求生命周期）。同步注册 `ActiveTurn`（`isTurnActive`/`subscribeTurn` 立即可见）后才 spawn。
 - **`driveTurn` 落盘时序**：先合成并落 turn-start 用户消息（`kind=message`，本轮首帧）；再逐 chunk——耐久的落 `kind=chunk`(seq++) 并广播、过程帧只广播；优雅收尾走 `finalizeTurnPersistence`（append 本轮新消息为 `kind=message` → GC 本轮 chunk → 写 header/lastActiveAt），emit `done` 后摘除。生成器**抛错**（真正意外失败，区别于 `session.stream()` 自身的优雅降级 return）时，广播一条合成的 `message-metadata` chunk（复用 core 优雅失败同款 `status:'failed'` 形状，前端无需单独分支），**不**走 finalize（本轮 chunk 不 GC——同「进程崩溃残渣」取舍）。
 - **`GET /api/chat/conversations/{id}/stream?after=<seq>`**（可续传 tail）：先 `subscribeTurn` 订阅到缓冲、再回放 DB 中 `seq > after` 的行（记 `maxSentSeq`）、再 flush 缓冲里 `seq > maxSentSeq` 的实时帧（回放期到达的 ephemeral 丢弃）、随后持续转发直至 `done` 才关闭；若无进行中轮（`isTurnActive` false）则回放完即关。
 - **客户端**（`apps/web` 的 `use-chat-messages.ts`，「命令/订阅分离」）：`sendMessage` = 乐观插入 + `POST messages`（起轮/steer）+ 打开 tail；**组件挂载时总是打开 tail**（`after=lastSeq`）以续接刷新前遗留的进行中轮；tail 断开时若本轮尚未收尾就带 `after=lastSeq` 重开（指数退避、限次）。seq 去重 / `lastSeq` 推进 / 重连 `after=` **只看有 seq 的帧**；ephemeral 帧照常喂时间线（live 打字机），不进 seq 记账。回放流里天然不含 ephemeral，重连后由完工消息收敛终态。
@@ -190,7 +198,7 @@ P13-5 后的现行机制（三值审批 + 原生 chunk，取代旧的四对 wire
 
 - **触发面（bash 审批）**：`buildSession` 用 `gateWorkspace` 包装沙盒 workspace（**逐方法显式委托** + `defaultApproval: "review"`，不用对象展开——沙盒 workspace 是类实例，方法在原型链上，浅展开会丢方法只剩 `undefined`）。这把内置 bash 的 per-tool approval 升到 `"review"`，每次调用都升级到会话级的[审批分类器](../terms.md)。
 - **[审批分类器](../terms.md)（`onApproval`，`ApprovalPolicy`，三值）**：`approval-policy.ts` 的 `classifyApproval(mode, toolName, input)` 当场判「`allow` 直接跑 / `review` 需要人」。`CHAT_APPROVAL_MODE` 三档——`dangerous`（默认：`git push`、GitHub API curl（引 api.github.com 或 `$GH_TOKEN`）、`rm -r/-f`、`git reset --hard`、`git clean -f` 判 `review`，其余 `allow`；input 形状不符一律升级 `review`，宁严勿松）/ `all`（全量 `review`）/ `off`（不包装 workspace，零行为变化）。
-- **[人审通道](../terms.md)（`onReview`，`ApprovalReviewer`）**：分类器返 `review` 后，core 的 loop **先 yield 一个 `tool-approval-request` chunk**（审批可见性=这条 chunk，人一需要就已在线上）、再 `await onReview`。`onReview` → `turn-runner.ts` 的 `requestReview(id, {callId, toolName, input})`：注册一条 pending review、挂起直到 `POST .../approvals/:callId` 的[人工裁决](../terms.md)（或超时自动 deny）经 `resolveReview` settle。settle 后 loop 自己 yield `tool-approval-response` chunk——**turn-runner 不再 emit 任何桥事件**（纯内存 Promise 路由）。超时默认 `CHAT_APPROVAL_TIMEOUT_MS=240s`（沙盒 idle 300s 的 80%），走同一条 resolve 通路保证多 tab/回放一致。
+- **[人审通道](../terms.md)（`onReview`，`ApprovalReviewer`）**：分类器返 `review` 后，core 的 loop **先 yield 一个 `tool-approval-request` chunk**（审批可见性=这条 chunk，人一需要就已在线上）、再 `await onReview`。`onReview` → `turn-runner/human-bridge.ts` 的 `requestReview(id, {callId, toolName, input})`：注册一条 pending review、挂起直到 `POST .../approvals/:callId` 的[人工裁决](../terms.md)（或超时自动 deny）经 `resolveReview` settle。settle 后 loop 自己 yield `tool-approval-response` chunk——**turn-runner 不再 emit 任何桥事件**（纯内存 Promise 路由）。超时默认 `CHAT_APPROVAL_TIMEOUT_MS=240s`（沙盒 idle 300s 的 80%），走同一条 resolve 通路保证多 tab/回放一致。
 - **人工裁决纯两值**：允许 / 拒绝（可带拒绝理由回填模型），映射 `@nimbo/core` 的 `HumanDecision`。「改参数」口子已于 2026-07-15 定案删除。
 - **ask-user 工具**：`BuildSessionOptions.onAskUser` 存在时注册进 `agent.tools`（kebab-case `ask-user`）；`execute` 经 `requestUserAnswer`/`resolveUserAnswer` 同款桥挂起（`pendingQuestions`，独立于 `pendingReviews`）。可见性=`tool-ask-user` 部件自身的 `input-available`/`output-available` 状态（普通工具调用）。超时（`CHAT_ASK_USER_TIMEOUT_MS` 默认 240s）返回固定提示文案（`status:"completed"`，不抛错，模型自行继续）。**与 approvalMode 无关恒注册**（产品能力，不是安全闸）。
 - **裁决路由**：`POST .../approvals/:callId` `{behavior:"allow"|"deny", message?}`、`POST .../questions/:callId` `{answer}`——属主校验同其余路由；404 覆盖「session 不存在/非属主」与「callId 无 pending」；allow/answer 先 `touch` 续沙盒且**失败不阻断裁决**（挂到超时比 exec 失败更糟）。
@@ -308,7 +316,7 @@ div.h-screen.flex.flex-col.overflow-hidden   ← 文档永不滚动
 - 单行格式：ISO 时间戳 + 级别 + `[scope]` + 消息 + 结构化字段（对象 JSON 化；长字符串走截断助手，如 turn 文本预览 120 字符、工具 input 预览 200 字符）。
 - **不引入第三方日志库**——内网 npm registry 装依赖有历史坑（见项目笔记），零依赖是刻意选择而非临时省事。
 
-### 11.2 `turn-runner.ts` 打点（纯旁路 tap）
+### 11.2 `turn-runner/log.ts` 打点（纯旁路 tap）
 
 logger 经 `StartTurnParams` 可选注入（默认单例，现有调用方不传也能跑）；打点只在既有分支上追加一行日志调用，**绝不改变 chunk 流转/持久化行为**。打点事件清单：
 

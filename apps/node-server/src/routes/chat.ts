@@ -55,7 +55,7 @@ import {
   resolveUserAnswer,
   steerTurn,
   subscribeTurn,
-} from '../agent/turn-runner.js';
+} from '../agent/turn-runner/index.js';
 import { db as defaultDb } from '../db/instance.js';
 import { logger as defaultLogger } from '../logger.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -506,7 +506,7 @@ export function createChatApp(deps: ChatRouteDeps) {
         // STEER-3B: steer 很便宜（不用取沙盒、不用重建 session，`Session.steer()`
         // 只是排进已经在跑的那一轮）。`false` 覆盖「这一轮刚好结束了」的窄竞态——
         // 落到下面的起新一轮是正确回落。本路由不为 steer 的消息合成 echo：与起轮
-        // 消息（`turn-runner.ts` 的 `driveTurn` 会合成一条 `MessageFrame`）不同，
+        // 消息（`turn-runner/drive.ts` 的 `driveTurn` 会合成一条 `MessageFrame`）不同，
         // steer 的用户消息由 core 自己在真实注入点产出完整 chunk 序列
         // （`loop.ts` 的 `drainSteerMessages`），那才是到达 wire 的东西。
         if (steerTurn(id, text)) {
@@ -770,9 +770,9 @@ export function createChatApp(deps: ChatRouteDeps) {
       // history below — subscribing *before* the replay query (rather than
       // after) is what guarantees nothing lands in the gap between them
       // (docs/tech/chat-webapp.md §2.2b). Almost always `ChunkEnvelope`s (`subscribeTurn`'s
-      // own contract, turn-runner.ts); the one exception is a turn's very
+      // own contract, turn-runner/); the one exception is a turn's very
       // first live delivery, its synthesized turn-start `MessageFrame`
-      // (`turn-runner.ts`'s `driveTurn`) — `envelope.seq` is always defined
+      // (`turn-runner/drive.ts`'s `driveTurn`) — `envelope.seq` is always defined
       // on that one, so it flows through the exact same durable-frame
       // dedup/forward path as a `seq`-bearing chunk below, no special-casing
       // needed.

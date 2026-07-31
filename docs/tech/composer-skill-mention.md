@@ -14,7 +14,7 @@
 |---|------|------|-------------|
 | A | 加载沙盒里**全部** skill（不再只有写死的 `frontend-design`） | `chat-agent.ts` | 前置条件。用户选的 skill 若没进 `agent.skills`，模型调 `load-skill` 必然报 "No skill named ..."。 |
 | B | [skill 清单](../terms.md)扫描 + 落库 + 随会话下发 | `skill-catalog.ts`(新) · `db/schema.ts` · `store.ts` · `schemas/chat.ts` · `routes/chat.ts` | 前端要列菜单。走库缓存而不是现读沙盒，见 §2.1。 |
-| C | 起轮时把提及翻译成模型指令 | `turn-launcher.ts` · `turn-runner.ts` | 让「软提示」这条路真的生效，见 §2.2。 |
+| C | 起轮时把提及翻译成模型指令 | `turn-launcher.ts` · `turn-runner/drive.ts` | 让「软提示」这条路真的生效，见 §2.2。 |
 | D | composer 换成 tiptap + `/` 提及 | `apps/web/.../composer-editor.tsx`(新) · `skill-suggestion-list.tsx`(新) · `message-composer.tsx` | 功能本体。 |
 
 A/B/C 在服务端，D 在前端，**只通过 `ConversationDto.availableSkills` 一个字段耦合**——可以分两条线并行施工。
@@ -47,10 +47,10 @@ displayText（界面/账本）  = "/frontend-design 帮我看看首页排版"
 modelText（喂给模型）      = "/frontend-design 帮我看看首页排版\n\n[系统提示] 用户在本条消息中显式指定了 skill：frontend-design。请先调用 load-skill 工具加载它，再按其中的指引完成本次任务。"
 ```
 
-这个拆分**几乎零成本**，因为 `turn-runner.ts` 的 `driveTurn` 里这两条路本来就是分开的两行，只是眼下共用同一个 `text` 变量：
+这个拆分**几乎零成本**，因为 `turn-runner/drive.ts` 的 `driveTurn` 里这两条路本来就是分开的两行，只是眼下共用同一个 `text` 变量：
 
-- `apps/node-server/src/agent/turn-runner.ts:731` —— 合成给界面看的 `NimboUIMessage`（落[账本](../terms.md) + 广播）
-- `apps/node-server/src/agent/turn-runner.ts:741` —— `session.stream(text)` 喂给模型
+- `turn-runner/drive.ts` 的 `emit.emitMessage(userMessage)` —— 合成给界面看的 `NimboUIMessage`（落[账本](../terms.md) + 广播）
+- `turn-runner/drive.ts` 的 `session.stream(...)` —— 喂给模型
 
 把 `driveTurn` 的 `text: string` 参数拆成 `displayText` / `modelText` 两个即可，没有任何新机制。
 

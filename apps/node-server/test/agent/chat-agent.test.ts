@@ -43,7 +43,7 @@ import { loadSkillsFromWorkspace } from '../../src/agent/skill-catalog.js';
 import type {
   AskUserOutcome,
   RequestUserAnswerInput,
-} from '../../src/agent/turn-runner.js';
+} from '../../src/agent/turn-runner/index.js';
 import { stopOnlyModel, toolCallThenStopModel } from '../helpers/mock-model.js';
 import { allToolParts, drainTurn } from '../helpers/nimbo-chunks.js';
 import { silentLogger } from '../helpers/silent-logger.js';

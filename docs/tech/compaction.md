@@ -158,7 +158,7 @@ sequenceDiagram
     CORE->>CORE: 每步 convertToModelMessages 得 ModelMessage
 ```
 
-代码锚点：自动触发挂在 `turn-runner.ts` 的 `finalizeTurnPersistence`（本轮 `kind='message'` 条目落库、`deleteChunkEventsAfter`、写 session header 之后）；手动触发是新端点 `POST /api/chat/conversations/:id/compact`，用 `turn-runner.ts` 的 `isTurnActive` 判 409；推导过滤在 `routes/chat.ts` 的 `loadResumeState`；写条目复用 `store.ts` 的 `appendAgentEvent`（`getMaxEventSeq` 取号）。
+代码锚点：自动触发挂在 `turn-runner/persistence.ts` 的 `finalizeTurnPersistence`（本轮 `kind='message'` 条目落库、`deleteChunkEventsAfter`、写 session header 之后）；手动触发是新端点 `POST /api/chat/conversations/:id/compact`，用 `turn-runner/registry.ts` 的 `isTurnActive` 判 409；推导过滤在 `routes/chat.ts` 的 `loadResumeState`；写条目复用 `store.ts` 的 `appendAgentEvent`（`getMaxEventSeq` 取号）。
 
 ### 触发
 

@@ -34,7 +34,7 @@
 | 层 | 文件 | 改什么 |
 |---|---|---|
 | core | `packages/core/src/loop.ts` | 因 abort 收尾时，`NimboError.message` 优先取宿主给的 `signal.reason`（patch，见 §2） |
-| server | `agent/turn-runner.ts` | `shutdownTurns()`（中止全部 + 等收尾 + 超时）· `isShuttingDown()` 闸门 · `abortTurn` 支持传 reason |
+| server | `agent/turn-runner/`（`shutdown.ts`·`abort.ts`） | `shutdownTurns()`（中止全部 + 等收尾 + 超时）· `isShuttingDown()` 闸门 · `abortTurn` 支持传 reason |
 | server | `agent/turn-launcher.ts` | `reserveTurn` 被闸门拒时报新的 `reason: 'shutting_down'` |
 | server | `routes/chat.ts` | 该 outcome → `503` |
 | server | `agent/crash-recovery.ts`（新） | 启动时扫[孤儿轮](../terms.md)、补收尾行 |
@@ -72,7 +72,7 @@ function abortMessage(signal: AbortSignal, fallback: string): string {
 
 ## 3. server：优雅关闭
 
-### 3.1 `turn-runner.ts`：`shutdownTurns`
+### 3.1 `turn-runner/shutdown.ts`：`shutdownTurns`
 
 ```ts
 /** 关闭闸门：置真后 `reserveTurn` 一律拒绝——关闭期间绝不接新的轮。 */
@@ -129,7 +129,7 @@ SIGTERM / SIGINT
 
 | 位置 | 用途 |
 |---|---|
-| `agent/turn-runner.ts` | 优雅关闭时 `abortTurn` 的 reason（经 core 透传进 `NimboError.message`） |
+| `agent/turn-runner/abort-reasons.ts` | 优雅关闭时 `abortTurn` 的 reason（经 core 透传进 `NimboError.message`） |
 | `agent/crash-recovery.ts` | 启动扫描补的那条 metadata 的 `error.message` |
 | `web` 的 `turn-marker.tsx` | 命中它 → 「服务重启，这一轮已中断」；否则 → 「已停止」 |
 
@@ -160,7 +160,7 @@ sequenceDiagram
     autonumber
     participant W as node --watch / K8s
     participant I as index.ts
-    participant TR as turn-runner.ts
+    participant TR as turn-runner
     participant L as core loop
     participant U as 浏览器（tail 开着）
 
@@ -221,7 +221,7 @@ sequenceDiagram
 
 ### 7.4 多实例部署时只管自己
 
-`activeTurns` 是进程内的（`turn-runner.ts` 既有取舍），所以优雅关闭只中止**本进程**的轮。多实例部署下，启动扫描会看到**别的实例正在跑**的轮并误判为孤儿——这是本方案在单实例假设下的已知边界，多机部署时需要给轮加上「归属实例 + 心跳」才能正确区分。见[附录 B](#附录-b多实例部署要怎么改)。
+`activeTurns` 是进程内的（`turn-runner/registry.ts` 既有取舍），所以优雅关闭只中止**本进程**的轮。多实例部署下，启动扫描会看到**别的实例正在跑**的轮并误判为孤儿——这是本方案在单实例假设下的已知边界，多机部署时需要给轮加上「归属实例 + 心跳」才能正确区分。见[附录 B](#附录-b多实例部署要怎么改)。
 
 ### 7.5 `--watch-kill-signal` 若被改成非 SIGTERM
 

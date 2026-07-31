@@ -16,7 +16,7 @@ import {
   getMaxEventSeq,
   listConversationEvents,
 } from '../../src/agent/store.js';
-import type { TurnDrivenSession } from '../../src/agent/turn-runner.js';
+import type { TurnDrivenSession } from '../../src/agent/turn-runner/index.js';
 import {
   __resetShutdownForTests,
   ABORT_REASON_SHUTDOWN,
@@ -34,7 +34,7 @@ import {
   startTurn,
   steerTurn,
   subscribeTurn,
-} from '../../src/agent/turn-runner.js';
+} from '../../src/agent/turn-runner/index.js';
 import { createLogger } from '../../src/logger.js';
 import type {
   ChatReplayFrame,
@@ -123,7 +123,7 @@ describe('agent/turn-runner', () => {
 
   // Every test below gets its own fresh, never-before-used chat session id
   // (rather than a shared literal like 'sess-1') — `activeTurns`
-  // (turn-runner.ts) is a module-level `Map` that outlives any single test,
+  // (turn-runner/registry.ts) is a module-level `Map` that outlives any single test,
   // so if one test's assertions throw before it ever reaches
   // `fake.finish()`/`fake.fail()`, that turn is left dangling, active
   // forever, under whatever conversationId it used. A unique id per test means a
@@ -428,7 +428,7 @@ describe('agent/turn-runner', () => {
   // Turn-start user MessageFrame (this ticket's fix — docs/tech/single-ledger.md §5 引言's
   // "用户消息乱序/叠在一起" bug): driveTurn synthesizes+emits it exactly once,
   // strictly before it ever starts consuming session.stream(), sharing the
-  // turn's own seq counter — see turn-runner.ts's file header/createTurnEmitter.
+  // turn's own seq counter — see turn-runner/index.ts's file header and persistence.ts's createTurnEmitter.
   // ---------------------------------------------------------------------------
 
   describe('turn-start user MessageFrame', () => {
@@ -526,7 +526,7 @@ describe('agent/turn-runner', () => {
 
   // ---------------------------------------------------------------------------
   // isDurableChunk classification boundary (docs/tech/single-ledger.md §5 单-3, private to
-  // turn-runner.ts — asserted here purely via its observable effect: does the
+  // turn-runner — asserted here purely via its observable effect: does the
   // broadcast envelope carry a `seq`, and is a row persisted for it. Blanket
   // rule: text-delta/reasoning-delta/`transient: true` are ephemeral,
   // everything else is durable.
@@ -1080,12 +1080,12 @@ describe('agent/turn-runner', () => {
       expect(steerTurn(conversationId, 'steered text')).toBe(true);
       expect(steerable.steerCalls).toEqual(['steered text']);
 
-      // steerTurn is a pure forward to session.steer() (turn-runner.ts's own
+      // steerTurn is a pure forward to session.steer() (turn-runner/registry.ts's own
       // implementation: `(input) => session.steer?.(input) ?? false`) — no
       // emitMessage, no emitChunk, no ledger row of its own for the steered
       // text. Whatever the steered message's own start/text-*/finish
       // sequence ends up looking like is entirely `@nimbo/core`'s doing, not
-      // turn-runner.ts's.
+      // turn-runner's.
       expect(received).toEqual([]);
       expect(listConversationEvents(db, conversationId)).toEqual(beforeSteer);
 
@@ -1098,7 +1098,7 @@ describe('agent/turn-runner', () => {
   // promise routing now: neither function emits/persists anything of its own
   // (visibility comes entirely from `@nimbo/core`'s own
   // tool-approval-request/tool-approval-response chunks flowing through the
-  // normal `emit` path — see turn-runner.ts's file header).
+  // normal `emit` path — see turn-runner/index.ts's file header).
   // ---------------------------------------------------------------------------
 
   describe('requestReview / resolveReview', () => {

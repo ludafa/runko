@@ -2,7 +2,7 @@
  * 启动时的[崩溃恢复](../../../../docs/terms.md)（docs/tech/graceful-shutdown.md §5）
  * ——[优雅关闭](../../../../docs/terms.md)的**第二道防线**。
  *
- * 第一道（`turn-runner.ts` 的 `shutdownTurns`）覆盖「进程有机会执行代码」的关闭：
+ * 第一道（`turn-runner/shutdown.ts` 的 `shutdownTurns`）覆盖「进程有机会执行代码」的关闭：
  * SIGTERM/SIGINT，也就是 `node --watch` 热重载、部署、pod 迁移、Ctrl-C。但 `kill -9`、
  * OOM、断电、容器被硬杀不给任何机会——那些情况下进行中的轮**从未收尾**，界面上是一个
  * 永远转圈的「思考中…」，历史停在半句话上。
@@ -38,7 +38,7 @@ import {
   getLastConversationEvent,
   listAllConversationIds,
 } from './store.js';
-import { ABORT_REASON_SHUTDOWN } from './turn-runner.js';
+import { ABORT_REASON_SHUTDOWN } from './turn-runner/index.js';
 
 const LOG_SCOPE = 'crash-recovery';
 
@@ -68,7 +68,7 @@ function isTurnEndChunk(payloadJson: string): boolean {
   return turnEndMetadataSchema.safeParse(parsed).success;
 }
 
-/** 给孤儿轮补的那条收尾 chunk——形状与 `turn-runner.ts` 的两处同源，不新增任何 wire 形状。 */
+/** 给孤儿轮补的那条收尾 chunk——形状与 `turn-runner/` 的两处同源，不新增任何 wire 形状。 */
 function buildInterruptedChunk(): NimboChunk {
   return {
     type: 'message-metadata',

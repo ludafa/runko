@@ -20,7 +20,7 @@
 | **出队（dequeue）** | — | 一轮收尾后服务端自动取出待发队列队首、以它起下一轮的动作。出队即从队列移除；起轮失败则该条留在队列，等下一次轮收尾再试。 |
 | **起轮装配（turn launch）** | — | 从「服务端收到一条要起新一轮的消息」到「这一轮真正开始产出内容」之间那段准备工作：取沙盒 → 续期 → 从账本重建 `SessionState` → 建 agent 会话 → 交给 turn runner 驱动。落地为 `apps/node-server/src/agent/turn-launcher.ts` 的 `launchTurn`。它整段跑在 `POST .../messages` 的请求生命周期里，用户在界面上的等待有相当一部分花在这里，故单独打点（见 docs/tech/telemetry.md §2.4）。 |
 | **轮状态快照（turn-state frame）** | — | [直播流](#三数据存哪怎么传)上的一种状态快照帧（`{ turnActive: boolean }`）：每条 `GET .../stream` 在回放之后、进入直播之前必发一帧，内容是**服务端**对「这个会话此刻有没有[轮](#一agent-运行的基本单位)在跑」的权威答案。与[待发队列](#一agent-运行的基本单位)快照帧同构——没有 `seq`、不落库、不进[账本](#三数据存哪怎么传)。它取代了前端早先那个猜测（「回放最后一帧是不是 chunk」），因为崩溃残留会让那个猜法长期失准且永不自愈。见 docs/tech/chat-webapp.md §5.1。 |
-| **起轮占位（turn reservation）** | — | [起轮装配](#一agent-运行的基本单位)一进门就在服务端那张「进行中的轮」表里占下的位子：从装配的第一行代码起这一轮就算**存在**，于是它可以被[停止](#一agent-运行的基本单位)、同会话后来的消息也会走[排队](#一agent-运行的基本单位)而不是再起一轮。装配跑完则原地升级成真正在跑的那一轮，装配失败或装配期间被停止则撤销。落地为 `apps/node-server/src/agent/turn-runner.ts` 的 `reserveTurn`/`releaseTurn` 与 `ActiveTurn.phase`。 |
+| **起轮占位（turn reservation）** | — | [起轮装配](#一agent-运行的基本单位)一进门就在服务端那张「进行中的轮」表里占下的位子：从装配的第一行代码起这一轮就算**存在**，于是它可以被[停止](#一agent-运行的基本单位)、同会话后来的消息也会走[排队](#一agent-运行的基本单位)而不是再起一轮。装配跑完则原地升级成真正在跑的那一轮，装配失败或装配期间被停止则撤销。落地为 `apps/node-server/src/agent/turn-runner/` 的 `reservation.ts`（`reserveTurn`/`releaseTurn`）与 `registry.ts`（`ActiveTurn.phase`）。 |
 | **停止（stop / abort）** | 硬打断（interrupt）、取消（cancel）、中止 | 用户在一轮进行中主动叫停它：当前轮不再进入下一个 [step](#一agent-运行的基本单位)、待发队列一并清空，已产出的内容全部留在账本里。落地为 `AbortController` → core `TurnOptions.signal`，收尾状态是 `status: 'interrupted'` + `NimboError.code: 'aborted'`（这两个是代码标识符，行文一律说「停止」/「已停止」）。与 steer 的分别：steer 是「往这一轮里加话」，停止是「让这一轮结束」。见 docs/features/turn-abort.md。 |
 
 ## 二、两种「消息」格式（AI SDK 的概念）
@@ -87,7 +87,7 @@
 | **续期闸门（renewal gate）** | — | [沙盒适配器](#五沙盒与生命周期)内部唯一真正调用厂商续期 API 的地方。[活动信号](#五沙盒与生命周期)、exec 期间的自打点、宿主的手动调用三个来源都汇到这里，由它按「补足」语义决定这次要不要真的打网络。 |
 | **审批保活预算（approval keepalive budget）** | — | 卡在人工审批时最多还愿意为沙盒续多久。与[单轮保活上限](#五沙盒与生命周期)相互独立；配 0 表示审批期间完全不续，沙盒可能在人点下按钮之前就休眠。 |
 | **单轮保活上限（turn keepalive cap）** | — | 一轮之内保活最多持续多久。到点就停止续期、让沙盒按自己的节奏休眠，防失控任务无限烧钱。 |
-| **优雅关闭（graceful shutdown）** | — | 服务端进程收到 SIGTERM/SIGINT（热重载、部署、pod 迁移、Ctrl-C）后，先把进行中的[轮](#一agent-运行的基本单位)主动[停止](#一agent-运行的基本单位)并等它收尾、再退出，而不是让它无声消失。落地为 `turn-runner.ts` 的 `shutdownTurns` + `index.ts` 的信号处理。见 docs/features/graceful-shutdown.md。 |
+| **优雅关闭（graceful shutdown）** | — | 服务端进程收到 SIGTERM/SIGINT（热重载、部署、pod 迁移、Ctrl-C）后，先把进行中的[轮](#一agent-运行的基本单位)主动[停止](#一agent-运行的基本单位)并等它收尾、再退出，而不是让它无声消失。落地为 `turn-runner/shutdown.ts` 的 `shutdownTurns` + `index.ts` 的信号处理。见 docs/features/graceful-shutdown.md。 |
 | **孤儿轮（orphaned turn）** | — | 一个在[账本](#三数据存哪怎么传)里从未收尾的轮：驱动它的进程已经不在了（被强杀、OOM、断电），所以那条收尾 `message-metadata` 永远不会到来。识别特征是该会话的事件行**以 `kind='chunk'` 收尾**（优雅收尾会把本轮消息落成 message 行并 GC 掉 chunk 行）。服务端启动时扫出它们并补上「已中断」标记。 |
 | **代码快照（checkpoint）** | — | P13-2 计划：每轮结束把工作区完整状态推到用户仓库的快照引用，防平台快照过期丢未 push 的工作。 |
 | **快照引用（checkpoint ref）** | WIP ref、隐藏 ref | 存放代码快照的自定义 git 引用（如 `refs/nimbo/wip/<会话id>`），不在正常分支命名空间下：GitHub 界面看不到、不触发 CI。与代码快照同族——快照存进快照引用。 |

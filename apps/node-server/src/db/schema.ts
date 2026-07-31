@@ -161,13 +161,13 @@ export const conversations = sqliteTable('conversations', {
 //   vocabulary — tool state incl. approval-requested/responded, data parts,
 //   step markers, message start/finish/metadata; NOT text-delta/
 //   reasoning-delta/transient data parts, which only ever live on the SSE
-//   wire, see turn-runner.ts's `isDurableChunk`) belonging to the
+//   wire, see turn-runner/persistence.ts's `isDurableChunk`) belonging to the
 //   *in-progress* turn currently being driven. These rows exist so a page
 //   refresh mid-turn can still reconstruct pending approvals/questions from
 //   a replay; every one of them is deleted the instant its turn finishes
 //   gracefully (superseded by that turn's own `kind = 'message'` rows —
 //   src/agent/store.ts's `deleteChunkEventsAfter`, called from
-//   turn-runner.ts's `driveTurn`). A `kind = 'chunk'` row surviving past its
+//   turn-runner/drive.ts's `driveTurn`). A `kind = 'chunk'` row surviving past its
 //   turn only ever means that turn crashed mid-flight without a graceful
 //   finish (docs/tech/single-ledger.md §5 单-3 "crash mid-turn（无收尾）：本轮无 message 条目、
 //   chunk 条目残留") — accepted residue, not cleaned up later.

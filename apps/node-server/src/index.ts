@@ -1,7 +1,7 @@
 import { serve } from '@hono/node-server';
 
 import { recoverOrphanedTurns } from './agent/crash-recovery.js';
-import { isShuttingDown, shutdownTurns } from './agent/turn-runner.js';
+import { isShuttingDown, shutdownTurns } from './agent/turn-runner/index.js';
 import { app } from './app.js';
 import { db } from './db/instance.js';
 import { generateOpenAPISpec } from './generate-spec.js';

@@ -230,7 +230,7 @@ sequenceDiagram
     end
 ```
 
-> 人审桥（`turn-runner.ts` 的 `requestReview`/`resolveReview`）是**纯内存 promise 路由，不发任何 emit**：待审批的可见性由 core 自己的 `tool-approval-request` chunk 提供，裁决结果的可见性由 `tool-approval-response` chunk 提供，二者都随 `session.stream()` 走。`ask-user` 同理——挂起/已答就是 `tool-ask-user` 部件的 `input-available`/`output-available` 状态。
+> 人审桥（`turn-runner/human-bridge.ts` 的 `requestReview`/`resolveReview`）是**纯内存 promise 路由，不发任何 emit**：待审批的可见性由 core 自己的 `tool-approval-request` chunk 提供，裁决结果的可见性由 `tool-approval-response` chunk 提供，二者都随 `session.stream()` 走。`ask-user` 同理——挂起/已答就是 `tool-ask-user` 部件的 `input-available`/`output-available` 状态。
 
 ## 6. turn 收尾写入时序
 

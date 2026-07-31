@@ -186,7 +186,7 @@ export function dataToolTimingChunk(
 // ---------------------------------------------------------------------------
 // Frame envelopes — `ChatReplayFrame` wrapping around the chunk factories
 // above, plus the durable/ephemeral seq-assignment rule `apps/node-server`'s
-// `turn-runner.ts` (`isDurableChunk`) actually applies, so a hand-assembled
+// `turn-runner/persistence.ts` (`isDurableChunk`) actually applies, so a hand-assembled
 // chunk sequence can be turned into a realistic wire frame sequence (`seq`
 // only on durable chunks) in one call.
 // ---------------------------------------------------------------------------
@@ -203,7 +203,7 @@ export function messageFrame(
 }
 
 /**
- * `apps/node-server/src/agent/turn-runner.ts`'s `isDurableChunk`: `text-delta`/
+ * `apps/node-server/src/agent/turn-runner/persistence.ts`'s `isDurableChunk`: `text-delta`/
  * `reasoning-delta` and anything `transient: true` never consume a `seq`;
  * every other chunk does.
  */
@@ -214,7 +214,7 @@ export function isDurableChunk(chunk: NimboChunk): boolean {
   return !('transient' in chunk && chunk.transient === true);
 }
 
-/** Assigns sequential `seq`s to only the durable chunks in order, starting after `startSeq` — mirrors the server's own persist-then-broadcast numbering (`turn-runner.ts`'s `createEmitWire`). */
+/** Assigns sequential `seq`s to only the durable chunks in order, starting after `startSeq` — mirrors the server's own persist-then-broadcast numbering (`turn-runner/persistence.ts`'s `createEmitWire`). */
 export function toChunkEnvelopes(
   chunks: readonly NimboChunk[],
   startSeq = 0,

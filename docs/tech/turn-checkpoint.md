@@ -1,7 +1,7 @@
 # Turn Checkpoint 与沙盒保活（技术方案）
 
 > 相关：产品/使用视角见 [../features/turn-checkpoint.md](../features/turn-checkpoint.md)，施工进展见 [../plans/turn-checkpoint.md](../plans/turn-checkpoint.md)。
-> 依赖/延续：[chat 聊天 webapp](../features/chat-webapp.md)（turn 收尾在 `turn-runner.ts`、沙盒生命周期在 `sandbox-manager.ts`）· [UIMessage 单账本](../features/single-ledger.md)（[账本](../terms.md) `seq` 即快照对齐锚）· [tech/sandbox](../tech/sandbox.md)（BYO 原则与「要基线管理就用沙盒里的 git」）。
+> 依赖/延续：[chat 聊天 webapp](../features/chat-webapp.md)（turn 收尾在 `turn-runner/`、沙盒生命周期在 `sandbox-manager.ts`）· [UIMessage 单账本](../features/single-ledger.md)（[账本](../terms.md) `seq` 即快照对齐锚）· [tech/sandbox](../tech/sandbox.md)（BYO 原则与「要基线管理就用沙盒里的 git」）。
 >
 > **状态：计划中（未施工）**。本文描述的是**拟定设计**——接口签名、写入顺序、恢复阶梯都是待落地的方案，不是已有代码的说明。无新增数据库表（用 git 隐藏引用做持久层），故不含 erDiagram。
 
@@ -15,16 +15,16 @@
 
 顺序理由：若恰好在两步之间崩溃，宁可「代码比记忆新」（模型下一轮 `git status` 就能发现多出来的东西），不可「记忆比代码新」（模型坚信存在的改动实际没有，纯误导）。
 
-> **单账本对齐（[UIMessage 单账本](../features/single-ledger.md) 落地后）**：事件表与「模型记忆」已合一为**账本**，[模型上下文](../terms.md)现从账本的 UIMessage 现场推导，`nimbo_state_json` 取消。因此 checkpoint 的 `lastSeq` 可直接取账本 `seq`，不再需要跨「事件表 seq / `nimbo_state_json` 轮号」两本账互校，本不变量随之更简：模型上下文与代码快照仍在同一收尾边界写入，只是「模型上下文写入」在代码里就是 `turn-runner.ts` 的 `finalizeTurnPersistence` 追加 `kind='message'` 行、GC 本轮 `kind='chunk'` 行、更新 `conversations` 头这一段。
+> **单账本对齐（[UIMessage 单账本](../features/single-ledger.md) 落地后）**：事件表与「模型记忆」已合一为**账本**，[模型上下文](../terms.md)现从账本的 UIMessage 现场推导，`nimbo_state_json` 取消。因此 checkpoint 的 `lastSeq` 可直接取账本 `seq`，不再需要跨「事件表 seq / `nimbo_state_json` 轮号」两本账互校，本不变量随之更简：模型上下文与代码快照仍在同一收尾边界写入，只是「模型上下文写入」在代码里就是 `turn-runner/persistence.ts` 的 `finalizeTurnPersistence` 追加 `kind='message'` 行、GC 本轮 `kind='chunk'` 行、更新 `conversations` 头这一段。
 
 ### 1.1 收尾写入顺序（sequenceDiagram）
 
-对齐 `turn-runner.ts` 的 `driveTurn` 优雅收尾路径（`session.stream()` 返回 `TurnResult`、非 `catch` 抛错分支）。快照插在拿到 `TurnResult` 之后、`finalizeTurnPersistence` 之前：
+对齐 `turn-runner/drive.ts` 的 `driveTurn` 优雅收尾路径（`session.stream()` 返回 `TurnResult`、非 `catch` 抛错分支）。快照插在拿到 `TurnResult` 之后、`finalizeTurnPersistence` 之前：
 
 ```mermaid
 sequenceDiagram
     participant Core as session.stream()（@nimbo/core loop）
-    participant Drive as driveTurn (turn-runner.ts)
+    participant Drive as driveTurn (turn-runner/drive.ts)
     participant CP as @nimbo/git-checkpoint
     participant Exec as 工作区 / NimboExec（沙盒）
     participant Origin as origin（用户仓库）

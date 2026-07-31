@@ -33,7 +33,7 @@
  *
  * ---- optimistic user echo (short-lived — this ticket's fix) ----
  *
- * `apps/node-server`'s `turn-runner.ts` now gives a turn-starting user message a
+ * `apps/node-server`'s `turn-runner/drive.ts` now gives a turn-starting user message a
  * real wire position: `driveTurn` synthesizes and broadcasts it as this
  * turn's very first `MessageFrame`, strictly before anything else that turn
  * produces (`schemas/chat.ts`'s file header). `pendingUserEchoes`
@@ -151,7 +151,7 @@ function isAbortError(error: unknown): boolean {
  * 「历史以 chunk 收尾」——`turnInProgressRef` 挂载时的**临时**初值，只用来撑到 tail 连上
  * （那一刻[轮状态快照](../../../../../docs/terms.md)给出服务端的权威答案，见文件头）。
  *
- * 依据：`finalizeTurnPersistence`（`apps/node-server` 的 `turn-runner.ts`）只在一轮**优雅
+ * 依据：`finalizeTurnPersistence`（`apps/node-server` 的 `turn-runner/persistence.ts`）只在一轮**优雅
  * 收尾**后才 GC 它的 `kind = 'chunk'` 行，所以正常结束的一轮，历史里只剩 `MessageFrame`。
  *
  * **但它推不出「有轮在跑」**——这里曾经写着「这是服务端持久化的结构性不变量，不是
