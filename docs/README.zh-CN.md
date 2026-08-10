@@ -160,6 +160,7 @@ pnpm chat:web                 # web 开发服务器
   7. **single-ledger（UIMessage 单账本）** — [功能](./features/single-ledger.md) · [技术](./tech/single-ledger.md) · [施工](./plans/single-ledger.md)
   8. **compaction（上下文压缩）** — [功能](./features/compaction.md) · [技术](./tech/compaction.md) · [施工](./plans/compaction.md)
   9. **telemetry（遥测）** — [功能](./features/telemetry.md) · [技术](./tech/telemetry.md) · [施工](./plans/chat-observability.md)（属「chat 可观测性」拆单）
-  10. **verification（验证与验收）** — [施工](./plans/verification.md)（仅施工视角）
+  10. **agent-kernel（agent 内核包 `@nimbo/agent`）** — [功能](./features/agent-kernel.md) · [技术](./tech/agent-kernel.md) · [施工](./plans/agent-kernel.md)（会话生命周期的架构总纲：分层、四种可替换的宿主能力、六档部署形态、包怎么拆。设计讨论见 [issue #2](https://github.com/ludafa/nimbo/issues/2)）
+  11. **verification（验证与验收）** — [施工](./plans/verification.md)（仅施工视角）
   - **术语表**：[terms.md](./terms.md)（写文档/讨论/代码注释引用术语一律以此为准）
 - **开发**：`corepack pnpm install && corepack pnpm build && corepack pnpm typecheck && corepack pnpm test`（顺序 build 先行——workspace 循环 devDep 下跨包类型解析指向 dist）。Node ≥ 20（examples 与 L3 `tools/*.ts` 动态加载需 ≥ 22.18 原生 TS）。根 build/typecheck/test 脚本只作用于 `./packages/*`；apps 有自己的 `chat:*` 脚本。
