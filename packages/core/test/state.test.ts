@@ -82,7 +82,7 @@ describe("sessionStateSchema", () => {
 });
 
 describe("SessionState.messages type", () => {
-  it("is NimboUIMessage[] (the single-ledger working format, docs/tech/single-ledger.md §5-2)", () => {
+  it("is NimboUIMessage[] (the single-ledger working format, docs/agent/single-ledger/tech.md §5-2)", () => {
     expectTypeOf<SessionState["messages"]>().toEqualTypeOf<NimboUIMessage[]>();
 
     const fromLedger: NimboUIMessage[] = [{ id: "m1", role: "user", parts: [{ type: "text", text: "hi" }] }];

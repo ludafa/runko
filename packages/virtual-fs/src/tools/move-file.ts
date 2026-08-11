@@ -1,5 +1,5 @@
 /**
- * `move-file`（docs/tech/builtin-tools.md §1.5）：重命名/移动；`to` 已存在且未
+ * `move-file`（docs/core/builtin-tools/tech.md §1.5）：重命名/移动；`to` 已存在且未
  * `overwrite` → 拒绝；事件为 `delete(from)` + `add(to)`（v1 不引入 rename kind）。
  *
  * 目录内含 reference 条目时拒绝整体移动而不是静默丢弃——设计裁量：`NimboFS`

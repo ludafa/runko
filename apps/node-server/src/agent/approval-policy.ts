@@ -1,6 +1,6 @@
 /**
- * Chat approval-bridge policy (docs/tech/chat-webapp.md §2.2c（审批链），
- * docs/tech/single-ledger.md §6 三值重构): pure, side-effect-free
+ * Chat approval-bridge policy (docs/app/chat-webapp/tech.md §2.2c（审批链），
+ * docs/agent/single-ledger/tech.md §6 三值重构): pure, side-effect-free
  * helpers only — no I/O, no reference to `turn-runner/`'s in-memory
  * `activeTurns`. `routes/chat.ts`'s `POST .../messages` handler is the one
  * place `classifyApproval` gets wired in as the session-level "审批分类器"
@@ -12,7 +12,7 @@
  *   needs a human (`'review'`) — `@nimbo/core`'s loop only escalates to the
  *   session's 人审通道 (`onReview`, `turn-runner/human-bridge.ts`'s `requestReview`) for the
  *   latter, and only *after* it has already yielded a `tool-approval-request`
- *   chunk (docs/tech/single-ledger.md §6.1) — this module has no part in that visibility step
+ *   chunk (docs/agent/single-ledger/tech.md §6.1) — this module has no part in that visibility step
  *   anymore (the old boolean-driven `shouldAutoAllow` predates that fix).
  *
  * This module never sees an `ApprovalContext`/`callId` — those only matter
@@ -77,7 +77,7 @@ function isGithubApiCurl(command: string): boolean {
   return /api\.github\.com|\$GH_TOKEN/.test(command);
 }
 
-/** Whether a bash `command` string is dangerous enough that `'dangerous'` mode still requires a human (docs/tech/chat-webapp.md §2.2c（审批链）). */
+/** Whether a bash `command` string is dangerous enough that `'dangerous'` mode still requires a human (docs/app/chat-webapp/tech.md §2.2c（审批链）). */
 export function commandNeedsHumanApproval(command: string): boolean {
   return (
     GIT_PUSH_RE.test(command) ||
@@ -98,7 +98,7 @@ function extractBashCommand(input: JsonValue): string | undefined {
 
 /**
  * The other half of the bridge (see file header): the three-value
- * classification (docs/tech/single-ledger.md §6.1's `ApprovalOutcome`) a tool call gets from
+ * classification (docs/agent/single-ledger/tech.md §6.1's `ApprovalOutcome`) a tool call gets from
  * chat's session-level "审批分类器" — never `'deny'` (see file header).
  *
  * - `'off'`: always `'allow'` — this mode never gates the workspace in the

@@ -13,7 +13,7 @@ export const postApiChatConversationsIdMessagesPathParamsSchema = z.object({
 });
 
 /**
- * @description Accepted — see `mode` (\"started\" | \"steered\" | \"queued\" | \"aborted\"); poll/stream `GET .../stream` for its events. \"aborted\" (docs/tech/turn-abort.md §3.3) means the user stopped this turn while it was still being assembled, so it never started running — the stopped-turn frames are on the stream like any other outcome
+ * @description Accepted — see `mode` (\"started\" | \"steered\" | \"queued\" | \"aborted\"); poll/stream `GET .../stream` for its events. \"aborted\" (docs/agent/turn-abort/tech.md §3.3) means the user stopped this turn while it was still being assembled, so it never started running — the stopped-turn frames are on the stream like any other outcome
  */
 export const postApiChatConversationsIdMessages202Schema = z.lazy(
   () => startTurnAckSchema,
@@ -34,7 +34,7 @@ export const postApiChatConversationsIdMessages404Schema = z.lazy(
 );
 
 /**
- * @description Either the 待发队列 is full (docs/features/steer-and-queue.md §2.3 — nothing is ever silently dropped), or a turn was already in progress and could not be steered either (narrow race — the turn ended between the steer attempt and the fallback start)
+ * @description Either the 待发队列 is full (docs/agent/steer-and-queue/feature.md §2.3 — nothing is ever silently dropped), or a turn was already in progress and could not be steered either (narrow race — the turn ended between the steer attempt and the fallback start)
  */
 export const postApiChatConversationsIdMessages409Schema = z.lazy(
   () => apiErrorSchema,
@@ -48,7 +48,7 @@ export const postApiChatConversationsIdMessages500Schema = z.lazy(
 );
 
 /**
- * @description The server is shutting down (docs/tech/graceful-shutdown.md §3.3) — no new turn is accepted during shutdown. Retryable: resend once the new process is up
+ * @description The server is shutting down (docs/agent/graceful-shutdown/tech.md §3.3) — no new turn is accepted during shutdown. Retryable: resend once the new process is up
  */
 export const postApiChatConversationsIdMessages503Schema = z.lazy(
   () => apiErrorSchema,

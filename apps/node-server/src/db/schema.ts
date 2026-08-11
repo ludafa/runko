@@ -68,7 +68,7 @@ export const verification = sqliteTable('verification', {
 // Application tables — add yours here.
 // ---------------------------------------------------------------------------
 
-// Chat agent (docs/tech/chat-webapp.md §2.2, docs/tech/single-ledger.md §5 单-3 "UIMessage 单账本"): one row per
+// Chat agent (docs/app/chat-webapp/tech.md §2.2, docs/agent/single-ledger/tech.md §5 单-3 "UIMessage 单账本"): one row per
 // conversation（对话线程——2026-07-17 由 `chat_sessions` 更名，解开系统里
 // "session" 的三重超载：better-auth 的登录态 `session` 表、这里的对话、
 // SDK 的 agent 会话），bound 1:1 to a Vercel sandbox (`sandboxName`) and a
@@ -92,7 +92,7 @@ export const conversations = sqliteTable('conversations', {
   repo: text('repo').notNull(),
   branchName: text('branch_name').notNull(),
   sandboxName: text('sandbox_name').notNull(),
-  /** 沙盒 provider（docs/tech/sandbox-provider.md）：这次会话跑在哪家云沙盒上，建会话时选定、1:1 绑定、运行中不切换。存量行迁移回填 'vercel'。 */
+  /** 沙盒 provider（docs/host/sandbox-provider/tech.md）：这次会话跑在哪家云沙盒上，建会话时选定、1:1 绑定、运行中不切换。存量行迁移回填 'vercel'。 */
   provider: text('provider', { enum: ['vercel', 'e2b'] })
     .notNull()
     .default('vercel'),
@@ -111,7 +111,7 @@ export const conversations = sqliteTable('conversations', {
   /** `SessionState.turn` as of the last turn that finished — resumed agent sessions start their next turn at `agentSessionTurn + 1`. */
   agentSessionTurn: integer('agent_session_turn'),
   /**
-   * 待发队列（[排队](../../../../docs/terms.md)，docs/tech/steer-and-queue.md §2）：
+   * 待发队列（[排队](../../../../docs/terms.md)，docs/agent/steer-and-queue/tech.md §2）：
    * `QueuedMessage[]` 的 JSON——一轮进行中用户发的消息若走默认的排队路径就落这里，
    * 本轮收尾后由 `turn-launcher.ts` 取队首起下一轮。
    *
@@ -126,7 +126,7 @@ export const conversations = sqliteTable('conversations', {
    */
   queuedMessagesJson: text('queued_messages_json').notNull().default('[]'),
   /**
-   * [skill 清单](../../../../docs/terms.md)缓存（docs/tech/composer-skill-mention.md
+   * [skill 清单](../../../../docs/terms.md)缓存（docs/app/composer-skill-mention/tech.md
    * §2.1）：`SkillSummary[]` 的 JSON——`{name, description}` 两个字段，供
    * [composer](../../../../docs/terms.md) 里打 `/` 时列菜单。
    *
@@ -145,7 +145,7 @@ export const conversations = sqliteTable('conversations', {
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
 
-// docs/tech/single-ledger.md §5 单-3: the single ledger for a
+// docs/agent/single-ledger/tech.md §5 单-3: the single ledger for a
 // conversation's agent activity（2026-07-17 由 `agent_events` 更名——事件属于
 // conversation 这个父实体，"agent" 是悬空修饰词），two kinds of row (`kind`)
 // sharing one seq space (monotonic per conversation, continues across
@@ -169,7 +169,7 @@ export const conversations = sqliteTable('conversations', {
 //   src/agent/store.ts's `deleteChunkEventsAfter`, called from
 //   turn-runner/drive.ts's `driveTurn`). A `kind = 'chunk'` row surviving past its
 //   turn only ever means that turn crashed mid-flight without a graceful
-//   finish (docs/tech/single-ledger.md §5 单-3 "crash mid-turn（无收尾）：本轮无 message 条目、
+//   finish (docs/agent/single-ledger/tech.md §5 单-3 "crash mid-turn（无收尾）：本轮无 message 条目、
 //   chunk 条目残留") — accepted residue, not cleaned up later.
 //
 // 旧 `type` 列（`payloadJson` 判别字段的冗余镜像，纯调试便利、无代码读取）
@@ -188,7 +188,7 @@ export const conversationEvents = sqliteTable(
   (table) => [primaryKey({ columns: [table.conversationId, table.seq] })],
 );
 
-// 会话级授权（session grant，docs/tech/chat-webapp.md §6 / docs/terms.md §四）持久化：
+// 会话级授权（session grant，docs/app/chat-webapp/tech.md §6 / docs/terms.md §四）持久化：
 // 用户在审批卡片点「会话内都允许」后落一行——本会话内**该用户**的同一条具体调用
 // （tool + 入参指纹）后续直接放行、不再弹卡片。存 DB 而非内存耗材：随会话持久、
 // 跨重启存活、会话删除即随 conversation 级联清。
@@ -197,7 +197,7 @@ export const conversationEvents = sqliteTable(
 // owner；记它是为**将来一个 conversation 多用户**时按用户隔离授权留好数据——授权
 // 只放行**授权者本人**的调用（`hasSessionGrant` 按本轮发起者查），A 的授权不会
 // 悄悄放行 B 的操作。多用户的卡片可见性/可点性是未来的渲染层决策，不影响这张表。
-// [推送订阅](docs/terms.md)（docs/tech/push-notification.md §2）：一台设备的一个
+// [推送订阅](docs/terms.md)（docs/app/push-notification/tech.md §2）：一台设备的一个
 // 浏览器一行——用户点铃铛开启通知时，浏览器生成一张「投递地址」（endpoint URL +
 // 两把加密密钥）交给我们，服务端拿着它才能往这台设备投递。
 //
@@ -205,11 +205,11 @@ export const conversationEvents = sqliteTable(
 //
 // - **`endpoint` 当主键，不另发 id**。它本来就是「一台设备 + 一个站点」的唯一
 //   地址，由浏览器保证。拿它当主键，重复上报（页面每次加载都会幂等重报一次，
-//   见 docs/tech/push-notification.md §3.1）天然是 upsert，不需要先查再插。
+//   见 docs/app/push-notification/tech.md §3.1）天然是 upsert，不需要先查再插。
 // - **`user_id` 可以被覆盖**。同一台设备换个账号登录，浏览器给的还是同一个
 //   endpoint——upsert 时直接把归属改成新的人。这是对的：通知该跟着「这台设备
 //   现在是谁在用」走，而不是跟着第一个用它登录过的人。
-// - **不存偏好**。这一期没有按事件类型的用户开关（docs/features/push-notification.md
+// - **不存偏好**。这一期没有按事件类型的用户开关（docs/app/push-notification/feature.md
 //   附录 A.2）：服务端总闸是环境变量（`CHAT_PUSH_EVENTS`），设备级开关就是
 //   「这一行在不在」。将来真要做 per-user 偏好，是另一张表，不是往这里加列。
 //

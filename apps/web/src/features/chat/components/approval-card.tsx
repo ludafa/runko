@@ -1,5 +1,5 @@
 /**
- * Renders a gated tool call's pending human-in-the-loop approval (docs/tech/single-ledger.md §6) — driven directly by the tool part's own
+ * Renders a gated tool call's pending human-in-the-loop approval (docs/agent/single-ledger/tech.md §6) — driven directly by the tool part's own
  * `approval-requested` state (`part.toolCallId` *is* the approval's
  * `callId`, `part.approval.id` the same value again — no separate id space
  * to reconcile, unlike the retired `ApprovalTimelineEntry`/`callId` bridge

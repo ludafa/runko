@@ -1,6 +1,6 @@
 /**
- * Pure-function coverage for `agent/approval-policy.ts` (docs/tech/chat-webapp.md
- * §2.2c（审批链）, docs/tech/single-ledger.md §6 三值重构):
+ * Pure-function coverage for `agent/approval-policy.ts` (docs/app/chat-webapp/tech.md
+ * §2.2c（审批链）, docs/agent/single-ledger/tech.md §6 三值重构):
  * `resolveApprovalMode` (env parsing), `commandNeedsHumanApproval` (the
  * `'dangerous'` mode's danger checklist — unchanged by the three-value
  * rework) and `classifyApproval` (the mode-dispatch entry point
@@ -216,7 +216,7 @@ describe('agent/approval-policy: classifyApproval', () => {
     });
   });
 
-  describe('never returns "deny" (docs/tech/single-ledger.md §6.2 — chat always routes an escalation to a human)', () => {
+  describe('never returns "deny" (docs/agent/single-ledger/tech.md §6.2 — chat always routes an escalation to a human)', () => {
     it('across every mode × a representative set of inputs, the result is only ever "allow" or "review"', () => {
       const modes = ['off', 'all', 'dangerous'] as const;
       const inputs: JsonValue[] = [

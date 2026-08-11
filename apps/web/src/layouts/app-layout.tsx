@@ -107,7 +107,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 {session.user.email}
               </span>
             )}
-            {/* 推送开关（docs/features/push-notification.md §3.1）。放在主题键
+            {/* 推送开关（docs/app/push-notification/feature.md §3.1）。放在主题键
                 左边、只在登录后显示——订阅是挂在人身上的，未登录时点它没有意义。
                 服务端没配 VAPID 时它自己什么都不渲染。 */}
             {session?.user && <NotificationBell />}

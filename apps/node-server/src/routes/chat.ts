@@ -89,10 +89,10 @@ import type { TelemetryStore } from '../telemetry.js';
 import { getChatTelemetry, getChatTelemetryStore } from '../telemetry.js';
 
 // ---------------------------------------------------------------------------
-// docs/tech/chat-webapp.md §2.2 `routes/chat.ts` (+ §2.2c（审批链）'s
+// docs/app/chat-webapp/tech.md §2.2 `routes/chat.ts` (+ §2.2c（审批链）'s
 // `POST .../approvals/:callId` and `POST .../questions/:callId`, + the queue
-// endpoints of docs/tech/steer-and-queue.md §4.2, + `POST .../abort` of
-// docs/tech/turn-abort.md §3.2) — login required on all of them (same
+// endpoints of docs/agent/steer-and-queue/tech.md §4.2, + `POST .../abort` of
+// docs/agent/turn-abort/tech.md §3.2) — login required on all of them (same
 // `requireAuth` middleware as `routes/example.ts`).
 // ---------------------------------------------------------------------------
 
@@ -115,12 +115,12 @@ export interface ChatRouteDeps extends TurnLauncherDeps {
    * `requireAuth`, so production behavior is unchanged.
    */
   authMiddleware: MiddlewareHandler<ChatEnv>;
-  /** telemetry 事件集成（`@nimbo/core` `SessionTelemetry`，docs/tech/chat-webapp.md §11.4）——注入后逐 turn 的模型调用事件落 SQLite；缺省 undefined = 不采集。生产默认装配见文件底部（`getChatTelemetry`）。 */
+  /** telemetry 事件集成（`@nimbo/core` `SessionTelemetry`，docs/app/chat-webapp/tech.md §11.4）——注入后逐 turn 的模型调用事件落 SQLite；缺省 undefined = 不采集。生产默认装配见文件底部（`getChatTelemetry`）。 */
   telemetry?: SessionTelemetry;
   /**
    * 同一个遥测库的另一个口，两处在用：turn 遥测明细端点用它**查数**
    * （`TelemetryStore.list`），`turn-launcher.ts` 用它**写**起轮装配事件
-   * （docs/tech/telemetry.md §2.4，声明在 `TurnLauncherDeps` 上）。缺省 undefined =
+   * （docs/app/telemetry/tech.md §2.4，声明在 `TurnLauncherDeps` 上）。缺省 undefined =
    * 端点恒返回空数组、装配事件不采集。
    */
   telemetryStore?: TelemetryStore;
@@ -133,7 +133,7 @@ function describeError(error: unknown): string {
 function toConversationDto(row: ConversationRow): ConversationDto {
   // `sleeping` is derived at read time, never stored: hibernation happens on
   // Vercel's side when the idle timeout elapses (no server-side timer to flip
-  // the row — docs/tech/chat-webapp.md §2.2), so a stored `active` whose idle window has passed
+  // the row — docs/app/chat-webapp/tech.md §2.2), so a stored `active` whose idle window has passed
   // is presented as `sleeping`. P12-3 live verification caught the stored
   // status going stale exactly this way. The next message's `acquire` resumes
   // the sandbox and `touch` refreshes `lastActiveAt`, flipping it back.
@@ -148,9 +148,9 @@ function toConversationDto(row: ConversationRow): ConversationDto {
     provider: row.provider,
     status: row.status === 'active' && idleElapsed ? 'sleeping' : row.status,
     lastActiveAt: row.lastActiveAt.toISOString(),
-    // 直接解析手上这一行已经 select 出来的列，不再查一次库（docs/tech/steer-and-queue.md §4.2）。
+    // 直接解析手上这一行已经 select 出来的列，不再查一次库（docs/agent/steer-and-queue/tech.md §4.2）。
     queuedMessages: parseQueuedMessages(row.queuedMessagesJson, row.id),
-    // 同上，[skill 清单](../../../../docs/terms.md)缓存（docs/tech/composer-skill-mention.md §2.1）
+    // 同上，[skill 清单](../../../../docs/terms.md)缓存（docs/app/composer-skill-mention/tech.md §2.1）
     // ——读的是库里的快照，这条路径**不碰沙盒**，休眠会话也能列菜单。缓存为空时
     // 退到兜底清单（本功能上线前建的会话就是这一档），否则用户打 `/` 什么都没有。
     availableSkills: resolveSkillCatalog(
@@ -180,7 +180,7 @@ function frameEventName(
 /**
  * 一个帧的 `seq`——`QueueFrame` 与 [轮状态快照](../../../../docs/terms.md)`TurnStateFrame`
  * **恒无 seq**（它们是状态快照，不是[账本](../../../../docs/terms.md)事件，
- * docs/tech/steer-and-queue.md §4.3 / docs/tech/chat-webapp.md §5.1），所以在直播流里
+ * docs/agent/steer-and-queue/tech.md §4.3 / docs/app/chat-webapp/tech.md §5.1），所以在直播流里
  * 它们和 ephemeral chunk 走同一条「不占 seq、不参与续传」的路径。
  */
 function frameSeq(frame: ChatReplayFrame): number | undefined {
@@ -280,7 +280,7 @@ export function createChatApp(deps: ChatRouteDeps) {
       sandboxId: provider === 'e2b' ? acquired.resumeToken : null,
     });
 
-    // [skill 清单](../../../../docs/terms.md)首次填充（docs/tech/composer-skill-mention.md §2.1）：
+    // [skill 清单](../../../../docs/terms.md)首次填充（docs/app/composer-skill-mention/tech.md §2.1）：
     // 沙盒此刻刚 clone 完、刚装完 frontend-design，就地扫一次写库——否则新会话要等
     // 第一轮跑完才有菜单可用。`loadSkillsFromWorkspace` 自身不抛（扫不到就是空数组），
     // 所以这一步不会让建会话失败。
@@ -396,7 +396,7 @@ export function createChatApp(deps: ChatRouteDeps) {
     return c.json({ frames }, 200);
   });
 
-  // ---- GET /api/chat/conversations/{id}/turns/{turn}/telemetry (docs/tech/chat-webapp.md §11.4) ----
+  // ---- GET /api/chat/conversations/{id}/turns/{turn}/telemetry (docs/app/chat-webapp/tech.md §11.4) ----
 
   const turnTelemetryRoute = createRoute({
     method: 'get',
@@ -444,14 +444,14 @@ export function createChatApp(deps: ChatRouteDeps) {
     return c.json({ events }, 200);
   });
 
-  // ---- POST /api/chat/conversations/{id}/messages (starts a turn, docs/tech/chat-webapp.md §2.2b) ----
+  // ---- POST /api/chat/conversations/{id}/messages (starts a turn, docs/app/chat-webapp/tech.md §2.2b) ----
 
   const postMessageRoute = createRoute({
     method: 'post',
     path: '/api/chat/conversations/{id}/messages',
     tags: ['Chat'],
     summary:
-      'Start a turn, queue this message for the next one, or steer the in-progress turn (docs/tech/steer-and-queue.md §4.1): with no turn running this acquires the sandbox, builds the session and hands off to the in-process turn runner (mode "started"); with one running it either queues `text` onto the conversation’s 待发队列 (mode "queued", the default) or injects it into the running turn via `Session.steer()` (mode "steered", `intent: "steer"`). Either way, events arrive over `GET .../stream`, not this response',
+      'Start a turn, queue this message for the next one, or steer the in-progress turn (docs/agent/steer-and-queue/tech.md §4.1): with no turn running this acquires the sandbox, builds the session and hands off to the in-process turn runner (mode "started"); with one running it either queues `text` onto the conversation’s 待发队列 (mode "queued", the default) or injects it into the running turn via `Session.steer()` (mode "steered", `intent: "steer"`). Either way, events arrive over `GET .../stream`, not this response',
     request: {
       params: ConversationParamsSchema,
       body: {
@@ -463,7 +463,7 @@ export function createChatApp(deps: ChatRouteDeps) {
       202: {
         content: { 'application/json': { schema: StartTurnAckSchema } },
         description:
-          'Accepted — see `mode` ("started" | "steered" | "queued" | "aborted"); poll/stream `GET .../stream` for its events. "aborted" (docs/tech/turn-abort.md §3.3) means the user stopped this turn while it was still being assembled, so it never started running — the stopped-turn frames are on the stream like any other outcome',
+          'Accepted — see `mode` ("started" | "steered" | "queued" | "aborted"); poll/stream `GET .../stream` for its events. "aborted" (docs/agent/turn-abort/tech.md §3.3) means the user stopped this turn while it was still being assembled, so it never started running — the stopped-turn frames are on the stream like any other outcome',
       },
       401: {
         content: { 'application/json': { schema: ErrorSchema } },
@@ -476,7 +476,7 @@ export function createChatApp(deps: ChatRouteDeps) {
       409: {
         content: { 'application/json': { schema: ErrorSchema } },
         description:
-          'Either the 待发队列 is full (docs/features/steer-and-queue.md §2.3 — nothing is ever silently dropped), or a turn was already in progress and could not be steered either (narrow race — the turn ended between the steer attempt and the fallback start)',
+          'Either the 待发队列 is full (docs/agent/steer-and-queue/feature.md §2.3 — nothing is ever silently dropped), or a turn was already in progress and could not be steered either (narrow race — the turn ended between the steer attempt and the fallback start)',
       },
       500: {
         content: { 'application/json': { schema: ErrorSchema } },
@@ -485,7 +485,7 @@ export function createChatApp(deps: ChatRouteDeps) {
       503: {
         content: { 'application/json': { schema: ErrorSchema } },
         description:
-          'The server is shutting down (docs/tech/graceful-shutdown.md §3.3) — no new turn is accepted during shutdown. Retryable: resend once the new process is up',
+          'The server is shutting down (docs/agent/graceful-shutdown/tech.md §3.3) — no new turn is accepted during shutdown. Retryable: resend once the new process is up',
       },
     },
   });
@@ -498,7 +498,7 @@ export function createChatApp(deps: ChatRouteDeps) {
     const row = getConversation(deps.db, id, userId);
     if (row === undefined) return c.json({ error: 'Not found' }, 404);
 
-    // 三路分流（docs/tech/steer-and-queue.md §4.1）——**有没有进行中的一轮**是第一
+    // 三路分流（docs/agent/steer-and-queue/tech.md §4.1）——**有没有进行中的一轮**是第一
     // 决策位，`intent` 只在有的时候才有意义：没有进行中的一轮时排队毫无意义（排给谁
     // 收尾？），所以两种 intent 都直接起新一轮。判定权完全在服务端，客户端不预判。
     if (isTurnActive(id)) {
@@ -517,7 +517,7 @@ export function createChatApp(deps: ChatRouteDeps) {
           }
           return c.json({ ok: true as const, mode: 'steered' as const }, 202);
         }
-        // steer 报 false 有两种原因，必须分开处理（docs/tech/turn-abort.md §3.3）：
+        // steer 报 false 有两种原因，必须分开处理（docs/agent/turn-abort/tech.md §3.3）：
         // 这一轮还卡在[起轮装配](docs/terms.md)里（`preparing`，还没有 session 可插）
         // → 转成[排队](docs/terms.md)，它收尾时会自动[出队](docs/terms.md)，用户的话不会丢。
         // 回落去起新一轮是**错的**：会被这一轮自己的[起轮占位](docs/terms.md)挡成 409。
@@ -574,13 +574,13 @@ export function createChatApp(deps: ChatRouteDeps) {
       return c.json({ error: 'turn already in progress' }, 409);
     }
     if (outcome.reason === 'shutting_down') {
-      // 进程正在[优雅关闭](docs/terms.md)（docs/tech/graceful-shutdown.md §3.3）——一个
+      // 进程正在[优雅关闭](docs/terms.md)（docs/agent/graceful-shutdown/tech.md §3.3）——一个
       // 明确、可恢复的拒绝：刷新重发即可。不能报 409（那是「你已经有一轮在跑」，会误导）。
       return c.json({ error: '服务正在重启，请稍后重试' }, 503);
     }
     if (outcome.reason === 'aborted') {
       // 用户在[起轮装配](docs/terms.md)期间按了[停止](docs/terms.md)
-      // （docs/tech/turn-abort.md §3.3）：这一轮从没启动。202 而不是错误——用户要的
+      // （docs/agent/turn-abort/tech.md §3.3）：这一轮从没启动。202 而不是错误——用户要的
       // 结果达成了；收尾那两帧（用户消息 + 「已停止」）已落账本，客户端照常从
       // `GET .../stream` 拿到。
       return c.json({ ok: true as const, mode: 'aborted' as const }, 202);
@@ -588,14 +588,14 @@ export function createChatApp(deps: ChatRouteDeps) {
     return c.json({ error: outcome.message }, 500);
   });
 
-  // ---- POST /api/chat/conversations/{id}/abort (docs/tech/turn-abort.md §3.2) ----
+  // ---- POST /api/chat/conversations/{id}/abort (docs/agent/turn-abort/tech.md §3.2) ----
 
   const abortTurnRoute = createRoute({
     method: 'post',
     path: '/api/chat/conversations/{id}/abort',
     tags: ['Chat'],
     summary:
-      '[停止](docs/terms.md)这个会话进行中的那一轮（docs/tech/turn-abort.md）：中止当前轮并清空[待发队列](docs/terms.md)。200 只表示「停止已请求」——真正停下的时刻取决于 agent 当时在做什么（最坏情况是一条 bash 命令响应中断信号的时间），「已停止」这个结果走 `GET .../stream` 上那条 `status: "interrupted"` 的 `message-metadata` chunk 送达',
+      '[停止](docs/terms.md)这个会话进行中的那一轮（docs/agent/turn-abort/tech.md）：中止当前轮并清空[待发队列](docs/terms.md)。200 只表示「停止已请求」——真正停下的时刻取决于 agent 当时在做什么（最坏情况是一条 bash 命令响应中断信号的时间），「已停止」这个结果走 `GET .../stream` 上那条 `status: "interrupted"` 的 `message-metadata` chunk 送达',
     request: { params: ConversationParamsSchema },
     responses: {
       200: {
@@ -632,7 +632,7 @@ export function createChatApp(deps: ChatRouteDeps) {
       return c.json({ error: 'no turn in progress' }, 409);
     }
 
-    // 清队列必须在 `abortTurn` **之前**（docs/tech/turn-abort.md §3.2）：这一轮收尾时
+    // 清队列必须在 `abortTurn` **之前**（docs/agent/turn-abort/tech.md §3.2）：这一轮收尾时
     // `onTurnSettled` 会自动[出队](docs/terms.md)起下一轮，先 abort 再清存在真实竞态
     // ——abort 解开挂起的审批后这一轮可能立刻收尾，队首那条就被发出去了，而用户刚
     // 按的是「停止」。先清后 abort 则结构上不可能：出队时队列已空。
@@ -651,7 +651,7 @@ export function createChatApp(deps: ChatRouteDeps) {
     return c.json({ ok: true as const, queue }, 200);
   });
 
-  // ---- DELETE /api/chat/conversations/{id}/queue/{messageId} (docs/tech/steer-and-queue.md §4.2) ----
+  // ---- DELETE /api/chat/conversations/{id}/queue/{messageId} (docs/agent/steer-and-queue/tech.md §4.2) ----
 
   const deleteQueuedMessageRoute = createRoute({
     method: 'delete',
@@ -691,7 +691,7 @@ export function createChatApp(deps: ChatRouteDeps) {
     return c.json({ queue }, 200);
   });
 
-  // ---- DELETE /api/chat/conversations/{id}/queue (docs/tech/steer-and-queue.md §4.2) ----
+  // ---- DELETE /api/chat/conversations/{id}/queue (docs/agent/steer-and-queue/tech.md §4.2) ----
 
   const clearQueueRoute = createRoute({
     method: 'delete',
@@ -728,14 +728,14 @@ export function createChatApp(deps: ChatRouteDeps) {
     return c.json({ queue }, 200);
   });
 
-  // ---- GET /api/chat/conversations/{id}/stream?after=<seq> (resumable live tail, docs/tech/chat-webapp.md §2.2b) ----
+  // ---- GET /api/chat/conversations/{id}/stream?after=<seq> (resumable live tail, docs/app/chat-webapp/tech.md §2.2b) ----
 
   const streamTurnRoute = createRoute({
     method: 'get',
     path: '/api/chat/conversations/{id}/stream',
     tags: ['Chat'],
     summary:
-      'Resumable live tail of a session’s in-progress turn (docs/tech/chat-webapp.md §2.2b): replays persisted frames after `after`, then forwards the turn’s live chunks until it ends — reconnect-safe (page refresh/HMR/network blip never lose events)',
+      'Resumable live tail of a session’s in-progress turn (docs/app/chat-webapp/tech.md §2.2b): replays persisted frames after `after`, then forwards the turn’s live chunks until it ends — reconnect-safe (page refresh/HMR/network blip never lose events)',
     request: {
       params: ConversationParamsSchema,
       query: ConversationEventsQuerySchema,
@@ -744,7 +744,7 @@ export function createChatApp(deps: ChatRouteDeps) {
       200: {
         content: { 'text/event-stream': { schema: chatReplayFrameSchema } },
         description:
-          'SSE stream of `ChatReplayFrame`s (`{seq,message}` or `{seq?,chunk}`): replay, then live tail (closes once the turn ends, or immediately after replay if no turn is in progress). Live `chunk` frames omit `seq` when ephemeral (docs/tech/single-ledger.md §5 单-3 — `text-delta`/`reasoning-delta`/`transient` data parts), never persisted and never replayed; every other frame always carries one',
+          'SSE stream of `ChatReplayFrame`s (`{seq,message}` or `{seq?,chunk}`): replay, then live tail (closes once the turn ends, or immediately after replay if no turn is in progress). Live `chunk` frames omit `seq` when ephemeral (docs/agent/single-ledger/tech.md §5 单-3 — `text-delta`/`reasoning-delta`/`transient` data parts), never persisted and never replayed; every other frame always carries one',
       },
       401: {
         content: { 'application/json': { schema: ErrorSchema } },
@@ -769,7 +769,7 @@ export function createChatApp(deps: ChatRouteDeps) {
       // Buffer everything the emitter delivers while we're busy replaying
       // history below — subscribing *before* the replay query (rather than
       // after) is what guarantees nothing lands in the gap between them
-      // (docs/tech/chat-webapp.md §2.2b). Almost always `ChunkEnvelope`s (`subscribeTurn`'s
+      // (docs/app/chat-webapp/tech.md §2.2b). Almost always `ChunkEnvelope`s (`subscribeTurn`'s
       // own contract, turn-runner/); the one exception is a turn's very
       // first live delivery, its synthesized turn-start `MessageFrame`
       // (`turn-runner/drive.ts`'s `driveTurn`) — `envelope.seq` is always defined
@@ -793,14 +793,14 @@ export function createChatApp(deps: ChatRouteDeps) {
 
       // Flips true once the persisted replay (below) has been fully flushed
       // to this connection — see the ephemeral-drop rule in the `subscribeTurn`
-      // callback right below it (docs/tech/chat-webapp.md §2.2d "tail 的回归竞态", carried over
-      // onto the chunk vocabulary per docs/tech/single-ledger.md §5 单-3).
+      // callback right below it (docs/app/chat-webapp/tech.md §2.2d "tail 的回归竞态", carried over
+      // onto the chunk vocabulary per docs/agent/single-ledger/tech.md §5 单-3).
       let replayDone = false;
 
       const unsubscribe = subscribeTurn(
         id,
         (envelope) => {
-          // An ephemeral chunk (no `seq`, docs/tech/single-ledger.md §5 单-3) that arrives while
+          // An ephemeral chunk (no `seq`, docs/agent/single-ledger/tech.md §5 单-3) that arrives while
           // we're still replaying persisted history is strictly older than
           // (or a duplicate of) whatever the replay is about to send for
           // that same in-progress message — forwarding it would clobber an
@@ -813,7 +813,7 @@ export function createChatApp(deps: ChatRouteDeps) {
           // progress, so it's safe to buffer and forward like any other live
           // chunk.
           //
-          // 一个 `QueueFrame`（`frameSeq` 恒 undefined，docs/tech/steer-and-queue.md
+          // 一个 `QueueFrame`（`frameSeq` 恒 undefined，docs/agent/steer-and-queue/tech.md
           // §4.3）走同一条路径，且在这里被丢弃同样无害：回放结束后本连接会主动发
           // 一帧权威队列快照（见下方 `replayDone` 处），它必然比这里丢掉的更新。
           if (frameSeq(envelope) === undefined && !replayDone) return;
@@ -873,7 +873,7 @@ export function createChatApp(deps: ChatRouteDeps) {
 
         await flushBuffered();
 
-        // [待发队列](docs/terms.md)的权威快照（docs/tech/steer-and-queue.md §4.3 时机 1）：
+        // [待发队列](docs/terms.md)的权威快照（docs/agent/steer-and-queue/tech.md §4.3 时机 1）：
         // 每条连接在回放之后、进入直播之前都发一帧，因此**任何**时候连上/重连（新标签
         // 页、刷新、断线退避重连、以及上一轮出队后接上来的下一轮）拿到的都是当下的
         // 真实队列——出队恰好发生在上一轮 emitter 即将关闭的时刻，那一次的同步就靠
@@ -881,7 +881,7 @@ export function createChatApp(deps: ChatRouteDeps) {
         // 上面那条「回放期间丢弃无 seq 帧」的规则误伤。
         await writeFrame({ queue: listQueuedMessages(deps.db, id) });
 
-        // [轮状态快照](docs/terms.md)（docs/tech/chat-webapp.md §5.1）：同样每条连接必发
+        // [轮状态快照](docs/terms.md)（docs/app/chat-webapp/tech.md §5.1）：同样每条连接必发
         // 一帧，紧跟队列快照。发的是**订阅那一刻**的 `wasActive`（不是这里重新查一次）
         // ——它与下面「要不要进直播循环」用的是同一个读数，两者必须一致：告诉客户端
         // 「有轮在跑」却立刻关掉连接，或反过来，都会让客户端的重连逻辑做出错误决定。
@@ -916,14 +916,14 @@ export function createChatApp(deps: ChatRouteDeps) {
     });
   });
 
-  // ---- POST /api/chat/conversations/{id}/presence (在场心跳, docs/tech/push-notification.md §5.2) ----
+  // ---- POST /api/chat/conversations/{id}/presence (在场心跳, docs/app/push-notification/tech.md §5.2) ----
 
   const presenceRoute = createRoute({
     method: 'post',
     path: '/api/chat/conversations/{id}/presence',
     tags: ['Chat'],
     summary:
-      '上报[在场](../../../../docs/terms.md)：这条会话此刻是否正在调用者眼前（docs/tech/push-notification.md §5.2）。在场期间不向这个人推送本会话的通知',
+      '上报[在场](../../../../docs/terms.md)：这条会话此刻是否正在调用者眼前（docs/app/push-notification/tech.md §5.2）。在场期间不向这个人推送本会话的通知',
     request: {
       params: ConversationParamsSchema,
       body: {
@@ -964,14 +964,14 @@ export function createChatApp(deps: ChatRouteDeps) {
     return c.json({ ok: true as const }, 200);
   });
 
-  // ---- POST /api/chat/conversations/{id}/approvals/{callId} (resolve a pending approval, docs/tech/chat-webapp.md §2.2c（审批链）) ----
+  // ---- POST /api/chat/conversations/{id}/approvals/{callId} (resolve a pending approval, docs/app/chat-webapp/tech.md §2.2c（审批链）) ----
 
   const postApprovalRoute = createRoute({
     method: 'post',
     path: '/api/chat/conversations/{id}/approvals/{callId}',
     tags: ['Chat'],
     summary:
-      '批准或拒绝一个待处理的工具调用审批请求（docs/tech/chat-webapp.md §2.2c（审批链），docs/tech/single-ledger.md §6）：结果通过 `GET .../stream` 的 `tool-approval-response` chunk 送达，本响应只是一个 ack',
+      '批准或拒绝一个待处理的工具调用审批请求（docs/app/chat-webapp/tech.md §2.2c（审批链），docs/agent/single-ledger/tech.md §6）：结果通过 `GET .../stream` 的 `tool-approval-response` chunk 送达，本响应只是一个 ack',
     request: {
       params: ChatApprovalParamsSchema,
       body: {
@@ -1038,14 +1038,14 @@ export function createChatApp(deps: ChatRouteDeps) {
     return c.json({ ok: true as const }, 200);
   });
 
-  // ---- POST /api/chat/conversations/{id}/questions/{callId} (answer a pending ask-user question, docs/tech/chat-webapp.md §2.2c（审批链）) ----
+  // ---- POST /api/chat/conversations/{id}/questions/{callId} (answer a pending ask-user question, docs/app/chat-webapp/tech.md §2.2c（审批链）) ----
 
   const postAnswerRoute = createRoute({
     method: 'post',
     path: '/api/chat/conversations/{id}/questions/{callId}',
     tags: ['Chat'],
     summary:
-      '回答一个待处理的 ask-user 提问（docs/tech/chat-webapp.md §2.2c（审批链））：结果通过 `GET .../stream` 的 `tool-ask-user` 部件 output-available 状态送达，本响应只是一个 ack',
+      '回答一个待处理的 ask-user 提问（docs/app/chat-webapp/tech.md §2.2c（审批链））：结果通过 `GET .../stream` 的 `tool-ask-user` 部件 output-available 状态送达，本响应只是一个 ack',
     request: {
       params: ChatApprovalParamsSchema,
       body: {
@@ -1105,7 +1105,7 @@ export const chatApp = createChatApp({
   }),
   resolveModel,
   authMiddleware: requireAuth,
-  // 推送通知（docs/tech/push-notification.md §4）。**不加 vitest 守卫**（与
+  // 推送通知（docs/app/push-notification/tech.md §4）。**不加 vitest 守卫**（与
   // `getChatTelemetry*` 不同）：`createChatNotifier` 只是把 db 存进一个闭包，
   // 不建库、不起定时器、不碰网络；真正要发的时候还有「没配 VAPID 就整体禁用」
   // 那道总闸挡着，测试环境下它恒为关。

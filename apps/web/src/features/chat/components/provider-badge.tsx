@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 import type { ConversationProvider } from '../schema';
 
 /**
- * 沙盒 provider 标记（docs/features/sandbox-provider.md）——让用户一眼看清这次
+ * 沙盒 provider 标记（docs/host/sandbox-provider/feature.md）——让用户一眼看清这次
  * 会话跑在哪家云沙盒上。
  *
  * 改版后不再是描边药丸：这是**恒定不变的一项事实**（会话创建时选定即固定），

@@ -9,12 +9,12 @@ function noop(): void {
 }
 
 /**
- * composer 的分流键位（docs/features/steer-and-queue.md §2.1/§2.2）：一轮进行中
+ * composer 的分流键位（docs/agent/steer-and-queue/feature.md §2.1/§2.2）：一轮进行中
  * Enter = [排队](../../../../../docs/terms.md)、Alt+Enter / 插话按钮 =
  * [steer](../../../../../docs/terms.md)；空闲时两者无差别（服务端都会起新一轮），
  * 所以插话按钮只在流式中出现。
  *
- * 另一半是流式态那颗按钮的语义（docs/features/turn-abort.md §2.1）：它是
+ * 另一半是流式态那颗按钮的语义（docs/agent/turn-abort/feature.md §2.1）：它是
  * [停止](../../../../../docs/terms.md)键，不是排队键——排队只剩 Enter 一条路。
  */
 describe('MessageComposer', () => {
@@ -86,7 +86,7 @@ describe('MessageComposer', () => {
     await user.type(textbox, 'hi{Enter}');
 
     // 输入区是 contenteditable（tiptap），没有 `value` 属性——断言的是它的文本内容
-    // （docs/tech/composer-skill-mention.md §2.4）。
+    // （docs/app/composer-skill-mention/tech.md §2.4）。
     expect(textbox).toHaveTextContent('');
   });
 
@@ -127,11 +127,11 @@ describe('MessageComposer', () => {
 });
 
 /**
- * [skill 提及](../../../../../docs/terms.md)（docs/features/composer-skill-mention.md）：
+ * [skill 提及](../../../../../docs/terms.md)（docs/app/composer-skill-mention/feature.md）：
  * 打 `/` 唤出[skill 清单](../../../../../docs/terms.md)、选中后插入一枚原子标记块。
  *
  * 最要紧的一条是**菜单开着时 Enter 归菜单**——composer 的 Enter 平时是排队发送，
- * 绝不能因为菜单开着就把半截消息发出去（docs/tech/composer-skill-mention.md §6.1）。
+ * 绝不能因为菜单开着就把半截消息发出去（docs/app/composer-skill-mention/tech.md §6.1）。
  */
 describe('MessageComposer · skill 提及', () => {
   const skills = [
@@ -314,7 +314,7 @@ describe('MessageComposer · skill 提及', () => {
     expect(onSend).toHaveBeenCalledOnce();
     const [sentText, intent] = onSend.mock.calls[0] ?? [];
     // 服务端 `extractMentionedSkills` 要找的就是这个 `/<name>` 形态
-    // （docs/tech/composer-skill-mention.md §5.1）。
+    // （docs/app/composer-skill-mention/tech.md §5.1）。
     expect(sentText).toContain('/frontend-design');
     expect(sentText).toContain('帮我看看首页排版');
     expect(intent).toBe('queue');

@@ -3,13 +3,13 @@ import type { NimboChunk, NimboUIMessage } from '@nimbo/core';
 
 // ---------------------------------------------------------------------------
 // Wire vocabulary for the chat app's SSE stream + replay endpoints
-// (docs/tech/chat-webapp.md §2.2, docs/tech/single-ledger.md §5
+// (docs/app/chat-webapp/tech.md §2.2, docs/agent/single-ledger/tech.md §5
 // 单-3 "UIMessage 单账本" / §6 三值审批).
 //
 // The old `SessionEvent`/`SessionItem` mirror unions, the `user.message`/
 // `turn.result`/`turn.failed` sentinels, and the `approval.requested`/
 // `approval.resolved`/`question.asked`/`question.answered` bridge-event pairs
-// are ALL gone (docs/tech/single-ledger.md §5 单-3 施工要点):
+// are ALL gone (docs/agent/single-ledger/tech.md §5 单-3 施工要点):
 //
 // - `session.stream()` now yields `NimboChunk` (ai's `UIMessageChunk`
 //   vocabulary, instantiated for `NimboUIMessage` — `@nimbo/core`'s
@@ -17,7 +17,7 @@ import type { NimboChunk, NimboUIMessage } from '@nimbo/core';
 //   (`turn-runner/drive.ts`'s `driveTurn`), no server-invented wrapper events left.
 // - Approval visibility is now a `tool-approval-request`/
 //   `tool-approval-response` chunk pair `@nimbo/core`'s own loop produces
-//   (docs/tech/single-ledger.md §6.1) — the server no longer emits its own `approval.*` events
+//   (docs/agent/single-ledger/tech.md §6.1) — the server no longer emits its own `approval.*` events
 //   (`turn-runner/human-bridge.ts`'s 人审通道 bridge, `requestReview`/`resolveReview`, is
 //   pure in-memory promise routing now, no `TurnEmitter` calls at all).
 // - `ask-user` visibility is the `tool-ask-user` part's own
@@ -108,8 +108,8 @@ const nimboChunkSchema: z.ZodType<NimboChunk> = z.any();
 const nimboUIMessageSchema: z.ZodType<NimboUIMessage> = z.any();
 
 /**
- * `{ seq?, chunk }` — the live tail's own wire shape (docs/tech/chat-webapp.md §2.2d's
- * durable/ephemeral split, carried over verbatim per docs/tech/single-ledger.md §5 单-3's
+ * `{ seq?, chunk }` — the live tail's own wire shape (docs/app/chat-webapp/tech.md §2.2d's
+ * durable/ephemeral split, carried over verbatim per docs/agent/single-ledger/tech.md §5 单-3's
  * "写入时序": every chunk either persists-then-broadcasts (`seq` present) or
  * only-ever-broadcasts (`seq` absent)) — also reused, with `seq` always
  * present, for a replayed `kind = 'chunk'` row (see file header).
@@ -144,7 +144,7 @@ export const messageFrameSchema = z
 export type MessageFrame = z.infer<typeof messageFrameSchema>;
 
 /**
- * 一条[排队](../../../../docs/terms.md)中的待发消息（docs/tech/steer-and-queue.md §2.2）
+ * 一条[排队](../../../../docs/terms.md)中的待发消息（docs/agent/steer-and-queue/tech.md §2.2）
  * ——`conversations.queued_messages_json` 的数组元素，也是 wire 上 `QueueFrame` /
  * 队列端点响应的元素。
  *
@@ -164,7 +164,7 @@ export const QueuedMessageSchema = z
 export type QueuedMessage = z.infer<typeof QueuedMessageSchema>;
 
 /**
- * `{ queue }` — 队列状态快照（docs/tech/steer-and-queue.md §4.3）。两处共用一个形状：
+ * `{ queue }` — 队列状态快照（docs/agent/steer-and-queue/tech.md §4.3）。两处共用一个形状：
  *
  * - **wire 帧**：[直播流](../../../../docs/terms.md)的第三种帧。刻意**没有 `seq`**——
  *   它不是[账本](../../../../docs/terms.md)事件而是[transient](../../../../docs/terms.md)
@@ -180,7 +180,7 @@ export const queueFrameSchema = z
 export type QueueFrame = z.infer<typeof queueFrameSchema>;
 
 /**
- * `{ turnActive }` — [轮状态快照](../../../../docs/terms.md)（docs/tech/chat-webapp.md §5.1）。
+ * `{ turnActive }` — [轮状态快照](../../../../docs/terms.md)（docs/app/chat-webapp/tech.md §5.1）。
  * 与上面的队列快照同构（**没有 `seq`**、不落库、不参与 `after=` 续传），每条
  * `GET .../stream` 在回放之后、进入直播之前必发一帧。
  *
@@ -228,12 +228,12 @@ export type ChatReplayFrame =
   | TurnStateFrame;
 
 /**
- * `GET .../events` response shape (docs/tech/chat-webapp.md §2.2 "契约细化", front-end-consumed
+ * `GET .../events` response shape (docs/app/chat-webapp/tech.md §2.2 "契约细化", front-end-consumed
  * contract — NOT a bare array): every persisted row for the session, in seq
  * order — thanks to `store.ts`'s `deleteChunkEventsAfter` GC running at the
  * end of every gracefully-finished turn, this is already exactly "finished
  * message history + the in-progress (or crashed) turn's durable chunks"
- * (docs/tech/single-ledger.md §5 单-3's replay algorithm) with no extra filtering needed on the
+ * (docs/agent/single-ledger/tech.md §5 单-3's replay algorithm) with no extra filtering needed on the
  * way out.
  */
 export const ConversationEventsListSchema = z
@@ -249,7 +249,7 @@ export type ConversationEventsListDto = z.infer<
 // ---------------------------------------------------------------------------
 
 /**
- * [skill 清单](../../../../docs/terms.md)的一条（docs/tech/composer-skill-mention.md §5.2）——
+ * [skill 清单](../../../../docs/terms.md)的一条（docs/app/composer-skill-mention/tech.md §5.2）——
  * `name` 是目录名，同时也是 `load-skill` 的入参与 [skill 提及](../../../../docs/terms.md)
  * 的字面量；`description` 是 SKILL.md frontmatter 里那句话，菜单里那行灰字。
  */
@@ -269,14 +269,14 @@ export const ConversationSchema = z
     repo: z.string(),
     branchName: z.string(),
     sandboxName: z.string(),
-    /** 沙盒 provider（docs/tech/sandbox-provider.md）——前端据此渲染 provider 徽标。 */
+    /** 沙盒 provider（docs/host/sandbox-provider/tech.md）——前端据此渲染 provider 徽标。 */
     provider: z.enum(['vercel', 'e2b']),
     status: z.enum(['active', 'sleeping', 'expired']),
     lastActiveAt: z.string(),
-    /** 这个会话的[待发队列](../../../../docs/terms.md)（docs/tech/steer-and-queue.md §4.2）——页面加载时的初始快照，之后由 `QueueFrame` / 队列端点响应刷新。列表端点也带（侧边栏可显示「N 条待发」）。 */
+    /** 这个会话的[待发队列](../../../../docs/terms.md)（docs/agent/steer-and-queue/tech.md §4.2）——页面加载时的初始快照，之后由 `QueueFrame` / 队列端点响应刷新。列表端点也带（侧边栏可显示「N 条待发」）。 */
     queuedMessages: z.array(QueuedMessageSchema),
     /**
-     * 这个会话当前可选的 [skill 清单](../../../../docs/terms.md)（docs/tech/composer-skill-mention.md
+     * 这个会话当前可选的 [skill 清单](../../../../docs/terms.md)（docs/app/composer-skill-mention/tech.md
      * §2.1）——[composer](../../../../docs/terms.md) 里打 `/` 时列的就是它。
      *
      * 读的是库缓存（`conversations.available_skills_json`），**不碰沙盒**：休眠中的
@@ -293,7 +293,7 @@ export type ConversationDto = z.infer<typeof ConversationSchema>;
 export const CreateConversationInputSchema = z
   .object({
     title: z.string().min(1).max(255).optional(),
-    /** 这次会话用哪家沙盒；省略时落服务端默认 `SANDBOX_PROVIDER`（未配则 `vercel`）。docs/tech/sandbox-provider.md §6。 */
+    /** 这次会话用哪家沙盒；省略时落服务端默认 `SANDBOX_PROVIDER`（未配则 `vercel`）。docs/host/sandbox-provider/tech.md §6。 */
     provider: z.enum(['vercel', 'e2b']).optional(),
   })
   .openapi('CreateConversationInput');
@@ -302,7 +302,7 @@ export const PostChatMessageInputSchema = z
   .object({
     text: z.string().min(1),
     /**
-     * 这条消息**在已有进行中的一轮时**该走哪条路（docs/tech/steer-and-queue.md §4.1）：
+     * 这条消息**在已有进行中的一轮时**该走哪条路（docs/agent/steer-and-queue/tech.md §4.1）：
      * `'queue'`（默认）= [排队](../../../../docs/terms.md)到下一轮，`'steer'` =
      * [中途插话](../../../../docs/terms.md)注入当前这一轮。**没有**进行中的一轮时两者
      * 无差别，都是起新一轮——分流规则完全由服务端判定，客户端不预判。
@@ -312,17 +312,17 @@ export const PostChatMessageInputSchema = z
   .openapi('PostChatMessageInput');
 
 /**
- * `POST .../messages`'s 202 body (docs/tech/chat-webapp.md §2.2b): the turn only starts, the
+ * `POST .../messages`'s 202 body (docs/app/chat-webapp/tech.md §2.2b): the turn only starts, the
  * steer only lands, or the message only gets queued here — events arrive over
  * `GET .../stream`, not this response. `mode` distinguishes the three ways
  * this request could have been handled: `'started'` — no turn was active for
  * this session, so this kicked off a new one; `'steered'` (STEER-3B) — a turn
  * was already in progress and `text` was injected into it (`Session.steer`);
- * `'queued'` (docs/tech/steer-and-queue.md §4.1) — a turn was in progress and
+ * `'queued'` (docs/agent/steer-and-queue/tech.md §4.1) — a turn was in progress and
  * `text` went into the conversation's 待发队列 instead, to be dequeued as the
  * next turn once this one finishes.
  *
- * 第四档 `'aborted'`（docs/tech/turn-abort.md §3.3）：这一轮起来了一半——正在
+ * 第四档 `'aborted'`（docs/agent/turn-abort/tech.md §3.3）：这一轮起来了一半——正在
  * [起轮装配](../../../../docs/terms.md)——就被用户按[停止](../../../../docs/terms.md)
  * 掐掉了，**从没启动**。它仍是 202 而不是错误：用户要的结果达成了。这一档的收尾
  * （用户消息 + 「已停止」标记）照常走 `GET .../stream`，与其余三档一致。
@@ -337,9 +337,9 @@ export const StartTurnAckSchema = z
 export type StartTurnAck = z.infer<typeof StartTurnAckSchema>;
 
 /**
- * `POST .../abort`'s 200 body（docs/tech/turn-abort.md §3.2）：`ok` 只表示
+ * `POST .../abort`'s 200 body（docs/agent/turn-abort/tech.md §3.2）：`ok` 只表示
  * [停止](../../../../docs/terms.md)**已请求**——真正停下的时刻由 agent 当时在做什么
- * 决定（docs/features/turn-abort.md §2.3），而「已停止」这个结果和其它轮收尾一样，
+ * 决定（docs/agent/turn-abort/feature.md §2.3），而「已停止」这个结果和其它轮收尾一样，
  * 走[直播流](../../../../docs/terms.md)上那条 `status: 'interrupted'` 的
  * `message-metadata` chunk 送达，不在本响应里。
  *
@@ -369,7 +369,7 @@ export const ConversationEventsQuerySchema = z.object({
 });
 
 /**
- * `POST .../approvals/{callId}`'s path params (docs/tech/chat-webapp.md §2.2c（审批链）): `id`
+ * `POST .../approvals/{callId}`'s path params (docs/app/chat-webapp/tech.md §2.2c（审批链）): `id`
  * is the chat session, `callId` the pending tool call's own id
  * (`@nimbo/core`'s `ApprovalContext.callId`, carried on the
  * `tool-approval-request` chunk as `approvalId`). Also reused as-is for
@@ -388,7 +388,7 @@ export const ChatApprovalParamsSchema = z.object({
     .openapi({ param: { name: 'callId', in: 'path' }, examples: ['call_1'] }),
 });
 
-/** `DELETE .../queue/{messageId}`'s path params（docs/tech/steer-and-queue.md §4.2）：`id` 同 `ConversationParamsSchema`；`messageId` 是[待发队列](../../../../docs/terms.md)条目自己的 `QueuedMessage.id`（入队时 `randomUUID()` 生成，与工具调用的 `callId` 是两个不相干的 id 空间）。 */
+/** `DELETE .../queue/{messageId}`'s path params（docs/agent/steer-and-queue/tech.md §4.2）：`id` 同 `ConversationParamsSchema`；`messageId` 是[待发队列](../../../../docs/terms.md)条目自己的 `QueuedMessage.id`（入队时 `randomUUID()` 生成，与工具调用的 `callId` 是两个不相干的 id 空间）。 */
 export const ChatQueueParamsSchema = z.object({
   id: z
     .string()
@@ -400,7 +400,7 @@ export const ChatQueueParamsSchema = z.object({
 });
 
 /**
- * `POST .../approvals/{callId}`'s body (docs/tech/chat-webapp.md §2.2c（审批链）, docs/tech/single-ledger.md §6.3
+ * `POST .../approvals/{callId}`'s body (docs/app/chat-webapp/tech.md §2.2c（审批链）, docs/agent/single-ledger/tech.md §6.3
  * 人工裁决): a human's decision on a pending tool call — `message` is only
  * meaningful (and optional) on `deny` (the rejection reason, 回填模型), ignored
  * on `allow`/`allow-session`.
@@ -433,7 +433,7 @@ export const ApprovalAckSchema = z
 
 export type ApprovalAck = z.infer<typeof ApprovalAckSchema>;
 
-/** `POST .../questions/{callId}`'s body (docs/tech/chat-webapp.md §2.2c（审批链）): a human's free-text answer to a pending `ask-user` question — always required (unlike `PostApprovalInputSchema`'s optional deny `message`, there is no "answer with nothing" case here). */
+/** `POST .../questions/{callId}`'s body (docs/app/chat-webapp/tech.md §2.2c（审批链）): a human's free-text answer to a pending `ask-user` question — always required (unlike `PostApprovalInputSchema`'s optional deny `message`, there is no "answer with nothing" case here). */
 export const PostAnswerInputSchema = z
   .object({
     answer: z.string().min(1),
@@ -442,7 +442,7 @@ export const PostAnswerInputSchema = z
 
 /**
  * `POST .../presence`'s body（[在场](../../../../docs/terms.md)心跳，
- * docs/tech/push-notification.md §5.2）：`focused` = 「此刻这条会话正在这个人眼前」
+ * docs/app/push-notification/tech.md §5.2）：`focused` = 「此刻这条会话正在这个人眼前」
  * ——页面可见 **且** 窗口聚焦 **且** 路由停在这条会话，三者缺一即为 false。
  *
  * 只有页面自己知道这三件事，所以必须由它上报：服务端能看到的「有没有活的 SSE
@@ -452,7 +452,7 @@ export const PresenceInputSchema = z
   .object({ focused: z.boolean() })
   .openapi('PresenceInput');
 
-/** `GET .../turns/{turn}/telemetry`'s path params（docs/tech/chat-webapp.md §11.4）：`id` 同 `ConversationParamsSchema`；`turn` 是账本 metadata 里的轮次号（1 起）。 */
+/** `GET .../turns/{turn}/telemetry`'s path params（docs/app/chat-webapp/tech.md §11.4）：`id` 同 `ConversationParamsSchema`；`turn` 是账本 metadata 里的轮次号（1 起）。 */
 export const TurnTelemetryParamsSchema = z.object({
   id: z
     .string()
@@ -465,7 +465,7 @@ export const TurnTelemetryParamsSchema = z.object({
 });
 
 /**
- * 一条遥测事件（docs/tech/chat-webapp.md §11.4）：`payloadJson` 保持字符串原样
+ * 一条遥测事件（docs/app/chat-webapp/tech.md §11.4）：`payloadJson` 保持字符串原样
  * 透传（收敛后的事件 JSON，形状随 ai 小版本演化，服务端不做二次建模），
  * 前端自行 `JSON.parse` 按需取字段。
  */

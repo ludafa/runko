@@ -1,9 +1,9 @@
 /**
- * SessionState（P13-5-2，docs/tech/single-ledger.md §5 单-2）：会话恢复用
+ * SessionState（P13-5-2，docs/agent/single-ledger/tech.md §5 单-2）：会话恢复用
  * 的可序列化快照。`messages` 从 AI SDK 的 `ModelMessage[]` 换成 `NimboUIMessage[]`
  * ——"UIMessage 单账本"：loop 的工作状态与 session 的存档是同一份数据，每次调
  * 模型前用官方 `convertToModelMessages()` 现场推导 `ModelMessage[]`，不再单独
- * 存一份模型视图（docs/tech/single-ledger.md §0 TL;DR）。
+ * 存一份模型视图（docs/agent/single-ledger/tech.md §0 TL;DR）。
  *
  * 本文件同时是 `NimboUIMessage`/`NimboChunk`（UIMessageChunk 词汇表，对
  * `NimboUIMessage` 实例化）的唯一定义点——`loop.ts`/`session.ts` 都从这里导入，
@@ -16,7 +16,7 @@ import { jsonValueSchema, type JsonValue } from "./types.js";
 import type { NimboError, Usage } from "./events.js";
 
 // ============================================================================
-// NimboMessageMetadata（docs/tech/single-ledger.md §5-2 目标架构 1）：
+// NimboMessageMetadata（docs/agent/single-ledger/tech.md §5-2 目标架构 1）：
 // assistant 收尾元数据（turn/usage/status/error）+ user 消息的 steer 标记。
 // metadata 不参与 `convertToModelMessages()`（官方转换器天然丢弃 metadata），
 // 因此这些字段只给宿主/界面看，模型永远看不到。
@@ -55,7 +55,7 @@ export interface NimboMessageMetadata {
    */
   toolDurationMs?: number;
   error?: NimboError;
-  /** turn 进行中经 `Session.steer()` 注入的 user 消息标记（docs/tech/single-ledger.md §2.2a）。 */
+  /** turn 进行中经 `Session.steer()` 注入的 user 消息标记（docs/agent/single-ledger/tech.md §2.2a）。 */
   steered?: boolean;
 }
 
@@ -70,11 +70,11 @@ export const nimboMessageMetadataSchema: z.ZodType<NimboMessageMetadata> = z.obj
 });
 
 // ============================================================================
-// NimboDataParts（docs/tech/single-ledger.md §5-2 目标架构 1 / §2.2b，deny 分支已转用 ai 原生审批
-// 状态机，`data-approval` 因此作废——见 docs/tech/single-ledger.md §5 引言"§2.2b 相应条目作废"）：
+// NimboDataParts（docs/agent/single-ledger/tech.md §5-2 目标架构 1 / §2.2b，deny 分支已转用 ai 原生审批
+// 状态机，`data-approval` 因此作废——见 docs/agent/single-ledger/tech.md §5 引言"§2.2b 相应条目作废"）：
 // 五个 data 部件，类型名即 `data-file-change` 等。`tool-progress` 是
 // transient——只在写入期经 `emitTransientDataPart`（loop.ts）分流出流，绝不
-// 进 `UIMessage.parts`（docs/tech/single-ledger.md §4.1 发现 A：transient 是线协议 chunk 上的
+// 进 `UIMessage.parts`（docs/agent/single-ledger/tech.md §4.1 发现 A：transient 是线协议 chunk 上的
 // 属性，不是 `DataUIPart` 的字段，没有"先写后滤"这回事）。`tool-timing`
 // 与之相反——是**持久**部件：工具起止时间戳随 `assistantMessage.parts` 一起
 // 存档、随会话回放，不因刷新丢失（chat 界面据此渲染每个工具调用卡片的
@@ -149,7 +149,7 @@ export const nimboDataPartSchemas: { [NAME in keyof NimboDataParts & string]: z.
 };
 
 // ============================================================================
-// NimboUIMessage / NimboChunk（docs/tech/single-ledger.md §5-2 目标架构 1/2）
+// NimboUIMessage / NimboChunk（docs/agent/single-ledger/tech.md §5-2 目标架构 1/2）
 // ============================================================================
 
 /**
@@ -221,7 +221,7 @@ export const sessionStateSchema: z.ZodType<SessionState> = z.object({
 });
 
 /**
- * 恢复校验的深层通路（docs/tech/single-ledger.md §5-2 目标架构 1"恢复校验：用 ai@7 的
+ * 恢复校验的深层通路（docs/agent/single-ledger/tech.md §5-2 目标架构 1"恢复校验：用 ai@7 的
  * validateUIMessages 替代现在的 ModelMessage 结构判别"）：`raw` 通常是
  * `sessionStateSchema` 校验后的 `SessionState.messages`（已经过上面的浅层
  * 判别），这里再用 ai 官方校验器做深层语义校验（metadata 形状、data 部件

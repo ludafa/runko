@@ -1,5 +1,5 @@
 /**
- * 通知决策层（docs/tech/push-notification.md §5、§6.1）——四个[通知触发点](../../../../docs/terms.md)
+ * 通知决策层（docs/app/push-notification/tech.md §5、§6.1）——四个[通知触发点](../../../../docs/terms.md)
  * 各自拼一条载荷，过三道闸门，交给 `sender.ts` 投出去。
  *
  * **这一层是整个功能唯一"想事情"的地方**：`sender.ts` 只管怎么发、SW 只管怎么显示。
@@ -112,7 +112,7 @@ function describeToolCall(toolName: string, input: JsonValue): string {
 }
 
 /**
- * 哪几类[挂住不消失](../../../../docs/terms.md)（docs/tech/push-notification.md §6.4）。
+ * 哪几类[挂住不消失](../../../../docs/terms.md)（docs/app/push-notification/tech.md §6.4）。
  *
  * 判据是**「错过它会不会卡住什么」**：要审批、agent 提问这两类停着一整轮，人不处理
  * agent 就一直等到超时自动拒绝——必须挂住。一轮完成/失败只是告知，事情已经结束了，
@@ -126,7 +126,7 @@ const STICKY: Record<PushKind, boolean> = {
 };
 
 /**
- * 审批通知上的按钮（docs/tech/push-notification.md §6.5）。
+ * 审批通知上的按钮（docs/app/push-notification/tech.md §6.5）。
  *
  * **顺序就是取舍**：浏览器只渲染前 `Notification.maxActions` 个，Chrome 是 2，多的
  * 静默丢弃。所以「允许」「拒绝」这对基本盘排前面——少了任何一个这功能就残废；

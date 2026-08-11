@@ -1,5 +1,5 @@
 /**
- * `read-file`（docs/tech/builtin-tools.md §1.1）：cat -n 风格带行号文本；2000 行/256KB
+ * `read-file`（docs/core/builtin-tools/tech.md §1.1）：cat -n 风格带行号文本；2000 行/256KB
  * 预算 + offset/limit 分页；二进制与 reference 返回结构化指引而非裸错误；
  * 读取后登记 readState。
  */

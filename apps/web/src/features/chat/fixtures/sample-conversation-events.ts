@@ -1,9 +1,9 @@
 /**
- * Rebuilt for the P13-5-4/P13-5-5 UIMessage-ledger migration (docs/tech/single-ledger.md §5/§6) — this fixture used to record a
+ * Rebuilt for the P13-5-4/P13-5-5 UIMessage-ledger migration (docs/agent/single-ledger/tech.md §5/§6) — this fixture used to record a
  * `ChatStreamEnvelope[]` run against the retired `SessionEvent`/`SessionItem`
  * wire (see git history); it now exports full-conversation `LedgerFrame[]`
  * scenarios built from `../__tests__/helpers/nimbo-chunks`'s factories,
- * covering the two human-in-the-loop interaction shapes docs/tech/single-ledger.md §6 defines
+ * covering the two human-in-the-loop interaction shapes docs/agent/single-ledger/tech.md §6 defines
  * (a gated tool call that needs `review`, and an `ask-user` question) plus a
  * plain text-only turn and an already-GC'd replay — `timeline-view.test.tsx`/
  * `timeline.test.ts` compose these into render/materialization assertions
@@ -93,7 +93,7 @@ export const approvalTurnFrames: LedgerFrame[] = toChunkEnvelopes([
  * the human answers, the resolving half arrives as its own later batch of
  * frames (`askUserAnsweredFrames`, `seq` continuing from
  * `askUserPendingFrames`'s last one) — mirroring how a real answer arrives
- * over the tail well after the pending state was first seen (docs/tech/single-ledger.md §6,
+ * over the tail well after the pending state was first seen (docs/agent/single-ledger/tech.md §6,
  * `QuestionCard`'s pending/answered states).
  */
 export const askUserPendingFrames: LedgerFrame[] = toChunkEnvelopes([

@@ -1,8 +1,8 @@
 /**
  * E2B [保活](../../../docs/terms.md)接线验收测试 —— KA-2 的 E2B 专属部分。
  *
- * 规格见 docs/tech/sandbox-keepalive.md §5.5，验收清单见
- * docs/plans/sandbox-keepalive.md KA-2。
+ * 规格见 docs/host/sandbox-keepalive/tech.md §5.5，验收清单见
+ * docs/host/sandbox-keepalive/plan.md KA-2。
  *
  * [续期闸门](../../../docs/terms.md)本身（补足语义、审批状态机、两个上限）已在
  * `@nimbo/core` 的 `test/keepalive.test.ts` 里测透，这里只覆盖 E2B 这一层：

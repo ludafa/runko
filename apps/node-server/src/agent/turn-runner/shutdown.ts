@@ -1,5 +1,5 @@
 /**
- * [优雅关闭](../../../../../docs/terms.md)（docs/tech/graceful-shutdown.md §3）——进程要退
+ * [优雅关闭](../../../../../docs/terms.md)（docs/agent/graceful-shutdown/tech.md §3）——进程要退
  * 之前，把进行中的轮主动停下来并等它们收尾，而不是让它们无声消失。
  *
  * 本文件刻意**不碰 `process.exit`**：只负责让轮停下来，退不退进程是 `index.ts` 的事
@@ -48,7 +48,7 @@ export interface ShutdownResult {
 }
 
 /**
- * 关闭前把所有进行中的轮停下来并等它们收尾（docs/tech/graceful-shutdown.md §3.1）。
+ * 关闭前把所有进行中的轮停下来并等它们收尾（docs/agent/graceful-shutdown/tech.md §3.1）。
  *
  * 四步的顺序都是硬要求：
  *
@@ -62,7 +62,7 @@ export interface ShutdownResult {
  *    进收尾 metadata，界面据此显示「服务重启，这一轮已中断」。
  * 4. **等齐或撞超时**。撞超时不抛错也不强制清理登记：那些轮成了
  *    [孤儿轮](../../../../../docs/terms.md)，交给下次启动的 `crash-recovery.ts` 补收尾
- *    （两道防线在这里接上，docs/tech/graceful-shutdown.md §7.1）。
+ *    （两道防线在这里接上，docs/agent/graceful-shutdown/tech.md §7.1）。
  */
 export async function shutdownTurns(opts: {
   timeoutMs: number;

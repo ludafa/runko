@@ -1,6 +1,6 @@
 /**
- * L2 运行层：审批链求值（docs/tech/single-ledger.md §6，P13-5-2c 三值
- * 重构；两层组合语义沿自 docs/tech/core-sdk.md §4.5"审批链（求值顺序）"，逐字保留，只是
+ * L2 运行层：审批链求值（docs/agent/single-ledger/tech.md §6，P13-5-2c 三值
+ * 重构；两层组合语义沿自 docs/core/core-sdk/tech.md §4.5"审批链（求值顺序）"，逐字保留，只是
  * 结果值从二值 `ApprovalDecision`（allow/deny）换成三值 `ApprovalOutcome`
  * （allow/review/deny）——本文件是这次重构里"语义不变"的落地点）：
  *
@@ -32,7 +32,7 @@
  * （P4-1 工单原文："记忆存储由调用方注入，形状自定"）——这里只定义接口与一个
  * 便利的 `Set` 实现，所有权（跨轮次持久与否）留给 session（P4-2）。
  *
- * ---- once 记忆的标记时机（P13-5-2c 新语义，docs/tech/single-ledger.md §6.1 "review-once：…
+ * ---- once 记忆的标记时机（P13-5-2c 新语义，docs/agent/single-ledger/tech.md §6.1 "review-once：…
  * once 记忆的标记时机改为「人工裁决 allow 之后」") ----
  *
  * 只要某一级的策略解析在**这次 `evaluateApproval` 调用内部**就同步落到了
@@ -67,7 +67,7 @@ export function createOnceApprovalMemory(): OnceApprovalMemory {
 /**
  * `evaluateApproval` 的产出：核心语义是 `outcome`（`ApprovalOutcome` 三值），
  * 判别联合按 outcome 精确到调用方无需再猜——`deny` 恒带 `reason`（回填模型的
- * 拒绝理由：无仲裁者指导文案，或策略/分类器 `deny` 的默认文案，docs/tech/single-ledger.md §6.4
+ * 拒绝理由：无仲裁者指导文案，或策略/分类器 `deny` 的默认文案，docs/agent/single-ledger/tech.md §6.4
  * "拒绝理由 = 无仲裁者指导文案或分类器 deny 的默认文案"——三值化后
  * `ApprovalOutcome` 是裸字符串，策略/分类器无法附带自定义理由，这与旧
  * `ApprovalDecision.deny.message` 相比是刻意的能力收窄，见本次工单回报）；
@@ -96,7 +96,7 @@ export const DEFAULT_DENY_MESSAGE = "Tool call denied.";
 /**
  * "无仲裁者"指导文案——两处复用同一份文本：(a) 本文件内，session 分类器未
  * 配置时的兜底；(b) `loop.ts`，`evaluateApproval` 解析出 `review` 但会话没有
- * 注入 `onReview`（人审通道）时——docs/tech/single-ledger.md §6.4"未注入时：review 无人可裁 →
+ * 注入 `onReview`（人审通道）时——docs/agent/single-ledger/tech.md §6.4"未注入时：review 无人可裁 →
  * 视同无仲裁者 deny（附指导文案）"，两种"没有人能裁决"殊途同归，文案一致。
  */
 export function noArbiterDenyReason(toolName: string): string {

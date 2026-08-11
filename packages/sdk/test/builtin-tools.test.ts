@@ -1,10 +1,10 @@
 /**
  * P7-1 acceptance: `agent.builtinTools` filtering applies to the sdk-assembled file tools
- * eight-set (docs/tech/builtin-tools.md §3) — `false` turns them all off, an array whitelists a
+ * eight-set (docs/core/builtin-tools/tech.md §3) — `false` turns them all off, an array whitelists a
  * subset (including the `READ_ONLY_TOOLS` preset), and a host-supplied `agent.tools` entry
  * with the same name overrides the built-in (built-ins spread first, host tools last).
  *
- * P13-5-2（docs/tech/single-ledger.md）迁移：断言从 `SessionEvent`/
+ * P13-5-2（docs/agent/single-ledger/tech.md）迁移：断言从 `SessionEvent`/
  * `SessionItem` 改为读账本（`session.toJSON().messages` 的工具部件，
  * `state`：output-available/output-error 取代 completed/failed）。一个工具名
  * 从未出现在 `agent.tools` 里时，模型对它的调用在 `runOneStep` 里直接被 AI

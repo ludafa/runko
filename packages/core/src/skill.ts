@@ -1,5 +1,5 @@
 /**
- * L1 定义层：Skill 数据类型、`defineSkill`、三个加载器（docs/tech/core-sdk.md §4.1）。
+ * L1 定义层：Skill 数据类型、`defineSkill`、三个加载器（docs/core/core-sdk/tech.md §4.1）。
  * SKILL.md 解析/frontmatter 规则/附属文件枚举的实际实现在 `./skills/loader.js`
  * （P5）；本文件只做数据类型 + `defineSkill` 恒等函数 + 把三个加载器函数收敛
  * 成 spec 字面签名的 `Skill.fromDirectory/fromFS/fromMarkdown` 呈现形态。
@@ -40,7 +40,7 @@ export function defineSkill(def: Skill): Skill {
 }
 
 /**
- * 三个加载器（docs/tech/core-sdk.md §4.1，规则见 `./skills/loader.js` 头注释）：
+ * 三个加载器（docs/core/core-sdk/tech.md §4.1，规则见 `./skills/loader.js` 头注释）：
  * - `fromDirectory(path)`：packaged skill，真实磁盘上的 `<path>/SKILL.md` + 附属文件；
  * - `fromFS(fs, path)`：同语义，跑在任意 `NimboFS` 上；
  * - `fromMarkdown(name, md)`：flat skill（eve 的 `skills/*.md` 形态），同步。

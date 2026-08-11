@@ -1,8 +1,8 @@
 /**
  * 06-structured-output — the "automation pipeline node" scenario from
- * docs/features/core-sdk.md §3.2: run an agent as a CI/background-job step
+ * docs/core/core-sdk/feature.md §3.2: run an agent as a CI/background-job step
  * and get a typed, zod-validated result back instead of free text
- * (docs/tech/core-sdk.md §4.8 "结构化输出").
+ * (docs/core/core-sdk/tech.md §4.8 "结构化输出").
  *
  * `session.send<T>(input, { outputSchema })` runs the normal turn to
  * completion first (tool calls, file edits, everything `session.send()`

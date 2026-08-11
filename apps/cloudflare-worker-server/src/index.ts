@@ -15,7 +15,7 @@
  *
  * `@nimbo/sandbox-cloudflare` 原本是**网关形态**——nimbo 的前提是「agent 跑在任意
  * 电脑上」，而 CF Sandbox 只能从 Worker 内部经 Durable Object binding 访问，所以
- * 需要自部署一个 HTTP 网关把两边接起来（docs/tech/sandbox.md §6）。角色 ② 就是那个
+ * 需要自部署一个 HTTP 网关把两边接起来（docs/host/sandbox/tech.md §6）。角色 ② 就是那个
  * 网关。而角色 ① 的服务端自己就在 Worker 里，客户端与网关同进程——于是同一个
  * `createSandboxGateway` 实例既可以经 HTTP 服务外部客户端，也可以被本进程直接
  * `fetch()` 调用，把 TCP 那一跳短路掉。
@@ -32,7 +32,7 @@
  * 代价是进程内路径每次文件操作仍走一遍 JSON+base64 编解码；要省掉这层可以再抽一个
  * 直连适配器，本示例刻意不抽，以保持「与真机网关路径完全同构」。
  *
- * 明确不在范围内（见 docs/plans/cloudflare-worker-server.md）：
+ * 明确不在范围内（见 docs/app/cloudflare-worker-server/plan.md）：
  *   - D1 替换 better-sqlite3、better-auth 移植、chat 的 conversations/messages 路由
  *   - CF 沙盒 idle 睡眠丢文件系统 与 chat「未提交改动原样还原」的语义落差
  */
@@ -97,7 +97,7 @@ const GATEWAY_PREFIX = '/gateway';
  *
  * 这里刻意只在示例侧绕行、不改产品代码：包该怎么修（是彻底不转发，还是做成可选项）
  * 会改动 `protocol.test.ts` 里那条已固化的契约，属于独立决定。详见
- * docs/plans/cloudflare-worker-server.md「发现的缺陷」。
+ * docs/app/cloudflare-worker-server/plan.md「发现的缺陷」。
  *
  * 代价：客户端 abort 不再能中断沙盒内正在跑的命令，命令会一直跑到 `timeout` 为止。
  * 客户端侧的取消语义不受影响——`cloudflareWorkspace` 自己的 `raceAbort` 仍然保证

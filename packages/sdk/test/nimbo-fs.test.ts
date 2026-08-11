@@ -1,6 +1,6 @@
 /**
  * P7-1 acceptance: `NimboFS.fromMemory`/`NimboFS.fromDirectory` value-namespace calls
- * (docs/features/core-sdk.md §4.1: `NimboFS.fromDirectory("./project")`).
+ * (docs/core/core-sdk/feature.md §4.1: `NimboFS.fromDirectory("./project")`).
  */
 import * as nodeFs from "node:fs/promises";
 import * as nodePath from "node:path";

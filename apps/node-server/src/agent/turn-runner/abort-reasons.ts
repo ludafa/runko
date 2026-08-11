@@ -18,7 +18,7 @@ export const ABORT_DENY_MESSAGE =
 export const ABORT_REASON_USER = 'Turn stopped by the user.';
 
 /**
- * [优雅关闭](../../../../../docs/terms.md)时的中止理由（docs/tech/graceful-shutdown.md §4）。
+ * [优雅关闭](../../../../../docs/terms.md)时的中止理由（docs/agent/graceful-shutdown/tech.md §4）。
  *
  * **这是一个跨三处的文案契约**，改它要同时改三处，否则界面会把「服务重启」显示成
  * 「用户按了停止」：
@@ -29,7 +29,7 @@ export const ABORT_REASON_USER = 'Turn stopped by the user.';
  * 3. `apps/web` 的 `turn-marker.tsx`——命中它才显示「服务重启，这一轮已中断」。
  *
  * 之所以用文案而不是给 `NimboError.code` 加一个值：「服务要关闭了」是宿主的运维概念，
- * 不该塞进 SDK 的类型联合（理由详见 docs/tech/graceful-shutdown.md §2）。
+ * 不该塞进 SDK 的类型联合（理由详见 docs/agent/graceful-shutdown/tech.md §2）。
  */
 export const ABORT_REASON_SHUTDOWN =
   'The server shut down while this turn was running.';

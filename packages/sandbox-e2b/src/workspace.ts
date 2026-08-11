@@ -1,14 +1,14 @@
 /**
  * `e2bWorkspace(sandbox, opts?)`：把一个已创建好的 e2b 沙盒包成
  * `NimboFS & NimboExec`，供 `createSession(agent, { workspace })` 一次注入
- * （docs/tech/core-sdk.md §4.5a 模式 A；docs/tech/sandbox.md §5.2/§8.2）。
+ * （docs/core/core-sdk/tech.md §4.5a 模式 A；docs/host/sandbox/tech.md §5.2/§8.2）。
  *
  * BYO 实例是唯一入口：本函数不创建、不销毁沙盒——沙盒的生命周期（创建、
  * 暂停/恢复、销毁）完全由宿主自己管理，`e2bWorkspace()` 只是给一个已经
- * 存在的沙盒包一层 NimboFS/NimboExec 的视图（docs/tech/sandbox.md §5.2 "nimbo 不关心沙盒
+ * 存在的沙盒包一层 NimboFS/NimboExec 的视图（docs/host/sandbox/tech.md §5.2 "nimbo 不关心沙盒
  * 长什么样"）。
  *
- * **唯一的例外是[保活](../../../docs/terms.md)**（docs/features/sandbox-keepalive.md）：
+ * **唯一的例外是[保活](../../../docs/terms.md)**（docs/host/sandbox-keepalive/feature.md）：
  * 传了 `opts.keepAlive` 才开，开了之后一轮进行期间会自动续期。这不违反 BYO——
  * 建盒销盒仍归宿主，开不开保活也是宿主一行配置决定的，下沉的只是「续期动作怎么执行」。
  * 不传就一次网络调用都不会发生，行为与没有这个功能时完全一致。

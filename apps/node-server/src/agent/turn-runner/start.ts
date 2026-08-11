@@ -3,7 +3,7 @@
  * 原地升级），然后把 `drive.ts` 的 `driveTurn` 作为后台任务放出去，同步返回。
  *
  * 「不 `await`」是这个设计的要点：一轮的寿命与任何一个 HTTP 请求都无关
- * （docs/tech/chat-webapp.md §2.2b）——`POST .../messages` 只负责**起**它，`GET .../stream`
+ * （docs/app/chat-webapp/tech.md §2.2b）——`POST .../messages` 只负责**起**它，`GET .../stream`
  * 只负责**看**它。
  *
  * 这一轮全部收尾动作（清挂起项 → `emit('done')` → 从 `activeTurns` 删除 →
@@ -37,7 +37,7 @@ export interface StartTurnParams {
    */
   text: string;
   /**
-   * 实际喂给模型的文本，缺省即 `text`（docs/tech/composer-skill-mention.md §2.2）。
+   * 实际喂给模型的文本，缺省即 `text`（docs/app/composer-skill-mention/tech.md §2.2）。
    *
    * 两者分开，是为了让服务端能在**不污染账本**的前提下给模型追加话术——目前唯一的
    * 用途是[skill 提及](../../../../../docs/terms.md)的那行系统提示（`turn-launcher.ts`
@@ -73,7 +73,7 @@ export interface StartTurnParams {
    */
   logger?: Logger;
   /**
-   * 「这一轮彻底结束了」的通知点（docs/tech/steer-and-queue.md §3）——在收尾**全部**
+   * 「这一轮彻底结束了」的通知点（docs/agent/steer-and-queue/tech.md §3）——在收尾**全部**
    * 做完、`activeTurns` 里这一轮已被删除之后调用。
    *
    * 「在 delete 之后」是硬要求而非风格问题：`turn-launcher.ts` 用它来起下一轮
@@ -89,13 +89,13 @@ export interface StartTurnParams {
    */
   onTurnSettled?: (info: TurnSettledInfo) => void;
   /**
-   * 这一轮的两个「首次」时刻（docs/tech/telemetry.md §2.4）——见 `TurnMilestone`。
+   * 这一轮的两个「首次」时刻（docs/app/telemetry/tech.md §2.4）——见 `TurnMilestone`。
    * 与 `onTurnSettled` 同款：本目录只报告事件，落库/拼载荷是注入方
    * （`turn-launcher.ts`）的事；回调抛错只记日志，不影响这一轮。
    */
   onMilestone?: (milestone: TurnMilestone, info: TurnMilestoneInfo) => void;
   /**
-   * 这一轮的[起轮占位](../../../../../docs/terms.md)句柄（docs/tech/turn-abort.md §3.3）
+   * 这一轮的[起轮占位](../../../../../docs/terms.md)句柄（docs/agent/turn-abort/tech.md §3.3）
    * ——`turn-launcher.ts` 装配前从 `reserveTurn` 拿到、装配完连同 session 一起交进来，
    * 由 `startTurn` 把它就地升级成真正在跑的那一轮。
    *

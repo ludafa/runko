@@ -1,6 +1,6 @@
 /**
- * `agent/web-search.ts`（docs/tech/web-search.md，验收要点见
- * docs/plans/web-search.md）：`web-search` 工具的单测。
+ * `agent/web-search.ts`（docs/app/web-search/tech.md，验收要点见
+ * docs/app/web-search/plan.md）：`web-search` 工具的单测。
  *
  * **零网络零凭证**——`fetch` 经 `CreateWebSearchToolOptions.fetchImpl` 注入假
  * 实现，超时经 `timeoutMs` 注入毫秒级值，所以「超时」这条分支是真跑出来的，

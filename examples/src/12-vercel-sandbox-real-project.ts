@@ -1,6 +1,6 @@
 /**
  * 12-vercel-sandbox-real-project — a real-project, real-Git-workflow e2e demo
- * (docs/tech/sandbox.md §1/§2, docs/plans/core-sdk.md
+ * (docs/host/sandbox/tech.md §1/§2, docs/core/core-sdk/plan.md
  * P11): a nimbo agent, connected to a real Vercel Sandbox, clones the user's
  * own GitHub repo (a plain frontend project), installs the official
  * `anthropics/skills` "frontend-design" skill straight from the sandbox's
@@ -10,11 +10,11 @@
  * connected for the target project) picks up the push/PR and builds a
  * preview deployment on its own — this script never calls the Vercel deploy
  * API and never promises a deployment URL in its summary, only a PR link
- * (docs/tech/sandbox.md §8.3).
+ * (docs/host/sandbox/tech.md §8.3).
  *
  * ---- File naming / test runner note ----
  *
- * The `.e2e.test.ts` suffix is the user-specified filename (docs/tech/sandbox.md §8.6),
+ * The `.e2e.test.ts` suffix is the user-specified filename (docs/host/sandbox/tech.md §8.6),
  * NOT a vitest spec — this is still a plain `node`-executed example script
  * like every other file in examples/, run with `node examples/12-....ts`.
  * The root `vitest.config.ts` declares `test.projects: ["packages/*"]`
@@ -46,14 +46,14 @@
  * exit cleanly. The rest of the real-project path (repo cloning, skill
  * install, the git/PR workflow, the agent instructions) compiles and reads
  * correctly but is untested end-to-end in this checkout; results get
- * backfilled into docs/plans/verification.md once a user supplies `GITHUB_REPO`/`GITHUB_PAT`.
+ * backfilled into docs/core/verification/plan.md once a user supplies `GITHUB_REPO`/`GITHUB_PAT`.
  *
  * ---- Why not shared/model.ts's resolveModel() ----
  *
  * Every other model-driven example calls `resolveModel()`, which tries
  * DeepSeek direct-connect first and falls back to an AI SDK Gateway string.
  * This example deliberately does neither of those things as a fallback
- * chain: docs/tech/sandbox.md §8.4 pins DeepSeek specifically (a design-quality task
+ * chain: docs/host/sandbox/tech.md §8.4 pins DeepSeek specifically (a design-quality task
  * benefits from a stronger tier than the other examples' plain
  * "deepseek-chat" default) and this script constructs `createDeepSeek(...)`
  * itself with a different default model id — see `DEEPSEEK_DESIGN_MODEL_ID`
@@ -65,7 +65,7 @@
  * "$DEEPSEEK_API_BASE_URL/models"` (a read-only listing endpoint — the one
  * real network call this construction task was allowed to make, no
  * completion/chat call). The response listed exactly two ids:
- * `deepseek-v4-flash` and `deepseek-v4-pro`; the latter is docs/tech/sandbox.md §8.4's
+ * `deepseek-v4-flash` and `deepseek-v4-pro`; the latter is docs/host/sandbox/tech.md §8.4's
  * "v4 pro 档". See the final report for the raw response.
  *
  * Root `.env` loading: duplicated from shared/model.ts's private (not
@@ -77,7 +77,7 @@
  * shell vars win over the file). All config lives in the repo-root `.env`
  * now (2026-07-12 consolidation) — see `<repo>/.env.template`.
  *
- * ---- The Git workflow (docs/tech/sandbox.md §1/§2, §8.1/§8.3) ----
+ * ---- The Git workflow (docs/host/sandbox/tech.md §1/§2, §8.1/§8.3) ----
  *
  * Host-side (before any model call): `Sandbox.create({ source: { type: "git",
  * url, username: "x-access-token", password: GITHUB_PAT, depth: 1 }, env: {
@@ -97,7 +97,7 @@
  * default branch/the branch name are baked into the instructions string by
  * this script — the model is never asked to guess them.
  *
- * GitHub auth is fine-grained-PAT v1 (docs/tech/sandbox.md §8.1): exactly Contents R+W +
+ * GitHub auth is fine-grained-PAT v1 (docs/host/sandbox/tech.md §8.1): exactly Contents R+W +
  * Pull requests R+W (+ auto Metadata R), scoped to one repo, short expiry,
  * revoke after the run — see .env.template's GITHUB_PAT comment.
  *
@@ -162,7 +162,7 @@ const SSH_REPO_PATTERN = /^git@github\.com:([^/]+)\/([^/]+?)(?:\.git)?$/;
 const HTTPS_REPO_PATTERN = /^https:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/;
 
 /**
- * Accepts both forms `GITHUB_REPO` might hold (docs/tech/sandbox.md §8.3): SSH
+ * Accepts both forms `GITHUB_REPO` might hold (docs/host/sandbox/tech.md §8.3): SSH
  * (`git@github.com:owner/repo.git`) and HTTPS (`https://github.com/owner/repo`,
  * with or without a trailing `.git`/`/`). Always resolves to the HTTPS form —
  * `Sandbox.create`'s git source and the `git remote set-url` the sandbox init
@@ -208,7 +208,7 @@ function initPlanSteps(plan: InitPlan): InitStep[] {
 }
 
 /**
- * Six host-side `runCommand` calls (docs/tech/sandbox.md §2.3/§2.4), none of them routed
+ * Six host-side `runCommand` calls (docs/host/sandbox/tech.md §2.3/§2.4), none of them routed
  * through the model. `remoteAuth` reads the PAT from the sandbox's own
  * `$GH_TOKEN` environment variable (set via `Sandbox.create`'s `env` option)
  * rather than interpolating the PAT into this script's command string — the
@@ -539,7 +539,7 @@ async function realProjectSection(): Promise<void> {
   if (model === undefined) {
     console.log(
       "[nimbo example] DeepSeek is not configured — skipping the real-project section.\n" +
-        "This example is DeepSeek-only (docs/tech/sandbox.md §8.4 pins a stronger tier for the design task), unlike other\n" +
+        "This example is DeepSeek-only (docs/host/sandbox/tech.md §8.4 pins a stronger tier for the design task), unlike other\n" +
         "examples' resolveModel() dual path. Set in the repo-root .env:\n" +
         "  DEEPSEEK_API_BASE_URL=...\n" +
         "  DEEPSEEK_API_TOKEN=...\n" +

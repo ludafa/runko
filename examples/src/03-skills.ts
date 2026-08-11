@@ -1,6 +1,6 @@
 /**
  * 03-skills — SKILL.md loading and progressive disclosure
- * (docs/tech/core-sdk.md §4.6): a skill's name+description is injected into
+ * (docs/core/core-sdk/tech.md §4.6): a skill's name+description is injected into
  * the system prompt up front; the full markdown body only reaches the model
  * when it calls the built-in `load-skill` tool. Both the flat (`skills/*.md`)
  * and packaged (`skills/<name>/SKILL.md` + attachments) forms from the Claude

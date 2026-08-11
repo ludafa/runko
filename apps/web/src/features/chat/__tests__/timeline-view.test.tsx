@@ -545,7 +545,7 @@ describe('TimelineView — turn-stats / turn-failed bar placement', () => {
   });
 
   // 同一个 `code: 'aborted'`，但不是用户按的——服务端[优雅关闭](../../../../../docs/terms.md)
-  // 中止的（docs/tech/graceful-shutdown.md §4）。判档靠 message 与服务端那个常量逐字相等，
+  // 中止的（docs/agent/graceful-shutdown/tech.md §4）。判档靠 message 与服务端那个常量逐字相等，
   // 所以这条用例同时是那个跨端文案契约的哨兵：服务端改了文案而这里没跟，它就会红。
   it('服务重启导致的中断走「服务重启，这一轮已中断」，与用户按停止分开', () => {
     const messages: NimboUIMessage[] = [

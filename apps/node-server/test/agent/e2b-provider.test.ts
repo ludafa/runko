@@ -1,5 +1,5 @@
 /**
- * Contract tests for `createE2bProvider()` (docs/plans/sandbox-provider.md
+ * Contract tests for `createE2bProvider()` (docs/host/sandbox-provider/plan.md
  * SP-2). The `e2b` package's static `Sandbox.create`/`Sandbox.connect` are
  * mocked — no network, no credentials — and the *real* `@nimbo/sandbox-e2b`
  * `e2bWorkspace()` wraps a structural fake sandbox. Asserts the three
@@ -171,7 +171,7 @@ describe('createE2bProvider', () => {
     }
   });
 
-  it('resume(): retries a transient not-found and reconnects the same sandbox (a just-paused sandbox can 404 for a moment — docs/plans/sandbox-provider.md SP-6)', async () => {
+  it('resume(): retries a transient not-found and reconnects the same sandbox (a just-paused sandbox can 404 for a moment — docs/host/sandbox-provider/plan.md SP-6)', async () => {
     vi.useFakeTimers();
     try {
       const fake = fakeE2bSandbox('sbx_resumed');

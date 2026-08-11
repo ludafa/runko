@@ -1,5 +1,5 @@
 /**
- * 07-streaming — consuming `session.stream()` live (docs/tech/single-ledger.md
+ * 07-streaming — consuming `session.stream()` live (docs/agent/single-ledger/tech.md
  * §5 单账本): `session.stream(input)` returns an
  * `AsyncGenerator<NimboChunk, TurnResult>` — every `yield` is a `NimboChunk`
  * (ai 的 `UIMessageChunk` 词汇表，对 `NimboUIMessage` 实例化) the host can

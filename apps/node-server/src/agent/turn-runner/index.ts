@@ -1,11 +1,11 @@
 /**
- * Turn execution/connection decoupling (docs/tech/chat-webapp.md §2.2b,
+ * Turn execution/connection decoupling (docs/app/chat-webapp/tech.md §2.2b,
  * the P12-4 fix for "SSE 断开后进行中 turn 的后续输出不再到达页面"): a chat
  * turn is driven entirely in-process, independent of any HTTP request —
  * `POST .../messages` (`routes/chat.ts`) only *starts* it (`startTurn`),
  * `GET .../stream` only *observes* it (`subscribeTurn`/`isTurnActive`). A
  * client disconnecting (page refresh, HMR, network blip) never interrupts
- * the turn: every *durable* chunk (docs/tech/single-ledger.md §5
+ * the turn: every *durable* chunk (docs/agent/single-ledger/tech.md §5
  * 单-3's durable/ephemeral split, `persistence.ts`'s `isDurableChunk`) is persisted
  * (`conversation_events`, monotonic `seq`) before it's ever handed to a subscriber,
  * so a fresh `GET .../stream?after=<seq>` on reconnect replays whatever was
@@ -36,16 +36,16 @@
  * | `session.ts`        | `TurnDrivenSession`——对接 `@nimbo/sdk` 的那道结构化接缝               |
  * | `log.ts`            | 日志旁路：`LOG_SCOPE` + 每个 chunk 记一行的 `logChunk`                 |
  *
- * Process-restart caveat (docs/tech/chat-webapp.md §2.2b "边界"): `activeTurns` is in-memory
+ * Process-restart caveat (docs/app/chat-webapp/tech.md §2.2b "边界"): `activeTurns` is in-memory
  * only — a server restart mid-turn silently drops it (the sandbox may still
  * be running, but nothing drives `session.stream()` forward anymore). Rows
  * already persisted stay put; the next `GET .../stream` finds no active
- * turn and just replays up to the crash point (docs/tech/single-ledger.md §5 单-3: this turn's
+ * turn and just replays up to the crash point (docs/agent/single-ledger/tech.md §5 单-3: this turn's
  * `kind = 'chunk'` rows never got GC'd, since `finalizeTurnPersistence`
  * never ran — accepted residue, see schema.ts's own doc comment). This is
  * v1's documented trade-off, not a bug to fix here.
  *
- * ---- UIMessage 单账本 migration (docs/tech/single-ledger.md §5 单-3, P13-5-3) ----
+ * ---- UIMessage 单账本 migration (docs/agent/single-ledger/tech.md §5 单-3, P13-5-3) ----
  *
  * This module used to speak `@nimbo/core`'s retired `SessionEvent` union and
  * maintain a handful of server-invented wire-only sentinels/events on top of
@@ -57,7 +57,7 @@
  * `message-metadata` chunk for the genuinely-unexpected-throw case (see
  * `drive.ts`'s `driveTurn`'s `catch` branch) and exactly one synthetic
  * `MessageFrame` per turn — the turn-start user message (see `driveTurn`'s own
- * comment; this is this ticket's fix for docs/tech/single-ledger.md §5 引言's
+ * comment; this is this ticket's fix for docs/agent/single-ledger/tech.md §5 引言's
  * "用户消息乱序/叠在一起" bug, closing the gap `schemas/chat.ts`'s file header
  * used to describe) — no other server-invented wire shapes left.
  *
@@ -71,11 +71,11 @@
  *    finishes gracefully, its remaining newly-appended `NimboUIMessage`s
  *    (assistant steps, steer-injected user messages) get `kind = 'message'`
  *    rows too and the turn's now-superseded `kind = 'chunk'` rows are deleted
- *    (`store.ts`'s `deleteChunkEventsAfter`) — docs/tech/single-ledger.md §5 单-3's "写入时序".
+ *    (`store.ts`'s `deleteChunkEventsAfter`) — docs/agent/single-ledger/tech.md §5 单-3's "写入时序".
  * 2. **审批/ask-user bridges** (`human-bridge.ts`): pure in-memory promise
  *    routing now, with **no `emit` calls at all**. Visibility of a
  *    pending approval is `@nimbo/core`'s own `tool-approval-request` chunk
- *    (docs/tech/single-ledger.md §6.1 — the loop yields it *before* `await`ing `onReview`, so
+ *    (docs/agent/single-ledger/tech.md §6.1 — the loop yields it *before* `await`ing `onReview`, so
  *    it's already on the wire the instant a human's needed); visibility of
  *    its resolution is the matching `tool-approval-response` chunk the loop
  *    yields once `onReview` resolves. Both flow through `session.stream()`
@@ -87,11 +87,11 @@
  *
  * 除这两件事外，本目录还有两个**纯通知点**，都不改变任何 chunk 流转/持久化行为：
  * `onTurnSettled`（这一轮彻底结束了，`start.ts`）与 `onMilestone`（这一轮的第一个
- * chunk / 第一个可见 chunk 抵达了，`drive.ts`，docs/tech/telemetry.md §2.4）。两者的
+ * chunk / 第一个可见 chunk 抵达了，`drive.ts`，docs/app/telemetry/tech.md §2.4）。两者的
  * 共同姿态是「本目录只报告生命周期事件，要不要因此起下一轮、要不要落一行遥测，是
  * 注入方的事」——所以这里既不认识「队列」，也不认识「遥测」。
  *
- * ---- 停止本轮（docs/tech/turn-abort.md） ----
+ * ---- 停止本轮（docs/agent/turn-abort/tech.md） ----
  *
  * 每一轮自带一个 `AbortController`（`ActiveTurn.abortController`），signal 经
  * `session.stream(text, { signal })` 交给 `@nimbo/core`；`abortTurn()` 触发它。

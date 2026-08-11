@@ -53,7 +53,7 @@ describe('postChatMessage', () => {
   });
 
   // 请求 steer 却拿回 `'queued'`：那一轮还卡在[起轮装配](../../../../../docs/terms.md)里，
-  // 插不进去（docs/tech/turn-abort.md §3.3）。调用方靠这个返回值撤掉「待注入」回显。
+  // 插不进去（docs/agent/turn-abort/tech.md §3.3）。调用方靠这个返回值撤掉「待注入」回显。
   it('resolves with `queued` even when `steer` was requested (server is the one that decides)', async () => {
     vi.stubGlobal(
       'fetch',
@@ -300,7 +300,7 @@ describe('streamConversationTail', () => {
     const fetchMock = vi.fn().mockResolvedValue(sseResponse(chunks));
     vi.stubGlobal('fetch', fetchMock);
 
-    // `seq` is `number | undefined` on the envelope type (docs/tech/single-ledger.md §5 单-3) —
+    // `seq` is `number | undefined` on the envelope type (docs/agent/single-ledger/tech.md §5 单-3) —
     // neither fixture frame below is ephemeral, so the assertion still
     // expects concrete numbers.
     const received: (number | undefined)[] = [];

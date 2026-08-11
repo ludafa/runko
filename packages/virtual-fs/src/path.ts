@@ -1,5 +1,5 @@
 /**
- * 虚拟路径规范化与 glob 匹配（docs/tech/core-sdk.md §4.4："路径规范：POSIX 风格虚拟绝对路径；
+ * 虚拟路径规范化与 glob 匹配（docs/core/core-sdk/tech.md §4.4："路径规范：POSIX 风格虚拟绝对路径；
  * `..` 越界在 FS 层直接拒绝——安全边界在 FS 不在工具"）。
  *
  * 本文件不依赖任何具体 FS 实现，纯字符串运算，供 memory.ts/overlay.ts/dir.ts 共用。

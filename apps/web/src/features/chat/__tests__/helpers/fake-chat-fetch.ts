@@ -21,7 +21,7 @@ import type {
  * 请求体里的 `intent`（没有/不认识就是 `undefined`）——`POST .../messages` 的默认
  * `mode` 据它推断，让 fake 的分流结果与真服务端一致：有进行中的一轮时 `intent: 'steer'`
  * → `'steered'`，其余 → `'started'`。测试要覆盖不一致的那几档（比如装配窗口里 steer 被
- * 转成排队，docs/tech/turn-abort.md §3.3）就用 `setMessagePostMode` 显式指定。
+ * 转成排队，docs/agent/turn-abort/tech.md §3.3）就用 `setMessagePostMode` 显式指定。
  */
 function requestedIntent(body: unknown): 'queue' | 'steer' | undefined {
   if (typeof body !== 'object' || body === null || !('intent' in body)) {
@@ -150,7 +150,7 @@ export class FakeChatFetch {
   /**
    * 固定 `POST .../messages` 的 `mode`（服务端实际分流结果，见 `startTurnAckSchema`）。
    * 唯一必须用它的场景是「请求 steer 却拿回 `'queued'`」——那一轮还卡在
-   * [起轮装配](../../../../../../docs/terms.md)里，插不进去（docs/tech/turn-abort.md §3.3）。
+   * [起轮装配](../../../../../../docs/terms.md)里，插不进去（docs/agent/turn-abort/tech.md §3.3）。
    */
   setMessagePostMode(mode: StartTurnMode): void {
     this.messagePostMode = mode;
@@ -255,7 +255,7 @@ export class FakeChatFetch {
     }
 
     // POST .../abort（[停止](../../../../../../docs/terms.md)本轮，
-    // docs/tech/turn-abort.md §3.2）——服务端中止当前轮 + 清空队列，响应带回清空后的
+    // docs/agent/turn-abort/tech.md §3.2）——服务端中止当前轮 + 清空队列，响应带回清空后的
     // 快照（恒为空数组）。
     if (method === 'POST' && kind === 'abort') {
       this.abortPosts.push({ conversationId, body: undefined });
@@ -271,7 +271,7 @@ export class FakeChatFetch {
     }
 
     // DELETE .../queue/:messageId（删一条）与 DELETE .../queue（清空）——两者都返回
-    // 变更后的完整队列快照（docs/tech/steer-and-queue.md §4.2）。
+    // 变更后的完整队列快照（docs/agent/steer-and-queue/tech.md §4.2）。
     if (method === 'DELETE' && kind === 'queue') {
       const messageId = segments[conversationsIndex + 3];
       this.queueDeletes.push({ conversationId, messageId });

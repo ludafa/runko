@@ -1,5 +1,5 @@
 /**
- * `push_subscriptions` 的读写（docs/tech/push-notification.md §2）——与
+ * `push_subscriptions` 的读写（docs/app/push-notification/tech.md §2）——与
  * `agent/store.ts` 同一姿态：一组吃注入 `Db` 的纯函数，测试可以指向内存库而不必
  * 碰 `db/instance.ts` 的单例。
  */

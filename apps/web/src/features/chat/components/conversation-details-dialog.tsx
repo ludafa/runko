@@ -1,5 +1,5 @@
 /**
- * 会话详情弹窗：功能条上放不下、也不必常驻的东西（docs/features/chat-ui.md
+ * 会话详情弹窗：功能条上放不下、也不必常驻的东西（docs/app/chat-ui/feature.md
  * 「会话功能条压成一行」）。两个 tab：
  *
  * - **详情**——这个会话绑在哪条分支、哪个仓库、哪种[沙盒 provider](../../../../../docs/terms.md)。

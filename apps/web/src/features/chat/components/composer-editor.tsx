@@ -1,5 +1,5 @@
 /**
- * [composer](../../../../../docs/terms.md) 的输入区（docs/tech/composer-skill-mention.md §5.3/§6）。
+ * [composer](../../../../../docs/terms.md) 的输入区（docs/app/composer-skill-mention/tech.md §5.3/§6）。
  *
  * 从 `<textarea>` 换成 tiptap，**只为一件事**：拿到「原子节点」这个能力——一枚删得
  * 干净、选得整体、不会被拆成半截字符的[skill 提及](../../../../../docs/terms.md)标记

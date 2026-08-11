@@ -1,7 +1,7 @@
 /**
- * `glob`（docs/tech/builtin-tools.md §1.7）：匹配路径列表，按路径排序（虚拟 FS 无
+ * `glob`（docs/core/builtin-tools/tech.md §1.7）：匹配路径列表，按路径排序（虚拟 FS 无
  * 有意义 mtime，不按修改时间排）；1000 条上限。默认忽略 `.git`/`node_modules`
- * （docs/tech/sandbox.md §4，`DEFAULT_SEARCH_IGNORE`）。
+ * （docs/host/sandbox/tech.md §4，`DEFAULT_SEARCH_IGNORE`）。
  *
  * 双路径自适应：`ctx.fs.searchFiles` 存在时优先一次调用在底座内部完成整个
  * 扫描（远端沙盒场景省掉逐文件网络往返）；未实现该方法、或调用时抛

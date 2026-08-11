@@ -1,5 +1,5 @@
 /**
- * 04-mini-bash — the "same-origin workspace" story from docs/tech/core-sdk.md
+ * 04-mini-bash — the "same-origin workspace" story from docs/core/core-sdk/tech.md
  * §4.5a mode A: `createSession({ fs, exec: miniBash(fs) })` gives the file
  * tools and the `bash` tool the *same* NimboFS instance, so there is nothing
  * to keep in sync — a file written through `write-file` is immediately

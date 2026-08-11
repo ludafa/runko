@@ -1,6 +1,6 @@
 /**
  * [skill 清单](../../../../docs/terms.md)的扫描/落库形态，与
- * [skill 提及](../../../../docs/terms.md)的文本解析——docs/tech/composer-skill-mention.md
+ * [skill 提及](../../../../docs/terms.md)的文本解析——docs/app/composer-skill-mention/tech.md
  * §5.1。
  *
  * 这个文件收着三类彼此独立、但都围绕「一个会话有哪些 skill 可用」的逻辑：
@@ -83,7 +83,7 @@ function describeError(error: unknown): string {
 }
 
 /**
- * 扫描并加载沙盒里全部 skill（docs/tech/composer-skill-mention.md §1 改动 A）。
+ * 扫描并加载沙盒里全部 skill（docs/app/composer-skill-mention/tech.md §1 改动 A）。
  *
  * **best-effort，绝不抛**：这是每轮[起轮装配](../../../../docs/terms.md)的必经
  * 路径，一个坏 skill（缺 SKILL.md、缺 `description` frontmatter、读不动）不该
@@ -161,7 +161,7 @@ function escapeForRegExp(literal: string): string {
 const NAME_CONTINUATION = String.raw`[A-Za-z0-9_\-/]`;
 
 /**
- * 从消息文本里扫出被提及的 skill 名（docs/tech/composer-skill-mention.md §5.1）。
+ * 从消息文本里扫出被提及的 skill 名（docs/app/composer-skill-mention/tech.md §5.1）。
  *
  * **按白名单逐个匹配**，不是「先用一个大正则捞出所有 `/xxx` 再过滤」：这样
  * 用户正常输入的路径（`/usr/local`、`cd /etc`）根本不会进入候选，也不必担心
@@ -187,12 +187,12 @@ export function extractMentionedSkills(
 }
 
 /**
- * 拼出发给模型的文本（docs/tech/composer-skill-mention.md §2.2）。
+ * 拼出发给模型的文本（docs/app/composer-skill-mention/tech.md §2.2）。
  *
  * **提及为空时原样返回同一个字符串**——不用这个功能的用户，喂给模型的字节与
  * 本功能上线前完全一致，零副作用。
  *
- * 这一行提示是「[软提示](../../../../docs/features/composer-skill-mention.md)」
+ * 这一行提示是「[软提示](../../../../docs/app/composer-skill-mention/feature.md)」
  * 路线能真正生效的关键：只把 `/frontend-design` 留在文本里，对模型而言就是一串
  * 普通字符，没有任何理由让它去调 `load-skill`。措辞集中在这一处，方便日后按实测
  * 效果调；将来若要升级成「硬注入 SKILL.md 正文」，改动也只落在这个函数。

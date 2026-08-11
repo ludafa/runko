@@ -1,5 +1,5 @@
 /**
- * `loadAgent(dir, opts?)`：L3 目录约定层（docs/tech/core-sdk.md §4.7；P7-3 工单任务 2）——
+ * `loadAgent(dir, opts?)`：L3 目录约定层（docs/core/core-sdk/tech.md §4.7；P7-3 工单任务 2）——
  * eve 布局兼容："agent 目录"约定：`instructions.md`（必需，或 `opts.instructions`
  * 兜底）+ `agent.ts`/`agent.json`（model 等运行配置，动态 import()）+
  * `tools/*.ts`（文件名即工具名，动态 import()）+ `skills/`（flat `*.md` +
@@ -281,7 +281,7 @@ function isToolLikeRecord(record: Record<string, unknown>): record is ToolLikeRe
   return typeof record.description === "string" && typeof record.execute === "function" && isZodSchemaLike(record.inputSchema);
 }
 
-/** docs/tech/single-ledger.md §6.1 三值重构：固定策略字符串是 "allow"/"review"/"review-once"/"deny"（旧 "never"/"always"/"once" 已废）。 */
+/** docs/agent/single-ledger/tech.md §6.1 三值重构：固定策略字符串是 "allow"/"review"/"review-once"/"deny"（旧 "never"/"always"/"once" 已废）。 */
 function isApprovalPolicyLike(value: unknown): value is ApprovalPolicy {
   return value === "allow" || value === "review" || value === "review-once" || value === "deny" || typeof value === "function";
 }
@@ -360,7 +360,7 @@ async function loadSkillsDir(absoluteDir: string): Promise<Skill[]> {
 // ---- loadAgent(dir, opts?) ----
 
 /**
- * L3 目录约定层（docs/tech/core-sdk.md §4.7）：把一个 eve 布局的 agent 目录加载成
+ * L3 目录约定层（docs/core/core-sdk/tech.md §4.7）：把一个 eve 布局的 agent 目录加载成
  * `AgentDefinition`。`opts.model` 优先于 `agent.ts`/`agent.json` 里的 model；
  * 两者都没提供 model 时报错带指导。
  */

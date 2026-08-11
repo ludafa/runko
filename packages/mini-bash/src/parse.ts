@@ -1,5 +1,5 @@
 /**
- * mini-bash 命令行解析（docs/tech/core-sdk.md §4.5a / docs/plans/core-sdk.md P6）：
+ * mini-bash 命令行解析（docs/core/core-sdk/tech.md §4.5a / docs/core/core-sdk/plan.md P6）：
  * 单双引号（含引号内空格与嵌引号）、空白分词、单层管道 `|`、命令分隔符
  * `;`、逻辑操作符 `&&`/`||`、`2>&1`。语法结构对齐 POSIX 优先级：`|` 最紧
  * （管道内各阶段先组成一个整体）；`&&`/`||` 同级、左结合，连接管道；`;`

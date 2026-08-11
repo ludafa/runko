@@ -10,7 +10,7 @@
  * doc comment (added in this ticket specifically to make this wiring possible; `agent.tools`
  * is frozen at `createSession(...)` time, before which no `Session` object exists yet).
  *
- * P13-5-2（docs/tech/single-ledger.md）迁移：断言从 `SessionEvent`/
+ * P13-5-2（docs/agent/single-ledger/tech.md）迁移：断言从 `SessionEvent`/
  * `SessionItem` 改为读账本（`session.toJSON().messages` 的部件），`file_change`/
  * `plan_update` 由 `data-file-change`（逐条追加）/`data-plan-update`（同 id
  * 覆盖）两个 data 部件承载。
@@ -65,7 +65,7 @@ function stopChunk(text: string) {
 
 /**
  * File tools signal domain-level failures (e.g. read-before-write violations) via a normal
- * `{ isError: true, content }` return value (docs/tech/builtin-tools.md §0.5), not by throwing —
+ * `{ isError: true, content }` return value (docs/core/builtin-tools/tech.md §0.5), not by throwing —
  * so the tool part still settles to `state: "output-available"`; the failure shows up in
  * `output`. Narrows the tool part's `output` (`unknown` — TOOLS type param default, see
  * `state.ts`'s `NimboUIMessage` header) down to that shape's `content` string without a type

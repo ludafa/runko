@@ -4,7 +4,7 @@
  * 的最小 `VercelSandboxLike` 实现（`fs.*` 直接落在 `node:fs/promises`，`runCommand` 真的启子进程），
  * 指向一个真实、hermetic 的临时目录（`os.tmpdir()`，不落进仓库，afterEach 清理）。
  *
- * 覆盖 docs/tech/sandbox.md §4 原生搜索快路径的行为契约：正则匹配、行号、±context、
+ * 覆盖 docs/host/sandbox/tech.md §4 原生搜索快路径的行为契约：正则匹配、行号、±context、
  * maxFiles/maxLines 双闸截断、ignore 剪枝（ancestor-or-self）、二进制文件跳过——并对着
  * `MemoryFS` + JS 回退路径（同一份文件内容）做结果对拍，证明两条路径在正常输入上语义一致。
  */

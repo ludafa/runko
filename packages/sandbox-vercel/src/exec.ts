@@ -1,6 +1,6 @@
 /**
  * `createVercelExec(sandbox, root)`：NimboExec 在 `sandbox.runCommand` 上的实现
- * （docs/tech/sandbox.md §3.2 / §8.2 Vercel 列）。
+ * （docs/host/sandbox/tech.md §3.2 / §8.2 Vercel 列）。
  *
  * ---- argv 语义：整段脚本是单个 argv，零字符串拼接 ----
  *
@@ -12,7 +12,7 @@
  *
  * ---- 超时：SDK 有原生 `timeoutMs` 字段，但契约仍自己用 AbortController 兜底 ----
  *
- * 工单研究文档（docs/tech/sandbox.md §2/§8.2）说 Vercel "无 timeout 选项"，但实测当前安装的
+ * 工单研究文档（docs/host/sandbox/tech.md §2/§8.2）说 Vercel "无 timeout 选项"，但实测当前安装的
  * `@vercel/sandbox@2.5.0` d.ts（`session.d.ts` 的 `RunCommandParams`）其实已经
  * 有 `timeoutMs?: number`（"sandbox 侧到点 SIGKILL"）——工单研究文档这一点已过
  * 时，这里如实记录偏差。但仍按工单指示自建 `AbortController` 竞速作为 124/130
@@ -107,7 +107,7 @@ function collectorStream(stream: "stdout" | "stderr", onOutput: ExecOptions["onO
 
 export function createVercelExec(sandbox: VercelSandboxLike, root: string, keepAlive?: KeepAlive): NimboExec {
   return {
-    // docs/tech/single-ledger.md §6.1（@nimbo/core 审批三值重构，P13-5-2c）：旧 "never" → "allow"（沙盒实现，隔离即边界）。
+    // docs/agent/single-ledger/tech.md §6.1（@nimbo/core 审批三值重构，P13-5-2c）：旧 "never" → "allow"（沙盒实现，隔离即边界）。
     defaultApproval: "allow",
     describe(): string {
       return DESCRIBE;
@@ -130,7 +130,7 @@ export function createVercelExec(sandbox: VercelSandboxLike, root: string, keepA
       });
 
       /**
-       * [保活](../../../docs/terms.md)的第二个信号源（docs/tech/sandbox-keepalive.md §3.1）：
+       * [保活](../../../docs/terms.md)的第二个信号源（docs/host/sandbox-keepalive/tech.md §3.1）：
        * 命令跑起来之后 core **一个 chunk 都不会产出**——`@nimbo/core` 的 `loop.ts`
        * 把工具进度先缓冲、等命令 resolve 之后才重放。所以一条跑十分钟的命令，这十分钟
        * 里 core 侧的活动信号是零，而这恰恰是最容易把沙盒跑没的场景。

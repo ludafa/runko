@@ -1,5 +1,5 @@
 /**
- * `write-file`（docs/tech/builtin-tools.md §1.2）：整文件写入，父目录自动创建（FS 层
+ * `write-file`（docs/core/builtin-tools/tech.md §1.2）：整文件写入，父目录自动创建（FS 层
  * 已保证，工具层不重复实现——§0.2）；覆盖已存在且未读过的文件 → 拒绝（§0.4）。
  */
 import { z } from "zod";

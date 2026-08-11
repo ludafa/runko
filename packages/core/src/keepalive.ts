@@ -1,6 +1,6 @@
 /**
  * [保活](../../../docs/terms.md)引擎 —— [续期闸门](../../../docs/terms.md)的通用实现
- * （docs/tech/sandbox-keepalive.md §5.4）。
+ * （docs/host/sandbox-keepalive/tech.md §5.4）。
  *
  * **这个文件是一件工具，不是 core 的行为。** `session.ts` 不 import 它、不调它、
  * 也不知道它存在——core 侧依然零定时器零保活策略（见 `types.ts` 的
@@ -15,7 +15,7 @@
  *
  * 云沙盒的超时是倒计时，**跑命令不会把它往后推**（Cloudflare 的 `sleepAfter`
  * 是例外，它是真空闲检测，所以那个适配器不用这套）。所以一轮只要跑得比超时长，
- * 沙盒就会在跑到一半时被平台暂停。详见 docs/features/sandbox-keepalive.md §1。
+ * 沙盒就会在跑到一半时被平台暂停。详见 docs/host/sandbox-keepalive/feature.md §1。
  *
  * ---- 三个信号源，一个闸门 ----
  *
@@ -26,7 +26,7 @@
  */
 import type { ActivitySignal } from "./types.js";
 
-/** 一次真实续期尝试的结果，交给宿主看日志、以及同步宿主自己的存活时间账（见 docs/tech/sandbox-keepalive.md §6.1）。 */
+/** 一次真实续期尝试的结果，交给宿主看日志、以及同步宿主自己的存活时间账（见 docs/host/sandbox-keepalive/tech.md §6.1）。 */
 export interface RenewInfo {
   ok: boolean;
   /** 这次是被谁触发的。 */

@@ -1,5 +1,5 @@
 /**
- * 推送订阅接口的 wire 契约（docs/tech/push-notification.md §3.1）。
+ * 推送订阅接口的 wire 契约（docs/app/push-notification/tech.md §3.1）。
  *
  * 形状直接对齐浏览器 `PushSubscription.toJSON()` 的输出（`{endpoint, keys:{p256dh,
  * auth}}`）——前端拿到订阅后原样 POST 上来，中间不做任何搬运，少一层就少一处

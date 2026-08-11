@@ -1,12 +1,12 @@
 /**
- * `agent/chat-agent.ts`'s `buildSession` (docs/tech/chat-webapp.md §2.2c
- * （审批链）, docs/tech/single-ledger.md §5 单-3/§6): coverage for the
+ * `agent/chat-agent.ts`'s `buildSession` (docs/app/chat-webapp/tech.md §2.2c
+ * （审批链）, docs/agent/single-ledger/tech.md §5 单-3/§6): coverage for the
  * two pieces of surface this module adds on top of a plain `@nimbo/sdk`
  * `createSession` call —
  *
  *   1. `gateWorkspace` (private, not exported): every `NimboFS`/`NimboExec`
  *      method forwards to the original workspace unchanged, `defaultApproval`
- *      is forced to `"review"` (docs/tech/single-ledger.md §6.1's three-value `ApprovalOutcome`
+ *      is forced to `"review"` (docs/agent/single-ledger/tech.md §6.1's three-value `ApprovalOutcome`
  *      — the retired boolean-flavored `"always"` string is gone), `describe`
  *      is included only when the original workspace has one, and
  *      `approvalMode: "off"` skips the wrapping entirely (the returned
@@ -103,7 +103,7 @@ async function createSpyWorkspace(
   const exec = vi.fn((_req: ExecRequest) => Promise.resolve(execResult));
   const describeSpy =
     opts.withDescribe === true ? vi.fn(() => 'test env') : undefined;
-  // 原生搜索可选方法（docs/tech/builtin-tools.md §3.7/§3.8）：MemoryFS 本身刻意
+  // 原生搜索可选方法（docs/core/builtin-tools/tech.md §3.7/§3.8）：MemoryFS 本身刻意
   // 不实现，这里按需挂假实现——用来锁定 gateWorkspace 必须转发可选能力方法
   // （2026-07-16 的回归：只转发七个必选方法导致 chat 应用里原生搜索永远失效）。
   const searchFilesSpy =
@@ -135,7 +135,7 @@ async function createSpyWorkspace(
     : {}),
   };
 
-  // docs/tech/composer-skill-mention.md §1 改动 A：`buildSession` 不再自己读沙盒，
+  // docs/app/composer-skill-mention/tech.md §1 改动 A：`buildSession` 不再自己读沙盒，
   // skill 由调用方加载后传入——这里就地扫同一个假 workspace，让测试用的仍是
   // 「真加载出来的 skill」。加载行为本身由 `skill-catalog.test.ts` 覆盖。
   const skills = await loadSkillsFromWorkspace(workspace, silentLogger);
@@ -169,7 +169,7 @@ interface BaseBuildOptions {
 }
 
 /**
- * docs/tech/composer-skill-mention.md §1 改动 A 之后 `buildSession` 不再自己读
+ * docs/app/composer-skill-mention/tech.md §1 改动 A 之后 `buildSession` 不再自己读
  * 沙盒，skill 由调用方（`turn-launcher.ts`）加载后传入——这里就地用
  * `loadSkillsFromWorkspace` 扫同一个假 workspace，保持「测的是真加载出来的
  * skill」而不是手搓一个 stub 对象。加载本身的行为由 `skill-catalog.test.ts` 覆盖。
@@ -187,7 +187,7 @@ function baseBuildOptions(spy: SpyWorkspace): BaseBuildOptions {
 
 type BuiltSession = Awaited<ReturnType<typeof buildSession>>;
 
-/** Drains a session's `stream(text)` to completion and hands back the finished ledger (`session.toJSON().messages`) — the new "what happened this turn" source of truth (docs/tech/single-ledger.md §5 单-3), replacing the retired `SessionEvent`/`SessionItem` stream inspection. */
+/** Drains a session's `stream(text)` to completion and hands back the finished ledger (`session.toJSON().messages`) — the new "what happened this turn" source of truth (docs/agent/single-ledger/tech.md §5 单-3), replacing the retired `SessionEvent`/`SessionItem` stream inspection. */
 async function drainStream(
   session: BuiltSession,
   text: string,
@@ -196,7 +196,7 @@ async function drainStream(
   return { messages: session.toJSON().messages };
 }
 
-/** The tool part (`tool-<name>`) for a given tool name, across a finished turn's messages — at most one per `toolCallId` (docs/tech/single-ledger.md §4.1 实现教训: only the settled state is ever recorded). */
+/** The tool part (`tool-<name>`) for a given tool name, across a finished turn's messages — at most one per `toolCallId` (docs/agent/single-ledger/tech.md §4.1 实现教训: only the settled state is ever recorded). */
 function findToolPart(
   messages: NimboUIMessage[],
   toolName: string,
@@ -522,7 +522,7 @@ describe('agent/chat-agent: buildSession — ask-user tool registration', () => 
 });
 
 // ---------------------------------------------------------------------------
-// web-search 条件注册（docs/tech/web-search.md §5；工具本身的单测在
+// web-search 条件注册（docs/app/web-search/tech.md §5；工具本身的单测在
 // test/agent/web-search.test.ts）。三条覆盖它的两个注册来源与「都没有」那一档；
 // env 那条用 stubGlobal 拦下全局 fetch，所以整个文件仍是零网络。
 // ---------------------------------------------------------------------------

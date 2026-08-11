@@ -1,5 +1,5 @@
 /**
- * L2 运行层：`createSession`/`Session`（docs/tech/core-sdk.md §4.2 全节 / §4.8 终止与恢复
+ * L2 运行层：`createSession`/`Session`（docs/core/core-sdk/tech.md §4.2 全节 / §4.8 终止与恢复
  * 边界）。持有一个会话跨 turn 的全部持久状态，把"给定状态跑一个 turn"的活
  * 委派给 `loop.ts` 的 `runTurn`——本文件只做状态的所有权与生命周期、输入/
  * 输出的组装、以及 `send()` 相对 `stream()` 的缓冲语义。
@@ -40,7 +40,7 @@
  * 得到"注入 fs，或改用 @nimbo/sdk"的错误消息；`@nimbo/sdk` 是允许依赖两者的
  * 门面包，默认 `MemoryFS` 装配归 P7 落在那里。
  *
- * ---- exec/workspace 与 bash 的条件内置（P6-2 施工回填，docs/tech/core-sdk.md §4.5a） ----
+ * ---- exec/workspace 与 bash 的条件内置（P6-2 施工回填，docs/core/core-sdk/tech.md §4.5a） ----
  *
  * `SessionOptions.exec?: NimboExec` 注入才会在 `assembleTools` 里出现内置
  * `bash` 工具——与 `load-skill` 由 `agent.skills` 隐式控制是同一族"条件内置"
@@ -58,7 +58,7 @@
  * 却又传了别的 fs/exec，实际生效的是哪个"的隐性歧义。判断与报错落在
  * `resolveExecutionSurfaces`。
  *
- * ---- 结构化输出 + 序列化/恢复（P7-2，docs/tech/core-sdk.md §4.2/§4.8） ----
+ * ---- 结构化输出 + 序列化/恢复（P7-2，docs/core/core-sdk/tech.md §4.2/§4.8） ----
  *
  * `send<T>(...outputSchema)` 的实际生成逻辑（`generateText`+`Output`+重试）
  * 全部在 `structured.ts`；本文件只做"正常 turn 收尾后要不要多走一轮"的调度
@@ -97,7 +97,7 @@
  * `mountSkillFiles` 一节相同：那会是破坏性签名变更）。
  *
  * `session.started`/`turn.started`（旧 `SessionEvent`）不再有对应 chunk——
- * docs/tech/single-ledger.md §2.2a 原文"session.started / seq 时钟 | 不需要部件"，`turn.started`
+ * docs/agent/single-ledger/tech.md §2.2a 原文"session.started / seq 时钟 | 不需要部件"，`turn.started`
  * 同理（没有分配 data 部件/metadata 承载它，调用方发起 `stream()` 本身就是
  * "新一轮开始"的信号）；`hasStarted`/`session.started` 重发抑制机制随之整体
  * 移除，不再需要"resume 后不重发"的裁量。
@@ -136,7 +136,7 @@ import type {
 } from "./types.js";
 import type { NimboError, Usage } from "./events.js";
 
-// ---- Input / InputBlock（docs/tech/core-sdk.md §4.2） ----
+// ---- Input / InputBlock（docs/core/core-sdk/tech.md §4.2） ----
 
 export type InputBlock =
   | { type: "text"; text: string }
@@ -144,14 +144,14 @@ export type InputBlock =
 
 export type Input = string | InputBlock[];
 
-// ---- TurnOptions / TurnResult（docs/tech/core-sdk.md §4.2；outputSchema 见本文件头"结构化输出"一节） ----
+// ---- TurnOptions / TurnResult（docs/core/core-sdk/tech.md §4.2；outputSchema 见本文件头"结构化输出"一节） ----
 
 export interface TurnOptions {
   signal?: AbortSignal;
 }
 
 /**
- * `items: SessionItem[]` 已随 `SessionItem` 退役而移除（docs/tech/single-ledger.md §5 单-2）——"这个 turn 发生了什么"现在读账本本身
+ * `items: SessionItem[]` 已随 `SessionItem` 退役而移除（docs/agent/single-ledger/tech.md §5 单-2）——"这个 turn 发生了什么"现在读账本本身
  * （`Session.toJSON().messages`，`NimboUIMessage[]` 的部件/metadata），不再
  * 有一份平行的 item 列表。`finalResponse`/`usage` 两个字段的类型与语义不变
  * （工单原文"TurnResult 形状不变"，这里按二者仍逐字保留的意思落实；`items`
@@ -188,7 +188,7 @@ export function createSessionReadState(): SessionReadState {
   };
 }
 
-// ---- SessionOptions（docs/tech/core-sdk.md §4.2；exec/workspace 见下方字段注释） ----
+// ---- SessionOptions（docs/core/core-sdk/tech.md §4.2；exec/workspace 见下方字段注释） ----
 
 export interface SessionOptions {
   fs?: NimboFS;
@@ -196,10 +196,10 @@ export interface SessionOptions {
   exec?: NimboExec;
   /** 语法糖：同源工作区一次注入 fs + exec（§4.5a 模式 A）；与 `fs`/`exec` 互斥，理由见本文件头。 */
   workspace?: NimboFS & NimboExec;
-  /** 审批分类器（docs/tech/single-ledger.md §6.2，取代旧的 `shouldAutoAllow`）——per-tool 升级到这里的兜底判定，见 `@nimbo/core/approval.js` 头注释。 */
+  /** 审批分类器（docs/agent/single-ledger/tech.md §6.2，取代旧的 `shouldAutoAllow`）——per-tool 升级到这里的兜底判定，见 `@nimbo/core/approval.js` 头注释。 */
   onApproval?: ApprovalPolicy;
   /**
-   * 人审通道（docs/tech/single-ledger.md §6.4 P13-5-2c 新增，`ApprovalReviewer`，types.ts）：
+   * 人审通道（docs/agent/single-ledger/tech.md §6.4 P13-5-2c 新增，`ApprovalReviewer`，types.ts）：
    * `evaluateApproval` 解析出 `review` 后，`loop.ts` 先 yield
    * `tool-approval-request` chunk 再 `await` 这个函数拿到人工裁决——与
    * `onApproval`（同步的三值分类）是两个独立的注入点。未注入时 `review`
@@ -252,7 +252,7 @@ export interface SessionOptions {
  */
 export type SessionDerivedDataRecorder = Pick<DerivedDataCollector, "recordFileChange" | "recordPlanUpdate">;
 
-// ---- Session（docs/tech/core-sdk.md §4.2） ----
+// ---- Session（docs/core/core-sdk/tech.md §4.2） ----
 
 export interface Session {
   readonly id: string;
@@ -264,10 +264,10 @@ export interface Session {
   send(input: Input, opts?: TurnOptions): Promise<TurnResult>;
   /** 结构化输出（§4.8；实现见本文件头"结构化输出"一节 / `structured.ts`）。 */
   send<T>(input: Input, opts: TurnOptions & { outputSchema: z.ZodType<T> }): Promise<TurnResult & { structuredOutput: T }>;
-  /** ai 的 UIMessageChunk 词汇表（对 `NimboUIMessage` 实例化，`state.ts` 的 `NimboChunk`）——任何 AI SDK 兼容客户端可直接消费（docs/tech/single-ledger.md §5 单-2 目标架构 2）。 */
+  /** ai 的 UIMessageChunk 词汇表（对 `NimboUIMessage` 实例化，`state.ts` 的 `NimboChunk`）——任何 AI SDK 兼容客户端可直接消费（docs/agent/single-ledger/tech.md §5 单-2 目标架构 2）。 */
   stream(input: Input, opts?: TurnOptions): AsyncGenerator<NimboChunk, TurnResult>;
   /**
-   * 软 steer（STEER-1，docs/tech/core-sdk.md §4.2）：turn 进行中调用则把 `input` 排队、在
+   * 软 steer（STEER-1，docs/core/core-sdk/tech.md §4.2）：turn 进行中调用则把 `input` 排队、在
    * 下一个 step checkpoint 注入为一条 user 消息（不打断进行中的模型流式输出
    * 或工具执行）并返回 `true`；没有进行中的 turn（尚未 `send`/`stream`，或上
    * 一个 turn 已经收尾）返回 `false`——调用方此时应改用 `send`/`stream` 发起
@@ -322,7 +322,7 @@ function createUnconfiguredFS(): NimboFS {
 
 /**
  * P5 补充：`agent.skills` 非空时在 instructions 之后追加 `<available_skills>`
- * 段（docs/tech/core-sdk.md §4.6 第 1 点）。拼装顺序是"人写的 instructions 在前、skills 元
+ * 段（docs/core/core-sdk/tech.md §4.6 第 1 点）。拼装顺序是"人写的 instructions 在前、skills 元
  * 数据在后"——后者是运行时派生的补充信息，不是 instructions 本文的一部分。
  */
 function buildSystemPrompt(agent: AgentDefinition, opts: SessionOptions): string | undefined {
@@ -366,7 +366,7 @@ function isUpdatePlanEnabled(builtinTools: BuiltinToolName[] | false | undefined
 }
 
 /**
- * `load-skill` 是条件内置（docs/tech/builtin-tools.md §1.9 / §3 括注）：不经
+ * `load-skill` 是条件内置（docs/core/builtin-tools/tech.md §1.9 / §3 括注）：不经
  * `builtinTools` 裁剪，只看 `agent.skills` 是否配置了至少一个 skill——与
  * `bash` 由 `NimboExec` 注入触发是同一族"条件内置"机制，但触发条件各自独立。
  */
@@ -377,7 +377,7 @@ function isLoadSkillEnabled(skills: Skill[] | undefined): boolean {
 /**
  * `agent.tools` + core 自带的内置工具（`update-plan` 恒定、`load-skill`/
  * `bash` 条件内置，文件工具八件套归 P7）。宿主同名工具覆盖内置实现
- * （docs/tech/builtin-tools.md §3），因此展开顺序是内置在前、`agent.tools` 在后。
+ * （docs/core/builtin-tools/tech.md §3），因此展开顺序是内置在前、`agent.tools` 在后。
  */
 function assembleTools(agent: AgentDefinition, planStore: PlanStore, derivedData: DerivedDataCollector, exec: NimboExec | undefined): Record<string, Tool> {
   const builtins: Record<string, Tool> = {};
@@ -398,7 +398,7 @@ function assembleTools(agent: AgentDefinition, planStore: PlanStore, derivedData
 
 const WORKSPACE_EXCLUSIVITY_MESSAGE =
   "SessionOptions.workspace is mutually exclusive with fs/exec — workspace (NimboFS & NimboExec) already " +
-  "provides both from a single same-source object (docs/tech/core-sdk.md §4.5a mode A). Pass either { workspace } alone, " +
+  "provides both from a single same-source object (docs/core/core-sdk/tech.md §4.5a mode A). Pass either { workspace } alone, " +
   "or { fs, exec } (either or both) without workspace — mixing the two leaves it ambiguous which fs/exec " +
   "actually took effect.";
 
@@ -438,7 +438,7 @@ function hasRestoreCapability(candidate: NimboFS): candidate is NimboFS & FSRest
   return "restore" in candidate && typeof candidate.restore === "function";
 }
 
-// ---- 活动信号（docs/tech/sandbox-keepalive.md §5.2） ----
+// ---- 活动信号（docs/host/sandbox-keepalive/tech.md §5.2） ----
 
 /**
  * core 侧节流间隔，**只为降噪**：一轮里 chunk 可能每秒来几十个，逐个通知远端
@@ -558,7 +558,7 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
   const tools = assembleTools(agent, planStore, derivedData, exec);
   const getSkill = createGetSkill(agent.skills ?? []);
   /**
-   * P5：附属文件挂载"createSession 时"触发（docs/tech/core-sdk.md §4.6 第 3 点原文）——
+   * P5：附属文件挂载"createSession 时"触发（docs/core/core-sdk/tech.md §4.6 第 3 点原文）——
    * `mountSkillFiles(...)` 在这里被调用（不是等到第一次 `stream()`），只是它的
    * 完成（`await`）挪到 `stream()` 顶部，理由是 `createSession` 本身是同步函数、
    * 不能在这里 `await` 一个可能真异步的 `NimboFS.writeFile`（真实沙盒实现）；
@@ -585,7 +585,7 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
    * catches in `loop.ts`) doesn't drain the queue first — content queued
    * during that in-flight model call/tool execution is dropped when the turn
    * fails that way, not injected. Not fixed by this method; see loop.ts's
-   * `runTurn` header and docs/tech/core-sdk.md §4.2 for the up-to-date list of which
+   * `runTurn` header and docs/core/core-sdk/tech.md §4.2 for the up-to-date list of which
    * termination paths do drain.
    */
   function steer(input: Input): boolean {
@@ -603,7 +603,7 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
       messages.push(toUserUIMessage(input));
 
       /**
-       * [活动信号](../../../docs/terms.md)的 turn 作用域节流状态（docs/tech/sandbox-keepalive.md §5.2）。
+       * [活动信号](../../../docs/terms.md)的 turn 作用域节流状态（docs/host/sandbox-keepalive/tech.md §5.2）。
        * 每轮重置，所以一轮的第一个 chunk 必定发信号——新一轮开始就该让远端知道。
        */
       let lastActivityAt = 0;

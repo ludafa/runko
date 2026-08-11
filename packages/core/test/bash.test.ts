@@ -68,7 +68,7 @@ describe("createBashTool", () => {
     });
   });
 
-  describe("approval default (§1.10 取 exec.defaultApproval; docs/tech/single-ledger.md §6.1 三值重构 never→allow / always→review)", () => {
+  describe("approval default (§1.10 取 exec.defaultApproval; docs/agent/single-ledger/tech.md §6.1 三值重构 never→allow / always→review)", () => {
     it("uses exec.defaultApproval verbatim when declared 'allow'", () => {
       const tool = createBashTool({ exec: fakeExec({ defaultApproval: "allow" }) });
       expect(tool.approval).toBe("allow");
@@ -85,7 +85,7 @@ describe("createBashTool", () => {
     });
   });
 
-  describe("execute(): timeout/non-zero exit are normal results, not thrown errors (§1.10 / docs/tech/builtin-tools.md §4)", () => {
+  describe("execute(): timeout/non-zero exit are normal results, not thrown errors (§1.10 / docs/core/builtin-tools/tech.md §4)", () => {
     it("formats a successful (exit 0) run with stdout and the exit code", async () => {
       const tool = createBashTool({ exec: fakeExec({ result: resultOf(0, "hello\n", "") }) });
       const output = await tool.execute({ command: "echo hello" }, makeCtx());
@@ -149,7 +149,7 @@ describe("createBashTool", () => {
     });
   });
 
-  describe("onOutput → ctx.update() (§1.10 / docs/tech/builtin-tools.md §4)", () => {
+  describe("onOutput → ctx.update() (§1.10 / docs/core/builtin-tools/tech.md §4)", () => {
     it("forwards every onOutput chunk's data to ctx.update, in order", async () => {
       const update = vi.fn();
       const tool = createBashTool({

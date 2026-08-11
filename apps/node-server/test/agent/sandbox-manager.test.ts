@@ -277,7 +277,7 @@ describe('sandbox-manager', () => {
     expect(second.defaultBranch).toBe('main');
   });
 
-  it('acquire(): reports which of the three paths it took via `mode` (观测字段，docs/tech/telemetry.md §2.4)', async () => {
+  it('acquire(): reports which of the three paths it took via `mode` (观测字段，docs/app/telemetry/tech.md §2.4)', async () => {
     // 3：resume 报 unavailable → 重建。
     const rebuilding = createFakeProvider({
       resumeResult: async () => ({ kind: 'unavailable' }),
@@ -329,7 +329,7 @@ describe('sandbox-manager', () => {
   });
 
   // -------------------------------------------------------------------------
-  // SP-7 缓存失效 + 保活心跳（docs/tech/sandbox-provider.md §5.1）。
+  // SP-7 缓存失效 + 保活心跳（docs/host/sandbox-provider/tech.md §5.1）。
   // 底层前提：平台超时是**绝对截止时间**，跑命令不续期——所以缓存句柄会过期，
   // 长轮次需要心跳。
   // -------------------------------------------------------------------------
@@ -589,7 +589,7 @@ describe('sandbox-manager', () => {
   });
 });
 
-describe('resolveDefaultProvider (docs/tech/sandbox-provider.md §6)', () => {
+describe('resolveDefaultProvider (docs/host/sandbox-provider/tech.md §6)', () => {
   const ORIGINAL = process.env.SANDBOX_PROVIDER;
 
   afterEach(() => {

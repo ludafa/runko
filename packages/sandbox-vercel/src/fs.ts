@@ -1,11 +1,11 @@
 /**
  * `createVercelFs(sandbox, root)`：NimboFS 七方法在 `sandbox.fs`（node:fs/promises
- * 兼容子集）上的直译（docs/tech/sandbox.md §3.1 / §8.2 Vercel 列）。
+ * 兼容子集）上的直译（docs/host/sandbox/tech.md §3.1 / §8.2 Vercel 列）。
  *
  * ---- 一个实测推翻工单研究原文的发现：`fs.rm()` 无法承担"非递归删非空目录
  * 拒绝"的语义 ----
  *
- * docs/tech/sandbox.md §8.2 原文说 Vercel 的 `fs.rm(p, {recursive})` "原生对齐"——本地实测
+ * docs/host/sandbox/tech.md §8.2 原文说 Vercel 的 `fs.rm(p, {recursive})` "原生对齐"——本地实测
  * `node:fs/promises`（Vercel Sandbox 的 `fs.*` 是这套 API 的兼容子集，语义应
  * 一致）证明并不成立：`fs.rm(path)`（`recursive` 缺省/false）对**任何**目录都
  * 抛 `ERR_FS_EISDIR`，不区分空/非空——用它去实现"非递归删空目录成功、删非空
@@ -14,7 +14,7 @@
  * 的是 `fs.rmdir()`（同样实测确认）。因此非递归删除按目标类型分流：文件走
  * `fs.rm()`；目录走 `fs.rmdir()`（拿到真正的 `ENOTEMPTY` 可翻译）；`recursive:
  * true` 时统一走 `fs.rm(path, {recursive:true, force:true})`。代价是非递归删
- * 目录多一次 `stat` 判断类型，可接受（docs/tech/sandbox.md §4 第 6 点本就预期扫描类操作
+ * 目录多一次 `stat` 判断类型，可接受（docs/host/sandbox/tech.md §4 第 6 点本就预期扫描类操作
  * 走 bash，单次 rm 调用的额外 RTT 量级不在那条建议的射程内）。
  *
  * ---- readdir 不逐条目 stat 取 size/mtime ----
@@ -28,7 +28,7 @@
  * 代价。因此 readdir 条目只填 name/type/mimeType，size/mtime 留空（FileStat 里
  * 两者本就是可选字段），需要精确 mtime 时调用方本就该单独 `stat()` 该路径。
  *
- * ---- 原生搜索快路径（docs/tech/sandbox.md §4）：`searchFiles`/`searchContent` + `glob` 重写 ----
+ * ---- 原生搜索快路径（docs/host/sandbox/tech.md §4）：`searchFiles`/`searchContent` + `glob` 重写 ----
  *
  * `NimboFS.searchFiles?`/`searchContent?` 是 grep/glob 工具的能力接缝（实现了就优先调，
  * 否则/`SearchUnsupportedError` 时回退现有 JS 逐文件扫描，见 `@nimbo/virtual-fs`

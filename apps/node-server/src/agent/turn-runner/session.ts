@@ -23,7 +23,7 @@ import type { NimboChunk, SessionState, TurnResult } from '@nimbo/core';
 export interface TurnDrivenSession {
   /**
    * `opts` 是 `@nimbo/core` 的 `TurnOptions` 里本目录唯一用到的那一项
-   * （docs/tech/turn-abort.md §3.1）：每一轮自己的 `AbortController.signal`，
+   * （docs/agent/turn-abort/tech.md §3.1）：每一轮自己的 `AbortController.signal`，
    * [停止](../../../../../docs/terms.md)靠它落地。声明成可选 + 只含 `signal`，所以
    * 一个只实现了 `stream(input)` 的测试 fake 仍然满足这个接口（多余的实参在
    * 运行期被忽略）——与 `steer` 同样的「比真类型更窄」姿态。

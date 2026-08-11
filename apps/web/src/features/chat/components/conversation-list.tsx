@@ -1,7 +1,7 @@
 /**
  * 侧栏的会话列表 + 新建入口。
  *
- * 改版做的两件事（docs/features/chat-ui.md「其余可见变化」）：
+ * 改版做的两件事（docs/app/chat-ui/feature.md「其余可见变化」）：
  *
  * 1. **新建表单从侧栏挪进弹窗**。它一个会话只用一次，却常驻占着列表最显眼的
  *    位置，先收成一枚 `＋ 新会话` 点开才展开——但侧栏只有 220px 宽，展开后的
@@ -57,7 +57,7 @@ export function SessionList({
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
   // Defaults to 'vercel' — matches the server's own `SANDBOX_PROVIDER` default
-  // (docs/tech/sandbox-provider.md §6); the UI always sends the choice explicitly.
+  // (docs/host/sandbox-provider/tech.md §6); the UI always sends the choice explicitly.
   const [provider, setProvider] = useState<ConversationProvider>('vercel');
 
   function handleCreate(e: React.FormEvent) {

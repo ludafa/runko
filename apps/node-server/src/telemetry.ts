@@ -1,5 +1,5 @@
 /**
- * chat 的 telemetry 落库（docs/tech/chat-webapp.md §11.4）：ai@7 转正的
+ * chat 的 telemetry 落库（docs/app/chat-webapp/tech.md §11.4）：ai@7 转正的
  * `Telemetry` 事件集成接口（纯回调，无 OpenTelemetry 依赖）→ 每个事件一行
  * SQLite，按 `functionId = "<agentSessionId>#<turn>"`（`@nimbo/core` loop 在每次
  * `streamText` 恒注入，见 `SessionTelemetry` 的注释）拆出 (agent_session_id, turn)
@@ -21,7 +21,7 @@
  *
  * 注意：nimbo 的工具由 loop 自己结算，AI SDK 的 onToolExecutionStart/End
  * 在这里永远不会触发——工具维度的数据在 `data-tool-timing` 部件里（见
- * docs/tech/single-ledger.md §3.2），按同一对 (agent_session_id, turn) 即可 join。
+ * docs/agent/single-ledger/tech.md §3.2），按同一对 (agent_session_id, turn) 即可 join。
  */
 import Database from 'better-sqlite3';
 import type { Telemetry } from 'ai';
@@ -123,7 +123,7 @@ interface RawEventRow {
 export function createTelemetryStore(path: string): TelemetryStore {
   const sqlite = new Database(path);
   sqlite.pragma('journal_mode = WAL');
-  // 耗材式 schema 演化（docs/tech/telemetry.md §3）：检测到更名前的旧列
+  // 耗材式 schema 演化（docs/app/telemetry/tech.md §3）：检测到更名前的旧列
   // （2026-07-17 session_id → agent_session_id）直接重建整表——遥测无持久
   // 承诺，重建优于迁移；DROP TABLE 连带其索引一起消失。
   const tableInfo: unknown = sqlite.pragma('table_info(telemetry_events)');

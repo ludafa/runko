@@ -1,5 +1,5 @@
 /**
- * 原生搜索快路径的接线测试（docs/tech/sandbox.md §4，`src/fs.ts`/`src/search-script.ts`）：一次调用 =
+ * 原生搜索快路径的接线测试（docs/host/sandbox/tech.md §4，`src/fs.ts`/`src/search-script.ts`）：一次调用 =
  * 一次 `runCommand`、payload 字段（正则 source/scope/ignore/limit/maxFiles/maxLines/context）
  * 传参正确、node 缺失判定的两种触发形态（拒绝 / exit 127）与缓存、脚本真实执行失败（非零/非
  * 127 退出码、非 JSON 输出）不缓存、本地超时不缓存、`glob()` 的 node-缺失回退。

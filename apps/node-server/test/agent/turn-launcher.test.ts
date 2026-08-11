@@ -1,5 +1,5 @@
 /**
- * 起轮装配打点（docs/tech/telemetry.md §2.4）的落库验证：`launchTurn` 逐段计时，
+ * 起轮装配打点（docs/app/telemetry/tech.md §2.4）的落库验证：`launchTurn` 逐段计时，
  * 经 `turn-runner/` 的 `onMilestone` 在这一轮**第一个 chunk 抵达时**写
  * `turn-prepare`、在**第一个可见 chunk** 抵达时写 `turn-first-output`。
  *

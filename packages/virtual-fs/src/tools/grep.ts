@@ -1,7 +1,7 @@
 /**
- * `grep`（docs/tech/builtin-tools.md §1.8）：正则、files/content 双模式、±context、
+ * `grep`（docs/core/builtin-tools/tech.md §1.8）：正则、files/content 双模式、±context、
  * 100 文件/500 行上限、ignore_case。默认忽略 `.git`/`node_modules`
- * （docs/tech/sandbox.md §4，`DEFAULT_SEARCH_IGNORE`）。
+ * （docs/host/sandbox/tech.md §4，`DEFAULT_SEARCH_IGNORE`）。
  *
  * 双路径自适应：`ctx.fs.searchContent` 存在时优先一次调用在底座内部完成整个
  * 搜索（远端沙盒场景省掉逐文件网络往返）；未实现该方法、或调用时抛

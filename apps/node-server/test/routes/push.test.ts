@@ -1,4 +1,4 @@
-/** 推送订阅的四个接口（docs/tech/push-notification.md §3.1）。 */
+/** 推送订阅的四个接口（docs/app/push-notification/tech.md §3.1）。 */
 import type { MiddlewareHandler } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';

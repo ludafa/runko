@@ -1,5 +1,5 @@
 /**
- * [在场](../../../../docs/terms.md)心跳接口（docs/tech/push-notification.md §5.2）
+ * [在场](../../../../docs/terms.md)心跳接口（docs/app/push-notification/tech.md §5.2）
  * ——`POST .../presence`。
  */
 import type { MiddlewareHandler } from 'hono';

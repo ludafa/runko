@@ -1,8 +1,8 @@
 /**
  * 活动信号（`NimboActivityAware.onActivity`）验收测试 —— KA-1。
  *
- * 规格见 docs/tech/sandbox-keepalive.md §5.2，验收清单见
- * docs/plans/sandbox-keepalive.md KA-1。
+ * 规格见 docs/host/sandbox-keepalive/tech.md §5.2，验收清单见
+ * docs/host/sandbox-keepalive/plan.md KA-1。
  *
  * 这里只测 core 侧的**信号产出**：什么时候发、发什么 reason、节流怎么走、
  * 没实现的工作区是不是完全不受影响。信号发出去之后适配器拿它干什么

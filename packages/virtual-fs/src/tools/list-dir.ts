@@ -1,5 +1,5 @@
 /**
- * `list-dir`（docs/tech/builtin-tools.md §1.6）：目录树文本，默认根/depth 1；行尾标注
+ * `list-dir`（docs/core/builtin-tools/tech.md §1.6）：目录树文本，默认根/depth 1；行尾标注
  * 非文本文件的 mimeType、reference 的 `→ href`、annotations.description；
  * 500 条目上限。
  */

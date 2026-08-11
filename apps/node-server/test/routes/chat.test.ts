@@ -73,7 +73,7 @@ const unauthorizedMiddleware: MiddlewareHandler<ChatEnv> =
   );
 
 // ---------------------------------------------------------------------------
-// SSE parsing (docs/tech/single-ledger.md §5 单-3): every frame this
+// SSE parsing (docs/agent/single-ledger/tech.md §5 单-3): every frame this
 // app's SSE endpoints can ever send is a `ChatReplayFrame` — either a
 // `ChunkEnvelope` (`{seq?, chunk}`, live or replayed) or a `MessageFrame`
 // (`{seq, message}`, replay-only). Parsing through the real
@@ -121,12 +121,12 @@ function messageFrames(frames: ChatReplayFrame[]): MessageFrame[] {
   return frames.filter((frame): frame is MessageFrame => 'message' in frame);
 }
 
-/** Narrows a frame list to its `QueueFrame`s（[待发队列](docs/terms.md)快照，docs/tech/steer-and-queue.md §4.3）——同样是结构判别（`'queue' in frame`）。 */
+/** Narrows a frame list to its `QueueFrame`s（[待发队列](docs/terms.md)快照，docs/agent/steer-and-queue/tech.md §4.3）——同样是结构判别（`'queue' in frame`）。 */
 function queueFrames(frames: ChatReplayFrame[]): QueueFrame[] {
   return frames.filter((frame): frame is QueueFrame => 'queue' in frame);
 }
 
-/** Narrows a frame list to its `TurnStateFrame`s（[轮状态快照](docs/terms.md)，docs/tech/chat-webapp.md §5.1）——同样是结构判别（`'turnActive' in frame`）。 */
+/** Narrows a frame list to its `TurnStateFrame`s（[轮状态快照](docs/terms.md)，docs/app/chat-webapp/tech.md §5.1）——同样是结构判别（`'turnActive' in frame`）。 */
 function turnStateFrames(frames: ChatReplayFrame[]): TurnStateFrame[] {
   return frames.filter(
     (frame): frame is TurnStateFrame => 'turnActive' in frame,
@@ -530,7 +530,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
   });
 
   // -------------------------------------------------------------------------
-  // E2B resumeToken rebuild persistence (docs/tech/sandbox-provider.md §3.1,
+  // E2B resumeToken rebuild persistence (docs/host/sandbox-provider/tech.md §3.1,
   // §5 "E2B 令牌落库时机"): a resume-unavailable→re-create acquire mints a
   // *new* sandboxId; POST .../messages must rewrite it back to
   // `conversations.sandbox_id` so the next message resumes the right
@@ -539,7 +539,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
   // `SandboxProvider`.
   // -------------------------------------------------------------------------
 
-  describe('E2B resumeToken rebuild — POST .../messages persists a new sandbox_id (docs/tech/sandbox-provider.md §3.1)', () => {
+  describe('E2B resumeToken rebuild — POST .../messages persists a new sandbox_id (docs/host/sandbox-provider/tech.md §3.1)', () => {
     it('a rebuilt E2B sandbox (acquire() returns a resumeToken different from the stored one) is persisted back to conversations.sandbox_id', async () => {
       const app = buildApp(() => stopOnlyModel('hi'));
       const created = await createE2bSession(app);
@@ -689,7 +689,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
   });
 
   // -------------------------------------------------------------------------
-  // POST .../messages (docs/tech/chat-webapp.md §2.2b: starts a turn, 202, doesn't stream)
+  // POST .../messages (docs/app/chat-webapp/tech.md §2.2b: starts a turn, 202, doesn't stream)
   // -------------------------------------------------------------------------
 
   it('POST .../messages starts a turn and returns 202 { ok: true, mode: "started" } immediately (no SSE body) when no turn is already in progress', async () => {
@@ -732,7 +732,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
     // `steerTurn` returns false and the route falls back to starting a new
     // turn — which `startTurn`'s own guard then rejects. That fallback path is
     // the only way a 409 "turn already in progress" is still reachable now
-    // that the default intent queues instead (docs/tech/steer-and-queue.md §4.1).
+    // that the default intent queues instead (docs/agent/steer-and-queue/tech.md §4.1).
     const stuck = createControllableSession();
     const { started } = startTurn({
       db,
@@ -760,7 +760,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
   });
 
   // -------------------------------------------------------------------------
-  // GET .../stream (docs/tech/chat-webapp.md §2.2b: resumable live tail; docs/tech/single-ledger.md §5 单-3):
+  // GET .../stream (docs/app/chat-webapp/tech.md §2.2b: resumable live tail; docs/agent/single-ledger/tech.md §5 单-3):
   // startTurn synthesizes+persists+broadcasts the turn-start user
   // MessageFrame synchronously, before it ever returns (this ticket's fix) —
   // a connection opened *after* startTurn already ran (every test/real usage
@@ -880,9 +880,9 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
     // 两帧都是「每条连接回放后必发」的状态快照，**包括**没有进行中那一轮的这种
     // 「连上即关」的连接：
     //
-    // - 队列快照（docs/tech/steer-and-queue.md §4.3 时机 1）——前端因此不必为「刚起的
+    // - 队列快照（docs/agent/steer-and-queue/tech.md §4.3 时机 1）——前端因此不必为「刚起的
     //   会话」单独查一次队列。空队列也照发（空≠不发）。
-    // - [轮状态快照](docs/terms.md)（docs/tech/chat-webapp.md §5.1）——`turnActive: false`
+    // - [轮状态快照](docs/terms.md)（docs/app/chat-webapp/tech.md §5.1）——`turnActive: false`
     //   正是这条连接要告诉前端的关键事实：别再靠「回放最后一帧是不是 chunk」猜了。
     expect(await response.text()).toBe(
       'event: queue\ndata: {"queue":[]}\n\n' +
@@ -890,7 +890,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
     );
   });
 
-  // 崩溃残留的会话（docs/tech/chat-webapp.md §5.1）：账本最后一行是 chunk，但服务端
+  // 崩溃残留的会话（docs/app/chat-webapp/tech.md §5.1）：账本最后一行是 chunk，但服务端
   // 那边**没有**轮在跑。这一条钉住的正是「前端不该再靠回放猜」——它靠这一帧知道真相。
   it('GET .../stream 对崩溃残留的会话报 turnActive:false——即便回放的最后一帧是 chunk', async () => {
     const app = buildApp(() => stopOnlyModel('unused'));
@@ -1048,7 +1048,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Durable/ephemeral split (docs/tech/single-ledger.md §5 单-3) — the stream route's own half
+  // Durable/ephemeral split (docs/agent/single-ledger/tech.md §5 单-3) — the stream route's own half
   // of `createEmitWire`'s split: the `replayDone` guard in `subscribeTurn`'s
   // callback (drop an ephemeral tick that arrives before the replay has
   // finished flushing) and `flushBuffered`'s no-`maxSentSeq` forwarding for
@@ -1547,7 +1547,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
     await holdableSandboxManager.writeCalled;
 
     // `intent: 'steer'` 是**显式**的——默认（省略 intent）现在是排队到下一轮
-    // （docs/tech/steer-and-queue.md §4.1），排队路径的覆盖见本文件的队列用例组。
+    // （docs/agent/steer-and-queue/tech.md §4.1），排队路径的覆盖见本文件的队列用例组。
     const secondResponse = await app.request(
       `/api/chat/conversations/${created.id}/messages`,
       {
@@ -1574,7 +1574,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
     // .../stream call typically lands late enough (several real async hops
     // after releaseWrite()) that it only ever *replays* this bracket from
     // already-persisted durable rows; the steered text's own text-delta is
-    // ephemeral (never persisted, live-only, docs/tech/single-ledger.md §5 单-3) and — by the
+    // ephemeral (never persisted, live-only, docs/agent/single-ledger/tech.md §5 单-3) and — by the
     // same "只直播不落盘" design P13-1 already established — is simply gone
     // for a connection that wasn't listening live at the moment it streamed.
     // The bracket (start…text-start…text-end…finish) still proves the loop
@@ -1607,7 +1607,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Approval chain + ask-user (docs/tech/chat-webapp.md §2.2c（审批链）, docs/tech/single-ledger.md §6) —
+  // Approval chain + ask-user (docs/app/chat-webapp/tech.md §2.2c（审批链）, docs/agent/single-ledger/tech.md §6) —
   // end-to-end through the real routes, a mock model driving a bash/ask-user
   // tool call, and the in-process turn-runner bridge (no fakes for any of
   // that machinery, only the sandbox/model are mocked, same as the rest of
@@ -1619,7 +1619,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
   // tracked it from that earlier chunk.
   // -------------------------------------------------------------------------
 
-  describe('approval chain + ask-user (docs/tech/single-ledger.md §6)', () => {
+  describe('approval chain + ask-user (docs/agent/single-ledger/tech.md §6)', () => {
     it('a safe bash command under the default (dangerous) approval mode runs straight through — no tool-approval-request/-response chunk is ever emitted', async () => {
       const app = buildApp(() =>
         toolCallThenStopModel(
@@ -1774,7 +1774,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       ).toBeDefined();
     });
 
-    it('一轮跑完只在起轮时补一次存活时长——轮内保活归适配器了（docs/tech/sandbox-keepalive.md）', async () => {
+    it('一轮跑完只在起轮时补一次存活时长——轮内保活归适配器了（docs/host/sandbox-keepalive/tech.md）', async () => {
       const app = buildApp(() => stopOnlyModel('done'));
       const created = await createSession(app);
       const before = sandboxManager.ensureLifetimeCalls.length;
@@ -1795,7 +1795,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       expect(calls).toEqual([created.id]);
     });
 
-    it('分段授权：allow-session 一条复合命令后，「其中一段」直接放行，「含新段」仍弹审批（docs/features/approval-grant-split.md）', async () => {
+    it('分段授权：allow-session 一条复合命令后，「其中一段」直接放行，「含新段」仍弹审批（docs/app/approval-grant-split/feature.md）', async () => {
       // 三轮各发一条命令：授权复合命令 → 只发其中一段 → 发含新段的命令。
       const commands = [
         'cd /home/user/repo && git push origin main',
@@ -2219,11 +2219,11 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
   });
 
   // -------------------------------------------------------------------------
-  // 待发队列（[排队](docs/terms.md)，docs/tech/steer-and-queue.md）：默认 intent 的
+  // 待发队列（[排队](docs/terms.md)，docs/agent/steer-and-queue/tech.md）：默认 intent 的
   // 入队、队列管理端点、tail 上的 QueueFrame，以及一轮收尾后的自动出队。
   // -------------------------------------------------------------------------
 
-  describe('待发队列 / 排队（docs/tech/steer-and-queue.md）', () => {
+  describe('待发队列 / 排队（docs/agent/steer-and-queue/tech.md）', () => {
     /** 占住这个会话的 turn 槽位（一个自己不会结束的 fake），好让 POST 走「有进行中的一轮」那条分支。 */
     function occupyTurn(conversationId: string) {
       const stuck = createControllableSession();
@@ -2260,7 +2260,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       return ConversationSchema.parse(await response.json()).queuedMessages;
     }
 
-    // 进程正在[优雅关闭](docs/terms.md)时不接新的轮（docs/tech/graceful-shutdown.md §3.3）。
+    // 进程正在[优雅关闭](docs/terms.md)时不接新的轮（docs/agent/graceful-shutdown/tech.md §3.3）。
     // 关闭闸门是模块级状态，所以这条用例自己负责复位，否则会连累后面全部用例。
     it('优雅关闭期间 POST .../messages 报 503（可恢复的拒绝，不是 409）', async () => {
       const app = buildApp(() => stopOnlyModel('hi'));
@@ -2496,12 +2496,12 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
     });
 
     // -----------------------------------------------------------------------
-    // 停止本轮（docs/tech/turn-abort.md §3.2）——`POST .../abort`。停止与队列在这里
+    // 停止本轮（docs/agent/turn-abort/tech.md §3.2）——`POST .../abort`。停止与队列在这里
     // 交汇：定案是「停止 = 全停」，所以这一组用例放在队列组里，正是为了钉住那个
     // 顺序（清队列**先于** abort，否则出队会抢跑）。
     // -----------------------------------------------------------------------
 
-    describe('POST .../abort（停止本轮，docs/tech/turn-abort.md）', () => {
+    describe('POST .../abort（停止本轮，docs/agent/turn-abort/tech.md）', () => {
       async function postAbort(
         app: ReturnType<typeof buildApp>,
         conversationId: string,
@@ -2553,7 +2553,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
         // `startTurn`），因为要验的正是[出队](docs/terms.md)那条 `onTurnSettled` 链条
         // 在停止后不抢跑——只有 `launchTurn` 会接上它。模型/沙盒是 fake，但 loop 是
         // 真的：于是这里同时验证了 core 的 step 边界 abort 检查（第二次模型调用不
-        // 发生），以及「工具执行中被停止」那一档（docs/features/turn-abort.md §2.3）。
+        // 发生），以及「工具执行中被停止」那一档（docs/agent/turn-abort/feature.md §2.3）。
         const holdableSandboxManager = createHoldableSandboxManager();
         let modelCalls = 0;
         const app = createChatApp({
@@ -2651,12 +2651,12 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
       });
 
       // ---------------------------------------------------------------------
-      // 起轮装配窗口里的停止（docs/tech/turn-abort.md §3.3）——用户实测报的
+      // 起轮装配窗口里的停止（docs/agent/turn-abort/tech.md §3.3）——用户实测报的
       // 「发完消息立刻点停止，没有任何反应」。窗口靠 `nextAcquireGate` 撑开：
       // `acquire()` 挂住 = 这一轮正卡在装配里，与真实的冷启动沙盒同形。
       // ---------------------------------------------------------------------
 
-      describe('起轮装配窗口（docs/tech/turn-abort.md §3.3）', () => {
+      describe('起轮装配窗口（docs/agent/turn-abort/tech.md §3.3）', () => {
         /** 起一轮并把它卡在 `acquire()` 里；返回「放行装配」的开关与那个还没 await 的 POST。 */
         async function startTurnHeldInAssembly(
           app: ReturnType<typeof buildApp>,
@@ -2831,7 +2831,7 @@ describe('routes/chat: sessions + turn start/stream endpoints', () => {
     });
   });
 
-  describe('GET /api/chat/conversations/{id}/turns/{turn}/telemetry (docs/tech/chat-webapp.md §11.4)', () => {
+  describe('GET /api/chat/conversations/{id}/turns/{turn}/telemetry (docs/app/chat-webapp/tech.md §11.4)', () => {
     it('404s for a session the user does not own / does not exist', async () => {
       const app = buildApp(() => stopOnlyModel('hi'));
       const response = await app.request(

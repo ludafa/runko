@@ -1,6 +1,6 @@
 /**
- * Sandbox lifecycle (docs/tech/chat-webapp.md §2.2 `sandbox-manager.ts`,
- * generalized per docs/tech/sandbox-provider.md): every cloud-sandbox SDK
+ * Sandbox lifecycle (docs/app/chat-webapp/tech.md §2.2 `sandbox-manager.ts`,
+ * generalized per docs/host/sandbox-provider/tech.md): every cloud-sandbox SDK
  * touch point in the whole server lives behind the structural
  * `SandboxProvider`/`ProvisionedSandbox` interfaces below — everything else
  * (routes/chat-agent) only ever sees `SandboxManager`, so tests inject fakes
@@ -35,14 +35,14 @@
  * known after `create()`, so `acquire()` returns the current token in
  * `AcquiredSandbox.resumeToken` for the route to persist).
  *
- * `ensureLifetime()` is the whole "sleep" mechanism (docs/tech/chat-webapp.md §1.4):
+ * `ensureLifetime()` is the whole "sleep" mechanism (docs/app/chat-webapp/tech.md §1.4):
  * it only asks the workspace to top its own lifetime back up — there is no
  * server-side timer. When a conversation goes idle past
  * `SANDBOX_IDLE_TIMEOUT_MS`, the platform stops + snapshots the sandbox on its
  * own (Vercel `persistent`, E2B `onTimeout:'pause'`); the next `acquire()`
  * (state 2 or 3) recovers.
  *
- * ---- 保活归 SDK 了（docs/tech/sandbox-keepalive.md，KA-5） ----
+ * ---- 保活归 SDK 了（docs/host/sandbox-keepalive/tech.md，KA-5） ----
  *
  * 这个文件以前自己起过一个 turn 级心跳定时器（`startHeartbeat`），现在**整个删掉**：
  * 一轮进行期间的续期由适配器自己做（`e2bWorkspace`/`vercelWorkspace` 的 `keepAlive`
@@ -94,7 +94,7 @@ export function resolveIdleTimeoutMs(): number {
 
 export type SandboxProviderId = 'vercel' | 'e2b';
 
-/** The default [沙盒 provider](docs/terms.md) for a new conversation whose request omits one — `SANDBOX_PROVIDER` env, falling back to `'vercel'` (docs/tech/sandbox-provider.md §6). */
+/** The default [沙盒 provider](docs/terms.md) for a new conversation whose request omits one — `SANDBOX_PROVIDER` env, falling back to `'vercel'` (docs/host/sandbox-provider/tech.md §6). */
 export function resolveDefaultProvider(): SandboxProviderId {
   return process.env.SANDBOX_PROVIDER?.trim().toLowerCase() === 'e2b' ?
       'e2b'
@@ -157,7 +157,7 @@ export interface SandboxProvider {
    * handle, an `exec` against a paused sandbox — not just by `resume()`.
    * Before this existed, only `resume()` consulted it, so a cached handle that
    * went stale surfaced a raw 404 to the caller and never recovered
-   * (docs/plans/sandbox-provider.md SP-7).
+   * (docs/host/sandbox-provider/plan.md SP-7).
    */
   isGone(error: unknown): boolean;
 }
@@ -233,7 +233,7 @@ export function createVercelProvider(): SandboxProvider {
         teamId,
         projectId,
         runtime: 'node24',
-        persistent: true, // the precondition for "sleep = Vercel's own snapshot-on-timeout" (docs/tech/chat-webapp.md §1.4/§2.2)
+        persistent: true, // the precondition for "sleep = Vercel's own snapshot-on-timeout" (docs/app/chat-webapp/tech.md §1.4/§2.2)
         timeout: params.timeoutMs,
         source: {
           type: 'git',
@@ -278,7 +278,7 @@ export function createVercelProvider(): SandboxProvider {
  * post-create `git clone` here; anchoring the workspace to this dir makes the
  * cwd-'/' shared init/branch commands (skill install, git config, fetch/
  * checkout) run inside the repo exactly as they do for Vercel's root
- * (docs/tech/sandbox-provider.md §1/§3).
+ * (docs/host/sandbox-provider/tech.md §1/§3).
  */
 const E2B_WORKSPACE_ROOT = '/home/user/repo';
 
@@ -330,7 +330,7 @@ export function createE2bProvider(): SandboxProvider {
         // (resources are baked in at template build time; see e2b-template.ts).
         template: resolveE2bTemplate(),
         timeoutMs: params.timeoutMs,
-        // Parity with Vercel `persistent`: auto-pause on idle timeout + auto-resume on traffic (full memory snapshot). docs/tech/sandbox-provider.md §5.
+        // Parity with Vercel `persistent`: auto-pause on idle timeout + auto-resume on traffic (full memory snapshot). docs/host/sandbox-provider/tech.md §5.
         lifecycle: { onTimeout: 'pause', autoResume: true },
         envs: { GH_TOKEN: params.githubPat },
         metadata: { name: params.name },
@@ -355,7 +355,7 @@ export function createE2bProvider(): SandboxProvider {
       // A sandbox that just auto-paused (lifecycle.onTimeout:'pause') can
       // transiently 404 on `connect` for a moment while the platform settles
       // the pause snapshot — observed in real-machine acceptance
-      // (docs/plans/sandbox-provider.md SP-6): the sandbox is actually still
+      // (docs/host/sandbox-provider/plan.md SP-6): the sandbox is actually still
       // there and reconnectable seconds later. So retry a few times before
       // concluding it's gone; a *persistent* not-found means re-create (which
       // would lose un-pushed WIP, so it must not fire on a transient blip).
@@ -388,7 +388,7 @@ interface InitScripts {
   gitExclude: string;
 }
 
-/** Same six commands as examples/12's `buildInitPlan` (docs/tech/sandbox.md §2.3/§2.4), minus default-branch detection (kept separate, see `detectDefaultBranch`). */
+/** Same six commands as examples/12's `buildInitPlan` (docs/host/sandbox/tech.md §2.3/§2.4), minus default-branch detection (kept separate, see `detectDefaultBranch`). */
 function buildInitScripts(owner: string, repo: string): InitScripts {
   return {
     installSkill:
@@ -512,7 +512,7 @@ export interface AcquireInput {
 }
 
 /**
- * 这次 `acquire()` 实际走了文件头三态里的哪一条（docs/tech/telemetry.md §2.4）
+ * 这次 `acquire()` 实际走了文件头三态里的哪一条（docs/app/telemetry/tech.md §2.4）
  * ——三者的耗时量级差着两个数量级（`cache` 零远程调用、`resume` 一次连接 +
  * 续期 + 一次 `git` 探测、`create` 还要 clone + 装 skill + 切分支），是「这一轮
  * 起得慢」时第一个要看的字段。纯观测用途：调用方不得据此改变行为，三态返回的
@@ -626,7 +626,7 @@ export function createSandboxManager(
           entry.expiresAt = info.expiresAt;
 
         /**
-         * 保活的**唯一**可观测出口（docs/features/sandbox-keepalive.md §3.5）：
+         * 保活的**唯一**可观测出口（docs/host/sandbox-keepalive/feature.md §3.5）：
          * 续期动作发生在适配器内部，不打这行日志的话运维完全看不见它在不在工作。
          *
          * 怎么看这行判断正常：
@@ -682,7 +682,7 @@ export function createSandboxManager(
     if (Date.now() < entry.expiresAt) return entry;
     // Presumed paused/expired platform-side. Dropping it here is what makes the
     // next acquire() reconnect instead of handing out a handle whose every call
-    // 404s (docs/plans/sandbox-provider.md SP-7 层 2).
+    // 404s (docs/host/sandbox-provider/plan.md SP-7 层 2).
     log.info(LOG_SCOPE, 'sandbox cache entry expired, will reconnect', {
       conversationId,
     });

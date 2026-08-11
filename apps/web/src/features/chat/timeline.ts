@@ -1,6 +1,6 @@
 /**
  * Render-shaping helpers for the `NimboUIMessage[]` ledger `materialize.ts`
- * produces (docs/tech/single-ledger.md §5/§6). Two concerns live
+ * produces (docs/agent/single-ledger/tech.md §5/§6). Two concerns live
  * here:
  *
  * - Interleaving `use-chat-messages.ts`'s short-lived optimistic user echoes
@@ -113,7 +113,7 @@ function parseUnknownJsonValue(value: unknown): JsonValue {
   return parsed.success ? parsed.data : null;
 }
 
-/** `bash`'s own input shape (docs/tech/builtin-tools.md): `{ command: string, timeout_ms？ }`. */
+/** `bash`'s own input shape (docs/core/builtin-tools/tech.md): `{ command: string, timeout_ms？ }`. */
 export function bashCommandFromInput(input: unknown): string | undefined {
   const value = parseUnknownJsonValue(input);
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {

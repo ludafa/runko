@@ -1,6 +1,6 @@
 /**
- * Wire-level schemas for the chat agent API (docs/tech/chat-webapp.md
- * §2.2, docs/tech/single-ledger.md §5/§6 "UIMessage 单账本" — P13-5-4
+ * Wire-level schemas for the chat agent API (docs/app/chat-webapp/tech.md
+ * §2.2, docs/agent/single-ledger/tech.md §5/§6 "UIMessage 单账本" — P13-5-4
  * migration). The old `SessionEvent`/`SessionItem` mirror (`sessionItemSchema`/
  * `sessionEventSchema`) plus every server-invented wire sentinel built on top
  * of it (`user.message`, `turn.result`/`turn.failed`,
@@ -74,7 +74,7 @@ const nimboUIMessageSchema: z.ZodType<NimboUIMessage> = z.any();
 /**
  * `{ seq?, chunk }` — the live tail's own wire shape (`seq` present ⇔
  * durable/replayable, absent ⇔ ephemeral — `text-delta`/`reasoning-delta`/any
- * `transient: true` data part, docs/tech/single-ledger.md §5 单-3), also reused with `seq`
+ * `transient: true` data part, docs/agent/single-ledger/tech.md §5 单-3), also reused with `seq`
  * always present for a replayed `kind = 'chunk'` row (the in-progress or
  * crashed turn's durable chunks).
  */
@@ -100,7 +100,7 @@ export type MessageFrame = z.infer<typeof messageFrameSchema>;
 
 /**
  * 一条[排队](../../../../../docs/terms.md)中的待发消息（`apps/node-server` 的
- * `schemas/chat.ts` `QueuedMessageSchema` 的手写镜像，docs/tech/steer-and-queue.md §2.2）。
+ * `schemas/chat.ts` `QueuedMessageSchema` 的手写镜像，docs/agent/steer-and-queue/tech.md §2.2）。
  */
 export const queuedMessageSchema = z.object({
   id: z.string(),
@@ -114,7 +114,7 @@ export type QueuedMessage = z.infer<typeof queuedMessageSchema>;
 /**
  * `{ queue }` — 队列状态快照。两处共用：直播流的第三种帧（每条连接回放后必发一帧，
  * 队列变化时再广播；**没有 `seq`**，因为它是状态快照而非[账本](../../../../../docs/terms.md)
- * 事件，docs/tech/steer-and-queue.md §4.3），以及两个队列端点的响应体。
+ * 事件，docs/agent/steer-and-queue/tech.md §4.3），以及两个队列端点的响应体。
  */
 export const queueFrameSchema = z.object({
   queue: z.array(queuedMessageSchema),
@@ -124,12 +124,12 @@ export type QueueFrame = z.infer<typeof queueFrameSchema>;
 
 /**
  * `POST .../messages` 的响应（`apps/node-server` 的 `StartTurnAckSchema` 的手写镜像，
- * docs/tech/steer-and-queue.md §4.1）：`mode` 是服务端**实际**怎么处理了这条消息。
+ * docs/agent/steer-and-queue/tech.md §4.1）：`mode` 是服务端**实际**怎么处理了这条消息。
  *
  * 分流完全由服务端判定、客户端不预判，所以 `mode` 可能与请求的 `intent` 不一致——
  * 目前有一档会：请求 [插话](../../../../../docs/terms.md) 但那一轮还卡在
  * [起轮装配](../../../../../docs/terms.md)里时插不进去，服务端只能给它
- * [排队](../../../../../docs/terms.md)，回 `'queued'`（docs/tech/turn-abort.md §3.3）。
+ * [排队](../../../../../docs/terms.md)，回 `'queued'`（docs/agent/turn-abort/tech.md §3.3）。
  * `'aborted'` 则是「这一轮在装配阶段就被用户按停止掐掉了，从没启动」。
  */
 export const startTurnAckSchema = z.object({
@@ -141,7 +141,7 @@ export type StartTurnMode = z.infer<typeof startTurnAckSchema>['mode'];
 
 /**
  * `POST .../abort` 的响应（`apps/node-server` 的 `AbortTurnAckSchema` 的手写镜像，
- * docs/tech/turn-abort.md §3.2）：`ok` 只表示[停止](../../../../../docs/terms.md)**已
+ * docs/agent/turn-abort/tech.md §3.2）：`ok` 只表示[停止](../../../../../docs/terms.md)**已
  * 请求**，「已停止」这个结果照旧走直播流上那条 `status: 'interrupted'` 的
  * `message-metadata`；`queue` 是清空后的队列快照（恒为空数组，停止即清空队列）。
  */
@@ -152,7 +152,7 @@ export const abortTurnAckSchema = z.object({
 
 /**
  * `{ turnActive }` — [轮状态快照](../../../../../docs/terms.md)（`apps/node-server` 的
- * `turnStateFrameSchema` 的手写镜像，docs/tech/chat-webapp.md §5.1）。每条
+ * `turnStateFrameSchema` 的手写镜像，docs/app/chat-webapp/tech.md §5.1）。每条
  * `GET .../stream` 在回放之后、进入直播之前必发一帧，内容是**服务端**此刻对
  * 「这个会话有没有[轮](../../../../../docs/terms.md)在跑」的权威答案。
  *
@@ -206,7 +206,7 @@ export function isTurnStateFrame(
 /**
  * 一个帧的 `seq`——`QueueFrame` 与 `TurnStateFrame` **恒无 seq**（都是状态快照，不是
  * [账本](../../../../../docs/terms.md)事件，所以不落盘、不参与 `after=` 续传；
- * docs/tech/steer-and-queue.md §4.3、docs/tech/chat-webapp.md §5.1），于是与 ephemeral
+ * docs/agent/steer-and-queue/tech.md §4.3、docs/app/chat-webapp/tech.md §5.1），于是与 ephemeral
  * chunk 在去重/续传簿记上走同一条「没有 seq」的路径。
  */
 export function frameSeq(frame: ChatReplayFrame): number | undefined {
@@ -214,7 +214,7 @@ export function frameSeq(frame: ChatReplayFrame): number | undefined {
   return frame.seq;
 }
 
-/** `GET .../events` response shape — `{ frames: ChatReplayFrame[] }`, not a bare array (docs/tech/chat-webapp.md §2.2 "契约细化"). */
+/** `GET .../events` response shape — `{ frames: ChatReplayFrame[] }`, not a bare array (docs/app/chat-webapp/tech.md §2.2 "契约细化"). */
 export const conversationEventsListSchema = z.object({
   frames: z.array(chatReplayFrameSchema),
 });
@@ -258,13 +258,13 @@ export const conversationStatusSchema = z.enum([
 
 export type ConversationStatus = z.infer<typeof conversationStatusSchema>;
 
-/** 沙盒 provider（docs/tech/sandbox-provider.md）——这次会话跑在哪家云沙盒上，建会话时选定、1:1 绑定。 */
+/** 沙盒 provider（docs/host/sandbox-provider/tech.md）——这次会话跑在哪家云沙盒上，建会话时选定、1:1 绑定。 */
 export const conversationProviderSchema = z.enum(['vercel', 'e2b']);
 
 export type ConversationProvider = z.infer<typeof conversationProviderSchema>;
 
 /**
- * [skill 清单](../../../../../docs/terms.md)的一条（docs/tech/composer-skill-mention.md §5.2）——
+ * [skill 清单](../../../../../docs/terms.md)的一条（docs/app/composer-skill-mention/tech.md §5.2）——
  * [composer](../../../../../docs/terms.md) 里打 `/` 时列的就是它：`name` 上屏做
  * [skill 提及](../../../../../docs/terms.md)的字面量，`description` 是菜单里那行灰字。
  */
@@ -284,10 +284,10 @@ export const conversationSchema = z.object({
   provider: conversationProviderSchema,
   status: conversationStatusSchema,
   lastActiveAt: z.string(),
-  /** 这个会话的[待发队列](../../../../../docs/terms.md)——页面加载时的初始快照，之后由 `QueueFrame` 与队列端点响应刷新（docs/tech/steer-and-queue.md §4.2）。 */
+  /** 这个会话的[待发队列](../../../../../docs/terms.md)——页面加载时的初始快照，之后由 `QueueFrame` 与队列端点响应刷新（docs/agent/steer-and-queue/tech.md §4.2）。 */
   queuedMessages: z.array(queuedMessageSchema),
   /**
-   * 这个会话当前可选的 [skill 清单](../../../../../docs/terms.md)（docs/tech/composer-skill-mention.md §2.1）。
+   * 这个会话当前可选的 [skill 清单](../../../../../docs/terms.md)（docs/app/composer-skill-mention/tech.md §2.1）。
    *
    * `.default([])` 不是可有可无的宽容：服务端读的是库缓存列，会话建于本功能上线前、
    * 或那一列坏掉时都会给出空清单，前端这边应当照常渲染一个「没有 skill 可选」的
@@ -301,7 +301,7 @@ export type Conversation = z.infer<typeof conversationSchema>;
 
 export const conversationListSchema = z.array(conversationSchema);
 
-// ---- turn 遥测明细（docs/tech/chat-webapp.md §11.4，GET .../turns/{turn}/telemetry） ----
+// ---- turn 遥测明细（docs/app/chat-webapp/tech.md §11.4，GET .../turns/{turn}/telemetry） ----
 
 /** 一条遥测事件：`payloadJson` 是服务端收敛后的事件 JSON 原文（形状随 ai 小版本演化，前端按需解析、缺字段跳过，不在这里深度建模）。 */
 export const turnTelemetryEventSchema = z.object({

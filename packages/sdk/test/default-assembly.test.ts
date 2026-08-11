@@ -5,7 +5,7 @@
  * `test/integration.test.ts` demonstrates as the "host" seam this ticket automates.
  * Also covers the `workspace` (NimboFS & NimboExec) overload's generic type retention.
  *
- * P13-5-2（docs/tech/single-ledger.md）迁移：断言从 `SessionEvent`/
+ * P13-5-2（docs/agent/single-ledger/tech.md）迁移：断言从 `SessionEvent`/
  * `SessionItem` 改为读账本（`session.toJSON().messages` 的部件）：
  * `toolCallItems`/`fileChangeItems`（helpers.ts）现在从账本 flatMap 工具/
  * `data-file-change` 部件，`status: "completed"` 换成 `state: "output-available"`。
@@ -124,7 +124,7 @@ describe("default assembly: SessionOptions.workspace (NimboFS & NimboExec, mode 
     const calls = toolCallItems(session.toJSON().messages);
     expect(calls.map((c) => c.state)).toEqual(["output-available", "output-available"]);
     // the bash tool call's output should contain the content written by write-file — same
-    // source, no materialize/reconcile step needed (docs/tech/core-sdk.md §4.5a mode A).
+    // source, no materialize/reconcile step needed (docs/core/core-sdk/tech.md §4.5a mode A).
     expect(JSON.stringify(calls[1]?.output)).toContain("hello");
   });
 });

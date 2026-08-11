@@ -1,5 +1,5 @@
 /**
- * 投递层（docs/tech/push-notification.md §6）——注入假 transport，不 mock 整个
+ * 投递层（docs/app/push-notification/tech.md §6）——注入假 transport，不 mock 整个
  * `web-push` 模块，也就不需要真的发网络。
  */
 import { beforeEach, describe, expect, it } from 'vitest';

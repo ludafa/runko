@@ -1,5 +1,5 @@
 /**
- * Vercel 的[保活](../../../docs/terms.md)接线（docs/tech/sandbox-keepalive.md §5.5）。
+ * Vercel 的[保活](../../../docs/terms.md)接线（docs/host/sandbox-keepalive/tech.md §5.5）。
  *
  * [续期闸门](../../../docs/terms.md)本身是通用的（`@nimbo/core` 的 `createKeepAlive`），
  * 这里只补上 Vercel 独有的两件事——**两件都与 E2B 相反**：
@@ -13,7 +13,7 @@
  *
  * 第 2 条正是既有 bug 的成因：`sandbox-manager.ts` 曾把两家当同义词，
  * 每条用户消息都盲加 5 分钟，高频对话十几轮后沙盒多活几十分钟白计费
- * （docs/tech/turn-checkpoint.md §5）。闸门的补足语义 + 这里的差额计算合起来修掉它。
+ * （docs/agent/turn-checkpoint/tech.md §5）。闸门的补足语义 + 这里的差额计算合起来修掉它。
  */
 import type { KeepAlive, KeepAliveDriver, KeepAliveOptions } from "@nimbo/core";
 import { createKeepAlive } from "@nimbo/core";

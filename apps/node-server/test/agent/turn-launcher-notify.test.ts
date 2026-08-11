@@ -1,5 +1,5 @@
 /**
- * 推送通知在起轮链路上的接线（docs/tech/push-notification.md §4）——跑的是真
+ * 推送通知在起轮链路上的接线（docs/app/push-notification/tech.md §4）——跑的是真
  * `launchTurn` + 真 core loop（模型/沙盒是假件），因为要验的两件事都只有在真链路上
  * 才成立：
  *

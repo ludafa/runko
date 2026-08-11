@@ -47,18 +47,18 @@ export interface FakeSandboxManager extends SandboxManager {
    * `resumeToken` instead of the default (`input.resumeToken ??
    * input.sandboxName`), then resets to `undefined` — lets a test simulate an
    * E2B "resume unavailable → re-create" that mints a brand-new `sandboxId`
-   * on a specific acquire (docs/tech/sandbox-provider.md §3.1), so
+   * on a specific acquire (docs/host/sandbox-provider/tech.md §3.1), so
    * `routes/chat.ts`'s POST .../messages rewrite-on-change branch can be
    * exercised without a real/fake `SandboxProvider`.
    */
   nextResumeToken?: string;
-  /** 覆盖 `acquire()` 报出的 `mode`（缺省 `'resume'`）——用来断言 `turn-launcher` 把它原样写进 `turn-prepare` 载荷（docs/tech/telemetry.md §2.4）。 */
+  /** 覆盖 `acquire()` 报出的 `mode`（缺省 `'resume'`）——用来断言 `turn-launcher` 把它原样写进 `turn-prepare` 载荷（docs/app/telemetry/tech.md §2.4）。 */
   nextAcquireMode?: AcquireMode;
   /**
    * 设了就让**下一次** `acquire()` 挂在这个 promise 上（resolve 之后才返回沙盒），用完
    * 即清。用来撑开[起轮装配](../../../../docs/terms.md)窗口——测试要在这段时间里对同一个
    * 会话做别的请求（按[停止](../../../../docs/terms.md)、再发一条消息），
-   * 见 docs/tech/turn-abort.md §3.3。
+   * 见 docs/agent/turn-abort/tech.md §3.3。
    *
    * `acquireCalls` 仍在挂住**之前**就记上，所以测试可以靠它确认「装配已经进去了」。
    */

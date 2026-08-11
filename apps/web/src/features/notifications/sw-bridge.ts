@@ -1,5 +1,5 @@
 /**
- * Service Worker → 页面的那一条消息通道（docs/tech/push-notification.md §3.2）。
+ * Service Worker → 页面的那一条消息通道（docs/app/push-notification/tech.md §3.2）。
  *
  * 用户点通知时，SW 优先 `focus()` 已开着的窗口再 `postMessage` 一条
  * `{type:'push-navigate', url}`，由这里接住、交给路由跳转。**不用 `openWindow`

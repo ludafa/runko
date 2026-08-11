@@ -1,6 +1,6 @@
 /**
  * 打 `/` 后弹出的 [skill 清单](../../../../../docs/terms.md)菜单
- * （docs/tech/composer-skill-mention.md §6.1/§6.2）。
+ * （docs/app/composer-skill-mention/tech.md §6.1/§6.2）。
  *
  * 由 tiptap 的 suggestion 工具经 `ReactRenderer` 挂载，**键盘事件不走 React 的
  * onKeyDown**：suggestion 插件在 ProseMirror 层先拿到按键，再转调这里

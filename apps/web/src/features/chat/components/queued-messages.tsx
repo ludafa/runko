@@ -1,5 +1,5 @@
 /**
- * 输入框上方的**待发区**（docs/features/steer-and-queue.md §2.3）：列出这个会话
+ * 输入框上方的**待发区**（docs/agent/steer-and-queue/feature.md §2.3）：列出这个会话
  * [排队](../../../../../docs/terms.md)中、还没发出的消息，每条可删、可**插进本轮**，可一键清空。
  *
  * 队列是**服务端**状态（`use-chat-messages.ts` 的 `queuedMessages`，由直播流的

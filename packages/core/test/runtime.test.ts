@@ -52,7 +52,7 @@ function baseApprovalOptions(
 }
 
 /**
- * P13-5-2c (docs/tech/single-ledger.md §6.4) split the old atomic `executeToolCall`
+ * P13-5-2c (docs/agent/single-ledger/tech.md §6.4) split the old atomic `executeToolCall`
  * (validate → approve → execute) into two independent steps so `loop.ts` can yield a
  * `tool-approval-request` chunk *before* awaiting a human reviewer — `resolveToolCallApproval`
  * (input validation + the approval chain, no execution) and `executeToolCall` (execution only,
@@ -136,7 +136,7 @@ describe("resolveToolCallApproval", () => {
 });
 
 describe("executeToolCall", () => {
-  describe("does not validate input or evaluate approval — that is resolveToolCallApproval's job (P13-5-2c split, docs/tech/single-ledger.md §6.4)", () => {
+  describe("does not validate input or evaluate approval — that is resolveToolCallApproval's job (P13-5-2c split, docs/agent/single-ledger/tech.md §6.4)", () => {
     it("passes input straight to execute() even when it does not satisfy the tool's own inputSchema", async () => {
       const execute = vi.fn(() => "ran anyway");
       const tool: Tool = { description: "d", inputSchema: z.object({ path: z.string() }), execute };

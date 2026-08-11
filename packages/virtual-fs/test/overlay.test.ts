@@ -211,7 +211,7 @@ describe("fromDirectory", () => {
   });
 });
 
-describe("OverlayFS native search seam (docs/tech/sandbox.md §4)", () => {
+describe("OverlayFS native search seam (docs/host/sandbox/tech.md §4)", () => {
   it("does not implement searchFiles/searchContent — a native-searching remote base's results would miss overlay writes, so grep/glob must fall back to JS scanning (which goes through the merged glob() view) against it", () => {
     const base = fromMemory({ "a.txt": "base-a" });
     const fs: NimboFS = new OverlayFS(base);

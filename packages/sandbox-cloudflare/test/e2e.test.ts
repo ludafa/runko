@@ -1,5 +1,5 @@
 /**
- * 端到端接线（docs/tech/sandbox.md §8.4 第 1 点"与 core 文件工具/bash 工具的 e2e"）：mock model
+ * 端到端接线（docs/host/sandbox/tech.md §8.4 第 1 点"与 core 文件工具/bash 工具的 e2e"）：mock model
  * 驱动一个真实 `createSession({ workspace })`，`workspace` 是
  * `cloudflareWorkspace()`（客户端）← `fetchViaGateway`（进程内直连）← `createSandboxGateway()`
  * （网关）← `FakeCfSandbox`（沙盒）的完整四层链路——不 mock 任何 nimbo 内部模块。
@@ -11,7 +11,7 @@
  *      使该路径的 `readState` 失效（§4.5a 模式 A 规则 2），之后 `edit-file` 被拒
  *      直到重新 `read-file`。
  *
- * P13-5-2（docs/tech/single-ledger.md）迁移：断言从 `SessionEvent`/
+ * P13-5-2（docs/agent/single-ledger/tech.md）迁移：断言从 `SessionEvent`/
  * `SessionItem`（`.status`）改为 `NimboChunk`/账本工具部件（`.state`）——同
  * `@nimbo/just-bash`/`@nimbo/sandbox-e2b` 的 `test/e2e.test.ts` 迁移，一比一
  * 照搬；辅助函数就地内联（不跨包 import 测试辅助，沿两包既有"各自 test 文件

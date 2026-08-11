@@ -13,12 +13,12 @@ const LOG_SCOPE = 'server';
 // Generate openapi.yml on dev server start
 generateOpenAPISpec(app);
 
-// 推送通知（docs/tech/push-notification.md §6.5）：把「开没开、开了哪几类」摊在
+// 推送通知（docs/app/push-notification/tech.md §6.5）：把「开没开、开了哪几类」摊在
 // 启动日志里，且**只在这里**说一遍——`isPushEnabled()` 在每一轮里会被问很多次，
 // 那些地方一行日志都不该打。
 logPushStartup(logger);
 
-// [崩溃恢复](../../../docs/terms.md)（docs/tech/graceful-shutdown.md §5）：上次进程若是
+// [崩溃恢复](../../../docs/terms.md)（docs/agent/graceful-shutdown/tech.md §5）：上次进程若是
 // 被强杀的（`kill -9`/OOM/断电），那些[孤儿轮](../../../docs/terms.md)在账本里从没收尾。
 // 放在 `serve()` **之前**——这样第一个请求进来时账本已经一致，不会有人看到一个还没补上
 // 收尾的半截历史。
@@ -27,7 +27,7 @@ recoverOrphanedTurns(db, logger);
 const port = Number(process.env.SERVER_PORT ?? 3000);
 
 /**
- * [优雅关闭](../../../docs/terms.md)等收尾的上限（docs/tech/graceful-shutdown.md §7.1）。
+ * [优雅关闭](../../../docs/terms.md)等收尾的上限（docs/agent/graceful-shutdown/tech.md §7.1）。
  *
  * 默认 15 秒：K8s 的 `terminationGracePeriodSeconds` 默认 30 秒，留一半余量给连接关闭与
  * 进程退出。`node --watch` 侧是**无限期**等我们的（实测，见 tech 附录 A），所以这个值在
@@ -44,7 +44,7 @@ const server = serve({ fetch: app.fetch, port }, (info) => {
 });
 
 /**
- * 关闭顺序是硬要求（docs/tech/graceful-shutdown.md §3.2）：
+ * 关闭顺序是硬要求（docs/agent/graceful-shutdown/tech.md §3.2）：
  *
  * **先让轮收尾，再关 server。** 反过来的话，被中止那一轮的收尾帧根本发不到浏览器
  * ——它要经 `GET .../stream` 送出去，而 `server.close()` 会断掉那条 SSE 连接；更糟的是
@@ -83,7 +83,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   });
 }
 
-// SIGTERM = `node --watch` 热重载（实测，docs/tech/graceful-shutdown.md 附录 A）、
+// SIGTERM = `node --watch` 热重载（实测，docs/agent/graceful-shutdown/tech.md 附录 A）、
 // `kill`、K8s pod 迁移；SIGINT = Ctrl-C。若有人把 dev 脚本的 `--watch-kill-signal`
 // 改成别的信号，这里要同步加监听（§7.5）。
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {

@@ -114,7 +114,7 @@ async function loadSkillsDirFromFS(fs: NimboFS, dir: string): Promise<Skill[]> {
 }
 
 /**
- * L3 目录约定层，虚拟 FS 版本（docs/tech/core-sdk.md §4.7）。只读 `instructions.md` 与
+ * L3 目录约定层，虚拟 FS 版本（docs/core/core-sdk/tech.md §4.7）。只读 `instructions.md` 与
  * `skills/`（本文件头）；`opts.model` 必需——本函数从不读取/求值
  * `agent.ts`/`agent.json`/`tools/*.ts`。
  */
@@ -126,7 +126,7 @@ export async function loadAgentFromFS(fs: NimboFS, dir: string, opts: LoadAgentF
   if (model === undefined) {
     throw new Error(
       `loadAgentFromFS(fs, "${dir}"): no model configured — this loader never evaluates agent.ts/agent.json ` +
-        "(docs/tech/core-sdk.md §4.7: no arbitrary code execution surface over a virtual FS), so pass " +
+        "(docs/core/core-sdk/tech.md §4.7: no arbitrary code execution surface over a virtual FS), so pass " +
         "loadAgentFromFS(fs, dir, { model }).",
     );
   }

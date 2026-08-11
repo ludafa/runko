@@ -28,7 +28,7 @@ function getPostApiChatConversationsIdAbortUrl(
 }
 
 /**
- * @summary [停止](docs/terms.md)这个会话进行中的那一轮（docs/tech/turn-abort.md）：中止当前轮并清空[待发队列](docs/terms.md)。200 只表示「停止已请求」——真正停下的时刻取决于 agent 当时在做什么（最坏情况是一条 bash 命令响应中断信号的时间），「已停止」这个结果走 `GET .../stream` 上那条 `status: "interrupted"` 的 `message-metadata` chunk 送达
+ * @summary [停止](docs/terms.md)这个会话进行中的那一轮（docs/agent/turn-abort/tech.md）：中止当前轮并清空[待发队列](docs/terms.md)。200 只表示「停止已请求」——真正停下的时刻取决于 agent 当时在做什么（最坏情况是一条 bash 命令响应中断信号的时间），「已停止」这个结果走 `GET .../stream` 上那条 `status: "interrupted"` 的 `message-metadata` chunk 送达
  * {@link /api/chat/conversations/:id/abort}
  */
 export async function postApiChatConversationsIdAbort(

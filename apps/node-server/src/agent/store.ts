@@ -1,6 +1,6 @@
 /**
- * `conversations` + `conversation_events` reads/writes (docs/tech/chat-webapp.md
- * §2.2 `store.ts`, docs/tech/single-ledger.md §5 单-3 "UIMessage 单
+ * `conversations` + `conversation_events` reads/writes (docs/app/chat-webapp/tech.md
+ * §2.2 `store.ts`, docs/agent/single-ledger/tech.md §5 单-3 "UIMessage 单
  * 账本") — plain functions over an injected `Db` (the same
  * `BetterSQLite3Database<typeof schema>` shape as `db/instance.ts`'s
  * singleton), so tests can point them at an isolated in-memory database
@@ -47,7 +47,7 @@ export interface CreateConversationInput {
   repo: string;
   branchName: string;
   sandboxName: string;
-  /** 沙盒 provider（docs/tech/sandbox-provider.md）。省略时默认 `'vercel'`，与列默认一致——路由侧始终显式传，省略仅便于测试夹具。 */
+  /** 沙盒 provider（docs/host/sandbox-provider/tech.md）。省略时默认 `'vercel'`，与列默认一致——路由侧始终显式传，省略仅便于测试夹具。 */
   provider?: ConversationRow['provider'];
   /** E2B 的[重连令牌](docs/terms.md) sandboxId（建盒后由路由回填）；Vercel/建会话初始为 null。 */
   sandboxId?: string | null;
@@ -104,10 +104,10 @@ export function getConversation(
 export interface ConversationPatch {
   status?: ConversationStatus;
   lastActiveAt?: Date;
-  /** E2B 的[重连令牌](docs/terms.md) sandboxId——首建落库、或过期重建后换了新 sandbox 时由路由回写（docs/tech/sandbox-provider.md §3.1）。 */
+  /** E2B 的[重连令牌](docs/terms.md) sandboxId——首建落库、或过期重建后换了新 sandbox 时由路由回写（docs/host/sandbox-provider/tech.md §3.1）。 */
   sandboxId?: string;
   /**
-   * The nimbo session-scalar header (docs/tech/single-ledger.md §5 单-3, schema.ts's own doc
+   * The nimbo session-scalar header (docs/agent/single-ledger/tech.md §5 单-3, schema.ts's own doc
    * comment) — all three always written together, at the end of every turn
    * that finishes gracefully (`turn-runner/persistence.ts`'s `finalizeTurnPersistence`).
    * There is no partial-update case, so this is one combined optional group
@@ -143,7 +143,7 @@ export function updateConversation(
 
 // ---- conversation_events ----
 
-/** Seq continuation point for a session (docs/tech/chat-webapp.md §2.2 "seq 单调，从 DB max(seq) 续") — `0` if the session has no events yet, so the first appended event is `seq = 1`. Spans both `kind`s — one counter for the whole ledger (docs/tech/single-ledger.md §5 单-3). */
+/** Seq continuation point for a session (docs/app/chat-webapp/tech.md §2.2 "seq 单调，从 DB max(seq) 续") — `0` if the session has no events yet, so the first appended event is `seq = 1`. Spans both `kind`s — one counter for the whole ledger (docs/agent/single-ledger/tech.md §5 单-3). */
 export function getMaxEventSeq(db: Db, conversationId: string): number {
   const row = db
     .select({ value: max(conversationEvents.seq) })
@@ -171,7 +171,7 @@ export function listAllConversationIds(db: Db): string[] {
 /**
  * 一个会话[账本](../../../../docs/terms.md)里的**最后一行**（按 seq），空会话返回
  * `undefined`——[孤儿轮](../../../../docs/terms.md)的识别就看它是不是 `kind = 'chunk'`
- * （docs/tech/graceful-shutdown.md §5）。
+ * （docs/agent/graceful-shutdown/tech.md §5）。
  *
  * 单独一条 `ORDER BY seq DESC LIMIT 1`，而不是 `listConversationEvents(...).at(-1)`：
  * 崩溃恢复要对**每个**会话问一次，把整份历史读进内存再丢掉太浪费。
@@ -214,11 +214,11 @@ export function appendConversationEvent(
 /**
  * Replay, in arrival (seq) order; `afterSeq` (exclusive) drives
  * `GET .../events?after=<seq>` / `GET .../stream?after=<seq>` pagination
- * (docs/tech/chat-webapp.md §2.2). Returns both `kind`s mixed together — thanks to
+ * (docs/app/chat-webapp/tech.md §2.2). Returns both `kind`s mixed together — thanks to
  * `deleteChunkEventsAfter` running at the end of every turn that finishes
  * gracefully, whatever rows remain are already exactly "finished-message
  * history + the currently in-progress (or crashed) turn's durable chunks"
- * (docs/tech/single-ledger.md §5 单-3's replay algorithm), with no extra filtering needed here.
+ * (docs/agent/single-ledger/tech.md §5 单-3's replay algorithm), with no extra filtering needed here.
  */
 export function listConversationEvents(
   db: Db,
@@ -241,7 +241,7 @@ export function listConversationEvents(
 }
 
 /**
- * Turn-finalization GC (docs/tech/single-ledger.md §5 单-3 "turn 收尾…GC 本轮的 chunk 条目"):
+ * Turn-finalization GC (docs/agent/single-ledger/tech.md §5 单-3 "turn 收尾…GC 本轮的 chunk 条目"):
  * deletes every `kind = 'chunk'` row with `seq > afterSeq` for this session.
  * `afterSeq` is the session's `getMaxEventSeq` reading taken at the *start*
  * of the turn being finalized (`turn-runner/start.ts`'s `startTurn`) — since a
@@ -269,21 +269,21 @@ export function deleteChunkEventsAfter(
 }
 
 // ---------------------------------------------------------------------------
-// 待发队列（[排队](../../../../docs/terms.md)，docs/tech/steer-and-queue.md §2）
+// 待发队列（[排队](../../../../docs/terms.md)，docs/agent/steer-and-queue/tech.md §2）
 //
 // 全部落在 `conversations.queued_messages_json` 这一列上——**不是**账本
 // （`conversation_events`）的一部分：账本记「已发生的事」（`kind='message'` 行永不
 // 删除、`seq` 被回放/续传/GC 三处依赖），排队消息是「尚未发生的意图」（可删可清空）。
-// 见 `db/schema.ts` 该列的注释与 docs/tech/steer-and-queue.md §2。
+// 见 `db/schema.ts` 该列的注释与 docs/agent/steer-and-queue/tech.md §2。
 //
 // 每个写操作都是**读-改-写整个数组**：读列 → 改数组 → 写回。中间不 `await`
 // （better-sqlite3 全同步），所以在 chat 应用的单进程前提下无并发丢更新窗口
-// （多进程部署的限制见 docs/tech/steer-and-queue.md §7）。
+// （多进程部署的限制见 docs/agent/steer-and-queue/tech.md §7）。
 // ---------------------------------------------------------------------------
 
 const LOG_SCOPE = 'store';
 
-/** 一个会话最多排多少条（docs/features/steer-and-queue.md §2.3）——满了 `enqueueMessage` 返回 `'full'`，路由转成 409，绝不静默丢弃。 */
+/** 一个会话最多排多少条（docs/agent/steer-and-queue/feature.md §2.3）——满了 `enqueueMessage` 返回 `'full'`，路由转成 409，绝不静默丢弃。 */
 export const MAX_QUEUED_MESSAGES = 10;
 
 /** JSON 列的反序列化边界：`JSON.parse` 的 `any` 直接喂进 `safeParse`，不落进任何具名变量——`any` 不会逃出这个表达式（与 `schemas/chat.ts` 里同类边界一致的姿态）。 */
@@ -324,7 +324,7 @@ export function parseQueuedMessages(
   return result.data;
 }
 
-/** 同 `queuedMessagesSchema`：JSON 列的反序列化边界（docs/tech/composer-skill-mention.md §3）。 */
+/** 同 `queuedMessagesSchema`：JSON 列的反序列化边界（docs/app/composer-skill-mention/tech.md §3）。 */
 const availableSkillsSchema = z.array(SkillSummarySchema);
 
 /**
@@ -367,7 +367,7 @@ export function parseAvailableSkills(
 
 /**
  * 刷新 [skill 清单](../../../../docs/terms.md)缓存，**内容没变就不写**
- * （docs/tech/composer-skill-mention.md §2.1）。返回落库的 JSON，调用方可直接拿去
+ * （docs/app/composer-skill-mention/tech.md §2.1）。返回落库的 JSON，调用方可直接拿去
  * 拼 DTO，不必再查一次库。
  *
  * 调用点两处：会话创建时沙盒首次就绪（`routes/chat.ts`）、以及每轮

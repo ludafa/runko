@@ -1,5 +1,5 @@
 /**
- * [停止](../../../../../docs/terms.md)进行中的那一轮（docs/tech/turn-abort.md §3）。
+ * [停止](../../../../../docs/terms.md)进行中的那一轮（docs/agent/turn-abort/tech.md §3）。
  *
  * 每一轮自带一个 `AbortController`（`ActiveTurn.abortController`），signal 经
  * `session.stream(text, { signal })` 交给 `@nimbo/core`；本文件的 `abortTurn` 触发它。
@@ -17,10 +17,10 @@ import { LOG_SCOPE } from './log.js';
 import { activeTurns } from './registry.js';
 
 /**
- * [停止](../../../../../docs/terms.md)这个会话进行中的那一轮（docs/tech/turn-abort.md §3.1）
+ * [停止](../../../../../docs/terms.md)这个会话进行中的那一轮（docs/agent/turn-abort/tech.md §3.1）
  * ——`routes/chat.ts` 的 `POST .../abort` 调它。返回 `false` = 没有进行中的一轮可停
  * （路由转 409）；`true` = 停止已请求（**不代表已经停住**，真正停下的时刻见
- * docs/features/turn-abort.md §2.3）。
+ * docs/agent/turn-abort/feature.md §2.3）。
  *
  * 四步的顺序都是硬要求：
  *
@@ -55,7 +55,7 @@ export function abortTurn(
   const pendingQuestionIds = [...activeTurn.pendingQuestions.keys()];
   log.info(LOG_SCOPE, 'turn abort requested', {
     conversationId,
-    // `preparing` = 停在[起轮装配](../../../../../docs/terms.md)窗口里（docs/tech/turn-abort.md §3.3）：
+    // `preparing` = 停在[起轮装配](../../../../../docs/terms.md)窗口里（docs/agent/turn-abort/tech.md §3.3）：
     // 这一轮还没启动，收尾由 `releaseTurn` 补，不走 core 的 loop。
     phase: activeTurn.phase,
     pendingReviews: pendingReviewIds.length,

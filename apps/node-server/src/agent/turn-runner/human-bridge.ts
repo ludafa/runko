@@ -5,7 +5,7 @@
  *
  * 纯**内存里的 promise 路由**，**一个 `emit` 都不发**（见 `index.ts` 头注释）：
  * 挂起中这件事的可见性是 `@nimbo/core` 自己的 `tool-approval-request` chunk
- * （docs/tech/single-ledger.md §6.1——loop 是先 yield 它、再 `await onReview`，所以人
+ * （docs/agent/single-ledger/tech.md §6.1——loop 是先 yield 它、再 `await onReview`，所以人
  * 一被需要那一刻它已经在线上了），结果的可见性则是 loop 随后 yield 的
  * `tool-approval-response`。两者都随 `session.stream()` 正常流转，本文件不需要
  * （也绝不该）再宣告一遍。ask-user 同理：它挂起/已答的状态就是 `tool-ask-user`
@@ -40,7 +40,7 @@ function takePending<T>(
 }
 
 // ---------------------------------------------------------------------------
-// 审批链 / 人审通道 (docs/tech/single-ledger.md §6.4): `requestReview`
+// 审批链 / 人审通道 (docs/agent/single-ledger/tech.md §6.4): `requestReview`
 // is what `routes/chat.ts` wires up as the session's `onReview`
 // (`ApprovalReviewer`) — `@nimbo/core`'s loop calls it only *after* it has
 // already yielded a `tool-approval-request` chunk for a call the session's
@@ -56,14 +56,14 @@ function takePending<T>(
  *
  * 这个值原本还背着「赶在沙盒空闲超时之前把无人应答的审批拒掉」的保命职责，所以取
  * 沙盒空闲超时的 80%。[保活](../../../../../docs/terms.md)接管之后那层耦合没了（等人期间
- * 由适配器按[审批保活预算](../../../../../docs/terms.md)续期，见 docs/tech/sandbox-keepalive.md），
+ * 由适配器按[审批保活预算](../../../../../docs/terms.md)续期，见 docs/host/sandbox-keepalive/tech.md），
  * 数值本身不动。
  */
 const DEFAULT_APPROVAL_TIMEOUT_MS = 240_000;
 
 /**
  * 导出给 `turn-launcher.ts`：审批通知的存活时长（TTL）必须与这个超时**在同一处**
- * 取值（docs/tech/push-notification.md §6.3/§8）——送不到人手上就已经自动拒绝了的
+ * 取值（docs/app/push-notification/tech.md §6.3/§8）——送不到人手上就已经自动拒绝了的
  * 通知，不如别送。两边各读一遍环境变量迟早会悄悄对不上。
  */
 export function resolveApprovalTimeoutMs(): number {
@@ -187,7 +187,7 @@ export function resolveReview(
 }
 
 // ---------------------------------------------------------------------------
-// ask-user bridge (docs/tech/chat-webapp.md §2.2c（审批链）) — structurally the sibling of the
+// ask-user bridge (docs/app/chat-webapp/tech.md §2.2c（审批链）) — structurally the sibling of the
 // review bridge above; `chat-agent.ts`'s `ask-user` tool calls
 // `requestUserAnswer` on every invocation (no auto-allow branch — asking the
 // user is always exactly that), suspending the turn until a human answers

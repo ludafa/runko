@@ -1,5 +1,5 @@
 /**
- * REST + SSE client for the chat agent API (docs/tech/chat-webapp.md §2.2, docs/tech/single-ledger.md §5/§6). These routes aren't in the OpenAPI spec kubb
+ * REST + SSE client for the chat agent API (docs/app/chat-webapp/tech.md §2.2, docs/agent/single-ledger/tech.md §5/§6). These routes aren't in the OpenAPI spec kubb
  * generates a *usable* client from (`chunk`/`message` come out `z.any()` — see
  * `schema.ts`'s own file header) — like before this migration, this stays
  * hand-written, and every response is validated with the zod schemas in
@@ -90,7 +90,7 @@ export async function getConversation(
 }
 
 /**
- * `GET .../events?after=<seq>` (docs/tech/chat-webapp.md §2.2, docs/tech/single-ledger.md §5 单-3): the full
+ * `GET .../events?after=<seq>` (docs/app/chat-webapp/tech.md §2.2, docs/agent/single-ledger/tech.md §5 单-3): the full
  * persisted history, in seq order — `{ frames: ChatReplayFrame[] }`, not a
  * bare/paginated array (`apps/node-server`'s `schemas/chat.ts` `ChatEventsListSchema`
  * doc comment: GC already keeps this bounded to "finished message history +
@@ -118,8 +118,8 @@ export interface ChatFrameStreamHandlers {
 }
 
 /**
- * `POST /api/chat/conversations/:id/messages` (docs/tech/chat-webapp.md §2.2b,
- * docs/tech/steer-and-queue.md §4.1): only *starts* a turn, *queues* this
+ * `POST /api/chat/conversations/:id/messages` (docs/app/chat-webapp/tech.md §2.2b,
+ * docs/agent/steer-and-queue/tech.md §4.1): only *starts* a turn, *queues* this
  * message for the next one, or *steers* the in-progress one — its events
  * arrive separately, over `streamConversationTail`, not this response.
  *
@@ -134,7 +134,7 @@ export interface ChatFrameStreamHandlers {
  * resolve 的值是服务端**实际**的分流结果（`mode`，见 `startTurnAckSchema`）：它可能与
  * 请求的 `intent` 不一致，调用方需要据此修正自己的乐观状态——目前唯一的用处是
  * `use-chat-messages.ts` 在「请求 steer 却拿回 `queued`」时撤掉那条「待注入」回显
- * （docs/tech/turn-abort.md §3.3）。
+ * （docs/agent/turn-abort/tech.md §3.3）。
  */
 export async function postChatMessage(
   conversationId: string,
@@ -155,7 +155,7 @@ export async function postChatMessage(
 }
 
 /**
- * `POST .../abort`（docs/tech/turn-abort.md §3.2）：[停止](../../../../../docs/terms.md)
+ * `POST .../abort`（docs/agent/turn-abort/tech.md §3.2）：[停止](../../../../../docs/terms.md)
  * 进行中的那一轮——中止当前轮 + 清空[待发队列](../../../../../docs/terms.md)，返回清空
  * 后的队列快照（恒为空数组）。
  *
@@ -176,7 +176,7 @@ export async function postAbortTurn(
 }
 
 /**
- * `DELETE .../queue/:messageId`（docs/tech/steer-and-queue.md §4.2）：删掉一条还没
+ * `DELETE .../queue/:messageId`（docs/agent/steer-and-queue/tech.md §4.2）：删掉一条还没
  * 发出的[排队](../../../../../docs/terms.md)消息，返回**变更后的完整队列快照**
  * ——服务端始终是队列的权威，调用方直接用这份快照覆盖本地状态，不做乐观合并（与审批
  * 「不做乐观翻转」同一姿态）。`404` = 这条已经不在队列里了（已出队成一轮 / 已删）。
@@ -193,7 +193,7 @@ export async function deleteQueuedMessage(
   return queueFrameSchema.parse(json).queue;
 }
 
-/** `DELETE .../queue`（docs/tech/steer-and-queue.md §4.2）：清空队列，同样返回变更后的快照（恒为空数组）。 */
+/** `DELETE .../queue`（docs/agent/steer-and-queue/tech.md §4.2）：清空队列，同样返回变更后的快照（恒为空数组）。 */
 export async function clearQueuedMessages(
   conversationId: string,
   signal?: AbortSignal,
@@ -206,10 +206,10 @@ export async function clearQueuedMessages(
 }
 
 /**
- * `POST .../approvals/:callId` (docs/tech/single-ledger.md §6): a human's decision on a pending
+ * `POST .../approvals/:callId` (docs/agent/single-ledger/tech.md §6): a human's decision on a pending
  * tool call — `callId` is the gated tool part's own `toolCallId`
  * (`approval-requested` state, `part.approval.id`), no separate id space to
- * reconcile anymore (docs/tech/single-ledger.md §5 引言's "旧『卡片对不上工具卡片』的痛点自动消失").
+ * reconcile anymore (docs/agent/single-ledger/tech.md §5 引言's "旧『卡片对不上工具卡片』的痛点自动消失").
  * Result arrives back over the tail as the matching `tool-approval-response`
  * chunk, this call only needs to succeed or fail; `use-chat-messages.ts`
  * tells a `404` (the server no longer has this `callId` pending) apart from
@@ -238,7 +238,7 @@ export async function postApprovalDecision(
   );
 }
 
-/** `POST .../questions/:callId` (docs/tech/single-ledger.md §6): a human's free-text answer to a pending `ask-user` tool call — same posture/rationale as `postApprovalDecision` above. */
+/** `POST .../questions/:callId` (docs/agent/single-ledger/tech.md §6): a human's free-text answer to a pending `ask-user` tool call — same posture/rationale as `postApprovalDecision` above. */
 export async function postQuestionAnswer(
   conversationId: string,
   callId: string,
@@ -258,7 +258,7 @@ export async function postQuestionAnswer(
 
 /**
  * `POST .../presence`（[在场](../../../../docs/terms.md)心跳，
- * docs/tech/push-notification.md §5.2）：上报"这条会话此刻是否正在我眼前"。服务端
+ * docs/app/push-notification/tech.md §5.2）：上报"这条会话此刻是否正在我眼前"。服务端
  * 据此决定要不要推送——在场就不推，因为审批卡片已经在眼前了。
  *
  * 与本文件其它函数不同，**这个接口失败一律吞掉**（由 `use-presence.ts` 负责）：
@@ -284,7 +284,7 @@ export async function postPresence(
   );
 }
 
-/** `GET .../turns/{turn}/telemetry`（docs/tech/chat-webapp.md §11.4）：一个 turn 的遥测明细——未启用遥测/该轮无数据返回空数组，UI 显示"无遥测数据"而不是报错。 */
+/** `GET .../turns/{turn}/telemetry`（docs/app/chat-webapp/tech.md §11.4）：一个 turn 的遥测明细——未启用遥测/该轮无数据返回空数组，UI 显示"无遥测数据"而不是报错。 */
 export async function fetchTurnTelemetry(
   conversationId: string,
   turn: number,
@@ -298,7 +298,7 @@ export async function fetchTurnTelemetry(
 }
 
 /**
- * `GET /api/chat/conversations/:id/stream?after=<seq>` (docs/tech/chat-webapp.md §2.2b, docs/tech/single-ledger.md §5
+ * `GET /api/chat/conversations/:id/stream?after=<seq>` (docs/app/chat-webapp/tech.md §2.2b, docs/agent/single-ledger/tech.md §5
  * 单-3): the resumable live tail — replays persisted frames after `after`,
  * then forwards the turn's live frames until it ends (or closes immediately
  * if there's no turn in progress). Resolves once the stream closes; rejects

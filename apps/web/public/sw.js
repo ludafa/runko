@@ -1,7 +1,7 @@
 // @ts-check
 /// <reference lib="webworker" />
 /**
- * 推送通知的 Service Worker（docs/tech/push-notification.md §7）。
+ * 推送通知的 Service Worker（docs/app/push-notification/tech.md §7）。
  *
  * 它只做两件事：收到推送弹一条通知、点了通知把人送回对应会话。
  *

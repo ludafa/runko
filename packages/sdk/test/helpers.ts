@@ -3,11 +3,11 @@
  * (the "host assembly" file this ticket's default wiring formalizes): a `MockLanguageModelV4`
  * scripted via raw AI SDK stream chunks, one `doStream` entry per assistant step.
  *
- * P13-5-2（docs/tech/single-ledger.md）迁移：`drainStream` 改收集
+ * P13-5-2（docs/agent/single-ledger/tech.md）迁移：`drainStream` 改收集
  * `NimboChunk`（`session.stream()` 的产出类型，SessionEvent 已退役）；
  * `isItemCompleted`/`toolCallItems`/`fileChangeItems` 改为从最终账本
  * （`session.toJSON().messages`）的部件里取——同一 toolCallId 在账本里只记
- * 结算态（docs/tech/single-ledger.md §4.1 实现教训），因此按工具部件类型/data 部件类型 flatMap
+ * 结算态（docs/agent/single-ledger/tech.md §4.1 实现教训），因此按工具部件类型/data 部件类型 flatMap
  * 全部消息即可，不需要再从 chunk 流里筛"completed"事件。
  */
 import { isToolUIPart, simulateReadableStream } from "ai";

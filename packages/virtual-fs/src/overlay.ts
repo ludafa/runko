@@ -1,5 +1,5 @@
 /**
- * OverlayFS：base（只读）+ overlay（MemoryFS，承接写入与删除墓碑）（docs/tech/core-sdk.md §4.4）。
+ * OverlayFS：base（只读）+ overlay（MemoryFS，承接写入与删除墓碑）（docs/core/core-sdk/tech.md §4.4）。
  * 读穿透 base、写覆盖进 overlay、删除记墓碑（base 条目随之从 readdir/stat/glob 消失）。
  */
 import * as nodeFs from "node:fs/promises";

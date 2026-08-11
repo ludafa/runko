@@ -1,12 +1,12 @@
 /**
- * 投递层（docs/tech/push-notification.md §6）：给定一个 userId 和一条载荷，投给
+ * 投递层（docs/app/push-notification/tech.md §6）：给定一个 userId 和一条载荷，投给
  * 这个人的**所有**设备；失效的订阅就地回收。
  *
  * 这一层不做任何「该不该发」的判断——那是 `notifier.ts` 三道闸门的事。它只负责
  * 「已经决定要发了，怎么发出去、发不出去怎么办」。
  *
  * **永不 reject**：`sendToUser` 内部 `Promise.allSettled` + 全程 try/catch。一条
- * 通知发不出去，绝不能让一轮跑不下去（docs/tech/push-notification.md §9 不变量 1）。
+ * 通知发不出去，绝不能让一轮跑不下去（docs/app/push-notification/tech.md §9 不变量 1）。
  */
 import type { Urgency } from 'web-push';
 import webpush from 'web-push';
@@ -72,7 +72,7 @@ export interface SendOptions {
   /**
    * 覆盖存活时长。审批/提问由调用方（`notifier.ts`）按**当前审批超时的剩余秒数**
    * 传入：送不到用户手上就已经自动拒绝了的通知，不如别送
-   * （docs/tech/push-notification.md §6.3）。
+   * （docs/app/push-notification/tech.md §6.3）。
    */
   ttlSeconds?: number;
   logger?: Logger;
@@ -134,7 +134,7 @@ function createDefaultTransport(): PushTransport | undefined {
 /**
  * 投给这个人的每一台设备。**不 reject、不抛**。
  *
- * 失败处置分两档（docs/tech/push-notification.md §6.5）：
+ * 失败处置分两档（docs/app/push-notification/tech.md §6.5）：
  *
  * - **404 / 410** —— 这个订阅已作废（撤了权限 / 浏览器换了 endpoint / 清了站点
  *   数据）→ **删行**。这是唯一会删行的路径。

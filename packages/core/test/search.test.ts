@@ -1,5 +1,5 @@
 /**
- * `SearchUnsupportedError`（docs/tech/sandbox.md §4 原生搜索接缝的唯一运行时产物）：适配器
+ * `SearchUnsupportedError`（docs/host/sandbox/tech.md §4 原生搜索接缝的唯一运行时产物）：适配器
  * 声明"本次运行时环境无法原生搜索"时抛出的信号类，`grep`/`glob` 工具据此静默回退 JS 扫描。
  */
 import { describe, expect, it } from "vitest";

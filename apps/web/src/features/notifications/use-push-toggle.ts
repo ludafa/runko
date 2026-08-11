@@ -1,5 +1,5 @@
 /**
- * 铃铛的状态机（docs/tech/push-notification.md §7）。
+ * 铃铛的状态机（docs/app/push-notification/tech.md §7）。
  *
  * 六个状态，界面据此决定渲不渲染、渲成什么样：
  *

@@ -1,6 +1,6 @@
 /**
  * 09-sandbox-e2b — the first of three "BYO cloud sandbox" examples
- * (docs/tech/sandbox.md §8, docs/plans/core-sdk.md P10):
+ * (docs/host/sandbox/tech.md §8, docs/core/core-sdk/plan.md P10):
  * instead of `NimboFS.fromMemory()`/`fromDirectory()` or the in-process
  * `miniBash`/`justBash` exec implementations, an agent's files and bash
  * commands can live in a real E2B cloud sandbox (a Firecracker microVM) —
@@ -64,7 +64,7 @@
  *      file, then `sandbox.kill()`s it. This repo's checkout has no E2B
  *      credentials, so this section is expected to stop at the guidance
  *      message — the real-sandbox path compiles and reads correctly but is
- *      untested end-to-end here; results get backfilled into docs/plans/verification.md once a
+ *      untested end-to-end here; results get backfilled into docs/core/verification/plan.md once a
  *      user supplies E2B_API_KEY.
  */
 import { createSession, defineAgent } from "@nimbo/sdk";

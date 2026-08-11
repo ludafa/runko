@@ -1,6 +1,6 @@
 /**
  * 08-just-bash — the "full-syntax bash" upgrade path from
- * docs/tech/core-sdk.md §4.5b: `@nimbo/mini-bash`'s six read-only commands
+ * docs/core/core-sdk/tech.md §4.5b: `@nimbo/mini-bash`'s six read-only commands
  * can't carry a Claude-style model's high-frequency `if`/`for`/`while`/
  * `case` scripts, so nimbo ships a second, *optional* `NimboExec`
  * implementation — `@nimbo/just-bash`, an adapter over

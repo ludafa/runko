@@ -8,7 +8,7 @@
  * forwarding) instead of only ever seeing a turn that's already fully
  * drained.
  *
- * ---- UIMessage 单账本 migration (docs/tech/single-ledger.md §5
+ * ---- UIMessage 单账本 migration (docs/agent/single-ledger/tech.md §5
  * 单-3, P13-5-3) ----
  *
  * `stream()` now yields `NimboChunk` (ai's `UIMessageChunk` vocabulary)
@@ -28,7 +28,7 @@ export interface ControllableSession {
   toJSONCalls: SessionState[];
   /**
    * `turn-runner/` 传进来的那个 [停止](../../../../docs/terms.md)信号
-   * （`ActiveTurn.abortController.signal`，docs/tech/turn-abort.md §3.1）——`stream()`
+   * （`ActiveTurn.abortController.signal`，docs/agent/turn-abort/tech.md §3.1）——`stream()`
    * 被调用后才有值。测试用它断言「signal 确实透传给了 core」，以及模拟 core 收到
    * abort 后的优雅收尾（真 loop 在 step 边界收尾，这里由测试手动 `pushChunk` +
    * `finish` 扮演同一件事）。
@@ -38,7 +38,7 @@ export interface ControllableSession {
    * 每次 `stream(input)` 收到的文本，按调用顺序。用来断言**模型实际看到的那份**
    * ——它可能与落[账本](../../../../docs/terms.md)的用户原话不同
    * （[skill 提及](../../../../docs/terms.md)会追加一行系统提示，
-   * docs/tech/composer-skill-mention.md §2.2）。
+   * docs/app/composer-skill-mention/tech.md §2.2）。
    */
   streamInputs: string[];
   pushChunk(chunk: NimboChunk): void;

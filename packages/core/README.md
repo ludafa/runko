@@ -36,7 +36,7 @@ console.log(result.finalResponse);
 
 ## API 面清单
 
-以下按 API 分层列出（语义细节见 [docs/tech/core-sdk.md](../../docs/tech/core-sdk.md) 对应小节）。
+以下按 API 分层列出（语义细节见 [docs/core/core-sdk/tech.md](../../docs/core/core-sdk/tech.md) 对应小节）。
 
 ### L1 · 定义层（§4.1）
 

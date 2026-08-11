@@ -1,5 +1,5 @@
 /**
- * Skills 注入三件事（docs/tech/core-sdk.md §4.6）：① `<available_skills>` system prompt 段
+ * Skills 注入三件事（docs/core/core-sdk/tech.md §4.6）：① `<available_skills>` system prompt 段
  * ② `ctx.getSkill(name)` 的真实现（读 skill 定义自带的 `files`，非 FS）
  * ③ 附属文件挂载到 `/.skills/<name>/`（经 `NimboFS.writeFile`）。三者都只消费
  * `Skill[]`，不关心 skill 是程序化 `defineSkill` 出来的还是 `loader.ts` 三加载器
@@ -15,7 +15,7 @@ function decodeFileContent(content: string | Uint8Array): string {
   return typeof content === "string" ? content : textDecoder.decode(content);
 }
 
-/** skill 附属文件挂载目录的约定前缀（docs/tech/builtin-tools.md §1.9 / docs/tech/core-sdk.md §4.6 第 3 点）。 */
+/** skill 附属文件挂载目录的约定前缀（docs/core/builtin-tools/tech.md §1.9 / docs/core/core-sdk/tech.md §4.6 第 3 点）。 */
 export function skillMountPath(skillName: string, relPath?: string): string {
   const base = `/.skills/${skillName}`;
   if (relPath === undefined) return base;
@@ -23,7 +23,7 @@ export function skillMountPath(skillName: string, relPath?: string): string {
 }
 
 /**
- * `<available_skills>` 段：每 skill 一行 `name: description`（docs/tech/core-sdk.md §4.6
+ * `<available_skills>` 段：每 skill 一行 `name: description`（docs/core/core-sdk/tech.md §4.6
  * 第 1 点）。`skills` 为空数组时返回 `undefined`——"agent.skills 非空时才注入"
  * 由调用方（`session.ts`）按这个返回值分支，不在这里编码"要不要拼进 system
  * prompt"的决策（那是 session 的组装职责）。
@@ -35,7 +35,7 @@ export function buildAvailableSkillsBlock(skills: readonly Skill[]): string | un
 }
 
 /**
- * `ctx.getSkill` 的真实现（docs/tech/core-sdk.md §4.6 第 2 点 + §4.1 `ToolContext.getSkill`）：
+ * `ctx.getSkill` 的真实现（docs/core/core-sdk/tech.md §4.6 第 2 点 + §4.1 `ToolContext.getSkill`）：
  * 数据源是 skill 定义本身的 `files`，不经过 FS——即便这次 session 的 FS 没配置
  * 或还没挂载完，宿主工具仍然能靠 `getSkill` 读到附属文件内容。未知 skill 名/
  * 未知文件路径都在 `.text()` 被 await 时才抛（惰性，同 P4-1 占位实现的求值时机，
@@ -78,7 +78,7 @@ function describeError(error: unknown): string {
 }
 
 /**
- * 附属文件挂载（docs/tech/core-sdk.md §4.6 第 3 点）：把每个 skill 的 `files` 经
+ * 附属文件挂载（docs/core/core-sdk/tech.md §4.6 第 3 点）：把每个 skill 的 `files` 经
  * `NimboFS.writeFile` 写入 `/.skills/<name>/`。"只读层"语义（挂载后 agent 不该
  * 能改写它）留给 P7 的门面（OverlayFS base 层）——这里只负责把字节写进去，用的
  * 是普通 `NimboFS` 接口，不假设具体实现。

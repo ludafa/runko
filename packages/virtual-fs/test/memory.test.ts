@@ -319,7 +319,7 @@ describe("MemoryFS.snapshot()/restore()", () => {
   });
 });
 
-describe("MemoryFS native search seam (docs/tech/sandbox.md §4)", () => {
+describe("MemoryFS native search seam (docs/host/sandbox/tech.md §4)", () => {
   it("does not implement searchFiles/searchContent — grep/glob must always fall back to JS scanning against it", () => {
     // typed as the NimboFS interface (not the concrete class) — searchFiles/searchContent are
     // optional members of the interface, not members of MemoryFS's own declared shape, so accessing

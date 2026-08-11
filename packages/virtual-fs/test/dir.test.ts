@@ -83,7 +83,7 @@ describe("DirFS", () => {
   });
 });
 
-describe("DirFS native search seam (docs/tech/sandbox.md §4)", () => {
+describe("DirFS native search seam (docs/host/sandbox/tech.md §4)", () => {
   it("does not implement searchFiles/searchContent — grep/glob must always fall back to JS scanning against it", () => {
     // no real directory needed — DirFS's constructor doesn't touch disk, and this test only checks
     // the shape of the instance (searchFiles/searchContent absent), never calling any I/O method.

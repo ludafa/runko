@@ -29,7 +29,7 @@ function getPostApiChatConversationsIdQuestionsCallidUrl(
 }
 
 /**
- * @summary 回答一个待处理的 ask-user 提问（docs/tech/chat-webapp.md §2.2c（审批链））：结果通过 `GET .../stream` 的 `tool-ask-user` 部件 output-available 状态送达，本响应只是一个 ack
+ * @summary 回答一个待处理的 ask-user 提问（docs/app/chat-webapp/tech.md §2.2c（审批链））：结果通过 `GET .../stream` 的 `tool-ask-user` 部件 output-available 状态送达，本响应只是一个 ack
  * {@link /api/chat/conversations/:id/questions/:callId}
  */
 export async function postApiChatConversationsIdQuestionsCallid(

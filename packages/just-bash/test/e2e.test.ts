@@ -1,6 +1,6 @@
 /**
  * End-to-end wiring: mock model drives a real `createSession` + `justBash`
- * bash tool (docs/tech/core-sdk.md §4.5b "端到端两件套" 验收点). Mirrors
+ * bash tool (docs/core/core-sdk/tech.md §4.5b "端到端两件套" 验收点). Mirrors
  * `@nimbo/core`'s `test/e2e-minibash.test.ts` pattern one-for-one, swapped to
  * the full-syntax interpreter:
  *   a) a mock model tool-calls `bash` to run an if/for/case script, and the
@@ -11,7 +11,7 @@
  *      §4.5a mode A rule 2 "readState invalidation" mechanism) so a
  *      subsequent `edit-file` is rejected until the path is re-read.
  *
- * P13-5-2（docs/tech/single-ledger.md）迁移：断言从 `SessionEvent`/
+ * P13-5-2（docs/agent/single-ledger/tech.md）迁移：断言从 `SessionEvent`/
  * `SessionItem`（`.status`）改为 `NimboChunk`/账本工具部件（`.state`）——同
  * `@nimbo/core`'s `test/e2e-minibash.test.ts` 的迁移，一比一对应；辅助函数
  * 就地内联（不跨包 import 测试辅助，沿两包既有"各自 test 文件自包含"的风格）。
@@ -162,7 +162,7 @@ describe("b) bypass proof: bash's real redirect write invalidates readState (§4
     expect(toolCalls[1]).toMatchObject({ state: "output-available" }); // bash redirect write, real just-bash, real exit 0
     expect(stringOutput(toolCalls[1]?.output)).toContain("exit code: 0");
 
-    // edit-file's execute() itself returns normally with an { isError: true, content } value (docs/tech/builtin-tools.md §0.5) —
+    // edit-file's execute() itself returns normally with an { isError: true, content } value (docs/core/builtin-tools/tech.md §0.5) —
     // state stays "output-available", the rejection shows up in output.
     expect(toolCalls[2]).toMatchObject({ state: "output-available" });
     expect(errorResultContent(toolCalls[2]?.output)).toContain("changed since it was last read");

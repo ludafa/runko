@@ -1,4 +1,4 @@
-/** `push_subscriptions` 的读写（docs/tech/push-notification.md §2）。 */
+/** `push_subscriptions` 的读写（docs/app/push-notification/tech.md §2）。 */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Db } from '../../src/agent/store.js';

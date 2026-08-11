@@ -1,5 +1,5 @@
 /**
- * Renders one `NimboUIMessage` (docs/tech/single-ledger.md §5/§6) —
+ * Renders one `NimboUIMessage` (docs/agent/single-ledger/tech.md §5/§6) —
  * the P13-5-4 replacement for the retired `ItemCard`/`SessionItem` mapping.
  * The mapping is no longer 1:1: a `SessionItem` used to render as exactly
  * one card, but one `NimboUIMessage` can carry *several* parts (text,
@@ -12,7 +12,7 @@
  * the rare case a turn fails before any step ever ran) naturally renders as
  * *just* that trailing marker, no bubble.
  *
- * Tool part dispatch (docs/tech/single-ledger.md §6): a gated call's `approval-requested` state
+ * Tool part dispatch (docs/agent/single-ledger/tech.md §6): a gated call's `approval-requested` state
  * renders `ApprovalCard` instead of the generic `ToolCallCard`; the
  * `ask-user` tool's `input-available`/`output-available` states render
  * `QuestionCard` instead (same "avoid double display" rationale the retired
@@ -78,7 +78,7 @@ export interface MessageEntryProps {
     behavior: 'allow' | 'allow-session' | 'deny',
   ) => void;
   onSubmitAnswer: (callId: string, answer: string) => void;
-  /** chat 会话 id（遥测明细的查询键之一，docs/tech/chat-webapp.md §11.4）——缺席时 TurnStatsButton 的弹窗只出概览、没有明细。 */
+  /** chat 会话 id（遥测明细的查询键之一，docs/app/chat-webapp/tech.md §11.4）——缺席时 TurnStatsButton 的弹窗只出概览、没有明细。 */
   conversationId?: string;
 }
 

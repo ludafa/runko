@@ -1,5 +1,5 @@
 /**
- * 启动时的[崩溃恢复](../../../../docs/terms.md)（docs/tech/graceful-shutdown.md §5）——
+ * 启动时的[崩溃恢复](../../../../docs/terms.md)（docs/agent/graceful-shutdown/tech.md §5）——
  * [优雅关闭](../../../../docs/terms.md)的第二道防线，覆盖 `kill -9`/OOM/断电这些
  * 「进程没机会执行任何代码」的情形。
  */

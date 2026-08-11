@@ -1,5 +1,5 @@
 /**
- * P7-1 acceptance: docs/features/core-sdk.md §4.1's five-line quickstart, ported to this
+ * P7-1 acceptance: docs/core/core-sdk/feature.md §4.1's five-line quickstart, ported to this
  * package with the two deviations the ticket allows — the import source (`@nimbo/sdk` via
  * this package's own `../src/index.js`, since a package's tests always exercise its own
  * source) and the model (`MockLanguageModelV4` standing in for `anthropic(...)`, since real
@@ -20,7 +20,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { defineAgent, createSession, NimboFS } from "../src/index.js";
 import { mockModel, stopChunk, toolCallChunk } from "./helpers.js";
 
-describe("docs/features/core-sdk.md §4.1 five-line quickstart (import source + model are the only deviations)", () => {
+describe("docs/core/core-sdk/feature.md §4.1 five-line quickstart (import source + model are the only deviations)", () => {
   let projectDir: string;
 
   beforeEach(async () => {

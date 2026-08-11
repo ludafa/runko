@@ -25,7 +25,7 @@ export type GetApiChatConversationsIdStreamQueryParams = {
 };
 
 /**
- * @description SSE stream of `ChatReplayFrame`s (`{seq,message}` or `{seq?,chunk}`): replay, then live tail (closes once the turn ends, or immediately after replay if no turn is in progress). Live `chunk` frames omit `seq` when ephemeral (docs/tech/single-ledger.md §5 单-3 — `text-delta`/`reasoning-delta`/`transient` data parts), never persisted and never replayed; every other frame always carries one
+ * @description SSE stream of `ChatReplayFrame`s (`{seq,message}` or `{seq?,chunk}`): replay, then live tail (closes once the turn ends, or immediately after replay if no turn is in progress). Live `chunk` frames omit `seq` when ephemeral (docs/agent/single-ledger/tech.md §5 单-3 — `text-delta`/`reasoning-delta`/`transient` data parts), never persisted and never replayed; every other frame always carries one
  */
 export type GetApiChatConversationsIdStream200 =
   ChatChunkEnvelope | ChatMessageFrame | ChatQueueFrame | ChatTurnStateFrame;

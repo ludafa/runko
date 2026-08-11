@@ -1,6 +1,6 @@
 /**
  * The [沙盒模板](../../../../docs/terms.md) the chat server's E2B provider
- * creates sandboxes from (docs/tech/sandbox-provider.md §5).
+ * creates sandboxes from (docs/host/sandbox-provider/tech.md §5).
  *
  * E2B fixes CPU/RAM at **template build time** — `Sandbox.create` has no
  * memory knob at all (`SandboxOpts` only carries template / timeout /

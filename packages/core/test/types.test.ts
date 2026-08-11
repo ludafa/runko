@@ -20,7 +20,7 @@ import type {
 } from "../src/types.js";
 import { jsonValueSchema } from "../src/types.js";
 
-describe("ApprovalOutcome (docs/tech/single-ledger.md §6.1 三值)", () => {
+describe("ApprovalOutcome (docs/agent/single-ledger/tech.md §6.1 三值)", () => {
   it("is exactly the three-value union — nothing more, nothing less", () => {
     expectTypeOf<ApprovalOutcome>().toEqualTypeOf<"allow" | "review" | "deny">();
   });
@@ -37,7 +37,7 @@ describe("ApprovalOutcome (docs/tech/single-ledger.md §6.1 三值)", () => {
   });
 });
 
-describe("ApprovalPolicy (docs/tech/single-ledger.md §6.1)", () => {
+describe("ApprovalPolicy (docs/agent/single-ledger/tech.md §6.1)", () => {
   it("accepts the four fixed-string policies at the type level", () => {
     expectTypeOf<"allow">().toExtend<ApprovalPolicy>();
     expectTypeOf<"review">().toExtend<ApprovalPolicy>();
@@ -52,7 +52,7 @@ describe("ApprovalPolicy (docs/tech/single-ledger.md §6.1)", () => {
   });
 });
 
-describe("HumanDecision (docs/tech/single-ledger.md §6.3 — two values only, updatedInput deleted)", () => {
+describe("HumanDecision (docs/agent/single-ledger/tech.md §6.3 — two values only, updatedInput deleted)", () => {
   it("narrows to no extra payload on the allow branch", () => {
     const decision: HumanDecision = { behavior: "allow" };
     expect(decision.behavior).toBe("allow");
@@ -76,7 +76,7 @@ describe("HumanDecision (docs/tech/single-ledger.md §6.3 — two values only, u
     expect(deny.behavior).toBe("deny");
   });
 
-  it("the allow branch's own declared shape has no updatedInput property (deleted 2026-07-15, docs/tech/single-ledger.md §6.3)", () => {
+  it("the allow branch's own declared shape has no updatedInput property (deleted 2026-07-15, docs/agent/single-ledger/tech.md §6.3)", () => {
     expectTypeOf<Extract<HumanDecision, { behavior: "allow" }>>().not.toHaveProperty("updatedInput");
   });
 });
@@ -183,7 +183,7 @@ describe("NimboFS / NimboExec / Tool / ToolContext shapes", () => {
     expect(await tool.execute("hi", ctx)).toBe("hi");
   });
 
-  it("accepts a NimboFS implementation that also implements the optional searchFiles/searchContent seam (docs/tech/sandbox.md §4)", async () => {
+  it("accepts a NimboFS implementation that also implements the optional searchFiles/searchContent seam (docs/host/sandbox/tech.md §4)", async () => {
     const fs: NimboFS = {
       readFile: async () => new Uint8Array(),
       writeFile: async () => {},
@@ -204,7 +204,7 @@ describe("NimboFS / NimboExec / Tool / ToolContext shapes", () => {
   });
 });
 
-describe("FileSearchQuery / FileSearchResult (NimboFS.searchFiles, docs/tech/sandbox.md §4)", () => {
+describe("FileSearchQuery / FileSearchResult (NimboFS.searchFiles, docs/host/sandbox/tech.md §4)", () => {
   it("requires pattern + limit; ignore is optional", () => {
     const withoutIgnore: FileSearchQuery = { pattern: "/app/**", limit: 1000 };
     const withIgnore: FileSearchQuery = { pattern: "/app/**", ignore: ["**/.git", "**/node_modules"], limit: 1000 };
@@ -224,7 +224,7 @@ describe("FileSearchQuery / FileSearchResult (NimboFS.searchFiles, docs/tech/san
   });
 });
 
-describe("ContentSearchQuery / ContentSearchResult (NimboFS.searchContent, docs/tech/sandbox.md §4)", () => {
+describe("ContentSearchQuery / ContentSearchResult (NimboFS.searchContent, docs/host/sandbox/tech.md §4)", () => {
   it("requires pattern/scope/mode/maxFiles/maxLines; ignoreCase/ignore/context are optional", () => {
     const minimal: ContentSearchQuery = { pattern: "TODO", scope: "/**", mode: "files", maxFiles: 100, maxLines: 500 };
     expect(minimal.ignoreCase).toBeUndefined();

@@ -1,5 +1,5 @@
 /**
- * 推送通知的共享类型（docs/tech/push-notification.md §6.1）。
+ * 推送通知的共享类型（docs/app/push-notification/tech.md §6.1）。
  *
  * 这一层刻意只有类型、没有逻辑：`vapid.ts`（总闸）、`events.ts`（白名单）、
  * `sender.ts`（投递）、`notifier.ts`（决策）四个模块都要用 `PushKind`，把它放在
@@ -34,7 +34,7 @@ export function isPushKind(value: string): value is PushKind {
  * 一条推送的完整载荷（JSON 序列化后加密投出）。
  *
  * **文案在服务端拼好**：`title`/`body` 是最终显示的中文字符串，Service Worker
- * 原样显示、不做任何判断。理由见 docs/tech/push-notification.md 附录 B.1——那份
+ * 原样显示、不做任何判断。理由见 docs/app/push-notification/tech.md 附录 B.1——那份
  * SW 是没有构建、没有类型检查的裸 JS，逻辑越少越好。
  */
 export interface PushPayload {
@@ -42,7 +42,7 @@ export interface PushPayload {
   v: 1;
   kind: PushKind;
   conversationId: string;
-  /** 已按 docs/tech/push-notification.md §6.1 截断。 */
+  /** 已按 docs/app/push-notification/tech.md §6.1 截断。 */
   title: string;
   /** 同上。 */
   body: string;
@@ -54,7 +54,7 @@ export interface PushPayload {
    * [挂住不消失](../../../../docs/terms.md)——通知停在屏幕上直到人动手处理，不自动收
    * （SW 里映射成 `requireInteraction`）。
    *
-   * **按类型分档，不是全局开关**（docs/tech/push-notification.md §6.4）：要审批、
+   * **按类型分档，不是全局开关**（docs/app/push-notification/tech.md §6.4）：要审批、
    * agent 提问这两类**卡着一轮**，错过就等于把 agent 晾在那儿，必须挂住；一轮完成/
    * 失败只是告知，挂住的话跑十轮就攒十条要你一条条点掉，反而更烦。
    *
@@ -68,7 +68,7 @@ export interface PushPayload {
    */
   callId?: string;
   /**
-   * 通知上的操作按钮（docs/tech/push-notification.md §6.5）。省略 = 没有按钮，
+   * 通知上的操作按钮（docs/app/push-notification/tech.md §6.5）。省略 = 没有按钮，
    * 点通知只跳转。
    *
    * **每一项自带 `behavior`**，SW 拿到就直接发请求，不需要自己从 `action` id 推断

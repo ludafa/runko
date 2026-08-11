@@ -21,7 +21,7 @@ function getPostApiPushTestUrl() {
 }
 
 /**
- * @summary 给自己的全部设备发一条测试通知——端到端验证推送通道是否打通（docs/plans/push-notification.md PN-10 用例 4）
+ * @summary 给自己的全部设备发一条测试通知——端到端验证推送通道是否打通（docs/app/push-notification/plan.md PN-10 用例 4）
  * {@link /api/push/test}
  */
 export async function postApiPushTest(

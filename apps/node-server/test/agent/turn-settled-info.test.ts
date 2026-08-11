@@ -1,6 +1,6 @@
 /**
  * `onTurnSettled` 交出的「这一轮是怎么结束的」（`TurnSettledInfo`，
- * docs/tech/push-notification.md §3.3、§4）。
+ * docs/app/push-notification/tech.md §3.3、§4）。
  *
  * 这是运行内核为推送通知让出的**唯一**一处扩展——四个取值必须准，否则「跑完了」
  * 和「这一轮没跑完」会报反。

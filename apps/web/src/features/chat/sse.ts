@@ -1,7 +1,7 @@
 /**
  * Minimal `text/event-stream` parser (WHATWG EventSource algorithm, `data`/
  * `event`/`id` fields — `retry` is irrelevant to a one-shot POST stream and
- * dropped). docs/tech/chat-webapp.md §2.3: kubb's generated client doesn't cover SSE, so the
+ * dropped). docs/app/chat-webapp/tech.md §2.3: kubb's generated client doesn't cover SSE, so the
  * chat message endpoint is consumed with a hand-rolled `fetch` +
  * `ReadableStream` reader; this module is the incremental line/event
  * splitter that reader feeds into, chunk by chunk. It must not assume a

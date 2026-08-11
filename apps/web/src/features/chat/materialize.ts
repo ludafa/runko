@@ -1,6 +1,6 @@
 /**
  * Incrementally materializes the wire's `ChatReplayFrame` sequence (message
- * frames from replay + chunk envelopes from replay/live alike, docs/tech/single-ledger.md §5 单-3) into a single, render-ready
+ * frames from replay + chunk envelopes from replay/live alike, docs/agent/single-ledger/tech.md §5 单-3) into a single, render-ready
  * `NimboUIMessage[]` — the client-side mirror of `@nimbo/core`'s own
  * server-side "UIMessage 单账本".
  *
@@ -34,7 +34,7 @@
  * (already fully known up front, never actually streamed token-by-token —
  * `loop.ts`'s own doc comment) would come out mislabeled `assistant` if
  * routed through it. Its `start` chunk's `messageMetadata.steered === true`
- * (the same flag docs/tech/single-ledger.md §2.2a's steer marker) is the one signal available
+ * (the same flag docs/agent/single-ledger/tech.md §2.2a's steer marker) is the one signal available
  * at that point to tell the two apart, so `MessageLedger` special-cases it: a
  * `steered` `start` chunk is built directly (`applySteerChunk`, a handful of
  * known chunk types — `text-*`/`file`, never tool calls/reasoning/data
@@ -343,7 +343,7 @@ export class MessageLedger {
    * 的旧轮消息只能排到**末尾**——界面上就是旧轮跑到新轮下面去了（用户实测）。
    *
    * 崩溃的轮以前总是账本里的最后一轮（崩溃即终止），所以这个洞一直没机会暴露；现在
-   * 崩溃轮之后还能继续对话（docs/tech/graceful-shutdown.md），它就浮出来了。
+   * 崩溃轮之后还能继续对话（docs/agent/graceful-shutdown/tech.md），它就浮出来了。
    */
   private ensureOrder(id: string): void {
     if (this.ordered.has(id)) return;

@@ -1,5 +1,5 @@
 /**
- * telemetry 落库（src/telemetry.ts，docs/tech/chat-webapp.md §11.4）：
+ * telemetry 落库（src/telemetry.ts，docs/app/chat-webapp/tech.md §11.4）：
  * functionId 解析、载荷收敛（大块正文换摘要 + 16KB 封顶）、事件回调的
  * "永不影响 turn"守卫、getChatTelemetry 的 vitest 守卫，以及经
  * buildSession 全链路（core loop 注入 functionId → 集成落 SQLite →

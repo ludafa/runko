@@ -1,5 +1,5 @@
 /**
- * 文件工具八件套的工厂入口（docs/tech/builtin-tools.md §1.1–§1.8, §4；docs/tech/core-sdk.md §4.5）。
+ * 文件工具八件套的工厂入口（docs/core/builtin-tools/tech.md §1.1–§1.8, §4；docs/core/core-sdk/tech.md §4.5）。
  * `createFileTools(opts)` 是 P4（core session/ToolRuntime）落地前的可注入接缝——
  * 设计理由见 `shared.ts` 顶部注释。
  */

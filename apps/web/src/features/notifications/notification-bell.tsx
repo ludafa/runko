@@ -1,5 +1,5 @@
 /**
- * header 右端的铃铛（docs/features/push-notification.md §3.1）——这台设备的推送
+ * header 右端的铃铛（docs/app/push-notification/feature.md §3.1）——这台设备的推送
  * 开关。样式与 `ThemeToggle` 逐像素同构（同一组尺寸/悬停色/圆角），它们并排站在
  * header 里，长得不一样会很显眼。
  *

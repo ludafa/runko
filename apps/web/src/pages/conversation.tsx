@@ -33,7 +33,7 @@ function HistoryLoadingSkeleton() {
 }
 
 function ConversationContent({ conversationId }: { conversationId: string }) {
-  // [在场](../../../docs/terms.md)上报（docs/tech/push-notification.md §5.2）：人正
+  // [在场](../../../docs/terms.md)上报（docs/app/push-notification/tech.md §5.2）：人正
   // 盯着这条会话时，服务端不推送本会话的通知——卡片已经在眼前了。挂在这里而不是
   // 更内层，是因为它只需要 conversationId，且历史还在加载时人就已经"在看"了。
   usePresence(conversationId);
@@ -97,7 +97,7 @@ function ConversationTimeline({
   conversation: Conversation;
   initialFrames: ChatReplayFrame[];
 }) {
-  // 队列初值来自会话详情（docs/tech/steer-and-queue.md §4.2）——之后由直播流的
+  // 队列初值来自会话详情（docs/agent/steer-and-queue/tech.md §4.2）——之后由直播流的
   // `QueueFrame` 快照接管，不再读这份初值。
   const chat = useChatMessages(
     conversationId,

@@ -83,7 +83,7 @@ export function TimelineView({
   messages: readonly NimboUIMessage[];
   /** Short-lived — popped once the real turn-start `MessageFrame` arrives (see `use-chat-messages.ts`'s file header) — interleaved with `messages` at their sent-at position in the meantime. */
   pendingUserEchoes?: readonly PendingUserEcho[];
-  /** `useChatMessages`'s own submitting/expired state (docs/tech/single-ledger.md §6) — threaded straight through to the approval/question cards, see that hook's doc comments. */
+  /** `useChatMessages`'s own submitting/expired state (docs/agent/single-ledger/tech.md §6) — threaded straight through to the approval/question cards, see that hook's doc comments. */
   submittingCallIds?: ReadonlySet<string>;
   locallyExpiredCallIds?: ReadonlySet<string>;
   /** 这个会话此刻有没有[轮](../../../../../docs/terms.md)在跑——轮结束后还没落定的审批/提问卡片一律显示成「已失效」（见 `MessageEntry` 的同名 prop）。缺省 `true`。 */
@@ -95,7 +95,7 @@ export function TimelineView({
     behavior: 'allow' | 'allow-session' | 'deny',
   ) => void;
   onSubmitAnswer?: (callId: string, answer: string) => void;
-  /** chat 会话 id——TurnStatsButton 遥测明细的查询键（docs/tech/chat-webapp.md §11.4），缺席时统计弹窗只出概览、没有明细。 */
+  /** chat 会话 id——TurnStatsButton 遥测明细的查询键（docs/app/chat-webapp/tech.md §11.4），缺席时统计弹窗只出概览、没有明细。 */
   conversationId?: string;
 }) {
   const entries = useMemo(

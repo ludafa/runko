@@ -1,5 +1,5 @@
 /**
- * MemoryFS：纯内存路径树，实现 core 的 NimboFS 全部七方法（docs/tech/core-sdk.md §4.4）。
+ * MemoryFS：纯内存路径树，实现 core 的 NimboFS 全部七方法（docs/core/core-sdk/tech.md §4.4）。
  * 另提供不进 NimboFS 接口的"附加能力"：writeReference（供 fromMemory 构造 reference
  * 条目）、diff()/writeBack()/snapshot()/restore()（§4.4 第 5 点）。
  */
@@ -389,7 +389,7 @@ export class MemoryFS implements NimboFS {
  * 走 writeReference——三者是可判别联合，typeof/instanceof 足以让编译器自然收窄到
  * else 分支就是 ReferenceInit，不需要额外的类型守卫函数或断言。
  *
- * 命名说明（工单裁量）：docs/tech/core-sdk.md §4.4 写的是 `NimboFS.fromMemory(...)`，但
+ * 命名说明（工单裁量）：docs/core/core-sdk/tech.md §4.4 写的是 `NimboFS.fromMemory(...)`，但
  * `NimboFS` 在 @nimbo/core 是一个 interface（类型），在 @nimbo/virtual-fs 里
  * 再声明一个同名的值做静态方法命名空间会与该类型名冲突，且跨包做 interface+
  * namespace 合并并不成立。这里改为导出独立函数 fromMemory；`NimboFS.fromMemory`

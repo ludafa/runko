@@ -1,5 +1,5 @@
 /**
- * `agent/skill-catalog.ts`（docs/tech/composer-skill-mention.md §5.1）：
+ * `agent/skill-catalog.ts`（docs/app/composer-skill-mention/tech.md §5.1）：
  *
  * 1. `loadSkillsFromWorkspace` —— 扫沙盒 `.agents/skills/*`。重点是**它绝不抛**：
  *    这是每轮[起轮装配](../../../../docs/terms.md)的必经路径，一个坏 skill 不该

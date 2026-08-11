@@ -1,6 +1,6 @@
 /**
  * Server-side counterpart to `packages/core/test/helpers/nimbo-chunks.ts`
- * (docs/tech/single-ledger.md §5 单-3, P13-5-3/P13-5-5): small
+ * (docs/agent/single-ledger/tech.md §5 单-3, P13-5-3/P13-5-5): small
  * factories/extractors for `NimboChunk`/`NimboUIMessage` used across
  * `test/agent/turn-runner.test.ts`, `test/agent/chat-agent.test.ts`, and
  * `test/routes/chat.test.ts` — inlined here rather than imported from
@@ -188,7 +188,7 @@ export function dataErrorChunk(data: ErrorData): NimboChunk {
 }
 /**
  * `data-tool-progress` — `transient` defaults to `true` (the shape
- * `@nimbo/core`'s loop actually produces, docs/tech/single-ledger.md §2.2b) but is a parameter
+ * `@nimbo/core`'s loop actually produces, docs/agent/single-ledger/tech.md §2.2b) but is a parameter
  * (not hardcoded) so `turn-runner.test.ts`'s `isDurableChunk` boundary
  * coverage can also construct the *non*-transient edge case (`transient:
  * false`/absent — a shape the real loop never emits for this chunk type, but

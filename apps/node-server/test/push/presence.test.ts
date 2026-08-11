@@ -1,5 +1,5 @@
 /**
- * [在场](../../../../docs/terms.md)（docs/tech/push-notification.md §5.2）——
+ * [在场](../../../../docs/terms.md)（docs/app/push-notification/tech.md §5.2）——
  * 纯内存 + TTL，用假时钟测，不真等 45 秒。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

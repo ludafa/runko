@@ -12,9 +12,9 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 nimbo：可嵌入 Node.js 的轻量 agent SDK。pnpm monorepo：`@nimbo/core`（接口+loop）、`@nimbo/virtual-fs`（FS 实现+文件工具）、`@nimbo/mini-bash`（NimboExec 纯 TS 解释器）、`@nimbo/sdk`（门面）；apps：`@nimbo-chat/node-server` / `@nimbo-chat/web`（chat 应用）。事实来源（按工单指向精读，别全文通读浪费上下文）：
 
 - `docs/terms.md` —— 术语表，主术语为准
-- `docs/tech/*.md`（如 `core-sdk.md`/`builtin-tools.md`）—— 验收对照的技术规格
-- `docs/features/core-sdk.md` —— 成功标准
-- `docs/plans/*.md`（如 `core-sdk.md`）—— 各功能施工计划与变更记录（拆单/收口时维护）
+- `docs/<层>/<功能>/tech.md`（如 `docs/core/core-sdk/tech.md`/`docs/core/builtin-tools/tech.md`）—— 验收对照的技术规格
+- `docs/core/core-sdk/feature.md` —— 成功标准
+- `docs/<层>/<功能>/plan.md`（如 `docs/core/core-sdk/plan.md`）—— 各功能施工计划与变更记录（拆单/收口时维护）
 
 工具链：typescript@7（tsgo）、vitest@4、pnpm workspace。
 
@@ -49,7 +49,7 @@ Spec 依据：<文档§章节>
 
 ## 维护施工计划（验收「通过」后）
 
-需要时更新对应功能的 `docs/plans/<feature>.md`：阶段状态（✅/⏳）、实际改动、与计划的偏差；重大偏差写入变更记录表。
+需要时更新对应功能的 `docs/<层>/<功能>/plan.md`：阶段状态（✅/⏳）、实际改动、与计划的偏差；重大偏差写入变更记录表。
 
 ## 约束
 

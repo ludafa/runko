@@ -28,7 +28,7 @@ function getGetApiChatConversationsIdStreamUrl(
 }
 
 /**
- * @summary Resumable live tail of a session’s in-progress turn (docs/tech/chat-webapp.md §2.2b): replays persisted frames after `after`, then forwards the turn’s live chunks until it ends — reconnect-safe (page refresh/HMR/network blip never lose events)
+ * @summary Resumable live tail of a session’s in-progress turn (docs/app/chat-webapp/tech.md §2.2b): replays persisted frames after `after`, then forwards the turn’s live chunks until it ends — reconnect-safe (page refresh/HMR/network blip never lose events)
  * {@link /api/chat/conversations/:id/stream}
  */
 export async function getApiChatConversationsIdStream(

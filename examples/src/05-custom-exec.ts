@@ -1,12 +1,12 @@
 /**
- * 05-custom-exec — "bring your own sandbox" (docs/features/core-sdk.md §3.4 /
- * docs/tech/core-sdk.md §4.5a): `NimboExec` is a three-method interface
+ * 05-custom-exec — "bring your own sandbox" (docs/core/core-sdk/feature.md §3.4 /
+ * docs/core/core-sdk/tech.md §4.5a): `NimboExec` is a three-method interface
  * (`exec`, optional `describe`, optional `defaultApproval`). nimbo ships
  * `@nimbo/mini-bash` (a read-only in-process interpreter) and
  * `localExec` (a real local shell) as reference implementations, but neither
  * is special — a host with its own Docker/e2b/remote-worker sandbox injects
  * its own object here and nothing about the agent loop, the `bash` tool, or
- * the approval chain has to change (this is docs/features/core-sdk.md §6's fourth success
+ * the approval chain has to change (this is docs/core/core-sdk/feature.md §6's fourth success
  * criterion, verified end to end).
  *
  * This example's custom exec is a tiny in-memory stub (not a real sandbox) —
@@ -88,7 +88,7 @@ async function modelDrivenSection(): Promise<void> {
   // surface: createSession({ exec }) is agnostic to what's behind the interface.
   //
   // The stub declares `defaultApproval: "review"`, so every bash call raises an approval
-  // request; without a session-level arbiter it would be denied by design (docs/tech/core-sdk.md §4.5a
+  // request; without a session-level arbiter it would be denied by design (docs/core/core-sdk/tech.md §4.5a
   // "no-arbiter semantics" — an unanswered "review" must fail closed, not silently pass). A
   // real host would plug in its own UI/policy here; `onApproval: "allow"` just means "allow
   // whatever reaches me", which is enough to let this demo actually run the command.

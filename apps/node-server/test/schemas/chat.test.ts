@@ -1,5 +1,5 @@
 /**
- * `schemas/chat.ts`'s wire vocabulary (docs/tech/single-ledger.md §5
+ * `schemas/chat.ts`'s wire vocabulary (docs/agent/single-ledger/tech.md §5
  * 单-3): `chunkEnvelopeSchema` (`{seq?, chunk}` — the live tail's own shape,
  * also reused for a replayed `kind = 'chunk'` row), `messageFrameSchema`
  * (`{seq, message}` — replay-only, a finished `kind = 'message'` row),
@@ -26,7 +26,7 @@ const sampleMessage = {
 };
 
 describe('schemas/chat: chunkEnvelopeSchema', () => {
-  it('parses an envelope with no `seq` key at all — the ephemeral shape (docs/tech/single-ledger.md §5 单-3)', () => {
+  it('parses an envelope with no `seq` key at all — the ephemeral shape (docs/agent/single-ledger/tech.md §5 单-3)', () => {
     const result = chunkEnvelopeSchema.safeParse({ chunk: sampleChunk });
     expect(result.success).toBe(true);
   });

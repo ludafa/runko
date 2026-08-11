@@ -1,5 +1,5 @@
 /**
- * [起轮占位](../../../../../docs/terms.md)（docs/tech/turn-abort.md §3.3）——把「这一轮
+ * [起轮占位](../../../../../docs/terms.md)（docs/agent/turn-abort/tech.md §3.3）——把「这一轮
  * 存在」这件事**提前**到[起轮装配](../../../../../docs/terms.md)开始的那一刻，而不是等
  * 装配跑完才登记。
  *
@@ -37,7 +37,7 @@ export interface TurnReservation {
    * 这一轮唯一的那个中止信号：占位的那一刻就绪，装配跑完由 `startTurn` 原样交给
    * core（`session.stream(text, { signal })`）。装配期间被[停止](../../../../../docs/terms.md)
    * 时它也会 abort，所以未来若把它透进 `sandbox-manager`，那几个远程调用也能被掐断
-   * （目前不接受 signal，见 docs/tech/turn-abort.md §6.5）。
+   * （目前不接受 signal，见 docs/agent/turn-abort/tech.md §6.5）。
    */
   readonly signal: AbortSignal;
   /** 装配期间是否已被请求停止——`launchTurn` 在它的两个检查点读这个。 */
@@ -56,7 +56,7 @@ export const reservationRegistry = new WeakMap<TurnReservation, ActiveTurn>();
 
 /**
  * `reserveTurn` 的结果——拒绝时**分两种原因**，因为它们的 HTTP 语义不同
- * （docs/tech/graceful-shutdown.md §3.3）：
+ * （docs/agent/graceful-shutdown/tech.md §3.3）：
  *
  * - `'busy'`：这个会话已经有一轮了（装配中的也算）→ 路由转 **409**。
  * - `'shutting_down'`：进程正在[优雅关闭](../../../../../docs/terms.md)→ 路由转 **503**
@@ -67,7 +67,7 @@ export type ReserveTurnResult =
   | { ok: false; reason: 'busy' | 'shutting_down' };
 
 /**
- * 占下这个会话的[起轮占位](../../../../../docs/terms.md)（docs/tech/turn-abort.md §3.3）：
+ * 占下这个会话的[起轮占位](../../../../../docs/terms.md)（docs/agent/turn-abort/tech.md §3.3）：
  * 从这一刻起 `isTurnActive` 为真、`GET .../stream` 能订阅到这一轮、`POST .../abort`
  * 停得住它。
  *
@@ -79,7 +79,7 @@ export function reserveTurn(
   logger?: Logger,
 ): ReserveTurnResult {
   const log = logger ?? defaultLogger;
-  // 关闭期间绝不接新的轮（docs/tech/graceful-shutdown.md §3.3）——两种拒绝要分开报，
+  // 关闭期间绝不接新的轮（docs/agent/graceful-shutdown/tech.md §3.3）——两种拒绝要分开报，
   // 它们的 HTTP 语义不同：`busy` → 409（已有轮），`shutting_down` → 503（稍后重试）。
   if (isShuttingDown()) return { ok: false, reason: 'shutting_down' };
   if (activeTurns.has(conversationId)) return { ok: false, reason: 'busy' };
@@ -107,7 +107,7 @@ export function reserveTurn(
 }
 
 /**
- * 撤销一个[起轮占位](../../../../../docs/terms.md)（docs/tech/turn-abort.md §3.3）——
+ * 撤销一个[起轮占位](../../../../../docs/terms.md)（docs/agent/turn-abort/tech.md §3.3）——
  * `launchTurn` 的 `finally` 调它，覆盖装配的**每一条**没能交棒给 `startTurn` 的退出路径
  * （凭据缺失、沙盒起不来、`buildSession` 抛错、期间被停止）。
  *

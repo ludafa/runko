@@ -1,5 +1,5 @@
 /**
- * 测试专用辅助（P13-5-2/P13-5-5，docs/tech/single-ledger.md）：
+ * 测试专用辅助（P13-5-2/P13-5-5，docs/agent/single-ledger/tech.md）：
  * `runTurn`/`Session.stream()` 现在产出 `NimboChunk`（ai 的 `UIMessageChunk`
  * 词汇表）而不是退役的 `SessionEvent`，"这个 turn/会话发生了什么" 现在读
  * 账本本身（`NimboUIMessage[]` 的部件/metadata）而不是一份平行的 item 列表
@@ -60,7 +60,7 @@ export function toolParts(message: NimboUIMessage): ToolUIPart<UITools>[] {
   return result;
 }
 
-/** 一条消息里全部工具部件，跨多条消息 flatMap（账本级查找，同一 toolCallId 理应只出现一次——见 docs/tech/single-ledger.md §4.1 实现教训）。 */
+/** 一条消息里全部工具部件，跨多条消息 flatMap（账本级查找，同一 toolCallId 理应只出现一次——见 docs/agent/single-ledger/tech.md §4.1 实现教训）。 */
 export function allToolParts(messages: NimboUIMessage[]): ToolUIPart<UITools>[] {
   return messages.flatMap(toolParts);
 }

@@ -22,7 +22,7 @@ function setup(): FakeChatFetch {
   return fake;
 }
 
-/** 一条[待发队列](../../../../../docs/terms.md)条目（docs/tech/steer-and-queue.md §2.2）。 */
+/** 一条[待发队列](../../../../../docs/terms.md)条目（docs/agent/steer-and-queue/tech.md §2.2）。 */
 function queuedMessage(id: string, text: string): QueuedMessage {
   return { id, text, userId: 'user-1', createdAt: 1_700_000_000_000 };
 }
@@ -99,7 +99,7 @@ describe('useChatMessages — mount / lastFrameIsChunk', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 轮状态快照（docs/tech/chat-webapp.md §5.1）——服务端在每条 tail 连上时下发的权威
+// 轮状态快照（docs/app/chat-webapp/tech.md §5.1）——服务端在每条 tail 连上时下发的权威
 // 「这个会话有没有轮在跑」。它取代了 `lastFrameIsChunk` 那个猜测：崩溃残留会让那个
 // 猜法长期失准且永不自愈（用户发的消息一律走排队、没有乐观回显、还等不到出队）。
 // ---------------------------------------------------------------------------
@@ -747,7 +747,7 @@ describe('useChatMessages — submitApproval / submitAnswer', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 待发队列（[排队](../../../../../docs/terms.md)，docs/tech/steer-and-queue.md §6）
+// 待发队列（[排队](../../../../../docs/terms.md)，docs/agent/steer-and-queue/tech.md §6）
 // ---------------------------------------------------------------------------
 
 describe('useChatMessages — 待发队列', () => {
@@ -830,7 +830,7 @@ describe('useChatMessages — 待发队列', () => {
     // 排队不做乐观 echo（服务端的 QueueFrame 快照会把它回填到待发区，那里就是
     // 它的可见位置）；steer 做——它的真实注入点是 core 的下一个 step 边界，可能
     // 等几十秒，在那之前界面上什么都不发生用户会以为按钮没生效
-    //（docs/features/chat-ui.md、2026-07-25）。
+    //（docs/app/chat-ui/feature.md、2026-07-25）。
     expect(result.current.pendingUserEchoes).toEqual([
       // 锚点恒为 MAX_SAFE_INTEGER：`buildRenderEntries` 把越界锚点夹到末尾，
       // 于是这条「待注入」在等待期间始终待在时间线最下面，不会被后续 step 产出的
@@ -846,7 +846,7 @@ describe('useChatMessages — 待发队列', () => {
   });
 
   // 请求 steer 但服务端回 `'queued'`：那一轮还卡在[起轮装配](../../../../../docs/terms.md)
-  // 里，没有 session 可插，服务端只能给它排队（docs/tech/turn-abort.md §3.3）。
+  // 里，没有 session 可插，服务端只能给它排队（docs/agent/turn-abort/tech.md §3.3）。
   it('steer 拿回 mode "queued" 时撤掉那条「待注入」回显——它永远等不到注入点', async () => {
     const fake = setup();
     fake.setMessagePostMode('queued');
@@ -993,12 +993,12 @@ describe('useChatMessages — 待发队列', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 停止本轮（docs/tech/turn-abort.md §4.1）——`stopTurn` / `stopping`。核心是「不做
+// 停止本轮（docs/agent/turn-abort/tech.md §4.1）——`stopTurn` / `stopping`。核心是「不做
 // 乐观翻转」：按下停止只发请求 + 置中间态，界面回到空闲只认 wire 上那条
 // `status: 'interrupted'` 的 `message-metadata`。
 // ---------------------------------------------------------------------------
 
-describe('useChatMessages — 停止本轮（docs/tech/turn-abort.md）', () => {
+describe('useChatMessages — 停止本轮（docs/agent/turn-abort/tech.md）', () => {
   /** 起一轮：`initialFrames` 以一条裸 chunk 结尾 = 有进行中的一轮（`lastFrameIsChunk`）。 */
   const IN_PROGRESS_FRAMES: ChatReplayFrame[] = [
     { seq: 1, chunk: startChunk('m1') },

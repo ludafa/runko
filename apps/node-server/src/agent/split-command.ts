@@ -1,5 +1,5 @@
 /**
- * 命令拆分器（[命令段](../../../../docs/terms.md) / docs/tech/approval-grant-split.md §3）：
+ * 命令拆分器（[命令段](../../../../docs/terms.md) / docs/app/approval-grant-split/tech.md §3）：
  * 把一条 bash 命令行切成若干条简单命令，供[分段授权](../../../../docs/terms.md)
  * 按段记账。纯函数，无 I/O、无依赖。
  *

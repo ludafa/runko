@@ -1,20 +1,20 @@
 /**
  * End-to-end wiring test for the `bash` builtin tool + `@nimbo/mini-bash`
- * (docs/tech/builtin-tools.md §4 bash 验收项 / docs/tech/core-sdk.md §4.5a). `@nimbo/mini-bash`
+ * (docs/core/builtin-tools/tech.md §4 bash 验收项 / docs/core/core-sdk/tech.md §4.5a). `@nimbo/mini-bash`
  * is a devDependency (not a runtime dependency of `@nimbo/core` — mirrors the
  * existing `@nimbo/virtual-fs` devDep pattern documented in `session.ts`'s
  * header): this file plays the "host" role, wiring `createSession(agent, {
  * fs, exec: miniBash(fs) })` / `{ workspace }` the way `@nimbo/sdk` (P7) will
  * formalize.
  *
- * docs/tech/builtin-tools.md §4 bash 验收项逐条对应：
+ * docs/core/builtin-tools/tech.md §4 bash 验收项逐条对应：
  *   1. 未注入 exec 时工具列表无 bash → "no bash tool ..." 用例
  *   2. 注入后出现 → 其余全部用例（bash 调用结算为 output-available，而不是 output-error）
  *   3. 审批默认值来自 defaultApproval → "approval default" describe 块
  *   4. onOutput → transient data-tool-progress chunk → "onOutput chunks reach the host ..." 用例
  *   5. 超时/非零退出码正常回填（非 output-error 崩溃）→ "timed-out or non-zero-exit" 用例
  *
- * P13-5-2（docs/tech/single-ledger.md）迁移：断言从 `SessionEvent`/
+ * P13-5-2（docs/agent/single-ledger/tech.md）迁移：断言从 `SessionEvent`/
  * `SessionItem` 改为读 chunk 流 + 账本工具部件（`state`：output-available/
  * output-error/output-denied，取代 completed/failed/denied）。
  */
@@ -84,7 +84,7 @@ function errorResultContent(output: unknown): string {
   return typeof output.content === "string" ? output.content : "";
 }
 
-describe("bash builtin + exec/workspace wiring (docs/tech/builtin-tools.md §4 / docs/tech/core-sdk.md §4.5a)", () => {
+describe("bash builtin + exec/workspace wiring (docs/core/builtin-tools/tech.md §4 / docs/core/core-sdk/tech.md §4.5a)", () => {
   it("no bash tool in the list when exec is not injected — the model's bash call is never declared, comes back as a direct output-error", async () => {
     const model = mockModel([toolCallStep("call_1", "bash", { command: "echo hi" }), stopStep("done")]);
     const session = createSession(defineAgent({ model }));
@@ -112,7 +112,7 @@ describe("bash builtin + exec/workspace wiring (docs/tech/builtin-tools.md §4 /
     expect(stringOutput(toolCalls[0]?.output)).toContain("hello from mini-bash");
   });
 
-  describe("approval default comes from exec.defaultApproval (§1.10; docs/tech/single-ledger.md §6.1 三值重构 always→review / never→allow)", () => {
+  describe("approval default comes from exec.defaultApproval (§1.10; docs/agent/single-ledger/tech.md §6.1 三值重构 always→review / never→allow)", () => {
     it("a NimboExec declaring defaultApproval:'review' is denied when no session onApproval is configured (no-arbiter deny)", async () => {
       const exec: NimboExec = {
         defaultApproval: "review",
@@ -166,7 +166,7 @@ describe("bash builtin + exec/workspace wiring (docs/tech/builtin-tools.md §4 /
     expect(toolCalls[0]).toMatchObject({ state: "output-available" });
   });
 
-  describe("timeout/non-zero exit backfill as a normal settled tool part (docs/tech/builtin-tools.md §4, not output-error)", () => {
+  describe("timeout/non-zero exit backfill as a normal settled tool part (docs/core/builtin-tools/tech.md §4, not output-error)", () => {
     it("a non-zero exit from real mini-bash (grep with no match, exit 1) settles output-available, not output-error", async () => {
       const fs = fromMemory({ "a.txt": "hello\n" });
       const exec = miniBash(fs);
@@ -248,7 +248,7 @@ describe("SessionOptions.workspace syntax sugar (§4.5a 模式 A) and its exclus
   });
 });
 
-describe("mode A: same-source workspace, fs + exec: miniBash(fs) (docs/tech/core-sdk.md §4.5a)", () => {
+describe("mode A: same-source workspace, fs + exec: miniBash(fs) (docs/core/core-sdk/tech.md §4.5a)", () => {
   function assembleFileToolsSession(model: MockLanguageModelV4, fs: ReturnType<typeof fromMemory>, exec: NimboExec) {
     const readState = createSessionReadState();
     const derivedData = createDerivedDataCollector();
@@ -278,7 +278,7 @@ describe("mode A: same-source workspace, fs + exec: miniBash(fs) (docs/tech/core
     expect(stringOutput(toolCalls[1]?.output)).toContain("hello from write-file");
   });
 
-  describe("readState invalidation on bash-bypass writes (docs/tech/builtin-tools.md §0.4 / §4.5a 模式 A 衍生规则 2)", () => {
+  describe("readState invalidation on bash-bypass writes (docs/core/builtin-tools/tech.md §0.4 / §4.5a 模式 A 衍生规则 2)", () => {
     /**
      * Real mini-bash is entirely read-only (§4.5a: "全部命令跑在...只读"), so it cannot itself
      * produce a bash-made write to demonstrate this rule against. Per the ticket's own guidance
@@ -319,7 +319,7 @@ describe("mode A: same-source workspace, fs + exec: miniBash(fs) (docs/tech/core
       expect(toolCalls[0]).toMatchObject({ state: "output-available" }); // read-file
       expect(toolCalls[1]).toMatchObject({ state: "output-available" }); // bash write (a normal ExecResult, exit 0)
       // edit-file's execute() itself returns normally with an { isError: true, content } value
-      // (docs/tech/builtin-tools.md §0.5) — state stays "output-available", the rejection shows up in output (same
+      // (docs/core/builtin-tools/tech.md §0.5) — state stays "output-available", the rejection shows up in output (same
       // pattern as integration.test.ts's errorResultContent).
       expect(toolCalls[2]).toMatchObject({ state: "output-available" });
       expect(errorResultContent(toolCalls[2]?.output)).toContain("changed since it was last read");

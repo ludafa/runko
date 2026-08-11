@@ -1,5 +1,5 @@
 /**
- * 铃铛状态机（docs/tech/push-notification.md §7）。
+ * 铃铛状态机（docs/app/push-notification/tech.md §7）。
  *
  * 最要紧的一条：**绝不主动弹权限框**——只有用户点铃铛才 `requestPermission()`。
  * 一进页面就问是最招人烦的做法，Chrome 还会因此惩罚站点。

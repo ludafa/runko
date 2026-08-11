@@ -1,10 +1,10 @@
 /**
- * L2 运行层：单个 turn 的 step 循环 `runTurn`（docs/tech/single-ledger.md
+ * L2 运行层：单个 turn 的 step 循环 `runTurn`（docs/agent/single-ledger/tech.md
  * §5 单-2，"UIMessage 单账本"迁移）。session.ts 拥有跨 turn 的持久状态
  * （messages/turn 计数/readState/onceMemory/planStore），本文件只负责"给定
  * 当前账本，把一个 turn 跑到底"——工作态是 `NimboUIMessage[]`（不再是
  * `ModelMessage[]`），每步调模型前用 ai 官方 `convertToModelMessages()` 现场
- * 推导，loop 自己不再手拼任何 `ModelMessage`（docs/tech/single-ledger.md §0 TL;DR）。
+ * 推导，loop 自己不再手拼任何 `ModelMessage`（docs/agent/single-ledger/tech.md §0 TL;DR）。
  *
  * ---- 与迁移前的对应关系（语义映射表，供 tester / P13-5-3 参考） ----
  *
@@ -15,13 +15,13 @@
  * | `item.started/updated/completed`（`agent_message`） | `text-start`/`text-delta`/`text-end` chunk + `TextUIPart` |
  * | `item.started/updated/completed`（`reasoning`） | `reasoning-start`/`reasoning-delta`/`reasoning-end` chunk + `ReasoningUIPart` |
  * | `item.started/updated/completed`（`user_message`，steer） | `start`/`text-*`/`finish` chunk + 一条 `metadata.steered=true` 的 user `NimboUIMessage`（见 `drainSteerMessages`） |
- * | `item.started/updated/completed`（`tool_call`，in_progress/completed/failed） | `tool-input-available` → `tool-output-available`/`tool-output-error` chunk + 工具部件（同一 toolCallId 原地覆盖，只记结算态——docs/tech/single-ledger.md §4.1 实现教训） |
- * | `item.started/updated/completed`（`tool_call`，denied，无 review） | `tool-input-available` → `tool-output-denied` chunk：`deny` 结果直接拒绝，不经审批请求/响应（docs/tech/single-ledger.md §6.1"deny：直接拒绝，output-denied"，P13-5-2c） |
+ * | `item.started/updated/completed`（`tool_call`，in_progress/completed/failed） | `tool-input-available` → `tool-output-available`/`tool-output-error` chunk + 工具部件（同一 toolCallId 原地覆盖，只记结算态——docs/agent/single-ledger/tech.md §4.1 实现教训） |
+ * | `item.started/updated/completed`（`tool_call`，denied，无 review） | `tool-input-available` → `tool-output-denied` chunk：`deny` 结果直接拒绝，不经审批请求/响应（docs/agent/single-ledger/tech.md §6.1"deny：直接拒绝，output-denied"，P13-5-2c） |
  * | `item.started/updated/completed`（`tool_call`，review） | `tool-input-available` → `tool-approval-request`（先产出，见下）→ `await` 人审通道 → `tool-approval-response`（allow/deny 都发）→ `tool-output-available`/`tool-output-error`/`tool-output-denied` chunk + 工具部件状态迁移（ai 原生审批状态机字段形状，P13-5-2c 重构） |
  * | `item.completed`（`file_change`） | `data-file-change` chunk + 部件（每次工具执行各一条，不 upsert） |
  * | `item.completed`（`plan_update`） | `data-plan-update` chunk + 部件（同 id 覆盖，见 `upsertPlanUpdatePart`） |
  * | `item.completed`（`error`） | `data-error`（本文件当前无实际生产者，同旧实现——旧 `SessionItem.error` 变体此前也从未被 loop.ts 实际产出过，见 `state.ts`/`events.ts` 头注释） |
- * | `ctx.update()` 进度 | `data-tool-progress` chunk，**transient：只出流不物化**（docs/tech/single-ledger.md §4.1 发现 A，见 `settleToolCall`） |
+ * | `ctx.update()` 进度 | `data-tool-progress` chunk，**transient：只出流不物化**（docs/agent/single-ledger/tech.md §4.1 发现 A，见 `settleToolCall`） |
  * | （新增，无旧对应）工具时间戳 | `data-tool-timing` chunk + **持久**部件（id = toolCallId，同 id 覆盖，见 `upsertToolTimingPart`）：`tool-input-available` 后立刻打 `startedAt`（入队），`executeToolCall` 前一刻打 `executionStartedAt`（真实执行起点；deny 路径恒缺席），每个结算 chunk（output-available/output-error/output-denied，含审批 deny）后立刻补 `completedAt`——三个时刻的语义见 `state.ts` 的 `toolTimingDataSchema` |
  * | `turn.completed`（`usage`） | `message-metadata` chunk，`messageMetadata: {turn, usage, status:'completed'}`，写在该轮最后一条 assistant 消息的 `.metadata` 上 |
  * | `turn.failed`（`error`） | 同上，`status: 'failed'`（`NimboError.code !== 'aborted'`）或 `'interrupted'`（`code === 'aborted'`）+ `error` |
@@ -38,13 +38,13 @@
  * step-start 分块相同），因此本文件延续这个已证实的姿态：一次 `runOneStep`
  * 调用 = 账本里新增一条 assistant 消息。
  *
- * ---- 审批：三值 + 阻塞前显式产出（docs/tech/single-ledger.md §6，P13-5-2c 返工，取代 §5 引言
+ * ---- 审批：三值 + 阻塞前显式产出（docs/agent/single-ledger/tech.md §6，P13-5-2c 返工，取代 §5 引言
  * 定案的"事后补记"编码） ----
  *
  * P13-5-2 交付的版本把 `tool-approval-request` chunk 编码在"人已经做完决定
  * 之后"（`executeToolCall` 是原子调用，审批在其内部同步/异步 resolve 完才
  * 返回），导致挂起等人审期间直播流里没有待审批信号——客户端无法据此弹卡片，
- * 人在环上功能实质失效（docs/tech/single-ledger.md §6 引言）。本次返工把审批解析
+ * 人在环上功能实质失效（docs/agent/single-ledger/tech.md §6 引言）。本次返工把审批解析
  * （`resolveToolCallApproval`，runtime.ts）与工具执行（`executeToolCall`）
  * 拆成两个独立步骤（`settleToolCall` 下方），loop 在两者之间插入
  * "先 yield 审批请求 chunk、再 await 人工裁决"这一步：
@@ -55,7 +55,7 @@
  *   2. `allow` → 直接 `executeToolCall` → `tool-output-available`/`-error`。
  *   3. `deny` → 不执行，直接 `tool-output-denied`（拒绝理由 = 无仲裁者指导
  *      文案或分类器 `deny` 的默认文案，回填模型）——不经过审批请求/响应
- *      chunk（docs/tech/single-ledger.md §6.1"deny：直接拒绝"，与旧实现"denied 恒三态编码"的
+ *      chunk（docs/agent/single-ledger/tech.md §6.1"deny：直接拒绝"，与旧实现"denied 恒三态编码"的
  *      关键差异）。
  *   4. `review` → **先** `assistantMessage.parts` 落 `approval-requested` +
  *      yield `tool-approval-request` chunk，**再** `await`
@@ -180,7 +180,7 @@ function statusForError(error: NimboError): "failed" | "interrupted" {
  * 概念——用户按了停止键、进程要关闭、pod 要迁移——core 不该认识这些词，也没必要为
  * 它们各加一个 code。宿主把理由放进 `reason`，它的界面就能如实解释给用户看
  * （chat 应用正是这么区分「已停止」与「服务重启，这一轮已中断」的，见
- * docs/tech/graceful-shutdown.md §2）。
+ * docs/agent/graceful-shutdown/tech.md §2）。
  *
  * `abort()` **不带参数**时 `reason` 是运行时自造的 `AbortError`（"This operation was
  * aborted"）——那不是宿主的解释，当作没给：否则收尾消息里会出现这句与调用方无关的
@@ -393,7 +393,7 @@ function upsertPlanUpdatePart(message: NimboUIMessage, data: PlanUpdateData): Da
   return part;
 }
 
-// ---- data-tool-timing（持久部件，工具起止时间戳；docs/tech/single-ledger.md §2.2b 之后
+// ---- data-tool-timing（持久部件，工具起止时间戳；docs/agent/single-ledger/tech.md §2.2b 之后
 // 补充，state.ts 的 `toolTimingDataSchema` 头注释有完整语义）：id = toolCallId，
 // 同 id 覆盖，物化方式照 `upsertPlanUpdatePart` 先例，唯一差别是每个工具调用
 // 各一个 id（不是单例）。----
@@ -507,7 +507,7 @@ interface PendingToolCall {
   toolCallId: string;
   toolName: string;
   input: JsonValue;
-  /** `assistantMessage.parts` 里 input-available 占位部件的下标——结算时原地替换，不新增数组项（docs/tech/single-ledger.md §4.1 实现教训：占位+结算双记会被服务商 400）。 */
+  /** `assistantMessage.parts` 里 input-available 占位部件的下标——结算时原地替换，不新增数组项（docs/agent/single-ledger/tech.md §4.1 实现教训：占位+结算双记会被服务商 400）。 */
   partIndex: number;
 }
 
@@ -608,11 +608,11 @@ async function* settleExecution(
   });
 
   // transient `data-tool-progress`：只出流,绝不 push 进 assistantMessage.parts
-  // （docs/tech/single-ledger.md §4.1 发现 A）。`ctx.update()` 是同步回调，生成器不能从回调内部
+  // （docs/agent/single-ledger/tech.md §4.1 发现 A）。`ctx.update()` 是同步回调，生成器不能从回调内部
   // yield，因此先缓冲、`executeToolCall` resolve 后按到达顺序重放——效果是
   // "进度确实以 chunk 到达"，但不与执行过程严格实时交错（P13-1 既有取舍，
   // 迁移前的 `executeStepToolCalls` 就是这个姿态，原样保留）。`text` 字段是
-  // 累积文本（docs/tech/single-ledger.md §2.2b"text（累积）"）。
+  // 累积文本（docs/agent/single-ledger/tech.md §2.2b"text（累积）"）。
   let accumulated = "";
   for (const chunk of progressChunks) {
     accumulated += chunk;
@@ -784,7 +784,7 @@ interface RunOneStepOptions {
 }
 
 /**
- * `model/step.ts` 的 `runStep` 不复用（工单允许的"手工发块"路线，见 docs/tech/single-ledger.md §5
+ * `model/step.ts` 的 `runStep` 不复用（工单允许的"手工发块"路线，见 docs/agent/single-ledger/tech.md §5
  * 单-2 工单原文"两条路线你按实现干净程度定"）：`runStep` 只转发四类增量块
  * （text-delta/reasoning-delta/tool-input-delta/tool-call），丢弃
  * text-start/text-end/reasoning-start/reasoning-end 等边界块——UIMessage 的
@@ -927,7 +927,7 @@ async function* runOneStep(opts: RunOneStepOptions): AsyncGenerator<NimboChunk, 
   return { finishReason: finalStep.finishReason, usage: finalStep.usage, assistantMessage };
 }
 
-// ---- runTurn：一个 turn 的完整 step 循环（终止条件同 docs/tech/core-sdk.md §4.8，未变） ----
+// ---- runTurn：一个 turn 的完整 step 循环（终止条件同 docs/core/core-sdk/tech.md §4.8，未变） ----
 
 export interface RunTurnOptions {
   model: LanguageModel;
@@ -963,7 +963,7 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<NimboChunk,
   let lastAssistantMessage: NimboUIMessage | undefined;
 
   for (let stepIndex = 1; stepIndex <= opts.maxTurnsPerRun; stepIndex++) {
-    // Checkpoint 0（宿主中止，docs/tech/turn-abort.md §2）：**绝不开始新的一步**。
+    // Checkpoint 0（宿主中止，docs/agent/turn-abort/tech.md §2）：**绝不开始新的一步**。
     // 一步*之内*的中止不靠这里——`abortSignal` 已经透传给 `streamText`（模型流被
     // 掐断、其 promise reject）与 `ToolContext.abortSignal`（工具自己收尾），两者
     // 都落进下面那个 catch，`abortSignal.aborted` 为真时同样归成
@@ -1111,7 +1111,7 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<NimboChunk,
     // finishReason === "tool-calls"：本步全部工具调用已经在 runOneStep 内部
     // 结算完毕（settleToolCall 在 runOneStep 返回前跑完，账本里不会留下任何
     // "in_progress" 占位——即便下面判定预算耗尽，工具调用本身也已正常完成，
-    // 不是"到达上限就拒绝执行最后一步的工具调用"，docs/tech/core-sdk.md §4.8 的既有语义
+    // 不是"到达上限就拒绝执行最后一步的工具调用"，docs/core/core-sdk/tech.md §4.8 的既有语义
     // 保持不变，只是不再需要在这里另起一段"先执行完再判定"的特殊分支）。
     if (stepIndex === opts.maxTurnsPerRun) {
       // STEER-1F：预算耗尽、即将失败之前也要 drain 一次——工具执行期间

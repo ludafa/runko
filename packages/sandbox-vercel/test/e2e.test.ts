@@ -6,7 +6,7 @@
  *   b) bash 旁路写（fake sandbox 的 fs.writeFile，不经 file 工具）使 readState
  *      失效（模式 A 规则 2），后续 edit-file 被拒绝直到重新 read-file。
  *
- * P13-5-2（docs/tech/single-ledger.md）迁移：断言从 `SessionEvent`/
+ * P13-5-2（docs/agent/single-ledger/tech.md）迁移：断言从 `SessionEvent`/
  * `SessionItem`（`.status`）改为 `NimboChunk`/账本工具部件（`.state`）——同
  * `@nimbo/just-bash`/`@nimbo/sandbox-e2b`/`@nimbo/sandbox-cloudflare` 的
  * `test/e2e.test.ts` 迁移，一比一照搬；辅助函数就地内联（不跨包 import 测试

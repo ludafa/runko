@@ -1,5 +1,5 @@
 /**
- * NimboFS 七方法契约（docs/tech/sandbox.md §3.1 / §8.2 Vercel 列）：ENOENT → NotFoundError，
+ * NimboFS 七方法契约（docs/host/sandbox/tech.md §3.1 / §8.2 Vercel 列）：ENOENT → NotFoundError，
  * 非递归 rm 对空/非空目录的分流（`src/fs.ts` 头注释记录的实测发现——node
  * `fs.rm()` 不能承担这个语义，必须靠 `fs.rmdir()`），glob 递归 + matcher，
  * mtime 整数 ms，root 锚定，readdir/mkdir/writeFile 的父目录语义。
@@ -175,7 +175,7 @@ describe("rm", () => {
 });
 
 /**
- * `glob()` is now a single `node -e`-script round-trip (docs/tech/sandbox.md §4 native search fast
+ * `glob()` is now a single `node -e`-script round-trip (docs/host/sandbox/tech.md §4 native search fast
  * path, `src/fs.ts` header) with the old per-file `readdir` + `matchesGlob` walk (`walkFiles`) kept
  * only as the fallback for when the sandbox has no usable `node` (`exitCode: 127`/rejection —
  * `FakeVercelSandbox`'s default `runCommandImpl` resolves `{exitCode:0}` with empty stdout, which is
@@ -261,7 +261,7 @@ describe("root anchoring", () => {
     expect(entries.map((e) => e.name)).toEqual(["a.txt"]);
   });
 
-  it("rejects '..' escaping past the virtual root for the fs tools (PathEscapesRootError), same boundary as MemoryFS/DirFS — src/path.ts's documented interpretation of docs/tech/sandbox.md §3.1", async () => {
+  it("rejects '..' escaping past the virtual root for the fs tools (PathEscapesRootError), same boundary as MemoryFS/DirFS — src/path.ts's documented interpretation of docs/host/sandbox/tech.md §3.1", async () => {
     const sandbox = new FakeVercelSandbox({ files: { "/a.txt": "hi" } });
     const ws = vercelWorkspace(sandbox);
     await expect(ws.readFile("/../etc/passwd")).rejects.toThrow(/escapes root/);

@@ -37,7 +37,7 @@
  *      `ai` package) is a union that already includes plain strings — an AI
  *      SDK Gateway model id such as `"anthropic/claude-sonnet-5"` is a
  *      first-class `LanguageModel` value, no provider package required (see
- *      docs/tech/core-sdk.md §4.3 and the root README's five-line example).
+ *      docs/core/core-sdk/tech.md §4.3 and the root README's five-line example).
  *      Requires `NIMBO_MODEL` + `AI_GATEWAY_API_KEY`.
  *
  * Neither path configured → setup instructions covering both, then a clean

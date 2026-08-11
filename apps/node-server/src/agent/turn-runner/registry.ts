@@ -6,7 +6,7 @@
  * 本文件只放**登记表本身**与几个直接读它的小查询/订阅函数；任何会改变一轮命运的
  * 动作（起、停、收尾）都在各自的模块里。
  *
- * 进程重启的边界（docs/tech/chat-webapp.md §2.2b「边界」）：`activeTurns` 只在内存里
+ * 进程重启的边界（docs/app/chat-webapp/tech.md §2.2b「边界」）：`activeTurns` 只在内存里
  * ——进程重启会无声丢掉进行中的轮（沙盒可能还活着，但没人再驱动 `session.stream()`
  * 往前走了）。已落盘的行原样留着，下一次 `GET .../stream` 找不到活跃轮，就只回放到
  * 崩溃点为止，剩下的交给 `crash-recovery.ts` 补收尾。
@@ -21,7 +21,7 @@ import type {
   QueueFrame,
 } from '../../schemas/chat.js';
 
-/** The outcome of one `ask-user` call (docs/tech/chat-webapp.md §2.2c（审批链）) — `'timeout'` never carries an `answer`, same as `HumanDecision`'s `deny` branch not requiring a `message`. */
+/** The outcome of one `ask-user` call (docs/app/chat-webapp/tech.md §2.2c（审批链）) — `'timeout'` never carries an `answer`, same as `HumanDecision`'s `deny` branch not requiring a `message`. */
 export type AskUserOutcome =
   { outcome: 'answered'; answer: string } | { outcome: 'timeout' };
 
@@ -48,7 +48,7 @@ export interface ReviewPendingEntry extends PendingEntry<HumanDecision> {
 }
 
 /**
- * 一轮在 `activeTurns` 里的两个阶段（docs/tech/turn-abort.md §3.3）。
+ * 一轮在 `activeTurns` 里的两个阶段（docs/agent/turn-abort/tech.md §3.3）。
  *
  * `preparing` = [起轮占位](../../../../../docs/terms.md)：`turn-launcher.ts` 的
  * `launchTurn` 一进门就占下这个位子，此后整段[起轮装配](../../../../../docs/terms.md)
@@ -65,7 +65,7 @@ export interface ActiveTurn {
   emitter: EventEmitter;
   done: boolean;
   /**
-   * 这一轮的中止闸门（docs/tech/turn-abort.md §3）——`reserveTurn`/`startTurn` 建、
+   * 这一轮的中止闸门（docs/agent/turn-abort/tech.md §3）——`reserveTurn`/`startTurn` 建、
    * `session.stream(text, { signal })` 消费、`abortTurn` 触发。
    */
   abortController: AbortController;
@@ -84,9 +84,9 @@ export interface ActiveTurn {
    * 也就无处可插（路由据此把这条消息转成排队，见 `isTurnPreparing`）。
    */
   steer: ((input: string) => boolean) | undefined;
-  /** Keyed by `callId` (`@nimbo/core`'s `ApprovalContext.callId`, docs/tech/single-ledger.md §6.4) — see `human-bridge.ts`'s `requestReview`/`resolveReview`. Carries `toolName`/`input` (`ReviewPendingEntry`) so `resolveReview` can grant a 会话级授权 for the exact call. */
+  /** Keyed by `callId` (`@nimbo/core`'s `ApprovalContext.callId`, docs/agent/single-ledger/tech.md §6.4) — see `human-bridge.ts`'s `requestReview`/`resolveReview`. Carries `toolName`/`input` (`ReviewPendingEntry`) so `resolveReview` can grant a 会话级授权 for the exact call. */
   pendingReviews: Map<string, ReviewPendingEntry>;
-  /** Keyed by `callId` (docs/tech/chat-webapp.md §2.2c（审批链）) — see `human-bridge.ts`'s `requestUserAnswer`/`resolveUserAnswer`. Independent of `pendingReviews`: same shape, different `Map`. */
+  /** Keyed by `callId` (docs/app/chat-webapp/tech.md §2.2c（审批链）) — see `human-bridge.ts`'s `requestUserAnswer`/`resolveUserAnswer`. Independent of `pendingReviews`: same shape, different `Map`. */
   pendingQuestions: Map<string, PendingEntry<AskUserOutcome>>;
 }
 
@@ -103,7 +103,7 @@ export function isTurnActive(conversationId: string): boolean {
 
 /**
  * 这个会话有没有一轮**卡在[起轮装配](../../../../../docs/terms.md)里**
- * （docs/tech/turn-abort.md §3.3）——`routes/chat.ts` 用它给[插话](../../../../../docs/terms.md)
+ * （docs/agent/turn-abort/tech.md §3.3）——`routes/chat.ts` 用它给[插话](../../../../../docs/terms.md)
  * 分流：装配中的轮没有 `session` 可插，那条消息该转成[排队](../../../../../docs/terms.md)，
  * 而不是像「这一轮刚好结束」那个窄竞态一样回落去起新一轮（会被自己的占位挡成 409）。
  */
@@ -126,7 +126,7 @@ export function steerTurn(conversationId: string, text: string): boolean {
   if (activeTurn === undefined) return false;
   // `undefined` = 这一轮还在[起轮装配](../../../../../docs/terms.md)里（`preparing`，还没有
   // session）——同样报 `false`，但路由要按 `isTurnPreparing` 区分这两种 `false`
-  // （docs/tech/turn-abort.md §3.3）。
+  // （docs/agent/turn-abort/tech.md §3.3）。
   return activeTurn.steer?.(text) ?? false;
 }
 
@@ -136,7 +136,7 @@ export function steerTurn(conversationId: string, text: string): boolean {
  * `isTurnActive` itself to tell the two cases apart, since `onDone` will
  * never fire for a turn that was never active). Subscribing is synchronous
  * and side-effect-free until the turn actually emits, so calling this
- * *before* replaying persisted history (docs/tech/chat-webapp.md §2.2b) is what prevents
+ * *before* replaying persisted history (docs/app/chat-webapp/tech.md §2.2b) is what prevents
  * losing an event that lands in the gap between the replay query and this
  * call. `onEvent` receives a `ChatReplayFrame` — almost always a
  * `ChunkEnvelope`, except for the turn's very first delivery, which is the
@@ -161,7 +161,7 @@ export function subscribeTurn(
 
 /**
  * 把一份[待发队列](../../../../../docs/terms.md)快照广播给这个会话进行中那一轮的所有订阅者
- * （多标签同步，docs/tech/steer-and-queue.md §4.3 的「时机 2」）。
+ * （多标签同步，docs/agent/steer-and-queue/tech.md §4.3 的「时机 2」）。
  *
  * 没有进行中的一轮就是**无操作**且不是错误：队列只可能在一轮进行中被改动（没有进行中
  * 的一轮时发消息直接起轮，不入队），而[出队](../../../../../docs/terms.md)恰好发生在这一轮

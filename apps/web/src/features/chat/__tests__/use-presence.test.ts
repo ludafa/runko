@@ -1,5 +1,5 @@
 /**
- * [在场](../../../../../docs/terms.md)上报（docs/tech/push-notification.md §5.2）。
+ * [在场](../../../../../docs/terms.md)上报（docs/app/push-notification/tech.md §5.2）。
  *
  * 断言的三件事：判据（可见 + 聚焦）、只在变化时补报、离开会话时销掉在场。
  */

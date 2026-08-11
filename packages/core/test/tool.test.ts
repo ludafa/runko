@@ -95,7 +95,7 @@ describe("defineTool", () => {
     expect(Object.keys(tools)).toEqual(["read-file", "search"]);
   });
 
-  describe("approval (docs/tech/single-ledger.md §6.1 三值重构)", () => {
+  describe("approval (docs/agent/single-ledger/tech.md §6.1 三值重构)", () => {
     it("accepts the four approval literals at the type level", () => {
       expectTypeOf<"allow">().toExtend<ApprovalPolicy>();
       expectTypeOf<"review">().toExtend<ApprovalPolicy>();
@@ -113,7 +113,7 @@ describe("defineTool", () => {
       expectTypeOf<"sometimes">().not.toExtend<ApprovalPolicy>();
     });
 
-    it("rejects the retired 'never'/'always'/'once' literals at the type level (2026-07-15 三值重构, docs/tech/single-ledger.md §6.1)", () => {
+    it("rejects the retired 'never'/'always'/'once' literals at the type level (2026-07-15 三值重构, docs/agent/single-ledger/tech.md §6.1)", () => {
       expectTypeOf<"never">().not.toExtend<ApprovalPolicy>();
       expectTypeOf<"always">().not.toExtend<ApprovalPolicy>();
       expectTypeOf<"once">().not.toExtend<ApprovalPolicy>();

@@ -1,5 +1,5 @@
 /**
- * `createFsAdapter`（NimboFS → IFileSystem）单测——逐行覆盖 docs/tech/core-sdk.md §4.5b
+ * `createFsAdapter`（NimboFS → IFileSystem）单测——逐行覆盖 docs/core/core-sdk/tech.md §4.5b
  * 降级表（`src/fs-adapter.ts` 头注释）。不经 `Bash`/`justBash`，直接对适配器
  * 调用，隔离"翻译是否正确"与"just-bash 解释器怎么用它"两层关注点。
  */

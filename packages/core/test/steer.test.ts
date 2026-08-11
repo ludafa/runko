@@ -1,11 +1,11 @@
 /**
- * STEER-1/STEER-1F (`Session.steer`, docs/tech/core-sdk.md §4.2) acceptance tests — see the
+ * STEER-1/STEER-1F (`Session.steer`, docs/core/core-sdk/tech.md §4.2) acceptance tests — see the
  * STEER-2/STEER-2F work orders for the nine numbered scenarios this file's
  * `describe` blocks map to 1:1 (scenario 8 is folded into the Checkpoint A
  * section per the work order's own "可与场景 2 合并验证" note), plus a
  * dedicated STEER-1F regression section below them.
  *
- * P13-5-2（docs/tech/single-ledger.md）迁移：`session.stream()`/
+ * P13-5-2（docs/agent/single-ledger/tech.md）迁移：`session.stream()`/
  * `runTurn()` 现在产出 `NimboChunk` 而不是退役的 `SessionEvent`，"steer 注入
  * 的消息" 现在是一条 `metadata.steered:true` 的 user `NimboUIMessage`（不再有
  * `user_message` item 或摘要出来的 `item.text`——ledger 里的 `parts` 本身就是
@@ -41,7 +41,7 @@
  *    until the test resumes it, so the call is guaranteed to land before the
  *    next drain checkpoint runs.
  *
- * STEER-1F (docs/tech/core-sdk.md §4.2, "STEER-1F 修复" / "已知缺口"): fixed the tool-calls
+ * STEER-1F (docs/core/core-sdk/tech.md §4.2, "STEER-1F 修复" / "已知缺口"): fixed the tool-calls
  * branch that hits `maxTurnsPerRun` (a steer queued during that step's tool
  * execution used to be silently discarded — see the git history of this file
  * for the pre-fix version of the "turn-scope queue clearing" test below,
@@ -598,14 +598,14 @@ describe("Session.steer — STEER-1F regression: drain-before-max_turns ordering
 });
 
 // ---------------------------------------------------------------------------
-// STEER-1F regression #2: the declared known gap. docs/tech/core-sdk.md §4.2 states that
+// STEER-1F regression #2: the declared known gap. docs/core/core-sdk/tech.md §4.2 states that
 // `runOneStep`/`executeStepToolCalls` throwing (`aborted`/`provider_error`)
 // does *not* drain — this test pins down that *current* (gap) behavior so a
 // future work order that closes it will see this assertion flip and know to
 // update it, rather than the gap silently regressing further unnoticed.
 // ---------------------------------------------------------------------------
 
-describe("runTurn — known gap (docs/tech/core-sdk.md §4.2): provider_error does not drain queued steer messages", () => {
+describe("runTurn — known gap (docs/core/core-sdk/tech.md §4.2): provider_error does not drain queued steer messages", () => {
   it("doStream throwing (provider_error) skips the drain the other three termination paths perform — content queued right as the failing step ran is discarded, never surfaces in the ledger", async () => {
     // Driving this through a real `session.steer()` call would require a tool execution to run
     // *while* the very step whose model call then throws is in flight — `simulateReadableStream`
@@ -649,7 +649,7 @@ describe("runTurn — known gap (docs/tech/core-sdk.md §4.2): provider_error do
 });
 
 // ---------------------------------------------------------------------------
-// STEER-3T (STEER-3A Finding 4, docs/tech/core-sdk.md §4.2): steer() must honestly return
+// STEER-3T (STEER-3A Finding 4, docs/core/core-sdk/tech.md §4.2): steer() must honestly return
 // false once the terminal chunk (message-metadata) has already been produced
 // by runTurn — even if the consumer's own `.next()` call that observed it
 // hasn't returned control back to it yet. Pre-fix, `stream()` only flipped
@@ -722,7 +722,7 @@ describe("Session.steer — STEER-3T: honest false once the terminal chunk has a
 });
 
 // ---------------------------------------------------------------------------
-// 7. steered input fidelity — docs/tech/single-ledger.md §5-2 裁量: the old `user_message.text`
+// 7. steered input fidelity — docs/agent/single-ledger/tech.md §5-2 裁量: the old `user_message.text`
 // one-line *summary* (e.g. "look: [image]") is retired along with SessionItem
 // — a steered message's `parts` array *is* the full-fidelity display form
 // now (no separate summary field to keep in sync), so this section asserts

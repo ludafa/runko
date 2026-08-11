@@ -1,5 +1,5 @@
 /**
- * 推送订阅的四个接口（docs/tech/push-notification.md §3.1）——全部要登录，与
+ * 推送订阅的四个接口（docs/app/push-notification/tech.md §3.1）——全部要登录，与
  * `routes/chat.ts` 同一个 `requireAuth`。
  *
  * 一条贯穿的姿态：**功能没开时，读接口如实回答「没开」，写接口返 503**。读接口
@@ -50,7 +50,7 @@ export function createPushApp(deps: PushRouteDeps): OpenAPIHono<PushEnv> {
     path: '/api/push/config',
     tags: ['Push'],
     summary:
-      '推送是否可用 + VAPID 公钥（docs/tech/push-notification.md §3.1）：前端据此决定渲不渲染铃铛',
+      '推送是否可用 + VAPID 公钥（docs/app/push-notification/tech.md §3.1）：前端据此决定渲不渲染铃铛',
     responses: {
       200: {
         content: { 'application/json': { schema: PushConfigSchema } },
@@ -163,7 +163,7 @@ export function createPushApp(deps: PushRouteDeps): OpenAPIHono<PushEnv> {
     path: '/api/push/test',
     tags: ['Push'],
     summary:
-      '给自己的全部设备发一条测试通知——端到端验证推送通道是否打通（docs/plans/push-notification.md PN-10 用例 4）',
+      '给自己的全部设备发一条测试通知——端到端验证推送通道是否打通（docs/app/push-notification/plan.md PN-10 用例 4）',
     responses: {
       200: {
         content: { 'application/json': { schema: PushAckSchema } },
@@ -196,7 +196,7 @@ export function createPushApp(deps: PushRouteDeps): OpenAPIHono<PushEnv> {
       // 恰恰不能几秒后自己溜走（与 `turn-done` 那一档的取值刻意不同）。
       sticky: true,
       // 带上按钮，好让人**不必等一次真实审批**就能验证「点按钮 → SW 发请求 →
-      // 收到响应」这条链路通不通（docs/tech/push-notification.md §6.5）。
+      // 收到响应」这条链路通不通（docs/app/push-notification/tech.md §6.5）。
       //
       // `callId` 是个哨兵值，会话 id 也是 `'test'`——审批接口查不到这条会话，必然
       // 返回 404，SW 因此弹出「这条审批已经处理过了」。**弹出来就说明链路是通的**；

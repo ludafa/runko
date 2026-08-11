@@ -11,7 +11,7 @@
 
 ## 示例清单
 
-| 脚本 | 演示点 | 对应产品场景（[docs/features/core-sdk.md](../docs/features/core-sdk.md) §3） |
+| 脚本 | 演示点 | 对应产品场景（[docs/core/core-sdk/feature.md](../docs/core/core-sdk/feature.md) §3） |
 |---|---|---|
 | [`01-memory-diff.ts`](./src/01-memory-diff.ts) | 纯内存工作区：agent 改代码，宿主拿 `diff()`，全程不碰磁盘 | SaaS 内嵌代码助手 |
 | [`02-dir-mount.ts`](./src/02-dir-mount.ts) | 真实目录 overlay 挂载：读穿透、写落内存，`writeBack()` 才落盘 | 安全地把真实项目交给 agent |
@@ -101,13 +101,13 @@ pnpm -r typecheck                          # 全 workspace（CI 跑的就是这�
 
 除 `08-just-bash.ts`（`@nimbo/just-bash` 不进 sdk 依赖，见该文件头注释）与 `09`/`10`/`11`/`12`（`@nimbo/sandbox-*` 适配器包同样不进 sdk 依赖，见各自文件头注释；12 号额外直接 import `@ai-sdk/deepseek` 构造模型，不经 `src/shared/model.ts` 的 `resolveModel()`）外，其余示例统一从 `@nimbo/sdk` 导入。示例演示的是**发布后的消费姿态**：裸名 `import { ... } from "@nimbo/sdk"`，与真实用户 `pnpm add @nimbo/sdk` 后的体验同构——workspace 成员化只负责把依赖搭好，import 语句本身不含 workspace 痕迹。
 
-> TODO：npm 裸名 `nimbo` 的发布决策待定（[docs/plans/core-sdk.md](../docs/plans/core-sdk.md) P7-1 遗留），定了之后这里与各 README 的 import 语句同步替换。
+> TODO：npm 裸名 `nimbo` 的发布决策待定（[docs/core/core-sdk/plan.md](../docs/core/core-sdk/plan.md) P7-1 遗留），定了之后这里与各 README 的 import 语句同步替换。
 
 ## 相关文档
 
-- 产品视角：[docs/features/examples.md](../docs/features/examples.md)
-- 技术视角：[docs/tech/examples.md](../docs/tech/examples.md)
-- 施工进展：[docs/plans/examples.md](../docs/plans/examples.md)
+- 产品视角：[docs/app/examples/feature.md](../docs/app/examples/feature.md)
+- 技术视角：[docs/app/examples/tech.md](../docs/app/examples/tech.md)
+- 施工进展：[docs/app/examples/plan.md](../docs/app/examples/plan.md)
 - 术语：[docs/terms.md](../docs/terms.md)
 </parameter>
 </invoke>

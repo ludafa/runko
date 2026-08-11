@@ -1,12 +1,12 @@
 /**
- * End-to-end wiring (docs/tech/core-sdk.md §4.5a "端到端两件套" 验收点，与
+ * End-to-end wiring (docs/core/core-sdk/tech.md §4.5a "端到端两件套" 验收点，与
  * `@nimbo/just-bash`/`test/e2e.test.ts` 同款结构，换成 e2b 假沙盒):
  *   a) mock model 调用内置 `bash` 工具，经 `e2bWorkspace()` 真实跑通一条命令；
  *   b) bypass proof —— bash 旁路写（模拟 `echo ... > /f.txt` 的效果）让
  *      `readState` 失效（§4.5a 模式 A 规则 2），后续 `edit-file` 被拒绝直到
  *      重新 `read-file`。
  *
- * P13-5-2（docs/tech/single-ledger.md）迁移：断言从 `SessionEvent`/
+ * P13-5-2（docs/agent/single-ledger/tech.md）迁移：断言从 `SessionEvent`/
  * `SessionItem`（`.status`）改为 `NimboChunk`/账本工具部件（`.state`）——同
  * `@nimbo/core`'s `test/e2e-minibash.test.ts` 与 `@nimbo/just-bash`'s
  * `test/e2e.test.ts` 的迁移，一比一对应；辅助函数就地内联（不跨包 import
@@ -148,7 +148,7 @@ describe("b) bypass proof: a bash-side write invalidates readState (§4.5a mode 
     expect(toolCalls[1]).toMatchObject({ state: "output-available" }); // bash bypass write, real e2bWorkspace exec, real exit 0
     expect(stringOutput(toolCalls[1]?.output)).toContain("exit code: 0");
 
-    // edit-file's execute() itself returns normally with an { isError: true, content } value (docs/tech/builtin-tools.md §0.5) —
+    // edit-file's execute() itself returns normally with an { isError: true, content } value (docs/core/builtin-tools/tech.md §0.5) —
     // state stays "output-available", the rejection shows up in output.
     expect(toolCalls[2]).toMatchObject({ state: "output-available" });
     expect(errorResultContent(toolCalls[2]?.output)).toContain("changed since it was last read");

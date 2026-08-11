@@ -1,18 +1,18 @@
 /**
- * L2 运行层：`ToolRuntime` 的单次调用执行体（docs/tech/core-sdk.md §4.1 ToolContext 组装 /
+ * L2 运行层：`ToolRuntime` 的单次调用执行体（docs/core/core-sdk/tech.md §4.1 ToolContext 组装 /
  * §4.5 审批链集成点 / §4.2 file_change/plan_update 派生数据接缝；
- * docs/tech/single-ledger.md §6 P13-5-2c 三值重构）。只处理"一次工具
+ * docs/agent/single-ledger/tech.md §6 P13-5-2c 三值重构）。只处理"一次工具
  * 调用"，不含 loop/session（P4-2）：不发 `SessionEvent`、不维护跨调用的
  * readState（那是文件工具 + session 的职责，见 `@nimbo/virtual-fs` 的
  * `createFileTools`），不做 abort 特判（execute() 因 abort 抛出时自然落入
  * "failed" 分支，与其他运行时错误同一条路径，不需要单独语义）。
  *
- * ---- 拆分为两步（P13-5-2c 核心变化，docs/tech/single-ledger.md §6.4） ----
+ * ---- 拆分为两步（P13-5-2c 核心变化，docs/agent/single-ledger/tech.md §6.4） ----
  *
  * 旧实现把"输入校验 → 审批链 → 执行 → 输出校验"揉进一个原子 `executeToolCall`
  * 调用，`review`（旧 "always"/"once"）结果因此只能在**审批已经做完**之后被
  * 编码成 chunk——挂起等人审期间界面看不到待审批信号（P13-5-2c 工单原文，
- * docs/tech/single-ledger.md §6 引言"事后补记只对模型恢复正确，对直播交互失效"）。三值化之后，
+ * docs/agent/single-ledger/tech.md §6 引言"事后补记只对模型恢复正确，对直播交互失效"）。三值化之后，
  * `review` 需要 loop 先 `yield tool-approval-request` chunk、再 `await` 人工
  * 裁决——这个"先产出后阻塞"的中间点是一次 `await` 边界，不可能塞进一个返回
  * `Promise` 的普通函数内部让调用方在中途取值，因此本文件把原子调用拆成两个
@@ -69,7 +69,7 @@
 import type { ApprovalContext, ApprovalPolicy, JsonValue, NimboFS, SkillHandle, Tool, ToolContext, ToolReturn } from "./types.js";
 import { evaluateApproval, type OnceApprovalMemory } from "./approval.js";
 
-// ---- 派生数据（docs/tech/core-sdk.md §4.2 SessionItem 的 file_change.changes / plan_update.items 字段对齐） ----
+// ---- 派生数据（docs/core/core-sdk/tech.md §4.2 SessionItem 的 file_change.changes / plan_update.items 字段对齐） ----
 
 export interface ToolCallFileChange {
   path: string;

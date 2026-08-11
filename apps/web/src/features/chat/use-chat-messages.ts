@@ -1,5 +1,5 @@
 /**
- * The chat feature's core deliverable (docs/tech/chat-webapp.md §2.2b, the P12-4 rewrite,
+ * The chat feature's core deliverable (docs/app/chat-webapp/tech.md §2.2b, the P12-4 rewrite,
  * carried over verbatim through the P13-5-4 UIMessage-ledger migration): turn
  * *execution* and *connection* are decoupled — `sendMessage` only fires
  * `POST .../messages` (starts the turn server-side, independent of any
@@ -18,10 +18,10 @@
  * 它有三个写入源，权威性递增：
  *
  * 1. **挂载时的临时猜测**（`lastFrameIsChunk`）：只用来撑到 tail 连上的那几十毫秒。
- * 2. **`MessageLedger` 的 `onTurnEnd`**（docs/tech/single-ledger.md §5 单-3 那条收尾
+ * 2. **`MessageLedger` 的 `onTurnEnd`**（docs/agent/single-ledger/tech.md §5 单-3 那条收尾
  *    `message-metadata`）：一轮真正结束的那一刻翻假。
  * 3. **[轮状态快照](../../../../../docs/terms.md)**（`applyTurnState`，
- *    docs/tech/chat-webapp.md §5.1）：**服务端的权威答案**，每条 tail 连上必发一帧。
+ *    docs/app/chat-webapp/tech.md §5.1）：**服务端的权威答案**，每条 tail 连上必发一帧。
  *
  * 第 3 条是后来加的，补的正是前两条都盖不住的那个洞：一轮**崩溃**时（进程重启、
  * `driveTurn` 的 catch 分支）收尾 metadata 永远不会到，而崩溃残留的 `kind = 'chunk'`
@@ -76,7 +76,7 @@ import type { PendingUserEcho } from './timeline';
 export type ChatTurnStatus = 'idle' | 'streaming' | 'error';
 
 /**
- * 一条用户消息在**已有进行中的一轮**时该走哪条路（docs/tech/steer-and-queue.md §4.1）：
+ * 一条用户消息在**已有进行中的一轮**时该走哪条路（docs/agent/steer-and-queue/tech.md §4.1）：
  * `'queue'` 排队到下一轮（composer 的 Enter 默认），`'steer'` 注入当前这一轮
  * （Alt+Enter / 插话按钮）。没有进行中的一轮时两者都是起新一轮。
  */
@@ -88,10 +88,10 @@ export interface UseChatMessagesResult {
   pendingUserEchoes: PendingUserEcho[];
   status: ChatTurnStatus;
   error: string | undefined;
-  /** True from `sendMessage` until the first frame of that turn arrives — docs/tech/chat-webapp.md §2.3's "沙盒恢复中…" gate. */
+  /** True from `sendMessage` until the first frame of that turn arrives — docs/app/chat-webapp/tech.md §2.3's "沙盒恢复中…" gate. */
   awaitingFirstEvent: boolean;
   /**
-   * 服务端持有的[待发队列](../../../../../docs/terms.md)（docs/tech/steer-and-queue.md）
+   * 服务端持有的[待发队列](../../../../../docs/terms.md)（docs/agent/steer-and-queue/tech.md）
    * ——初值来自会话详情，之后由直播流的 `QueueFrame` 与删除/清空的响应快照覆盖。
    * 服务端始终是权威，这里不做乐观合并。
    */
@@ -108,7 +108,7 @@ export interface UseChatMessagesResult {
   /** 清空待发队列。 */
   clearQueue: () => void;
   /**
-   * [停止](../../../../../docs/terms.md)进行中的那一轮（docs/tech/turn-abort.md §4.1）
+   * [停止](../../../../../docs/terms.md)进行中的那一轮（docs/agent/turn-abort/tech.md §4.1）
    * ——`POST .../abort`，服务端真中止 + 清空待发队列。**不做乐观状态翻转**：界面回到空闲
    * 只认直播流上那条 `status: 'interrupted'` 的 `message-metadata`。没有进行中的一轮时
    * 是无操作。
@@ -130,7 +130,7 @@ export interface UseChatMessagesResult {
    * page) to render the matching part as expired instead of pending.
    */
   locallyExpiredCallIds: ReadonlySet<string>;
-  /** Resolve a pending tool-call approval (docs/tech/single-ledger.md §6) — result arrives back over the tail as the matching part's `tool-approval-response` chunk, not from this call's own resolution ("不做乐观翻转"). */
+  /** Resolve a pending tool-call approval (docs/agent/single-ledger/tech.md §6) — result arrives back over the tail as the matching part's `tool-approval-response` chunk, not from this call's own resolution ("不做乐观翻转"). */
   submitApproval: (
     callId: string,
     behavior: 'allow' | 'allow-session' | 'deny',
@@ -174,7 +174,7 @@ function describeError(error: unknown): string {
 }
 
 /**
- * `interrupted` 归 `idle` 而不是 `error`（docs/tech/turn-abort.md §4.1）：那是用户自己
+ * `interrupted` 归 `idle` 而不是 `error`（docs/agent/turn-abort/tech.md §4.1）：那是用户自己
  * 按的[停止](../../../../../docs/terms.md)，不是故障——「已停止」的呈现落在时间线里那条
  * 收尾标记上（`turn-marker.tsx`），不占顶部那条红色的直播中断提示。
  */
@@ -196,7 +196,7 @@ export function useChatMessages(
     () =>
       // 初值优先取 `initialFrames` 里最后一帧队列快照（纯防御——今天
       // `GET .../events` 只返回账本帧，不会带 `QueueFrame`），否则用会话详情给的
-      // 那一份（docs/tech/steer-and-queue.md §4.2）。之后一律由直播流的快照接管。
+      // 那一份（docs/agent/steer-and-queue/tech.md §4.2）。之后一律由直播流的快照接管。
       initialFrames.filter(isQueueFrame).at(-1)?.queue ?? initialQueuedMessages,
   );
   const [pendingUserEchoes, setPendingUserEchoes] = useState<PendingUserEcho[]>(
@@ -226,7 +226,7 @@ export function useChatMessages(
     undefined,
   );
 
-  // Only seq'd (persisted) frames are dedup-tracked (docs/tech/single-ledger.md §5 单-3) — an
+  // Only seq'd (persisted) frames are dedup-tracked (docs/agent/single-ledger/tech.md §5 单-3) — an
   // ephemeral `ChunkEnvelope` (no `seq`) has no `seq` to dedupe by, and
   // doesn't need one (it's never redelivered by a replay/reconnect the way a
   // persisted frame can be).
@@ -271,7 +271,7 @@ export function useChatMessages(
   }, []);
 
   /**
-   * [轮状态快照](../../../../../docs/terms.md)的唯一落点（docs/tech/chat-webapp.md §5.1）
+   * [轮状态快照](../../../../../docs/terms.md)的唯一落点（docs/app/chat-webapp/tech.md §5.1）
    * ——服务端在**每条** tail 连上时告诉我们「这个会话到底有没有轮在跑」，这里据它校正
    * `turnInProgressRef` 与 `status`。
    *
@@ -315,7 +315,7 @@ export function useChatMessages(
         setStopping(false);
 
         // [待发队列](../../../../../docs/terms.md)非空 = 服务端**必然**会自动
-        // [出队](../../../../../docs/terms.md)起下一轮（docs/tech/steer-and-queue.md §5.1，
+        // [出队](../../../../../docs/terms.md)起下一轮（docs/agent/steer-and-queue/tech.md §5.1，
         // 上一轮成功或失败都会走这一步）。所以这里不落回 idle：保持 `streaming` +
         // `turnInProgressRef`，让 tail 的既有退避重连去接住那一轮——否则用户会看到
         // 「转完 → 静止 → 又开始转」的闪烁，甚至以为排队的消息没发出去。
@@ -347,8 +347,8 @@ export function useChatMessages(
     );
     ledgerRef.current = ledger;
     for (const frame of initialFrames) {
-      // 两种状态快照帧都不属于账本（`QueueFrame`，docs/tech/steer-and-queue.md §4.3；
-      // [轮状态快照](../../../../../docs/terms.md)，docs/tech/chat-webapp.md §5.1）
+      // 两种状态快照帧都不属于账本（`QueueFrame`，docs/agent/steer-and-queue/tech.md §4.3；
+      // [轮状态快照](../../../../../docs/terms.md)，docs/app/chat-webapp/tech.md §5.1）
       // ——跳过，不喂 `MessageLedger`。队列快照对状态的贡献已经在 `queuedMessages` 的
       // 初值里算过了（见上）；轮状态快照根本不会出现在 `initialFrames` 里（`GET .../events`
       // 只回放持久行，它只走直播流），这里跳过它纯粹是让类型收窄在一处说清。
@@ -459,7 +459,7 @@ export function useChatMessages(
 
       if (turnInProgressRef.current) {
         // 有进行中的一轮：`intent` 决定这条消息是排队还是插话
-        // （docs/tech/steer-and-queue.md §4.1，服务端才是判定方，这里只是把意图传过去）。
+        // （docs/agent/steer-and-queue/tech.md §4.1，服务端才是判定方，这里只是把意图传过去）。
         // 都不需要重开 tail（这一轮的那条还开着）。失败不动
         // `status`/`turnInProgressRef`：这一轮本身跑得好好的，与这条消息有没有
         // 递进去无关。
@@ -493,7 +493,7 @@ export function useChatMessages(
             (mode) => {
               // 服务端可能**没有**真把它插进这一轮：那一轮还卡在
               // [起轮装配](../../../../../docs/terms.md)里时插不进去（还没有 session），
-              // 只能给它排队（docs/tech/turn-abort.md §3.3）。这条「待注入」回显因此
+              // 只能给它排队（docs/agent/turn-abort/tech.md §3.3）。这条「待注入」回显因此
               // 永远等不到注入点，撤掉——它的可见位置改由队列快照给（待发区）。
               if (mode === 'queued') {
                 setPendingUserEchoes((prev) =>
@@ -633,7 +633,7 @@ export function useChatMessages(
   }, [conversationId, applyQueueSnapshot]);
 
   /**
-   * [停止](../../../../../docs/terms.md)本轮（docs/tech/turn-abort.md §4.1）。取代了本
+   * [停止](../../../../../docs/terms.md)本轮（docs/agent/turn-abort/tech.md §4.1）。取代了本
    * hook 早先那个 `cancel`——它只 abort 本地那条 SSE 连接、把 status 拍成 idle，服务端
    * 那一轮照样跑到底（刷新页面又全冒出来），从来没敢接到界面上。
    *
@@ -673,7 +673,7 @@ export function useChatMessages(
   }, []);
 
   /**
-   * `POST .../approvals/:callId` / `.../questions/:callId` (docs/tech/single-ledger.md §6): both
+   * `POST .../approvals/:callId` / `.../questions/:callId` (docs/agent/single-ledger/tech.md §6): both
    * `submitApproval` and `submitAnswer` below funnel through this — mark
    * `callId` submitting, fire the request, and on failure either flag it
    * `locallyExpiredCallIds` (a `404`: the server no longer has it pending) or

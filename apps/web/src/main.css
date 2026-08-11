@@ -183,7 +183,7 @@
   opacity: 0.06;
 }
 
-/* tiptap composer（docs/tech/composer-skill-mention.md §2.4）。三条都是**必需**的
+/* tiptap composer（docs/app/composer-skill-mention/tech.md §2.4）。三条都是**必需**的
    接线，不是修饰：
 
    1. `.tiptap` 的 Placeholder：扩展本身只往空段落上写一个 `data-placeholder` 属性，

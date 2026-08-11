@@ -1,5 +1,5 @@
 /**
- * 本轮统计按钮 + 弹窗（docs/features/telemetry.md · docs/tech/telemetry.md §4.2）：
+ * 本轮统计按钮 + 弹窗（docs/app/telemetry/feature.md · docs/app/telemetry/tech.md §4.2）：
  * assistant 消息末尾（该轮 metadata.status === 'completed'，@nimbo/core loop 的
  * finalizeTurn）挂一枚「统计」按钮——界面上不再有常驻的汇总条，一轮的全部指标
  * 都收进点开的弹窗里。弹窗分两层数据源，正是「账本为源、遥测做增强」的分工：
@@ -7,7 +7,7 @@
  * - **概览**来自账本 metadata（产品数据，永久、随流免费到达）：耗时、工具/agent
  *   拆分、usage 四分——不依赖遥测，遥测整体关闭这一节照常显示。
  * - **明细**来自遥测端点按需拉取：**本轮准备**（起轮装配分段 + 到首个响应/首个
- *   输出，docs/tech/telemetry.md §2.4——回答「发完消息盯着空白等的那几秒花在
+ *   输出，docs/app/telemetry/tech.md §2.4——回答「发完消息盯着空白等的那几秒花在
  *   哪」）；逐次模型调用的响应/首 token 耗时、输入输出吞吐、token 三分（含推理）、
  *   finishReason、模型；逐个工具执行的耗时与失败。
  *   遥测是可关闭/可清空的耗材，明细缺席只显示「无遥测数据」，概览不受影响；三节
@@ -86,7 +86,7 @@ const toolExecutionEndPayloadSchema = z.object({
 });
 
 /**
- * 起轮装配打点（docs/tech/telemetry.md §2.4，`apps/node-server` 的
+ * 起轮装配打点（docs/app/telemetry/tech.md §2.4，`apps/node-server` 的
  * `turn-launcher.ts` 写入）——这两种事件都是**本仓库自己**发的，形状由我们定死，
  * 不像 ai 的事件那样会随小版本漂移；但解析姿态保持一致（safeParse + 坏行跳过），
  * 因为旧记录里根本没有这两行，缺席是常态。
@@ -167,7 +167,7 @@ function parseTelemetryRows(events: TurnTelemetryEvent[]): {
 }
 
 /**
- * 「本轮准备」小节的行（docs/features/telemetry.md）：把「发完消息盯着空白等的那
+ * 「本轮准备」小节的行（docs/app/telemetry/feature.md）：把「发完消息盯着空白等的那
  * 一段」摊开。层级用缩进表达——`起轮装配` 是总数，下面四项是它的分解；两个「到…」
  * 是起轮之后、看见东西之前的两段。
  */

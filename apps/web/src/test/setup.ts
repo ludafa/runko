@@ -48,7 +48,7 @@ globalThis.matchMedia ??= (query: string): MediaQueryList => ({
 Element.prototype.getAnimations ??= () => [];
 
 // 同理，ProseMirror（[composer](../../../../docs/terms.md) 输入区的底层，经 tiptap
-// ——docs/tech/composer-skill-mention.md §2.4）需要几个 CSSOM View 的方法来做光标
+// ——docs/app/composer-skill-mention/tech.md §2.4）需要几个 CSSOM View 的方法来做光标
 // 与选区的坐标换算。jsdom 没有布局引擎，这几个要么缺失、要么只在 Element 上有：
 //
 // - `Range.getClientRects` / `Range.getBoundingClientRect`：ProseMirror 每次

@@ -1,7 +1,7 @@
 /**
  * 11-sandbox-cloudflare — the third "BYO cloud sandbox" example (see 09's
- * header for the shared background: docs/tech/sandbox.md
- * §8, docs/plans/core-sdk.md P10). Cloudflare Sandbox is architecturally
+ * header for the shared background: docs/host/sandbox/tech.md
+ * §8, docs/core/core-sdk/plan.md P10). Cloudflare Sandbox is architecturally
  * different from E2B/Vercel: it can only be *accessed* from inside a
  * Cloudflare Worker (a Durable Object binding), so "agent runs on any Node
  * machine" (this repo's whole premise) requires a small **gateway** —
@@ -18,7 +18,7 @@
  * @nimbo/sandbox-cloudflare`; note there's no provider SDK to add on the
  * client side — see below).
  *
- * Two entry points, two different "no runtime import" stories (docs/tech/sandbox.md §8.1/
+ * Two entry points, two different "no runtime import" stories (docs/host/sandbox/tech.md §8.1/
  * §8.2):
  *   - `.` (this script's `cloudflareWorkspace`, runs on **any** Node ≥20):
  *     a pure `fetch` client — it never imports `@cloudflare/sandbox` (that
@@ -84,7 +84,7 @@
  *      checkout has no deployed gateway, so this section is expected to stop
  *      at the guidance message — the real-gateway path compiles and reads
  *      correctly but is untested end-to-end here; results get backfilled
- *      into docs/plans/verification.md once a user deploys the gateway and supplies the two
+ *      into docs/core/verification/plan.md once a user deploys the gateway and supplies the two
  *      variables. Note there is no `Sandbox`-style SDK object to create or
  *      tear down here (unlike 09/10): the sandbox's lifecycle is owned by
  *      the host's wrangler project, not by this client.

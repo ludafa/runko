@@ -1,5 +1,5 @@
 /**
- * [在场](../../../../docs/terms.md)上报（docs/tech/push-notification.md §5.2）。
+ * [在场](../../../../docs/terms.md)上报（docs/app/push-notification/tech.md §5.2）。
  *
  * 判据三条，缺一不可：**页面可见**（没被切到后台标签页）、**窗口聚焦**（不是在
  * 另一个应用里）、**路由停在这条会话**（这个 hook 挂在会话页上，所以第三条天然

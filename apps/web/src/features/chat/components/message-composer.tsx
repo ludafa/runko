@@ -1,6 +1,6 @@
 /**
  * `streaming` 不禁用输入框——一[轮](../../../../../docs/terms.md)进行中照样能发消息，
- * 只是多了一个「去哪」的选择（docs/features/steer-and-queue.md §2）：
+ * 只是多了一个「去哪」的选择（docs/agent/steer-and-queue/feature.md §2）：
  *
  * - **Enter = [排队](../../../../../docs/terms.md)**（默认）：不打扰当前这一轮，
  *   本轮收尾后由服务端自动作为下一轮发出。
@@ -11,7 +11,7 @@
  * `streaming` 时出现——空闲时界面回到「一个输入框 + 一个发送键」的最简形态。
  *
  * **发送键在 `streaming` 时是[停止](../../../../../docs/terms.md)键**（方块图标，
- * docs/tech/turn-abort.md §4.2）：点它停止这一轮。所以流式期间那颗按钮**不再**是排队
+ * docs/agent/turn-abort/tech.md §4.2）：点它停止这一轮。所以流式期间那颗按钮**不再**是排队
  * 入口——排队走 Enter、插话走 ⌥⏎/插话按钮，placeholder 里明说了这两条。两处易踩的细节：
  * `type` 必须显式改成 `button`（默认 `submit` 会被 `PromptInput` 的 form 提交吃掉，
  * 那条路是排队），`disabled` 换成 `stopping`（流式期间输入框里有字也要能停）。
@@ -52,7 +52,7 @@ export function MessageComposer({
   stopping?: boolean;
   /**
    * 这个会话可选的 [skill 清单](../../../../../docs/terms.md)——打 `/` 时列的就是它
-   * （docs/features/composer-skill-mention.md）。缺省空数组：清单没到（或这个会话
+   * （docs/app/composer-skill-mention/feature.md）。缺省空数组：清单没到（或这个会话
    * 一个 skill 都没装）时 `/` 就是个普通斜杠，composer 一切照旧。
    */
   skills?: readonly SkillSummary[];
@@ -76,7 +76,7 @@ export function MessageComposer({
       <PromptInputBody>
         {/*
           输入区是 tiptap 而不是 ai-elements 的 `PromptInputTextarea`
-          （docs/tech/composer-skill-mention.md §2.4）——换引擎只为拿到 skill 提及
+          （docs/app/composer-skill-mention/tech.md §2.4）——换引擎只为拿到 skill 提及
           那枚原子标记块，打字体验仍是纯文本档。Enter/⌥⏎/Shift+Enter 三条键位由
           `ComposerEditor` 内部的快捷键扩展接管，语义与换引擎之前逐条一致。
         */}

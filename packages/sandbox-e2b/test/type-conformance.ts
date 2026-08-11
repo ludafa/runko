@@ -1,6 +1,6 @@
 /**
  * 类型对照测试（typecheck-only）：证明真实 `e2b` `Sandbox` 结构性满足手写的
- * `E2bSandboxLike`（docs/tech/sandbox.md §8.1 依赖策略）。刻意不叫 `*.test.ts`——vitest 的
+ * `E2bSandboxLike`（docs/host/sandbox/tech.md §8.1 依赖策略）。刻意不叫 `*.test.ts`——vitest 的
  * `include: ["test/**\/*.test.ts"]` 不会收集它当运行时用例（这里没有任何
  * `it()`/`expect()`），但它落在 `tsconfig.json` 的 `include: ["test/**\/*.ts"]`
  * 范围内，`pnpm typecheck` 仍会编译到它——编译通过即证明成立，不需要运行。

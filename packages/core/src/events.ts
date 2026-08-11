@@ -1,5 +1,5 @@
 /**
- * L2 运行层的 usage/error 类型（docs/tech/single-ledger.md §5 单-2：
+ * L2 运行层的 usage/error 类型（docs/agent/single-ledger/tech.md §5 单-2：
  * `SessionEvent`/`SessionItem` 联合退役——UIMessage 单账本下，session 的过程
  * 数据改由 `NimboChunk`（ai 的 UIMessageChunk 词汇表，`state.ts`）+
  * `NimboUIMessage` 的部件/metadata 表达，见 `loop.ts`/`session.ts`。`Usage`/

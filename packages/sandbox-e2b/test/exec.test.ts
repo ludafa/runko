@@ -1,5 +1,5 @@
 /**
- * NimboExec 契约（docs/tech/sandbox.md §3.2 / §8.2；工单验收点）：P6-1 全部失败路径 resolve
+ * NimboExec 契约（docs/host/sandbox/tech.md §3.2 / §8.2；工单验收点）：P6-1 全部失败路径 resolve
  * 而非 reject、超时/中止归一 124/130、`onOutput` 分片顺序、cwd 锚定、
  * `describe()`/`defaultApproval`。
  */

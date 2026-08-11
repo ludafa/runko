@@ -1,5 +1,5 @@
 /**
- * `loadAgent` (P7-3 task 2, docs/tech/core-sdk.md §4.7). The golden-path/full-field
+ * `loadAgent` (P7-3 task 2, docs/core/core-sdk/tech.md §4.7). The golden-path/full-field
  * assertions run against the committed fixture `test/fixtures/agent-dir/`
  * (instructions.md + agent.json + tools/*.js + skills/ flat & packaged).
  * Edge/error paths use ephemeral `mkdtemp()` directories so we don't need to

@@ -10,8 +10,8 @@ model: claude-sonnet-5
 
 nimbo 是可嵌入 Node.js 的轻量 agent SDK（pnpm monorepo：`@nimbo/sdk` 门面 / `@nimbo/core` / `@nimbo/virtual-fs` / `@nimbo/mini-bash`；apps：`@nimbo-chat/node-server` / `@nimbo-chat/web` 聊天应用）。开工前按需精读工单指向的章节：
 
-- `docs/tech/core-sdk.md` —— 接口与架构的唯一事实来源，断言行为以它为准（技术面按功能拆分见 docs/tech/*）
-- `docs/tech/builtin-tools.md` —— 内置工具的行为规格与验收要点
+- `docs/core/core-sdk/tech.md` —— 接口与架构的唯一事实来源，断言行为以它为准（技术面按功能拆分见 docs/<层>/<功能>/tech.md）
+- `docs/core/builtin-tools/tech.md` —— 内置工具的行为规格与验收要点
 
 工具链：typescript@7（tsgo）、vitest@4、pnpm workspace。
 

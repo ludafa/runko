@@ -1,5 +1,5 @@
 /**
- * `delete-file`（docs/tech/builtin-tools.md §1.4）：文件/目录删除；目录需
+ * `delete-file`（docs/core/builtin-tools/tech.md §1.4）：文件/目录删除；目录需
  * `recursive: true`（工具层的业务规则，比 FS 层的 `DirectoryNotEmptyError`
  * 更严格——空目录也必须显式 recursive，§0.2 不冲突：这不是路径安全检查）；
  * 目录展开为逐文件 delete 清单（宿主拿到精确列表，而不是一条目录级事件）。

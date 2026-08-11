@@ -1,8 +1,8 @@
 /**
- * `web-search`（docs/tech/web-search.md）：chat 应用注册给 agent 的[联网搜索]
+ * `web-search`（docs/app/web-search/tech.md）：chat 应用注册给 agent 的[联网搜索]
  * 工具，后端是 Exa 的 `POST /search`。
  *
- * 为什么在 apps 而不在 `@nimbo/core` 的内置工具里（docs/tech/web-search.md §1）：
+ * 为什么在 apps 而不在 `@nimbo/core` 的内置工具里（docs/app/web-search/tech.md §1）：
  * core 的内置工具有一条隐含契约——零凭证、零网络、宿主什么都不配也能用；
  * 这个工具要第三方 API key、按次计费、走公网，塞进 core 等于让每个 SDK 用户
  * 被动继承一个外部依赖和一份账单面。形态与 `ask-user`（chat-agent.ts）同构：
@@ -22,7 +22,7 @@ import { z } from 'zod';
 
 const EXA_SEARCH_ENDPOINT = 'https://api.exa.ai/search';
 
-/** 模型没指定条数时取几条——够用又不撑爆上下文（docs/features/web-search.md §6 成功标准 4）。 */
+/** 模型没指定条数时取几条——够用又不撑爆上下文（docs/app/web-search/feature.md §6 成功标准 4）。 */
 const DEFAULT_NUM_RESULTS = 5;
 const MAX_NUM_RESULTS = 10;
 
@@ -39,7 +39,7 @@ const ERROR_BODY_PREVIEW_CHARACTERS = 200;
 
 const UNEXPECTED_SHAPE_MESSAGE = 'Exa returned an unexpected response shape.';
 
-/** Exa 的内容类别过滤（docs/tech/web-search.md §3）。 */
+/** Exa 的内容类别过滤（docs/app/web-search/tech.md §3）。 */
 const EXA_CATEGORIES = [
   'company',
   'people',
@@ -80,7 +80,7 @@ const exaSearchResponseSchema = z.object({
 type ExaResult = z.infer<typeof exaResultSchema>;
 
 /**
- * 请求体（docs/tech/web-search.md §2）。三个已知的过时写法刻意不用（Exa 官方
+ * 请求体（docs/app/web-search/tech.md §2）。三个已知的过时写法刻意不用（Exa 官方
  * "Common Mistakes"）：`useAutoprompt` 已废弃、`highlights.numSentences`/
  * `highlightsPerUrl` 已废弃（传 `true` 即可）、`livecrawl: "always"` 已由
  * `contents.maxAgeHours` 取代。
@@ -111,7 +111,7 @@ export interface CreateWebSearchToolOptions extends WebSearchConfig {
 }
 
 /**
- * `EXA_API_KEY` 的懒解析（docs/tech/web-search.md §5）：在 `buildSession()` 里
+ * `EXA_API_KEY` 的懒解析（docs/app/web-search/tech.md §5）：在 `buildSession()` 里
  * 每轮调一次，不在模块加载期读——同 `model.ts` 的 `resolveModel()` 纪律，保证
  * `generate:openapi`/`typecheck` 这类只 import 不跑的场景不会因为没配凭证就炸。
  * 未配（缺席/空串/纯空白）返回 `undefined` = 这个工具根本不注册。
@@ -148,7 +148,7 @@ export function createWebSearchTool(opts: CreateWebSearchToolOptions): Tool {
     // 会花钱，那件事由产品文档告知用户，不由这个标志表达。
     readOnly: true,
     // 不设 approval：联网只读检索既不改仓库也不用用户的 GitHub 权限，与
-    // `git push`/`rm -rf` 那类外发动作不是一个量级（docs/tech/web-search.md §3）。
+    // `git push`/`rm -rf` 那类外发动作不是一个量级（docs/app/web-search/tech.md §3）。
     execute: (input, ctx) => runSearch(opts, input, ctx),
   });
 }
@@ -223,7 +223,7 @@ function buildRequestBody(input: WebSearchInput): ExaSearchRequestBody {
 }
 
 /**
- * 非 2xx 的分档文案（docs/tech/web-search.md §6）——全部收敛成 `Error`，因为
+ * 非 2xx 的分档文案（docs/app/web-search/tech.md §6）——全部收敛成 `Error`，因为
  * errorText 会随 `tool-output-error` 一并进模型上下文，模型看得到原因就能自救
  * （换关键词，或直说查不到）。
  */

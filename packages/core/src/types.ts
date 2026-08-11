@@ -82,7 +82,7 @@ export interface NimboFS {
   stat(path: string): Promise<FileStat>;
   glob(pattern: string): Promise<string[]>;
   /**
-   * 原生搜索能力接缝（docs/tech/sandbox.md §4）：实现了 = 该底座能一次调用在
+   * 原生搜索能力接缝（docs/host/sandbox/tech.md §4）：实现了 = 该底座能一次调用在
    * 内部完成整个文件名搜索（典型如远端沙盒在沙盒里跑一条脚本），`grep`/`glob`
    * 工具会优先调用；抛 `SearchUnsupportedError` 会被工具静默捕获、回退现有
    * `glob()` + JS 过滤逐文件扫描。**内存态/覆盖态实现故意不实现这两个方法**——
@@ -159,7 +159,7 @@ export interface NimboExec {
   defaultApproval?: ApprovalPolicy;
 }
 
-// ---- 活动信号：让远端工作区知道「这一轮还在干活」（docs/tech/sandbox-keepalive.md §5.1） ----
+// ---- 活动信号：让远端工作区知道「这一轮还在干活」（docs/host/sandbox-keepalive/tech.md §5.1） ----
 
 /**
  * 一次[活动信号](../../../docs/terms.md)的载荷。
@@ -203,7 +203,7 @@ export interface NimboKeepAliveCapable {
   keepAlive?(targetMs: number): Promise<void>;
 }
 
-// ---- 审批链（docs/tech/single-ledger.md §6，P13-5-2c 三值重构；术语见 docs/terms.md §4） ----
+// ---- 审批链（docs/agent/single-ledger/tech.md §6，P13-5-2c 三值重构；术语见 docs/terms.md §4） ----
 
 export interface ApprovalContext {
   toolName: string;
@@ -212,17 +212,17 @@ export interface ApprovalContext {
 }
 
 /**
- * 一次工具调用的审批结果三选一（docs/tech/single-ledger.md §6.1）：`allow` 直接执行；`review`
+ * 一次工具调用的审批结果三选一（docs/agent/single-ledger/tech.md §6.1）：`allow` 直接执行；`review`
  * 人工审批（loop 先 yield `tool-approval-request` chunk 再阻塞等真人，见
  * `loop.ts`）；`deny` 直接拒绝。旧 `ApprovalDecision`（allow+updatedInput /
  * deny+message 二值）已删除——`updatedInput`（允许时改模型填的参数）随之整体
- * 移除（2026-07-15 定案，见 docs/tech/single-ledger.md §6.3：chat 卡片从来只有允许/拒绝两个按钮，
+ * 移除（2026-07-15 定案，见 docs/agent/single-ledger/tech.md §6.3：chat 卡片从来只有允许/拒绝两个按钮，
  * 没有编辑框）。
  */
 export type ApprovalOutcome = "allow" | "review" | "deny";
 
 /**
- * 策略 vs 结果分层（docs/tech/single-ledger.md §6.1）：策略是配在工具上（`Tool.approval`）/注入
+ * 策略 vs 结果分层（docs/agent/single-ledger/tech.md §6.1）：策略是配在工具上（`Tool.approval`）/注入
  * 会话（原 `SessionOptions.onApproval`，现审批分类器）的规则，解析出每次调用
  * 的结果三值之一。旧字符串 `"never"`/`"always"`/`"once"` 全废——
  * `"never"` → `"allow"`、`"always"` → `"review"`、`"once"` → `"review-once"`。
@@ -238,7 +238,7 @@ export type ApprovalPolicy =
   | ((input: JsonValue, ctx: ApprovalContext) => Promise<ApprovalOutcome> | ApprovalOutcome);
 
 /**
- * 人工裁决（docs/tech/single-ledger.md §6.3）：分类器返回 `review` 后弹给真人的卡片，真人只答
+ * 人工裁决（docs/agent/single-ledger/tech.md §6.3）：分类器返回 `review` 后弹给真人的卡片，真人只答
  * 两值——`updatedInput`（改参数）彻底删除，"让它换个做法"用「拒绝+理由」或
  * steer 更直白。`deny.message` = 拒绝理由，回填模型。
  */
@@ -252,7 +252,7 @@ export interface ApprovalReviewRequest {
 }
 
 /**
- * session 级注入的「等真人」通道（docs/tech/single-ledger.md §6.4 施工回报新增接口，P13-5-2c）：
+ * session 级注入的「等真人」通道（docs/agent/single-ledger/tech.md §6.4 施工回报新增接口，P13-5-2c）：
  * `evaluateApproval` 解析出 `review` 后，`loop.ts` 先 yield
  * `tool-approval-request` chunk（界面弹卡片），再 `await` 这个函数拿到人工裁决。
  * 未注入（`undefined`）时 `review` 视同无仲裁者——按 deny + 现有指导文案处理，

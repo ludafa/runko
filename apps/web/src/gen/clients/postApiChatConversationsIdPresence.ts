@@ -28,7 +28,7 @@ function getPostApiChatConversationsIdPresenceUrl(
 }
 
 /**
- * @summary 上报[在场](../../../../docs/terms.md)：这条会话此刻是否正在调用者眼前（docs/tech/push-notification.md §5.2）。在场期间不向这个人推送本会话的通知
+ * @summary 上报[在场](../../../../docs/terms.md)：这条会话此刻是否正在调用者眼前（docs/app/push-notification/tech.md §5.2）。在场期间不向这个人推送本会话的通知
  * {@link /api/chat/conversations/:id/presence}
  */
 export async function postApiChatConversationsIdPresence(

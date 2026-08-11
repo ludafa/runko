@@ -1,5 +1,5 @@
 /**
- * E2B 的[保活](../../../docs/terms.md)接线（docs/tech/sandbox-keepalive.md §5.5）。
+ * E2B 的[保活](../../../docs/terms.md)接线（docs/host/sandbox-keepalive/tech.md §5.5）。
  *
  * [续期闸门](../../../docs/terms.md)本身是通用的（`@nimbo/core` 的 `createKeepAlive`），
  * 这里只补上 E2B 独有的两件事：

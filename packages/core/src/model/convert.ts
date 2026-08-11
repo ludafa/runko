@@ -1,5 +1,5 @@
 /**
- * L0 模型层：nimbo `Tool` → AI SDK `tool()` / `ToolSet`（docs/tech/core-sdk.md §4.3 第 1 点）。
+ * L0 模型层：nimbo `Tool` → AI SDK `tool()` / `ToolSet`（docs/core/core-sdk/tech.md §4.3 第 1 点）。
  *
  * 刻意省略 `execute`：手动 loop 模式下 AI SDK 因此不会自动执行任何工具——
  * `finishReason === "tool-calls"` 时 tool call 原样出现在 `fullStream`/

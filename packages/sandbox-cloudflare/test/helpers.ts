@@ -197,7 +197,7 @@ export class FakeCfSandbox implements CfSandboxLike {
 /**
  * 进程内对接客户端与网关：不发起真实网络请求，直接把 `fetch()` 的 `(input, init)`
  * 重新包成 `Request` 交给 `gateway.fetch()`——七方法 + exec 的全部编解码（zod parse、
- * base64、NDJSON 分帧）因此都走真实 wire 路径，只是省掉了真实 TCP/HTTP 层（docs/tech/sandbox.md §8.4
+ * base64、NDJSON 分帧）因此都走真实 wire 路径，只是省掉了真实 TCP/HTTP 层（docs/host/sandbox/tech.md §8.4
  * "CF 客户端+网关在进程内对接测试"）。
  */
 export function fetchViaGateway(gateway: SandboxGateway): typeof fetch {

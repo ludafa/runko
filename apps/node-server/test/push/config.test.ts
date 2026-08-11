@@ -1,5 +1,5 @@
 /**
- * 推送总闸与事件白名单（docs/tech/push-notification.md §5.1、§6.5）。
+ * 推送总闸与事件白名单（docs/app/push-notification/tech.md §5.1、§6.5）。
  *
  * 这两个模块每次调用都重新读 env（不缓存，与仓库既有的 `resolve*` 同姿态），所以
  * 测试直接改 `process.env` 即可，不需要任何重置入口。

@@ -1,5 +1,5 @@
 /**
- * 启动时的[崩溃恢复](../../../../docs/terms.md)（docs/tech/graceful-shutdown.md §5）
+ * 启动时的[崩溃恢复](../../../../docs/terms.md)（docs/agent/graceful-shutdown/tech.md §5）
  * ——[优雅关闭](../../../../docs/terms.md)的**第二道防线**。
  *
  * 第一道（`turn-runner/shutdown.ts` 的 `shutdownTurns`）覆盖「进程有机会执行代码」的关闭：
@@ -10,11 +10,11 @@
  * 本模块在启动时扫一遍，把这些[孤儿轮](../../../../docs/terms.md)补上收尾标记。
  *
  * **怎么认出孤儿轮**：一个会话的事件行**以 `kind = 'chunk'` 收尾，且那条 chunk 不是收尾
- * `message-metadata`**。依据是既有的落盘时序（docs/tech/single-ledger.md §5）——一轮优雅
+ * `message-metadata`**。依据是既有的落盘时序（docs/agent/single-ledger/tech.md §5）——一轮优雅
  * 收尾时 `finalizeTurnPersistence` 会把本轮消息落成 `kind = 'message'` 行并 GC 掉本轮的
  * chunk 行，所以正常结束的会话必然以 message 行收尾。
  *
- * 三条边界（详见 docs/tech/graceful-shutdown.md §5）：
+ * 三条边界（详见 docs/agent/graceful-shutdown/tech.md §5）：
  *
  * 1. **不删那些 chunk 行**。它们是那一轮**唯一**的内容记录——已经没有 session 能把它们
  *    物化成 `kind = 'message'` 行了，删掉界面就什么都看不到。所以只补收尾、不 GC。
@@ -25,7 +25,7 @@
  *
  * 只在进程启动时、`serve()` 之前跑一次（`index.ts`），那时进程内不可能有任何轮在跑，
  * 所以不存在与活跃轮的竞态。**单实例假设**下成立——多实例部署的边界见
- * docs/tech/graceful-shutdown.md 附录 B。
+ * docs/agent/graceful-shutdown/tech.md 附录 B。
  */
 import type { NimboChunk } from '@nimbo/core';
 import { z } from 'zod';

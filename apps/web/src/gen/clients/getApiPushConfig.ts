@@ -20,7 +20,7 @@ function getGetApiPushConfigUrl() {
 }
 
 /**
- * @summary 推送是否可用 + VAPID 公钥（docs/tech/push-notification.md §3.1）：前端据此决定渲不渲染铃铛
+ * @summary 推送是否可用 + VAPID 公钥（docs/app/push-notification/tech.md §3.1）：前端据此决定渲不渲染铃铛
  * {@link /api/push/config}
  */
 export async function getApiPushConfig(

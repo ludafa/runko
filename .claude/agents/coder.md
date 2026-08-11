@@ -11,9 +11,9 @@ tools: Read, Edit, Write, Bash, Glob, Grep
 
 nimbo 是可嵌入 Node.js 的轻量 agent SDK（pnpm monorepo：`@nimbo/sdk` 门面 / `@nimbo/core` / `@nimbo/virtual-fs` / `@nimbo/mini-bash`）。开工前必读（按需精读工单指向的章节，不要全文通读浪费上下文）：
 
-- `docs/tech/core-sdk.md` —— 接口与架构的唯一事实来源，实现必须与之一致（技术面按功能拆分见 docs/tech/*）
-- `docs/tech/builtin-tools.md` —— 内置工具的行为规格与验收要点
-- `docs/plans/core-sdk.md` —— 当前阶段与包结构（各功能施工见 docs/plans/*）
+- `docs/core/core-sdk/tech.md` —— 接口与架构的唯一事实来源，实现必须与之一致（技术面按功能拆分见 docs/<层>/<功能>/tech.md）
+- `docs/core/builtin-tools/tech.md` —— 内置工具的行为规格与验收要点
+- `docs/core/core-sdk/plan.md` —— 当前阶段与包结构（各功能施工见 docs/<层>/<功能>/plan.md）
 
 工具链：typescript@7（tsgo）、tsdown、vitest@4、pnpm workspace。模型层用 `ai@^7`（peer）。
 

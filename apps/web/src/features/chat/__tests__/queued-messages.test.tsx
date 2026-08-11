@@ -9,7 +9,7 @@ function queued(id: string, text: string): QueuedMessage {
   return { id, text, userId: 'user-1', createdAt: 1_700_000_000_000 };
 }
 
-/** 待发区（docs/features/steer-and-queue.md §2.3）：列出、删一条、清空；空队列整块不渲染。 */
+/** 待发区（docs/agent/steer-and-queue/feature.md §2.3）：列出、删一条、清空；空队列整块不渲染。 */
 describe('QueuedMessages', () => {
   it('队列为空时什么都不渲染（不留占位）', () => {
     const { container } = render(

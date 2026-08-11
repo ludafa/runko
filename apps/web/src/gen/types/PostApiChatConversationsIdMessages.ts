@@ -15,7 +15,7 @@ export type PostApiChatConversationsIdMessagesPathParams = {
 };
 
 /**
- * @description Accepted — see `mode` (\"started\" | \"steered\" | \"queued\" | \"aborted\"); poll/stream `GET .../stream` for its events. \"aborted\" (docs/tech/turn-abort.md §3.3) means the user stopped this turn while it was still being assembled, so it never started running — the stopped-turn frames are on the stream like any other outcome
+ * @description Accepted — see `mode` (\"started\" | \"steered\" | \"queued\" | \"aborted\"); poll/stream `GET .../stream` for its events. \"aborted\" (docs/agent/turn-abort/tech.md §3.3) means the user stopped this turn while it was still being assembled, so it never started running — the stopped-turn frames are on the stream like any other outcome
  */
 export type PostApiChatConversationsIdMessages202 = StartTurnAck;
 
@@ -30,7 +30,7 @@ export type PostApiChatConversationsIdMessages401 = ApiError;
 export type PostApiChatConversationsIdMessages404 = ApiError;
 
 /**
- * @description Either the 待发队列 is full (docs/features/steer-and-queue.md §2.3 — nothing is ever silently dropped), or a turn was already in progress and could not be steered either (narrow race — the turn ended between the steer attempt and the fallback start)
+ * @description Either the 待发队列 is full (docs/agent/steer-and-queue/feature.md §2.3 — nothing is ever silently dropped), or a turn was already in progress and could not be steered either (narrow race — the turn ended between the steer attempt and the fallback start)
  */
 export type PostApiChatConversationsIdMessages409 = ApiError;
 
@@ -40,7 +40,7 @@ export type PostApiChatConversationsIdMessages409 = ApiError;
 export type PostApiChatConversationsIdMessages500 = ApiError;
 
 /**
- * @description The server is shutting down (docs/tech/graceful-shutdown.md §3.3) — no new turn is accepted during shutdown. Retryable: resend once the new process is up
+ * @description The server is shutting down (docs/agent/graceful-shutdown/tech.md §3.3) — no new turn is accepted during shutdown. Retryable: resend once the new process is up
  */
 export type PostApiChatConversationsIdMessages503 = ApiError;
 

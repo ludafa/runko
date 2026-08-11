@@ -1,5 +1,5 @@
 /**
- * 一轮的**落盘**（docs/tech/single-ledger.md §5 单-3 的「写入时序」）——本目录里
+ * 一轮的**落盘**（docs/agent/single-ledger/tech.md §5 单-3 的「写入时序」）——本目录里
  * 唯一写 `conversation_events` / `conversations` 的地方。
  *
  * 两段职责，对应一轮的两个时刻：
@@ -41,7 +41,7 @@ export interface TurnEmitter {
 }
 
 /**
- * docs/tech/single-ledger.md §5 单-3's durable/ephemeral split
+ * docs/agent/single-ledger/tech.md §5 单-3's durable/ephemeral split
  * (P13-1's "过程帧只直播不落盘" carried over verbatim onto the new chunk
  * vocabulary): `text-delta`/`reasoning-delta` (the actual streamed
  * increments) and any chunk explicitly marked `transient: true` (today just
@@ -72,7 +72,7 @@ function isDurableChunk(chunk: NimboChunk): boolean {
  * synchronously, at `startTurn`-time — the same reading
  * `finalizeTurnPersistence`'s GC threshold (`turnStartSeq`) uses, so the two
  * agree on exactly which `seq` range belongs to this turn
- * (docs/tech/single-ledger.md §5 单-3).
+ * (docs/agent/single-ledger/tech.md §5 单-3).
  *
  * `emitMessage` (the turn-start synthesized user message, `driveTurn` calls
  * it exactly once, first) and `emitChunk` (every subsequent `NimboChunk`)
@@ -126,7 +126,7 @@ export function createTurnEmitter(
 }
 
 /**
- * Turn-finalization persistence (docs/tech/single-ledger.md §5 单-3's "写入时序", called from
+ * Turn-finalization persistence (docs/agent/single-ledger/tech.md §5 单-3's "写入时序", called from
  * `driveTurn`'s graceful-finish path only — never from the `catch` branch,
  * see its own comment): slices out this turn's newly-appended messages
  * *past its own turn-start user message* (`state.messages` past

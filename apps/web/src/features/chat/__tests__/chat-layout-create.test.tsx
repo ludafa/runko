@@ -1,5 +1,5 @@
 /**
- * 建会话的乐观切换（docs/features/chat-ui.md「建会话的等待反馈」）。
+ * 建会话的乐观切换（docs/app/chat-ui/feature.md「建会话的等待反馈」）。
  *
  * 这里守的是「乐观」二字：点击后**在 `POST /conversations` 还挂着的时候**会话区
  * 就得已经变成准备中——所以下面的 promise 都是手动控制 resolve 时机的，先断言

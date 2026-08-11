@@ -2,7 +2,7 @@
  * single-ledger 的 convertToModelMessages 结构语义（离线、无凭证、进 CI）。
  *
  * 迁移自 examples/13-uimessage-single-ledger.e2e.test.ts 的**离线段**
- * （docs/tech/single-ledger.md §2.2/§2.4）：nimbo 的 loop 用「UIMessage 数组」
+ * （docs/agent/single-ledger/tech.md §2.2/§2.4）：nimbo 的 loop 用「UIMessage 数组」
  * 做工作状态与唯一存档，每次调模型前用 AI SDK 官方 `convertToModelMessages()`
  * 现场推导 `ModelMessage[]`。本文件手工构造一组覆盖 §2.2 全部部件形态的
  * UIMessage 数组，断言转换器的结构语义：
@@ -23,7 +23,7 @@ import { convertToModelMessages } from "ai";
 import type { DataUIPart, ModelMessage, UIMessage } from "ai";
 
 // ---------------------------------------------------------------------------
-// 账本类型系统 —— docs/tech/single-ledger.md §2.2 的六个 data 部件 + 四个 kebab-case
+// 账本类型系统 —— docs/agent/single-ledger/tech.md §2.2 的六个 data 部件 + 四个 kebab-case
 // 工具 + 消息 metadata，全部经 zod 推导（z.infer），是落盘/读回的唯一定义。
 // ---------------------------------------------------------------------------
 

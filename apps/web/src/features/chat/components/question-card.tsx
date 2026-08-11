@@ -1,5 +1,5 @@
 /**
- * Renders a pending or answered `ask-user` question (docs/tech/single-ledger.md §6) — driven directly by the `tool-ask-user` part's own
+ * Renders a pending or answered `ask-user` question (docs/agent/single-ledger/tech.md §6) — driven directly by the `tool-ask-user` part's own
  * `input-available` (pending)/`output-available` (answered) states, no
  * separate `question`/`callId` wire shape any more (`part.toolCallId` *is*
  * the callId). `timeline.ts`'s `buildRenderEntries`/`message-entry.tsx`

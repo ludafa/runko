@@ -1,5 +1,5 @@
 /**
- * `justBash(fs, opts?)`：`NimboExec` 的全语法档实现（docs/tech/core-sdk.md §4.5b），
+ * `justBash(fs, opts?)`：`NimboExec` 的全语法档实现（docs/core/core-sdk/tech.md §4.5b），
  * 用 `just-bash` 的 `Bash` 类跑在注入的 `NimboFS` 之上（经 `fs-adapter.ts`
  * 翻译成 `IFileSystem`）。模式 A（同源工作区）的典型消费方式与 mini-bash
  * 一致：`createSession({ fs, exec: justBash(fs) })`。
@@ -175,7 +175,7 @@ export function justBash(fs: NimboFS, opts: JustBashOptions = {}): NimboExec {
   let instanceCwd = "/";
 
   return {
-    // docs/tech/single-ledger.md §6.1（@nimbo/core 审批三值重构，P13-5-2c）：旧 "never" → "allow"（沙盒实现，隔离即边界）。
+    // docs/agent/single-ledger/tech.md §6.1（@nimbo/core 审批三值重构，P13-5-2c）：旧 "never" → "allow"（沙盒实现，隔离即边界）。
     defaultApproval: "allow",
     describe(): string {
       return DESCRIBE;

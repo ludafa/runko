@@ -29,7 +29,7 @@ await fs.writeBack();                   // 唯一写真实磁盘的操作，只�
 
 ## API 面清单
 
-语义细节见 [docs/tech/core-sdk.md §4.4](../../docs/tech/core-sdk.md)、文件工具规格见 [docs/tech/builtin-tools.md §1](../../docs/tech/builtin-tools.md)。
+语义细节见 [docs/core/core-sdk/tech.md §4.4](../../docs/core/core-sdk/tech.md)、文件工具规格见 [docs/core/builtin-tools/tech.md §1](../../docs/core/builtin-tools/tech.md)。
 
 ### 三个 NimboFS 实现与工厂
 
@@ -66,7 +66,7 @@ await fs.writeBack();                   // 唯一写真实磁盘的操作，只�
 
 | 导出 | 说明 |
 |---|---|
-| `createFileTools(opts): Record<FileToolName, Tool>` | `read_file` / `write_file` / `edit_file` / `delete_file` / `move_file` / `list_dir` / `glob` / `grep`（规格见 docs/tech/builtin-tools.md §1.1–§1.8：输出预算与 `[truncated]` 标记、read-before-write 强制、错误即指导）。`opts`: `readState`（`ReadStateStore`，version = mtime）+ `onFileChange(changes)`（`FileChange.kind`: `add/update/delete`）——`@nimbo/sdk` 默认装配自动接线，直接用本包的宿主自己把这两个接缝接到 session（见 `@nimbo/core` 的 `createSessionReadState` / `createDerivedDataCollector`） |
+| `createFileTools(opts): Record<FileToolName, Tool>` | `read_file` / `write_file` / `edit_file` / `delete_file` / `move_file` / `list_dir` / `glob` / `grep`（规格见 docs/core/builtin-tools/tech.md §1.1–§1.8：输出预算与 `[truncated]` 标记、read-before-write 强制、错误即指导）。`opts`: `readState`（`ReadStateStore`，version = mtime）+ `onFileChange(changes)`（`FileChange.kind`: `add/update/delete`）——`@nimbo/sdk` 默认装配自动接线，直接用本包的宿主自己把这两个接缝接到 session（见 `@nimbo/core` 的 `createSessionReadState` / `createDerivedDataCollector`） |
 
 ### 路径工具
 

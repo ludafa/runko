@@ -1,5 +1,5 @@
 /**
- * 通知决策层（docs/tech/push-notification.md §5、§6.1）——三道闸门的真值表、文案
+ * 通知决策层（docs/app/push-notification/tech.md §5、§6.1）——三道闸门的真值表、文案
  * 截断、以及最要紧的那条：**抛错绝不影响一轮**。
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';

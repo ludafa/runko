@@ -1,5 +1,5 @@
 /**
- * 推送订阅接口的客户端（docs/tech/push-notification.md §3.1）。
+ * 推送订阅接口的客户端（docs/app/push-notification/tech.md §3.1）。
  *
  * 与 `features/chat/api.ts` 同一姿态：手写 `fetch` + zod 校验，不用 kubb 生成的
  * client——那份 client 从不检查 `response.ok`，而这里要分辨 503（服务端没配

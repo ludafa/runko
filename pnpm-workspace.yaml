@@ -15,7 +15,7 @@ packages:
   # build/test，故 pnpm -r 的这两步扫到 examples 会自动跳过。
   # 不带 /*——examples 根自身就是那个 workspace 成员（其 src/ 是示例源码）。
   # 11 号真机段需要的那个 CF 网关不在这里：它已并入 apps/cloudflare-worker-server
-  # （那是个完整的 workspace 成员，见 docs/tech/cloudflare-worker-server.md）。
+  # （那是个完整的 workspace 成员，见 docs/app/cloudflare-worker-server/tech.md）。
   - "examples"
 
 # just-bash 的可选依赖（zstd/xz 压缩格式的原生绑定，tar/gzip 之外的小众格式）：

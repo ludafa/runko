@@ -1,8 +1,8 @@
 /**
- * [通知触发点](../../../../docs/terms.md)白名单（docs/tech/push-notification.md §5.1）。
+ * [通知触发点](../../../../docs/terms.md)白名单（docs/app/push-notification/tech.md §5.1）。
  *
  * `CHAT_PUSH_EVENTS`，逗号分隔，默认四类全开。这一期刻意**不做**按事件类型的
- * 用户设置界面——理由见 docs/features/push-notification.md 附录 A.2（真正的问题
+ * 用户设置界面——理由见 docs/app/push-notification/feature.md 附录 A.2（真正的问题
  * 是"哪一类是噪音"现在纯靠猜，先全开跑一阵）。这个环境变量是给"确实被某一类吵
  * 到了"的人留的口子，改配置重启即生效。
  */

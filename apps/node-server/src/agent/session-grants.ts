@@ -1,9 +1,9 @@
 /**
- * 会话级授权（session grant，docs/terms.md §四 / docs/tech/chat-webapp.md §2.2c）：
+ * 会话级授权（session grant，docs/terms.md §四 / docs/app/chat-webapp/tech.md §2.2c）：
  * 人在审批卡片上点「会话内都允许」后记一条放行——同一会话内**同一用户**的同样
  * 调用后续直接放行、不再弹卡片；没记过的仍照常走审批链。
  *
- * ---- 记账粒度：bash 走分段授权（docs/tech/approval-grant-split.md） ----
+ * ---- 记账粒度：bash 走分段授权（docs/app/approval-grant-split/tech.md） ----
  *
  * bash 调用按[命令段](../../../../docs/terms.md)记账：一条复合命令拆成 N 段、记
  * N 行；后续调用**每一段都记过**才放行。这样 `cd X && rm -rf y && npm i a` 授权

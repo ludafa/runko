@@ -1,12 +1,12 @@
 /**
- * `load-skill`（docs/tech/builtin-tools.md §1.9）：调用返回该 skill 的 markdown 正文 +
+ * `load-skill`（docs/core/builtin-tools/tech.md §1.9）：调用返回该 skill 的 markdown 正文 +
  * 附属文件清单（提示可用 `read-file` 读 `/.skills/<name>/...`）。"loading a
- * skill adds instructions, never a new execution surface"（docs/tech/core-sdk.md §4.6 第
+ * skill adds instructions, never a new execution surface"（docs/core/core-sdk/tech.md §4.6 第
  * 2 点，eve 原话）——这个工具只返回文本，不触发任何副作用。
  *
  * 条件内置：仅在 `agent.skills` 非空时出现在工具列表，接线在 `session.ts` 的
  * `assembleTools`（与 `update-plan` 同款机制，但控制条件不同——不经
- * `builtinTools` 裁剪，只看 skills 是否配置，见 docs/tech/builtin-tools.md §3 原文
+ * `builtinTools` 裁剪，只看 skills 是否配置，见 docs/core/builtin-tools/tech.md §3 原文
  * 括注）。
  */
 import { z } from "zod";
@@ -16,7 +16,7 @@ import type { Skill } from "../../skill.js";
 import { skillMountPath } from "../../skills/registry.js";
 
 /**
- * docs/tech/builtin-tools.md §0.5 的"错误即指导"横切规则对全部工具生效（不止文件
+ * docs/core/builtin-tools/tech.md §0.5 的"错误即指导"横切规则对全部工具生效（不止文件
  * 八件套）：失败返回 `{ isError: true, content }`，`content` 带下一步建议。
  * 索引签名的显式声明理由同 `@nimbo/virtual-fs` 的 `ToolErrorResult`（具名
  * interface 要落进 `ToolReturn` 的 `JsonValue` 对象分支，必须显式声明索引签名，

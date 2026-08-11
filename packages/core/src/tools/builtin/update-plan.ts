@@ -1,5 +1,5 @@
 /**
- * `update-plan`（docs/tech/builtin-tools.md §1.11）：整表替换的任务计划工具。
+ * `update-plan`（docs/core/builtin-tools/tech.md §1.11）：整表替换的任务计划工具。
  * 纯内存状态、零安全面——"存储经注入，session 拥有"（§1.11 原文）：本工单
  * 只定义 `PlanStore` 接口（get/set 两个方法）+ 一个便利的内存实现，真正的
  * 生命周期归属（跨轮次持久与否）留给 P4-2 的 session。
@@ -7,7 +7,7 @@
  * `onPlanUpdate` 回调是派生数据接缝的"生产者"一端（消费者与设计理由见
  * `runtime.ts` 头部注释、先例见 `@nimbo/virtual-fs` 的
  * `createFileTools(opts).onFileChange`）：整表替换成功后同步调用，工具本身
- * 不发 `SessionEvent`（docs/tech/builtin-tools.md §0.6 同款规则，`file_change`/`plan_update` 都遵守）。
+ * 不发 `SessionEvent`（docs/core/builtin-tools/tech.md §0.6 同款规则，`file_change`/`plan_update` 都遵守）。
  */
 import { z } from "zod";
 import { defineTool } from "../../tool.js";

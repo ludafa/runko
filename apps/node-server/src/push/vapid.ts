@@ -1,5 +1,5 @@
 /**
- * 推送功能的**总闸**（docs/tech/push-notification.md §6.5）。
+ * 推送功能的**总闸**（docs/app/push-notification/tech.md §6.5）。
  *
  * [VAPID 密钥对](../../../../docs/terms.md)是服务端向推送服务（Chrome 走 FCM、
  * Firefox 走 autopush）自证身份的公私钥。三个环境变量缺任何一个 ⇒ 整个推送功能

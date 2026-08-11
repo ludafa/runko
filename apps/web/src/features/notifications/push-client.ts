@@ -1,5 +1,5 @@
 /**
- * 跟浏览器推送栈打交道的**唯一**一处（docs/tech/push-notification.md §7）：
+ * 跟浏览器推送栈打交道的**唯一**一处（docs/app/push-notification/tech.md §7）：
  * 权限、注册 Service Worker、订阅/退订、把订阅上报给服务端。
  *
  * 把它们收在一个文件里，是为了让 React 那一侧（`use-push-toggle.ts`）只面对

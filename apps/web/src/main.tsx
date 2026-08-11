@@ -16,7 +16,7 @@ declare module '@tanstack/react-router' {
   }
 }
 
-// 点通知回到对应会话（docs/tech/push-notification.md §3.2）：Service Worker
+// 点通知回到对应会话（docs/app/push-notification/tech.md §3.2）：Service Worker
 // focus 了这个窗口之后会 postMessage 过来，这里接住并跳转。
 //
 // 走 `router.history.push` 而不是 `router.navigate({ to })`：`to` 的类型是"所有

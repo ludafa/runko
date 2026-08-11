@@ -4,7 +4,7 @@
  * mounting to `/.skills/<name>/`, and end-to-end `ctx.getSkill()` from a
  * host-provided tool. Loader/registry unit tests live in `test/skills.test.ts`.
  *
- * P13-5-2（docs/tech/single-ledger.md）迁移：断言从 `SessionEvent`/
+ * P13-5-2（docs/agent/single-ledger/tech.md）迁移：断言从 `SessionEvent`/
  * `SessionItem` 改为读账本（`session.toJSON().messages` 的工具部件）。
  */
 import { describe, expect, it } from "vitest";

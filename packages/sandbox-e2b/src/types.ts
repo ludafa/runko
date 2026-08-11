@@ -1,5 +1,5 @@
 /**
- * `e2b` SDK 面的最小结构化子集（docs/tech/core-sdk.md §4.5a 施工依据 docs/tech/sandbox.md §8.1
+ * `e2b` SDK 面的最小结构化子集（docs/core/core-sdk/tech.md §4.5a 施工依据 docs/host/sandbox/tech.md §8.1
  * "依赖策略"）：只声明适配器实际调用到的方法/字段，以官方 d.ts
  * （`e2b@2.32.0`，`node_modules/e2b/dist/index.d.ts`）为蓝本手写。`e2bWorkspace()`
  * 收的是这份结构接口而非 `import("e2b").Sandbox` 具体类——宿主与本包各自安装的
@@ -78,7 +78,7 @@ export interface E2bSandboxLike {
   commands: E2bCommandsLike;
   /**
    * 把沙盒的存活时长**重置**为「从现在起 `timeoutMs`」（不是加时——E2B 与 Vercel
-   * 在这里语义相反，见 docs/tech/sandbox-keepalive.md §1）。
+   * 在这里语义相反，见 docs/host/sandbox-keepalive/tech.md §1）。
    *
    * 上限：Pro 账户 24 小时、Hobby 账户 1 小时（`e2b@2.32.0` 的 `Sandbox.setTimeout`
    * 文档注释），超了会报错。

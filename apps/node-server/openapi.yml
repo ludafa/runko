@@ -553,7 +553,7 @@ paths:
       tags:
         - Chat
       summary: 'Start a turn, queue this message for the next one, or steer the
-        in-progress turn (docs/tech/steer-and-queue.md §4.1): with no turn
+        in-progress turn (docs/agent/steer-and-queue/tech.md §4.1): with no turn
         running this acquires the sandbox, builds the session and hands off to
         the in-process turn runner (mode "started"); with one running it either
         queues `text` onto the conversation’s 待发队列 (mode "queued", the default)
@@ -577,7 +577,7 @@ paths:
         "202":
           description: Accepted — see `mode` ("started" | "steered" | "queued" |
             "aborted"); poll/stream `GET .../stream` for its events. "aborted"
-            (docs/tech/turn-abort.md §3.3) means the user stopped this turn
+            (docs/agent/turn-abort/tech.md §3.3) means the user stopped this turn
             while it was still being assembled, so it never started running —
             the stopped-turn frames are on the stream like any other outcome
           content:
@@ -597,7 +597,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
         "409":
-          description: Either the 待发队列 is full (docs/features/steer-and-queue.md §2.3 —
+          description: Either the 待发队列 is full (docs/agent/steer-and-queue/feature.md §2.3 —
             nothing is ever silently dropped), or a turn was already in progress
             and could not be steered either (narrow race — the turn ended
             between the steer attempt and the fallback start)
@@ -612,7 +612,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
         "503":
-          description: "The server is shutting down (docs/tech/graceful-shutdown.md §3.3)
+          description: "The server is shutting down (docs/agent/graceful-shutdown/tech.md §3.3)
             — no new turn is accepted during shutdown. Retryable: resend once
             the new process is up"
           content:
@@ -623,7 +623,7 @@ paths:
     post:
       tags:
         - Chat
-      summary: '[停止](docs/terms.md)这个会话进行中的那一轮（docs/tech/turn-abort.md）：中止当前轮并清空[待发队列](docs/terms.md)。200
+      summary: '[停止](docs/terms.md)这个会话进行中的那一轮（docs/agent/turn-abort/tech.md）：中止当前轮并清空[待发队列](docs/terms.md)。200
         只表示「停止已请求」——真正停下的时刻取决于 agent 当时在做什么（最坏情况是一条 bash 命令响应中断信号的时间），「已停止」这个结果走
         `GET .../stream` 上那条 `status: "interrupted"` 的 `message-metadata` chunk
         送达'
@@ -739,7 +739,7 @@ paths:
       tags:
         - Chat
       summary: "Resumable live tail of a session’s in-progress turn
-        (docs/tech/chat-webapp.md §2.2b): replays persisted frames after
+        (docs/app/chat-webapp/tech.md §2.2b): replays persisted frames after
         `after`, then forwards the turn’s live chunks until it ends —
         reconnect-safe (page refresh/HMR/network blip never lose events)"
       parameters:
@@ -762,7 +762,7 @@ paths:
           description: "SSE stream of `ChatReplayFrame`s (`{seq,message}` or
             `{seq?,chunk}`): replay, then live tail (closes once the turn ends,
             or immediately after replay if no turn is in progress). Live `chunk`
-            frames omit `seq` when ephemeral (docs/tech/single-ledger.md §5 单-3
+            frames omit `seq` when ephemeral (docs/agent/single-ledger/tech.md §5 单-3
             — `text-delta`/`reasoning-delta`/`transient` data parts), never
             persisted and never replayed; every other frame always carries one"
           content:
@@ -789,7 +789,7 @@ paths:
     post:
       tags:
         - Chat
-      summary: 上报[在场](../../../../docs/terms.md)：这条会话此刻是否正在调用者眼前（docs/tech/push-notification.md
+      summary: 上报[在场](../../../../docs/terms.md)：这条会话此刻是否正在调用者眼前（docs/app/push-notification/tech.md
         §5.2）。在场期间不向这个人推送本会话的通知
       parameters:
         - schema:
@@ -827,8 +827,8 @@ paths:
     post:
       tags:
         - Chat
-      summary: 批准或拒绝一个待处理的工具调用审批请求（docs/tech/chat-webapp.md
-        §2.2c（审批链），docs/tech/single-ledger.md §6）：结果通过 `GET .../stream` 的
+      summary: 批准或拒绝一个待处理的工具调用审批请求（docs/app/chat-webapp/tech.md
+        §2.2c（审批链），docs/agent/single-ledger/tech.md §6）：结果通过 `GET .../stream` 的
         `tool-approval-response` chunk 送达，本响应只是一个 ack
       parameters:
         - schema:
@@ -876,7 +876,7 @@ paths:
     post:
       tags:
         - Chat
-      summary: 回答一个待处理的 ask-user 提问（docs/tech/chat-webapp.md §2.2c（审批链））：结果通过 `GET
+      summary: 回答一个待处理的 ask-user 提问（docs/app/chat-webapp/tech.md §2.2c（审批链））：结果通过 `GET
         .../stream` 的 `tool-ask-user` 部件 output-available 状态送达，本响应只是一个 ack
       parameters:
         - schema:
@@ -922,7 +922,7 @@ paths:
     get:
       tags:
         - Push
-      summary: 推送是否可用 + VAPID 公钥（docs/tech/push-notification.md §3.1）：前端据此决定渲不渲染铃铛
+      summary: 推送是否可用 + VAPID 公钥（docs/app/push-notification/tech.md §3.1）：前端据此决定渲不渲染铃铛
       responses:
         "200":
           description: OK（未启用时 `{enabled:false, publicKey:null}`，不是错误）
@@ -995,7 +995,7 @@ paths:
     post:
       tags:
         - Push
-      summary: 给自己的全部设备发一条测试通知——端到端验证推送通道是否打通（docs/plans/push-notification.md PN-10 用例
+      summary: 给自己的全部设备发一条测试通知——端到端验证推送通道是否打通（docs/app/push-notification/plan.md PN-10 用例
         4）
       responses:
         "200":

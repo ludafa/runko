@@ -1,5 +1,5 @@
 /**
- * docs/tech/single-ledger.md §5/§6 migration: `TurnStartedMarker`
+ * docs/agent/single-ledger/tech.md §5/§6 migration: `TurnStartedMarker`
  * (a "第 N 轮" divider) is dropped — there is no wire signal for a turn
  * *starting* any more (`session.started`/`turn.started` "不需要部件/chunk",
  * `@nimbo/core`'s `loop.ts` doc comment), only for one *ending*
@@ -12,7 +12,7 @@
  * reuses the exact same `NimboError` shape as a graceful degrade — `code:
  * 'provider_error'`).
  *
- * `code: 'aborted'` 是这四种 code 里唯一**不是故障**的一种（docs/tech/turn-abort.md
+ * `code: 'aborted'` 是这四种 code 里唯一**不是故障**的一种（docs/agent/turn-abort/tech.md
  * §4.3）：用户自己按了[停止](../../../../../docs/terms.md)。它因此走中性呈现、也不显示
  * core 那句英文 `message`（那是给日志看的），其余三种照旧 destructive。
  */
@@ -31,10 +31,10 @@ const KNOWN_ERROR_TITLE: Record<NimboError['code'], string> = {
 /**
  * `apps/node-server` 的 `ABORT_REASON_SHUTDOWN` 的**手写镜像**（本仓库既有的镜像纪律，
  * 同 `schema.ts`）——服务端[优雅关闭](../../../../../docs/terms.md)时中止一轮用的就是这句
- * 话，它经 core 透传成 `NimboError.message`（docs/tech/graceful-shutdown.md §4）。
+ * 话，它经 core 透传成 `NimboError.message`（docs/agent/graceful-shutdown/tech.md §4）。
  *
  * 为什么靠文案而不是靠一个专门的 `code`：「服务要关闭了」是宿主的运维概念，不该塞进
- * `@nimbo/core` 的类型联合（理由见 docs/tech/graceful-shutdown.md §2）。**改这个常量要
+ * `@nimbo/core` 的类型联合（理由见 docs/agent/graceful-shutdown/tech.md §2）。**改这个常量要
  * 同时改服务端那份**，否则服务重启会被显示成「用户按了停止」。
  */
 const SHUTDOWN_ABORT_MESSAGE =

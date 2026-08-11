@@ -1,5 +1,5 @@
 /**
- * P13-5-2（docs/tech/single-ledger.md）迁移：`session.stream()`/
+ * P13-5-2（docs/agent/single-ledger/tech.md）迁移：`session.stream()`/
  * `session.send()` 产出/消费 `NimboChunk`/`NimboUIMessage` 而不是退役的
  * `SessionEvent`/`SessionItem`；"emits session.started only on the very
  * first stream()/send() call" 一节随 `session.started`/`turn.started` 事件

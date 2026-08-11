@@ -1,5 +1,5 @@
 /**
- * `SEARCH_SCRIPT`：原生搜索快路径（docs/tech/sandbox.md §4）里真正在沙盒内跑的那段脚本，
+ * `SEARCH_SCRIPT`：原生搜索快路径（docs/host/sandbox/tech.md §4）里真正在沙盒内跑的那段脚本，
  * `fs.ts` 经 `sandbox.runCommand({ cmd: "node", args: ["-e", SEARCH_SCRIPT, "--", JSON.stringify(payload)] })`
  * 一次网络往返把整棵树的扫描（glob 全量匹配 / grep 全量扫描）丢给沙盒自己的 node 完成，
  * 免去逐文件 readdir/stat/readFile 各一次 RTT。

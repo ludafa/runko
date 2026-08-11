@@ -1,8 +1,8 @@
 /**
  * 续期闸门（`createKeepAlive`）验收测试 —— KA-2 的通用部分。
  *
- * 规格见 docs/tech/sandbox-keepalive.md §5.4/§5.5，验收清单见
- * docs/plans/sandbox-keepalive.md KA-2 / KA-3。
+ * 规格见 docs/host/sandbox-keepalive/tech.md §5.4/§5.5，验收清单见
+ * docs/host/sandbox-keepalive/plan.md KA-2 / KA-3。
  *
  * 这里测的是与厂商无关的闸门本身：补足语义、三个信号源、审批状态机、两个上限、
  * 失败不外溢。厂商差异（E2B 的重置 vs Vercel 的加时）经 `KeepAliveDriver` 注入，

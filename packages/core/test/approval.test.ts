@@ -8,7 +8,7 @@ function ctx(overrides: Partial<ApprovalContext> = {}): ApprovalContext {
 }
 
 describe("evaluateApproval", () => {
-  describe("per-tool 'allow' / unconfigured — default allow (§4.5, docs/tech/single-ledger.md §6.1)", () => {
+  describe("per-tool 'allow' / unconfigured — default allow (§4.5, docs/agent/single-ledger/tech.md §6.1)", () => {
     it("allows when per-tool approval is 'allow', without consulting the session classifier", async () => {
       const onApproval = vi.fn();
       const resolution = await evaluateApproval({
@@ -76,7 +76,7 @@ describe("evaluateApproval", () => {
       expect(callback).toHaveBeenCalledWith({ query: "x" }, ctx({ toolName: "search" }));
     });
 
-    it("denies via a per-tool callback returning 'deny' — capability-narrowed to the default message (docs/tech/single-ledger.md §6.4: a custom deny text is no longer expressible here, only via review + HumanDecision.deny.message)", async () => {
+    it("denies via a per-tool callback returning 'deny' — capability-narrowed to the default message (docs/agent/single-ledger/tech.md §6.4: a custom deny text is no longer expressible here, only via review + HumanDecision.deny.message)", async () => {
       const callback = (): ApprovalOutcome => "deny";
       const resolution = await evaluateApproval({
         toolName: "bash",
@@ -113,7 +113,7 @@ describe("evaluateApproval", () => {
     });
   });
 
-  describe("'review' — every call escalates to the session classifier (docs/tech/single-ledger.md §6.1)", () => {
+  describe("'review' — every call escalates to the session classifier (docs/agent/single-ledger/tech.md §6.1)", () => {
     it("escalates to the session classifier on every call, never short-circuiting", async () => {
       const onApproval = vi.fn((): ApprovalOutcome => "allow");
       for (let i = 0; i < 3; i++) {
@@ -154,7 +154,7 @@ describe("evaluateApproval", () => {
     });
   });
 
-  describe("'review-once' — first call escalates, an approved call is remembered by tool name (docs/tech/single-ledger.md §6.1 review-once 语义)", () => {
+  describe("'review-once' — first call escalates, an approved call is remembered by tool name (docs/agent/single-ledger/tech.md §6.1 review-once 语义)", () => {
     it("asks the session classifier the first time, then allows subsequent calls without asking again", async () => {
       const onApproval = vi.fn((): ApprovalOutcome => "allow");
       const onceMemory = createOnceApprovalMemory();
@@ -285,7 +285,7 @@ describe("evaluateApproval", () => {
     });
   });
 
-  describe("spec gap: 'review'/'review-once' with no session classifier configured — deny with guidance (docs/tech/single-ledger.md §6.4 无仲裁者)", () => {
+  describe("spec gap: 'review'/'review-once' with no session classifier configured — deny with guidance (docs/agent/single-ledger/tech.md §6.4 无仲裁者)", () => {
     it("denies a 'review' tool call when the session classifier is not configured", async () => {
       const resolution = await evaluateApproval({
         toolName: "bash",

@@ -29,7 +29,7 @@ function getPostApiChatConversationsIdApprovalsCallidUrl(
 }
 
 /**
- * @summary 批准或拒绝一个待处理的工具调用审批请求（docs/tech/chat-webapp.md §2.2c（审批链），docs/tech/single-ledger.md §6）：结果通过 `GET .../stream` 的 `tool-approval-response` chunk 送达，本响应只是一个 ack
+ * @summary 批准或拒绝一个待处理的工具调用审批请求（docs/app/chat-webapp/tech.md §2.2c（审批链），docs/agent/single-ledger/tech.md §6）：结果通过 `GET .../stream` 的 `tool-approval-response` chunk 送达，本响应只是一个 ack
  * {@link /api/chat/conversations/:id/approvals/:callId}
  */
 export async function postApiChatConversationsIdApprovalsCallid(

@@ -1,9 +1,9 @@
 /**
  * P0 脚手架占位导出，P1-1 追加 L0 原语/事件模型/SessionState 的真实类型
- * （docs/tech/core-sdk.md §4.1/§4.2/§4.4/§4.5a/§4.8），P1-2 追加 L1 定义层
- * defineAgent/defineTool/defineSkill（docs/tech/core-sdk.md §4.1）。P4-1 追加审批链 +
+ * （docs/core/core-sdk/tech.md §4.1/§4.2/§4.4/§4.5a/§4.8），P1-2 追加 L1 定义层
+ * defineAgent/defineTool/defineSkill（docs/core/core-sdk/tech.md §4.1）。P4-1 追加审批链 +
  * ToolRuntime + update-plan；P4-2 追加 L2 运行层 `createSession`/`runTurn`
- * （docs/tech/core-sdk.md §4.2 全节），P4 收尾。P5 追加 skills：`Skill.fromDirectory/
+ * （docs/core/core-sdk/tech.md §4.2 全节），P4 收尾。P5 追加 skills：`Skill.fromDirectory/
  * fromFS/fromMarkdown` 三加载器（`skill.js`）、`<available_skills>` 注入 +
  * `load-skill` 工具 + 附属文件挂载 + 真实 `getSkill`（`skills/loader.js`、
  * `skills/registry.js`、`tools/builtin/load-skill.js`）。P6-2 追加 `bash`
@@ -11,7 +11,7 @@
  * 接线（`session.js`）。P7-2 追加结构化输出 `generateStructuredOutput`/
  * `NimboStructuredOutputError`（`structured.js`）+ `Session.send<T>`/
  * `toJSON`/`SessionOptions.resume`（`session.js`）。原生搜索能力接缝
- * （docs/tech/sandbox.md §4）追加 `NimboFS.searchFiles?`/`searchContent?` 与配套
+ * （docs/host/sandbox/tech.md §4）追加 `NimboFS.searchFiles?`/`searchContent?` 与配套
  * 查询/结果类型（`types.js`）+ `SearchUnsupportedError`（`search.js`）。
  */
 export const NIMBO_CORE_VERSION = "0.0.0" as const;

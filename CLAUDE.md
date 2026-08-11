@@ -52,15 +52,29 @@ pnpm workspace 三组成员（见 [pnpm-workspace.yaml](./pnpm-workspace.yaml)�
 
 ## 文档规范
 
-**目录与职责分离**——一个独立功能的文档按视角拆到三处，不再一个文件混写产品·技术·施工：
+**先按层归位，再按视角拆份**——落点是 `docs/<层>/<功能>/<视角>.md`：
 
-- **产品文档** `docs/features/<feature>.md`：产品视角——以用户使用手册作为目标，聚焦到要解决什么问题、用户可见行为/交互、范围与非目标、成功标准。
-- **技术方案文档** `docs/tech/<feature>.md`：技术视角——方案、关键接口/数据结构、取舍与已知限制。
-  - **涉及 DB 时**必须有**业务数据领域设计图**（实体与关系，用 mermaid `erDiagram`）。
-  - **核心流程**必须有**时序图**（用 mermaid `sequenceDiagram`）。
-- **施工进展** `docs/plans/<feature>.md`：拆单、验收结论、阶段状态、变更记录。
+```
+docs/<层>/<功能>/feature.md   产品视角——以用户使用手册作为目标，聚焦到要解决什么问题、用户可见行为/交互、范围与非目标、成功标准。
+docs/<层>/<功能>/tech.md      技术视角——方案、关键接口/数据结构、取舍与已知限制。
+docs/<层>/<功能>/plan.md      施工进展——拆单、验收结论、阶段状态、变更记录。
+```
 
-nimbo 是技术产品，**技术面本身就是产品功能**——架构总纲、内置工具、沙盒适配契约这类「底座」对开发者而言都是功能，一律按上面三目录归位，不另设参考目录。唯一例外：术语表 `docs/terms.md` 与总览 `README` 留在 `docs/` 根（它们是词典/索引，不是功能文档）。
+- **tech.md 的两条硬要求**：**涉及 DB 时**必须有**业务数据领域设计图**（实体与关系，用 mermaid `erDiagram`）；**核心流程**必须有**时序图**（用 mermaid `sequenceDiagram`）。
+- 三份不必都有——只有施工视角的（如 `docs/core/verification/`）就只放 `plan.md`，别为凑齐建空壳。
+
+**层怎么选**——依据 [agent 内核包的分层](./docs/agent/agent-kernel/feature.md)（推导见[技术方案 §2](./docs/agent/agent-kernel/tech.md)），四选一：
+
+| 层 | 收什么 | 索引 |
+|---|---|---|
+| `docs/core/` | 执行引擎档：`@nimbo/core` 与随包（virtual-fs · mini-bash · just-bash · sdk）的能力 | [core/README.md](./docs/core/README.md) |
+| `docs/agent/` | agent 逻辑层：轮编排（连续）与归属仲裁（独占）——会话怎么接下去、等人、崩溃、多进程 | [agent/README.md](./docs/agent/README.md) |
+| `docs/host/` | 宿主层：可替换的四样资源——沙盒 · 持久化 · 流分发 · 归属仲裁机制 | [host/README.md](./docs/host/README.md) |
+| `docs/app/` | 接入层与成品应用：chat 应用、Cloudflare Worker、examples（`apps/*` 与 `examples`） | [app/README.md](./docs/app/README.md) |
+
+新增一个功能就在对应层下开一个目录，并在**该层的 `README.md` 索引表里加一行**（一句话 + 三视角链接）；跨层不确定归哪层时，按「这个能力将来长在哪个包里」判断。
+
+nimbo 是技术产品，**技术面本身就是产品功能**——架构总纲、内置工具、沙盒适配契约这类「底座」对开发者而言都是功能，一律按上面四层归位，不另设参考目录。唯一例外：术语表 `docs/terms.md` 与总览 `docs/README.zh-CN.md` 留在 `docs/` 根（它们是词典/索引，不是功能文档）。
 
 请用简单易懂、清晰明了的语言来编写所有文档，避免晦涩、避免过度术语化。可以的时候尽量多画图，业务领域实体关系图、时序图是很重要的。
 

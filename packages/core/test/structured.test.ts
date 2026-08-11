@@ -1,6 +1,6 @@
 /**
  * P7-2: `generateStructuredOutput`（unit）+ `Session.send<T>` wiring
- * (integration) — docs/tech/core-sdk.md §4.8 "结构化输出" / §4.2 `send<T>` 重载.
+ * (integration) — docs/core/core-sdk/tech.md §4.8 "结构化输出" / §4.2 `send<T>` 重载.
  * See `src/structured.ts` header for the design rationale (generateText+Output
  * over generateObject, native-vs-fallback collapsing into one retry loop,
  * throw over a new turn.failed code).
@@ -163,7 +163,7 @@ describe("Session.send<T>(...outputSchema)", () => {
     const result = await session.send("summarize", { outputSchema: summarySchema });
 
     expect(result.finalResponse).toBe("here is your summary");
-    // TurnResult.items 已随 SessionItem 退役移除（docs/tech/single-ledger.md §5 单-2）——"发生了什么"
+    // TurnResult.items 已随 SessionItem 退役移除（docs/agent/single-ledger/tech.md §5 单-2）——"发生了什么"
     // 现在读账本本身：这个 turn 的 assistant 消息应携带一个落地的 text 部件。
     const messages = session.toJSON().messages;
     const assistantMessage = messages[messages.length - 1];

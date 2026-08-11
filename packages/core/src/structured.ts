@@ -1,6 +1,6 @@
 /**
  * L2 运行层：`Session.send<T>(...outputSchema)` 的结构化输出实现
- * （docs/tech/core-sdk.md §4.8 "结构化输出" 段 / §4.2 `send<T>` 重载原文）。独立于
+ * （docs/core/core-sdk/tech.md §4.8 "结构化输出" 段 / §4.2 `send<T>` 重载原文）。独立于
  * session.ts 成文件，保持 session.ts 聚焦于状态生命周期本身。
  *
  * ---- 落点：正常 loop 收尾之后的独立一轮，不改 loop.ts（本工单文件范围裁剪） ----

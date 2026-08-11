@@ -1,6 +1,6 @@
 # @nimbo/sandbox-vercel
 
-把一个已创建好的 [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox)（真实 Amazon Linux 2023 Firecracker microVM）实例包成 `NimboFS & NimboExec`，一次注入 `createSession(agent, { workspace })`——"模式 A 同源工作区"落在真实云沙盒上的实现（对照 [docs/tech/core-sdk.md §4.5a](../../docs/tech/core-sdk.md) / [docs/tech/sandbox.md §8](../../docs/tech/sandbox.md)）。
+把一个已创建好的 [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox)（真实 Amazon Linux 2023 Firecracker microVM）实例包成 `NimboFS & NimboExec`，一次注入 `createSession(agent, { workspace })`——"模式 A 同源工作区"落在真实云沙盒上的实现（对照 [docs/core/core-sdk/tech.md §4.5a](../../docs/core/core-sdk/tech.md) / [docs/host/sandbox/tech.md §8](../../docs/host/sandbox/tech.md)）。
 
 ## 安装
 
@@ -33,7 +33,7 @@ try {
 }
 ```
 
-完整可跑示例（含零凭证的 fake 沙盒演示，证明"BYO 实例 + 结构化接口"不需要真实网络）见 [examples/10-sandbox-vercel.ts](../../examples/10-sandbox-vercel.ts)。
+完整可跑示例（含零凭证的 fake 沙盒演示，证明"BYO 实例 + 结构化接口"不需要真实网络）见 [examples/10-sandbox-vercel.ts](../../examples/src/10-sandbox-vercel.ts)。
 
 ## 结构化接口 / BYO
 
@@ -59,11 +59,11 @@ const workspace = vercelWorkspace(sandbox, {
 - **不传 `keepAlive` = 完全不保活**，一次网络调用都不会发生。保活会花钱，不该在你没要求时悄悄发生。
 - 续期是**补足**语义：先读 `sandbox.expiresAt` 拿真实剩余，只补差额。这一点对 Vercel 尤其要紧——`extendTimeout(duration)` 是**加时**（官方文档原话 "Extends timeout **by** 5 minutes, to a total of 15 minutes"），直接传目标值会让租期反复累加，高频对话后沙盒多活几十分钟白计费。
 - 这一轮真的卡死时信号自然停止，沙盒会正常停机——它不会给一个已经死掉的任务无限续命。
-- 其余可调项（`maxTurnMs` 单轮上限、`approvalBudgetMs` 审批预算、`onRenew` 观测回调）见 `@nimbo/core` 的 `KeepAliveOptions` 与 [docs/features/sandbox-keepalive.md](../../docs/features/sandbox-keepalive.md)。
+- 其余可调项（`maxTurnMs` 单轮上限、`approvalBudgetMs` 审批预算、`onRenew` 观测回调）见 `@nimbo/core` 的 `KeepAliveOptions` 与 [docs/host/sandbox-keepalive/feature.md](../../docs/host/sandbox-keepalive/feature.md)。
 
 ⚠️ 查剩余用的是 **`sandbox.expiresAt`**（"When the currently running session will time out"），**不是 `sandbox.timeout`**——后者是建盒时配的默认时长，不是剩余量。
 
-## 已知限制（docs/tech/sandbox.md §8.2 / docs/plans/core-sdk.md P10-2 实际改动，如实照抄不发明）
+## 已知限制（docs/host/sandbox/tech.md §8.2 / docs/core/core-sdk/plan.md P10-2 实际改动，如实照抄不发明）
 
 - **非递归删除目录走 `fs.rmdir()` 而非 `fs.rm()`**：实测推翻了调研文档"`fs.rm(path, {recursive})` 原生对齐"的假设——`@vercel/sandbox` 的 `fs.rm(path)`（非递归）对**任何**目录都抛 `ERR_FS_EISDIR`，不区分空/非空；真正带"空则成功、非空则 `ENOTEMPTY`"语义的是 `fs.rmdir()`。适配器按目标类型分流：文件走 `fs.rm()`，非递归删目录走 `fs.rmdir()`，`{recursive: true}` 统一走 `fs.rm(path, {recursive:true, force:true})`——代价是非递归删目录多一次 `stat` 判断类型。
 - **bash 越出工作区根**：文件工具锚定在 `root` 之下并拒绝 `..` 越界，但 `bash -lc "<script>"` 是沙盒里的真实 shell（默认用户有免密 sudo），能读写/`cd` 到磁盘任何位置——绝对路径的 bash 命令（如 `cat /notes.txt`）落在沙盒真实文件系统根，而不是 `root`；同一份文件要在文件工具和 bash 之间互通，bash 侧要用相对路径。

@@ -1,5 +1,5 @@
 /**
- * DirFS：真实目录的只读视图（docs/tech/core-sdk.md §4.4：OverlayFS 的 base 通常是它）。
+ * DirFS：真实目录的只读视图（docs/core/core-sdk/tech.md §4.4：OverlayFS 的 base 通常是它）。
  * 唯一合法的 node:fs 使用边界——真实磁盘只在这里被读取，写方法一律拒绝。
  */
 import * as nodeFs from "node:fs/promises";

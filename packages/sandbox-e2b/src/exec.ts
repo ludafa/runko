@@ -1,5 +1,5 @@
 /**
- * NimboExec → e2b `Commands.run()` 映射（docs/tech/sandbox.md §3.2 / §8.2）。
+ * NimboExec → e2b `Commands.run()` 映射（docs/host/sandbox/tech.md §3.2 / §8.2）。
  *
  * ---- P6-1 契约：全部失败路径 resolve，不 reject ----
  *
@@ -79,7 +79,7 @@ function raceAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
 
 export function createE2bExec(sandbox: E2bSandboxLike, anchor: PathAnchor, keepAlive?: KeepAlive): NimboExec {
   return {
-    // docs/tech/single-ledger.md §6.1（@nimbo/core 审批三值重构，P13-5-2c）：旧 "never" → "allow"（沙盒实现，隔离即边界）。
+    // docs/agent/single-ledger/tech.md §6.1（@nimbo/core 审批三值重构，P13-5-2c）：旧 "never" → "allow"（沙盒实现，隔离即边界）。
     defaultApproval: "allow",
     describe(): string {
       return DESCRIBE;
@@ -93,7 +93,7 @@ export function createE2bExec(sandbox: E2bSandboxLike, anchor: PathAnchor, keepA
       const combined = AbortSignal.any([req.signal, timeoutController.signal]);
 
       /**
-       * [保活](../../../docs/terms.md)的第二个信号源（docs/tech/sandbox-keepalive.md §3.1）：
+       * [保活](../../../docs/terms.md)的第二个信号源（docs/host/sandbox-keepalive/tech.md §3.1）：
        * 命令跑起来之后 core **一个 chunk 都不会产出**——`@nimbo/core` 的 `loop.ts`
        * 把工具进度先缓冲、等命令 resolve 之后才重放。所以一条跑十分钟的命令，这十分钟
        * 里 core 侧的活动信号是零。而这恰恰是最容易把沙盒跑没的场景。

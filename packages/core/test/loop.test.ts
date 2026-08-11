@@ -1,5 +1,5 @@
 /**
- * P13-5-2（docs/tech/single-ledger.md）迁移：`runTurn` 的工作态/产出
+ * P13-5-2（docs/agent/single-ledger/tech.md）迁移：`runTurn` 的工作态/产出
  * 从 `ModelMessage[]`/`SessionEvent` 换成 `NimboUIMessage[]`/`NimboChunk`——
  * 这个文件按 `loop.ts` 文件头的语义映射表逐条对照重写：断言 chunk 序列
  * （`tool-input-available`/`tool-output-available`/`tool-approval-*`/
@@ -144,7 +144,7 @@ describe("runTurn", () => {
     expect(result.finalResponse).toBe("done");
     expect(store.getItems()).toEqual([{ text: "write tests", completed: false }]);
 
-    // docs/tech/single-ledger.md §4.1 实现教训：同一 toolCallId 在账本里只记结算态，不会残留
+    // docs/agent/single-ledger/tech.md §4.1 实现教训：同一 toolCallId 在账本里只记结算态，不会残留
     // input-available 占位（否则服务商对重复 tool_call_id 400）。
     const settled = allToolParts(messages);
     expect(settled).toHaveLength(1);
@@ -203,7 +203,7 @@ describe("runTurn", () => {
     expect(new Set(settled.map((part) => part.toolCallId)).size).toBe(settled.length);
   });
 
-  it("data-plan-update 同 id 覆盖 vs data-file-change 逐条追加 (docs/tech/single-ledger.md §2.2b / 关键语义 3)", async () => {
+  it("data-plan-update 同 id 覆盖 vs data-file-change 逐条追加 (docs/agent/single-ledger/tech.md §2.2b / 关键语义 3)", async () => {
     const store = createPlanStore();
     const derivedData = createDerivedDataCollector();
     const planTool = createUpdatePlanTool({ store, onPlanUpdate: (items) => derivedData.recordPlanUpdate(items) });
@@ -358,13 +358,13 @@ describe("runTurn", () => {
   });
 
   /**
-   * P13-5-2c 返工（docs/tech/single-ledger.md §6.1/§6.4）：审批三值化后 "denied tool call" 不再是
+   * P13-5-2c 返工（docs/agent/single-ledger/tech.md §6.1/§6.4）：审批三值化后 "denied tool call" 不再是
    * 单一场景——`deny` 结果（策略/分类器直接判定）与 `review` 结果（先产出
    * 请求 chunk、再等真人裁决）走完全不同的 chunk 序列，因此分成下面几个独立
    * 用例，而不是原来那一个混在一起的 "denied tool call" 测试。
    */
-  describe("deny outcome (evaluateApproval resolves 'deny' directly — not 'review'): straight to output-denied, no approval-request/response chunks at all (docs/tech/single-ledger.md §6.1)", () => {
-    it("per-tool 'deny' policy: no execute(), reason backfilled via both tool-approval-response.reason and the tool-result error-text (docs/tech/single-ledger.md §5 关键语义 10)", async () => {
+  describe("deny outcome (evaluateApproval resolves 'deny' directly — not 'review'): straight to output-denied, no approval-request/response chunks at all (docs/agent/single-ledger/tech.md §6.1)", () => {
+    it("per-tool 'deny' policy: no execute(), reason backfilled via both tool-approval-response.reason and the tool-result error-text (docs/agent/single-ledger/tech.md §5 关键语义 10)", async () => {
       const execute = vi.fn(() => "should not run");
       const tool: Tool = { description: "d", inputSchema: z.object({}), approval: "deny", execute };
 
@@ -464,7 +464,7 @@ describe("runTurn", () => {
     });
   });
 
-  describe("review resolved but no human reviewer is wired up (SessionOptions.onReview not configured): no-arbiter deny, and no tool-approval-request chunk is ever produced (docs/tech/single-ledger.md §6.4)", () => {
+  describe("review resolved but no human reviewer is wired up (SessionOptions.onReview not configured): no-arbiter deny, and no tool-approval-request chunk is ever produced (docs/agent/single-ledger/tech.md §6.4)", () => {
     it("a per-tool callback that itself resolves to 'review' has nobody to ask — denies with the no-arbiter guidance text, no approval-request chunk", async () => {
       const execute = vi.fn(() => "should not run");
       const tool: Tool = { description: "d", inputSchema: z.object({}), approval: (): ApprovalOutcome => "review", execute };
@@ -506,7 +506,7 @@ describe("runTurn", () => {
     });
   });
 
-  describe("review resolved AND a human reviewer (onReview) is wired up: approval-request chunk first, then await onReview, then approval-response (docs/tech/single-ledger.md §6.1/§6.4 P13-5-2c '先产出后阻塞')", () => {
+  describe("review resolved AND a human reviewer (onReview) is wired up: approval-request chunk first, then await onReview, then approval-response (docs/agent/single-ledger/tech.md §6.1/§6.4 P13-5-2c '先产出后阻塞')", () => {
     function reviewScenario(tool: Tool, onReview: ApprovalReviewer) {
       const onApproval: ApprovalPolicy = () => "review"; // session classifier: this call needs a human
       const model = mockModel(() => ({
@@ -569,7 +569,7 @@ describe("runTurn", () => {
       });
     });
 
-    it("onReview denies with a message: tool-approval-request → tool-approval-response(approved:false, reason) → output-denied, no execute(); reason backfilled to the model (docs/tech/single-ledger.md §5 关键语义 10)", async () => {
+    it("onReview denies with a message: tool-approval-request → tool-approval-response(approved:false, reason) → output-denied, no execute(); reason backfilled to the model (docs/agent/single-ledger/tech.md §5 关键语义 10)", async () => {
       const execute = vi.fn(() => "should not run");
       const tool: Tool = { description: "d", inputSchema: z.object({}), approval: "review", execute };
       const onReview = vi.fn(async (): Promise<HumanDecision> => ({ behavior: "deny", message: "not allowed in prod" }));
@@ -601,7 +601,7 @@ describe("runTurn", () => {
       expect(toolResult).toMatchObject({ toolCallId: "call_1", output: { type: "error-text", value: "not allowed in prod" } });
     });
 
-    it("onReview denies without a message: falls back to the default deny text (docs/tech/single-ledger.md §6.3 message is optional)", async () => {
+    it("onReview denies without a message: falls back to the default deny text (docs/agent/single-ledger/tech.md §6.3 message is optional)", async () => {
       const tool: Tool = { description: "d", inputSchema: z.object({}), approval: "review", execute: () => "should not run" };
       const onReview = vi.fn(async (): Promise<HumanDecision> => ({ behavior: "deny" }));
 
@@ -652,7 +652,7 @@ describe("runTurn", () => {
     });
   });
 
-  describe("review-once via onReview (docs/tech/single-ledger.md §6.1 review-once + P13-5-2c once-memory 标记时机): the human's decision — not the classifier's — controls whether once-memory gets marked", () => {
+  describe("review-once via onReview (docs/agent/single-ledger/tech.md §6.1 review-once + P13-5-2c once-memory 标记时机): the human's decision — not the classifier's — controls whether once-memory gets marked", () => {
     function reviewOnceScenario(execute: () => string, onReview: ApprovalReviewer) {
       const tool: Tool = { description: "d", inputSchema: z.object({}), approval: "review-once", execute };
       const onApproval: ApprovalPolicy = () => "review"; // session classifier always defers to a human
@@ -759,7 +759,7 @@ describe("runTurn", () => {
     expect(onApproval).not.toHaveBeenCalled();
   });
 
-  it("'review-once' approval memory persists across steps within the same turn — a session classifier that itself resolves synchronously to 'allow' asks only once, and never touches onReview at all (docs/tech/single-ledger.md §6.1 once-memory timing)", async () => {
+  it("'review-once' approval memory persists across steps within the same turn — a session classifier that itself resolves synchronously to 'allow' asks only once, and never touches onReview at all (docs/agent/single-ledger/tech.md §6.1 once-memory timing)", async () => {
     const execute = vi.fn(() => "ok");
     const tool: Tool = { description: "d", inputSchema: z.object({}), approval: "review-once", execute };
     const onApproval = vi.fn((): ApprovalOutcome => "allow");
@@ -810,7 +810,7 @@ describe("runTurn", () => {
   });
 
   /**
-   * 两条失败路径（docs/tech/single-ledger.md §5 关键语义 8）——实测确认（见工单回报"发现的 src
+   * 两条失败路径（docs/agent/single-ledger/tech.md §5 关键语义 8）——实测确认（见工单回报"发现的 src
    * 真实缺陷"）：模型调用一个完全未声明的工具名，与模型对一个已声明工具给出
    * 不可解析/不满足 schema 的输入，在当前实现下走的是**同一个**机制：AI SDK
    * 自己的 `parseToolCall`（`NoSuchToolError`/`InvalidToolInputError` 都被同一个
@@ -948,7 +948,7 @@ describe("runTurn", () => {
     expect(messages).toHaveLength(2);
   });
 
-  it("abort during a tool execution: the turn stops at the next step boundary without another model call (docs/tech/turn-abort.md §2)", async () => {
+  it("abort during a tool execution: the turn stops at the next step boundary without another model call (docs/agent/turn-abort/tech.md §2)", async () => {
     const controller = new AbortController();
 
     // 「用户在工具跑到一半时按了停止」：工具自己以成功/失败**正常收尾**（"失败即
@@ -1003,7 +1003,7 @@ describe("runTurn", () => {
     expect(lastAssistantMessage(messages)?.metadata?.status).toBe("interrupted");
   });
 
-  // 宿主给的中止理由要透传进收尾 message（docs/tech/graceful-shutdown.md §2）——
+  // 宿主给的中止理由要透传进收尾 message（docs/agent/graceful-shutdown/tech.md §2）——
   // 宿主靠它区分「用户按了停止」和「进程要关闭了」，core 自己不认识这些概念。
   it("abort reason: the host's own `abort(reason)` message is what lands in NimboError.message", async () => {
     const controller = new AbortController();
@@ -1242,7 +1242,7 @@ describe("runTurn", () => {
     const settled = allToolParts(messages);
     expect(settled).toEqual([{ type: "tool-slow_tool", toolCallId: "call_1", state: "output-available", input: {}, output: "final result" }]);
 
-    // docs/tech/single-ledger.md §4.1 发现 A：transient 只出流，绝不进 UIMessage.parts/序列化存档——
+    // docs/agent/single-ledger/tech.md §4.1 发现 A：transient 只出流，绝不进 UIMessage.parts/序列化存档——
     // 没有任何 data-tool-progress 部件残留在账本里。
     const assistant = messages.find((m) => allToolParts([m]).some((p) => p.toolCallId === "call_1"));
     expect(assistant).toBeDefined();

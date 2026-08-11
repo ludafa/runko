@@ -149,7 +149,7 @@ describe("grep", () => {
   });
 });
 
-describe("grep: default ignore (.git/node_modules, docs/tech/sandbox.md §4)", () => {
+describe("grep: default ignore (.git/node_modules, docs/host/sandbox/tech.md §4)", () => {
   function fsWithIgnoredDirs() {
     return fromMemory({
       "src/a.ts": "TODO",

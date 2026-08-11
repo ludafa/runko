@@ -1,5 +1,5 @@
 /**
- * `localExec` (P7-3 task 1, docs/tech/core-sdk.md §4.5a / docs/tech/builtin-tools.md §1.10).
+ * `localExec` (P7-3 task 1, docs/core/core-sdk/tech.md §4.5a / docs/core/builtin-tools/tech.md §1.10).
  * Uses real `node -e "..."` invocations (cross-platform, safe, and always
  * available since these tests themselves run under Node) rather than shell
  * builtins that differ between /bin/sh and cmd.exe.
@@ -21,7 +21,7 @@ function nodeEval(code: string): string {
 }
 
 describe("localExec()", () => {
-  describe("defaultApproval (docs/tech/builtin-tools.md §1.10 出厂值; docs/tech/single-ledger.md §6.1 三值重构 always→review)", () => {
+  describe("defaultApproval (docs/core/builtin-tools/tech.md §1.10 出厂值; docs/agent/single-ledger/tech.md §6.1 三值重构 always→review)", () => {
     it("is 'review', with materialize off", () => {
       expect(localExec().defaultApproval).toBe("review");
     });
@@ -43,7 +43,7 @@ describe("localExec()", () => {
     });
   });
 
-  describe("describe() (docs/tech/builtin-tools.md §1.10 环境自描述, ≤150 token 规格)", () => {
+  describe("describe() (docs/core/builtin-tools/tech.md §1.10 环境自描述, ≤150 token 规格)", () => {
     it("includes the real OS platform/arch and the running Node version", () => {
       const description = localExec().describe?.() ?? "";
       expect(description).toContain(nodeOs.platform());

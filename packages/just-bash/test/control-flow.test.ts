@@ -1,7 +1,7 @@
 /**
  * 真实控制流脚本在注入 MemoryFS 上跑（工单验收点）：每类语法至少一例，断言
  * stdout/exitCode。这是 mini-bash 六命令解释器撑不住、`@nimbo/just-bash` 存在
- * 的理由本身（docs/tech/core-sdk.md §4.5b 开篇）。
+ * 的理由本身（docs/core/core-sdk/tech.md §4.5b 开篇）。
  */
 import { fromMemory } from "@nimbo/virtual-fs";
 import { describe, expect, it } from "vitest";

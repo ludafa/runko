@@ -25,7 +25,7 @@ describe('agent/store', () => {
     seedUser(db, 'user-2');
   });
 
-  it('conversations: create/list/get scoped by user — a fresh row has a null nimbo header (docs/tech/single-ledger.md §5 单-3)', () => {
+  it('conversations: create/list/get scoped by user — a fresh row has a null nimbo header (docs/agent/single-ledger/tech.md §5 单-3)', () => {
     const row = createConversation(db, {
       id: 'sess-1',
       userId: 'user-1',
@@ -60,7 +60,7 @@ describe('agent/store', () => {
     expect(getConversation(db, 'does-not-exist', 'user-1')).toBeUndefined();
   });
 
-  it('createConversation: provider/sandboxId default to vercel/null when omitted (docs/tech/sandbox-provider.md §2)', () => {
+  it('createConversation: provider/sandboxId default to vercel/null when omitted (docs/host/sandbox-provider/tech.md §2)', () => {
     const row = createConversation(db, {
       id: 'sess-1',
       userId: 'user-1',
@@ -88,7 +88,7 @@ describe('agent/store', () => {
     expect(row.sandboxId).toBe('sbx_123');
   });
 
-  it('updateConversation: a sandboxId-only patch persists in isolation — status/lastActiveAt and the nimbo header columns are untouched (docs/tech/sandbox-provider.md §3.1)', () => {
+  it('updateConversation: a sandboxId-only patch persists in isolation — status/lastActiveAt and the nimbo header columns are untouched (docs/host/sandbox-provider/tech.md §3.1)', () => {
     createConversation(db, {
       id: 'sess-1',
       userId: 'user-1',
@@ -145,7 +145,7 @@ describe('agent/store', () => {
     expect(updated?.agentSessionTurn).toBeNull();
   });
 
-  it('updateConversation: agentSessionHeader patch writes all three scalar columns together (docs/tech/single-ledger.md §5 单-3 "session header")', () => {
+  it('updateConversation: agentSessionHeader patch writes all three scalar columns together (docs/agent/single-ledger/tech.md §5 单-3 "session header")', () => {
     createConversation(db, {
       id: 'sess-1',
       userId: 'user-1',
@@ -307,7 +307,7 @@ describe('agent/store', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // deleteChunkEventsAfter (docs/tech/single-ledger.md §5 单-3's turn-finalization GC) — deletes
+  // deleteChunkEventsAfter (docs/agent/single-ledger/tech.md §5 单-3's turn-finalization GC) — deletes
   // exactly the `kind = 'chunk'` rows with `seq > afterSeq`, leaving every
   // `kind = 'message'` row and every earlier/other-session `chunk` row alone.
   // ---------------------------------------------------------------------------
@@ -396,7 +396,7 @@ describe('agent/store', () => {
       expect(listConversationEvents(db, 'sess-2')).toHaveLength(1); // untouched
     });
 
-    it('multi-turn boundary: a later turn’s GC (afterSeq = its own start seq) never deletes an earlier turn’s crash-residue chunk rows (docs/tech/single-ledger.md §5 单-3 accepted residue)', () => {
+    it('multi-turn boundary: a later turn’s GC (afterSeq = its own start seq) never deletes an earlier turn’s crash-residue chunk rows (docs/agent/single-ledger/tech.md §5 单-3 accepted residue)', () => {
       // Turn 1: finished gracefully — one message row.
       appendConversationEvent(db, {
         conversationId: 'sess-1',
@@ -454,7 +454,7 @@ describe('agent/store', () => {
 
   // ---------------------------------------------------------------------------
   // [skill 清单](../../../../docs/terms.md)缓存列
-  // （docs/tech/composer-skill-mention.md §2.1/§3）：读回走 zod safeParse（坏数据
+  // （docs/app/composer-skill-mention/tech.md §2.1/§3）：读回走 zod safeParse（坏数据
   // 当空清单，不抛），写入在内容没变时不发 UPDATE。
   // ---------------------------------------------------------------------------
 

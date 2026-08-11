@@ -29,7 +29,7 @@ import { finalizeTurnPersistence } from './persistence.js';
 import type { TurnDrivenSession } from './session.js';
 
 /**
- * 一轮的两个「首次」时刻（docs/tech/telemetry.md §2.4）——本目录只**报告**它们，
+ * 一轮的两个「首次」时刻（docs/app/telemetry/tech.md §2.4）——本目录只**报告**它们，
  * 拼遥测载荷、写库都在 `turn-launcher.ts`（与 `onTurnSettled` 同款姿态：turn-runner
  * 不认识队列，也不认识遥测）。
  *
@@ -56,7 +56,7 @@ export interface TurnMilestoneInfo {
  * 「这一轮是怎么结束的」——`onTurnSettled` 的唯一参数。
  *
  * 本目录只**报告**它，不解读：注入方（`turn-launcher.ts`）拿它去决定要不要发通知
- * （docs/tech/push-notification.md §3.3）。这与 `onMilestone` 是同一姿态——运行内核
+ * （docs/app/push-notification/tech.md §3.3）。这与 `onMilestone` 是同一姿态——运行内核
  * 不认识推送，只多交出一个已经算好的事实。
  */
 export interface TurnSettledInfo {
@@ -98,7 +98,7 @@ function bestEffortTurn(session: TurnDrivenSession): number | undefined {
 }
 
 /**
- * 报告一个[起轮装配](../../../../../docs/terms.md)里程碑（docs/tech/telemetry.md §2.4）。
+ * 报告一个[起轮装配](../../../../../docs/terms.md)里程碑（docs/app/telemetry/tech.md §2.4）。
  * 两道防护，理由与「遥测永不影响 turn」同源：`session.toJSON()` 抛错（防御性，不
  * 预期）就跳过这次报告而不是让整轮崩掉；回调自己抛错就地吞掉记一行——它是注入方
  * 的事，不该污染这一轮。
@@ -171,20 +171,20 @@ export async function driveTurn(
     };
     emit.emitMessage(userMessage);
 
-    // `signal` = 这一轮自己的 `AbortController.signal`（docs/tech/turn-abort.md §3.1）
+    // `signal` = 这一轮自己的 `AbortController.signal`（docs/agent/turn-abort/tech.md §3.1）
     // ——[停止](../../../../../docs/terms.md)后 core 的 loop 在下一个 step 边界优雅收尾
     // （`status: 'interrupted'`），走的是下面那条**正常收尾**的路，不是 `catch` 分支。
     // 这里用 `modelText` 而不是 `text`：上面那条合成的 `NimboUIMessage`（进账本、
     // 进直播流）拿的是用户原话，模型这条路可以多带一行系统提示——两条路分开正是
     // [skill 提及](../../../../../docs/terms.md)「软提示」能生效又不脏账本的关键
-    // （docs/tech/composer-skill-mention.md §2.2）。没有提及时两者是同一个字符串。
+    // （docs/app/composer-skill-mention/tech.md §2.2）。没有提及时两者是同一个字符串。
     const gen = session.stream(modelText, { signal });
     let step = await gen.next();
     let stepIndex = 0;
     let lastMessageMetadata: NimboMessageMetadata | undefined;
     const pendingApprovalRequests = new Map<string, number>();
     const pendingSettlements = new Map<string, PendingToolSettlement>();
-    // 两个「首次」的一次性闸门（docs/tech/telemetry.md §2.4）——时刻在 chunk 抵达的
+    // 两个「首次」的一次性闸门（docs/app/telemetry/tech.md §2.4）——时刻在 chunk 抵达的
     // 那一刻取，报告放在 `emitChunk` 之后：观测绝不插在 chunk 送达用户的前面。
     let firstChunkReported = false;
     let firstOutputReported = false;

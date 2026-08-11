@@ -143,7 +143,7 @@ describe('agent/turn-runner', () => {
     });
   });
 
-  it('drives a turn end to end: the turn-start user message is persisted+broadcast synchronously before startTurn returns (this ticket’s fix — docs/tech/single-ledger.md §5 引言), so a late subscriber only ever sees the subsequent durable chunks; finalize then appends just the assistant message (skipping over core’s own already-persisted copy of the user message), and isTurnActive/"done" flip once drained', async () => {
+  it('drives a turn end to end: the turn-start user message is persisted+broadcast synchronously before startTurn returns (this ticket’s fix — docs/agent/single-ledger/tech.md §5 引言), so a late subscriber only ever sees the subsequent durable chunks; finalize then appends just the assistant message (skipping over core’s own already-persisted copy of the user message), and isTurnActive/"done" flip once drained', async () => {
     const fake = createControllableSession();
 
     const result = startTurn({
@@ -213,7 +213,7 @@ describe('agent/turn-runner', () => {
     // finalizeTurnPersistence appends only the ASSISTANT message (the user
     // message it would otherwise re-derive from state.messages[0] is
     // skipped — it was already persisted above, under its own synthesized
-    // id), then GCs every chunk row this turn produced (docs/tech/single-ledger.md §5 单-3) —
+    // id), then GCs every chunk row this turn produced (docs/agent/single-ledger/tech.md §5 单-3) —
     // only message rows survive past a gracefully-finished turn.
     const persisted = listConversationEvents(db, conversationId);
     expect(persisted.map((r) => r.seq)).toEqual([1, 4]);
@@ -235,7 +235,7 @@ describe('agent/turn-runner', () => {
   });
 
   // [skill 提及](../../../../docs/terms.md)的核心不变量
-  // （docs/tech/composer-skill-mention.md §2.2）：界面/账本拿用户原话，模型拿加料版。
+  // （docs/app/composer-skill-mention/tech.md §2.2）：界面/账本拿用户原话，模型拿加料版。
   it('modelText and text are separate: the ledger + wire carry the user’s own words while the model receives the augmented text', async () => {
     const fake = createControllableSession();
     const displayText = '/frontend-design 帮我看看首页排版';
@@ -425,7 +425,7 @@ describe('agent/turn-runner', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Turn-start user MessageFrame (this ticket's fix — docs/tech/single-ledger.md §5 引言's
+  // Turn-start user MessageFrame (this ticket's fix — docs/agent/single-ledger/tech.md §5 引言's
   // "用户消息乱序/叠在一起" bug): driveTurn synthesizes+emits it exactly once,
   // strictly before it ever starts consuming session.stream(), sharing the
   // turn's own seq counter — see turn-runner/index.ts's file header and persistence.ts's createTurnEmitter.
@@ -525,7 +525,7 @@ describe('agent/turn-runner', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // isDurableChunk classification boundary (docs/tech/single-ledger.md §5 单-3, private to
+  // isDurableChunk classification boundary (docs/agent/single-ledger/tech.md §5 单-3, private to
   // turn-runner — asserted here purely via its observable effect: does the
   // broadcast envelope carry a `seq`, and is a row persisted for it. Blanket
   // rule: text-delta/reasoning-delta/`transient: true` are ephemeral,
@@ -656,7 +656,7 @@ describe('agent/turn-runner', () => {
 
         expect(received).toHaveLength(1);
         // `ChatReplayFrame` 现在是三支联合（多了无 seq 的 `QueueFrame`，
-        // docs/tech/steer-and-queue.md §4.3）——先按结构收窄到 chunk 帧再读 seq。
+        // docs/agent/steer-and-queue/tech.md §4.3）——先按结构收窄到 chunk 帧再读 seq。
         const firstFrame = received[0];
         expect(
           firstFrame !== undefined && 'chunk' in firstFrame ?
@@ -713,7 +713,7 @@ describe('agent/turn-runner', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // finalizeTurnPersistence + GC (docs/tech/single-ledger.md §5 单-3): success and graceful
+  // finalizeTurnPersistence + GC (docs/agent/single-ledger/tech.md §5 单-3): success and graceful
   // failure (status failed/interrupted, session.stream() returning rather
   // than throwing) both append message rows and GC this turn's chunk rows;
   // an unexpected thrown exception (driveTurn's catch branch) does neither —
@@ -1094,7 +1094,7 @@ describe('agent/turn-runner', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // requestReview / resolveReview (docs/tech/single-ledger.md §6.4's 人审通道) — pure in-memory
+  // requestReview / resolveReview (docs/agent/single-ledger/tech.md §6.4's 人审通道) — pure in-memory
   // promise routing now: neither function emits/persists anything of its own
   // (visibility comes entirely from `@nimbo/core`'s own
   // tool-approval-request/tool-approval-response chunks flowing through the
@@ -1275,7 +1275,7 @@ describe('agent/turn-runner', () => {
       fake.finish({ finalResponse: 'ok', usage: {} });
     });
 
-    it('ordering invariant (docs/tech/single-ledger.md §6.1): a hand-written generator that mimics @nimbo/core’s loop — yield tool-approval-request, THEN await onReview (requestReview) — has that request already persisted+broadcast before requestReview’s promise can possibly be observed as pending by a caller', async () => {
+    it('ordering invariant (docs/agent/single-ledger/tech.md §6.1): a hand-written generator that mimics @nimbo/core’s loop — yield tool-approval-request, THEN await onReview (requestReview) — has that request already persisted+broadcast before requestReview’s promise can possibly be observed as pending by a caller', async () => {
       const decisions: HumanDecision[] = [];
       const session: TurnDrivenSession = {
         toJSON(): SessionState {
@@ -1530,7 +1530,7 @@ describe('agent/turn-runner', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // 停止本轮（docs/tech/turn-abort.md §3.1）——`abortTurn`。这里断言的是 chat 层
+  // 停止本轮（docs/agent/turn-abort/tech.md §3.1）——`abortTurn`。这里断言的是 chat 层
   // 那一半：signal 确实交给了 core、挂起的人审/提问被就地结掉、幂等。core 那一半
   // （「看到 abort 就在 step 边界优雅收尾」）由 packages/core 的 loop.test.ts 覆盖，
   // 这里的 fake session 只扮演它的产出（`message-metadata` + `finish`）。
@@ -1735,7 +1735,7 @@ describe('agent/turn-runner', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // 起轮占位（docs/tech/turn-abort.md §3.3）——`reserveTurn`/`releaseTurn`/
+  // 起轮占位（docs/agent/turn-abort/tech.md §3.3）——`reserveTurn`/`releaseTurn`/
   // `isTurnPreparing` + `startTurn` 的就地升级。这一组钉的是「刚发出就点停止毫无
   // 反应」那个 bug 的修法：让一轮从[起轮装配](../../../../docs/terms.md)的第一行
   // 起就算存在。
@@ -1752,7 +1752,7 @@ describe('agent/turn-runner', () => {
       expect(reserved.ok && reserved.reservation.wasAborted()).toBe(false);
 
       // 同一个会话不能有两个占位——报 `busy`（路由转 409），与关闭期间的
-      // `shutting_down`（503）分开，见 docs/tech/graceful-shutdown.md §3.3。
+      // `shutting_down`（503）分开，见 docs/agent/graceful-shutdown/tech.md §3.3。
       expect(reserveTurn(conversationId)).toEqual({
         ok: false,
         reason: 'busy',
@@ -1905,7 +1905,7 @@ describe('agent/turn-runner', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // 优雅关闭（docs/tech/graceful-shutdown.md §3.1）——`shutdownTurns`。
+  // 优雅关闭（docs/agent/graceful-shutdown/tech.md §3.1）——`shutdownTurns`。
   //
   // 这一组的用例会把模块级的关闭闸门置真，而 `activeTurns`/`shuttingDown` 都是模块级
   // 状态、跨用例存活，所以**每条都在最后把闸门复位**（`__resetShutdownForTests`）——
@@ -2024,7 +2024,7 @@ describe('agent/turn-runner', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // 起轮装配打点的通知点（docs/tech/telemetry.md §2.4）——`onMilestone` 与
+  // 起轮装配打点的通知点（docs/app/telemetry/tech.md §2.4）——`onMilestone` 与
   // `onTurnSettled` 同款：纯报告，不改变任何 chunk 流转/持久化行为。
   // ---------------------------------------------------------------------------
 

@@ -1,5 +1,5 @@
 /**
- * TurnStatsButton（本轮统计按钮 + 弹窗，docs/tech/telemetry.md §4.2）：界面上只有
+ * TurnStatsButton（本轮统计按钮 + 弹窗，docs/app/telemetry/tech.md §4.2）：界面上只有
  * 一枚「统计」按钮，点开弹窗——概览来自账本 metadata（永远在），明细来自遥测端点
  * （首次打开才拉、按 (conversationId, turn) 拉、三态渲染、坏行静默跳过）；无查询键
  * 时弹窗只出概览、不发请求。api 模块整体 mock，不发真实请求。
@@ -123,7 +123,7 @@ describe('TurnStatsButton — 本轮统计弹窗', () => {
     expect(dialog.textContent).toContain('失败'); // tool-error 标记
   });
 
-  it('渲染「本轮准备」小节：起轮装配分段 + 沙盒走的哪条路 + 到首个响应/首个输出（docs/tech/telemetry.md §2.4）', async () => {
+  it('渲染「本轮准备」小节：起轮装配分段 + 沙盒走的哪条路 + 到首个响应/首个输出（docs/app/telemetry/tech.md §2.4）', async () => {
     fetchMock.mockResolvedValue([
       {
         eventType: 'turn-prepare',

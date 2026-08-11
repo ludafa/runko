@@ -1,5 +1,5 @@
 /**
- * `edit-file`（docs/tech/builtin-tools.md §1.3）：精确子串替换，唯一命中或
+ * `edit-file`（docs/core/builtin-tools/tech.md §1.3）：精确子串替换，唯一命中或
  * `replace_all`；未命中/多命中返回指导性错误；要求先读且 mtime 一致（§0.4）。
  */
 import { z } from "zod";

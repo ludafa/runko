@@ -1,8 +1,8 @@
 /**
- * `buildSession` (docs/tech/chat-webapp.md §2.2 `chat-agent.ts`): takes the
+ * `buildSession` (docs/app/chat-webapp/tech.md §2.2 `chat-agent.ts`): takes the
  * turn's already-loaded skills (`opts.skills` — scanned off the sandbox by
  * `skill-catalog.ts`'s `loadSkillsFromWorkspace`, called from
- * `turn-launcher.ts`; before docs/tech/composer-skill-mention.md this file
+ * `turn-launcher.ts`; before docs/app/composer-skill-mention/tech.md this file
  * hard-read a single `frontend-design` path itself), builds instructions
  * with owner/repo/branch/defaultBranch baked in (the model is never asked to
  * guess them — same discipline as example 12's `buildInstructions`), and
@@ -12,14 +12,14 @@
  * whatever `workspace` it's given, which is what actually lets the agent
  * edit the sandbox's checked-out repo.
  *
- * Called fresh on every turn (every `POST .../messages`, per docs/tech/chat-webapp.md §2.2) —
+ * Called fresh on every turn (every `POST .../messages`, per docs/app/chat-webapp/tech.md §2.2) —
  * there is no long-lived in-memory `Session` object across requests; message
  * history round-trips through `conversation_events`'s `kind = 'message'` rows +
- * `conversations`'s `nimbo*` scalar header (docs/tech/single-ledger.md
+ * `conversations`'s `nimbo*` scalar header (docs/agent/single-ledger/tech.md
  * §5 单-3, `store.ts`'s `loadResumeState`/`Session.toJSON()`/`resume`), while
  * the sandbox's filesystem (including any uncommitted edits on the session
  * branch) round-trips separately via the Vercel snapshot
- * (`sandbox-manager.ts`) — docs/tech/chat-webapp.md §2.2's "持久化恢复语义" note.
+ * (`sandbox-manager.ts`) — docs/app/chat-webapp/tech.md §2.2's "持久化恢复语义" note.
  */
 import type {
   ApprovalPolicy,
@@ -47,7 +47,7 @@ export interface BuildSessionOptions {
   model: LanguageModel;
   workspace: NimboFS & NimboExec;
   /**
-   * 这一轮可用的全部 [skill](../../../../docs/terms.md)（docs/tech/composer-skill-mention.md
+   * 这一轮可用的全部 [skill](../../../../docs/terms.md)（docs/app/composer-skill-mention/tech.md
    * §1 改动 A）——**由调用方加载后传入**，不在这里读沙盒。
    *
    * 本功能之前这里是硬读 `/.agents/skills/frontend-design` 一个路径；改成扫描
@@ -65,17 +65,17 @@ export interface BuildSessionOptions {
   defaultBranch: string;
   branchName: string;
   resume?: SessionState;
-  /** `routes/chat.ts`'s approval bridge (docs/tech/chat-webapp.md §2.2c（审批链）, docs/tech/single-ledger.md §6.2) — the session-level 审批分类器 (`packages/core/src/approval.ts`'s `evaluateApproval`), a three-value `ApprovalOutcome` classifier. Passing one when `approvalMode` is `'off'` has no effect either way, since the workspace isn't gated in that mode (see `gateWorkspace`) — nothing ever escalates to it. */
+  /** `routes/chat.ts`'s approval bridge (docs/app/chat-webapp/tech.md §2.2c（审批链）, docs/agent/single-ledger/tech.md §6.2) — the session-level 审批分类器 (`packages/core/src/approval.ts`'s `evaluateApproval`), a three-value `ApprovalOutcome` classifier. Passing one when `approvalMode` is `'off'` has no effect either way, since the workspace isn't gated in that mode (see `gateWorkspace`) — nothing ever escalates to it. */
   onApproval?: ApprovalPolicy;
-  /** `routes/chat.ts`'s 人审通道 (docs/tech/single-ledger.md §6.4 `ApprovalReviewer`) — `@nimbo/core`'s loop `await`s this only after it has already yielded a `tool-approval-request` chunk for a `'review'`-classified call. Independent of `onApproval`: the classifier decides *whether* a human is needed; this is *how* the human's decision actually arrives. */
+  /** `routes/chat.ts`'s 人审通道 (docs/agent/single-ledger/tech.md §6.4 `ApprovalReviewer`) — `@nimbo/core`'s loop `await`s this only after it has already yielded a `tool-approval-request` chunk for a `'review'`-classified call. Independent of `onApproval`: the classifier decides *whether* a human is needed; this is *how* the human's decision actually arrives. */
   onReview?: ApprovalReviewer;
   /** Defaults to `'dangerous'` (`approval-policy.ts`'s own default) — controls whether/how the workspace's `bash` tool is gated, not what the model is allowed to do overall. */
   approvalMode?: ChatApprovalMode;
-  /** `routes/chat.ts`'s ask-user bridge (docs/tech/chat-webapp.md §2.2c（审批链）), wired to `turn-runner/human-bridge.ts`'s `requestUserAnswer` — registers the `ask-user` tool (see `createAskUserTool`) when present. Independent of `approvalMode`: `ask-user` is a product capability, not a safety gate, so it's registered the same way regardless of mode (including `'off'`). */
+  /** `routes/chat.ts`'s ask-user bridge (docs/app/chat-webapp/tech.md §2.2c（审批链）), wired to `turn-runner/human-bridge.ts`'s `requestUserAnswer` — registers the `ask-user` tool (see `createAskUserTool`) when present. Independent of `approvalMode`: `ask-user` is a product capability, not a safety gate, so it's registered the same way regardless of mode (including `'off'`). */
   onAskUser?: (req: RequestUserAnswerInput) => Promise<AskUserOutcome>;
-  /** [联网搜索](../../../../docs/terms.md)工具（docs/tech/web-search.md §5）——注入优先于 env 解析。不传时由 `createWebSearchToolFromEnv()` 按 `EXA_API_KEY` 决定注不注册；显式传入用于测试（假 `fetch`，零网络）与将来「按会话配 key」。 */
+  /** [联网搜索](../../../../docs/terms.md)工具（docs/app/web-search/tech.md §5）——注入优先于 env 解析。不传时由 `createWebSearchToolFromEnv()` 按 `EXA_API_KEY` 决定注不注册；显式传入用于测试（假 `fetch`，零网络）与将来「按会话配 key」。 */
   webSearchTool?: Tool;
-  /** telemetry 事件集成透传（`@nimbo/core` 的 `SessionTelemetry`，docs/tech/chat-webapp.md §11.4）——生产由 `src/telemetry.ts` 的 SQLite 集成供给（routes 经 deps 注入），测试注入假集成或不传。 */
+  /** telemetry 事件集成透传（`@nimbo/core` 的 `SessionTelemetry`，docs/app/chat-webapp/tech.md §11.4）——生产由 `src/telemetry.ts` 的 SQLite 集成供给（routes 经 deps 注入），测试注入假集成或不传。 */
   telemetry?: SessionTelemetry;
 }
 
@@ -92,7 +92,7 @@ function buildInstructions(opts: {
   repoName: string;
   defaultBranch: string;
   branchName: string;
-  /** `web-search` 是否注册进了工具表——没注册就不提它，免得指令让模型去找一个不存在的工具（docs/tech/web-search.md §5）。 */
+  /** `web-search` 是否注册进了工具表——没注册就不提它，免得指令让模型去找一个不存在的工具（docs/app/web-search/tech.md §5）。 */
   hasWebSearch: boolean;
 }): string {
   const { repoOwner, repoName, defaultBranch, branchName } = opts;
@@ -113,8 +113,8 @@ function buildInstructions(opts: {
 }
 
 /**
- * Forces `workspace`'s `bash` tool to always require approval (docs/tech/chat-webapp.md §2.2c
- * （审批链）, docs/tech/single-ledger.md §6.4): `createBashTool` (packages/core/src/tools/builtin/bash.ts)
+ * Forces `workspace`'s `bash` tool to always require approval (docs/app/chat-webapp/tech.md §2.2c
+ * （审批链）, docs/agent/single-ledger/tech.md §6.4): `createBashTool` (packages/core/src/tools/builtin/bash.ts)
  * picks its per-tool `ApprovalPolicy` from `exec.defaultApproval`, and the
  * Vercel sandbox's own `NimboExec` implementation declares `"allow"` there
  * (it has no notion of a human in the loop) — left as-is, every bash command
@@ -132,7 +132,7 @@ function buildInstructions(opts: {
  * with `undefined` where every `NimboFS`/`NimboExec` method should be.
  *
  * 显式逐方法转发的对价：`NimboFS` 的**可选能力方法**（`searchFiles`/
- * `searchContent`，原生搜索快路径——docs/tech/builtin-tools.md §3.7/§3.8）也必须
+ * `searchContent`，原生搜索快路径——docs/core/builtin-tools/tech.md §3.7/§3.8）也必须
  * 在这里显式跟上，否则会被这层包装静默剥掉、grep/glob 永远走 JS 逐文件回退
  * （在远端沙盒上是每文件一次网络往返的慢路径）——这正是 2026-07-16 线上
  * "grep 依旧十几秒"的事故根因。往 `NimboFS` 再加可选方法时，这里要同步。
@@ -167,7 +167,7 @@ const ASK_USER_TIMEOUT_MESSAGE =
   'The user did not respond within the time limit. Proceed with your best judgment, or ask again later.';
 
 /**
- * `ask-user` (docs/tech/chat-webapp.md §2.2c（审批链）): registered only when `opts.onAskUser`
+ * `ask-user` (docs/app/chat-webapp/tech.md §2.2c（审批链）): registered only when `opts.onAskUser`
  * is supplied (see `buildSession`) — same conditional-registration shape as
  * `load-skill`/`bash`, just driven by an option instead of `agent.skills`/
  * `exec`. No `approval` set: asking the user *is* the human-in-the-loop step
@@ -197,7 +197,7 @@ function createAskUserTool(
 }
 
 /**
- * 应用级工具表（core 内置工具之外的那几个，docs/tech/web-search.md §1）——两项
+ * 应用级工具表（core 内置工具之外的那几个，docs/app/web-search/tech.md §1）——两项
  * 都是**条件注册**，条件不满足时那个键根本不出现，模型看不见也就不会去调：
  *
  * - `ask-user`：`opts.onAskUser` 存在时（产品能力，与 approvalMode 无关）。
@@ -221,12 +221,12 @@ function buildTools(opts: BuildSessionOptions): Record<string, Tool> {
  * agent, and (re)creates the session — restoring message history from
  * `opts.resume` when this is a returning chat session.
  *
- * `approvalMode` (docs/tech/chat-webapp.md §2.2c（审批链）) gates the workspace (see
+ * `approvalMode` (docs/app/chat-webapp/tech.md §2.2c（审批链）) gates the workspace (see
  * `gateWorkspace`) for every mode except `'off'`, which passes `opts.workspace`
  * straight through unchanged — zero behavior change from before this bridge
  * existed. `onApproval`/`onReview` are otherwise passed through as-is
  * regardless of mode; in `'off'` mode neither ever gets called (nothing ever
- * escalates to them). `onAskUser` (also docs/tech/chat-webapp.md §2.2c（审批链）) registers
+ * escalates to them). `onAskUser` (also docs/app/chat-webapp/tech.md §2.2c（审批链）) registers
  * `ask-user` independent of `approvalMode` — see
  * `BuildSessionOptions.onAskUser`'s own doc comment.
  */

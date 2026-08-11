@@ -1,6 +1,6 @@
 /**
- * Skill 三加载器（docs/tech/core-sdk.md §4.1 `Skill.fromDirectory`/`fromFS`/`fromMarkdown`；
- * frontmatter 规则同 §4.1 末段 + docs/tech/builtin-tools.md §1.9）。纯加载逻辑，不含
+ * Skill 三加载器（docs/core/core-sdk/tech.md §4.1 `Skill.fromDirectory`/`fromFS`/`fromMarkdown`；
+ * frontmatter 规则同 §4.1 末段 + docs/core/builtin-tools/tech.md §1.9）。纯加载逻辑，不含
  * 注入/挂载/prompt 拼装（那些在 `registry.ts`，由 `session.ts` 接线）。
  *
  * frontmatter 自实现（工单要求不引 yaml/frontmatter 三方库）：只认文件最开头的
@@ -126,7 +126,7 @@ async function collectRealDirectoryFiles(rootDir: string, exclude: string): Prom
   return files;
 }
 
-/** packaged skill：读 `<path>/SKILL.md` + 附属文件（docs/tech/core-sdk.md §4.1）；`name` 取目录 basename。 */
+/** packaged skill：读 `<path>/SKILL.md` + 附属文件（docs/core/core-sdk/tech.md §4.1）；`name` 取目录 basename。 */
 export async function loadSkillFromDirectory(path: string): Promise<Skill> {
   const name = nodePath.basename(path);
   const skillMdPath = nodePath.join(path, SKILL_MD_FILENAME);
@@ -173,7 +173,7 @@ async function collectFSFiles(fs: NimboFS, rootPath: string, exclude: string): P
       } else if (entry.type === "file") {
         files[relPath] = await fs.readFile(fullPath);
       }
-      // "reference" 条目跳过：没有可读取的本地字节内容（docs/tech/core-sdk.md §4.4），skill
+      // "reference" 条目跳过：没有可读取的本地字节内容（docs/core/core-sdk/tech.md §4.4），skill
       // 附属文件语义要求可直接读到内容，reference 条目不满足这个前提。
     }
   }
@@ -182,7 +182,7 @@ async function collectFSFiles(fs: NimboFS, rootPath: string, exclude: string): P
   return files;
 }
 
-/** packaged skill，同语义跑在 `NimboFS` 上（docs/tech/core-sdk.md §4.1）。 */
+/** packaged skill，同语义跑在 `NimboFS` 上（docs/core/core-sdk/tech.md §4.1）。 */
 export async function loadSkillFromFS(fs: NimboFS, path: string): Promise<Skill> {
   const name = virtualBasename(path);
   const skillMdPath = joinVirtualPath(path, SKILL_MD_FILENAME);

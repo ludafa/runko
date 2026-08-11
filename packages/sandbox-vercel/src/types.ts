@@ -1,6 +1,6 @@
 /**
  * `VercelSandboxLike`：`@vercel/sandbox` 的 `Sandbox` 实例我们实际触碰的方法面，
- * 手写结构化最小子集（docs/tech/core-sdk.md §4.5a / docs/tech/sandbox.md §8.1 依赖策略）。**本文件不
+ * 手写结构化最小子集（docs/core/core-sdk/tech.md §4.5a / docs/host/sandbox/tech.md §8.1 依赖策略）。**本文件不
  * import `@vercel/sandbox`，连 `import type` 都不出现**——工厂函数收这个接口
  * 而非具体类，宿主与我们各自安装的 SDK 副本因此不需要是同一份；类型对照只发生
  * 在 `test/type-conformance.test-d.ts`（`import type { Sandbox } from "@vercel/sandbox"`
