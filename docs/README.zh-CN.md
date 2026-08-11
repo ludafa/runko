@@ -2,23 +2,36 @@
 
 > 英文版（根目录）见 [../README.md](../README.md)。
 
-**可嵌入 Node.js 应用的轻量 agent SDK**：几行代码在自己的服务里跑起一个具备文件操作、命令执行、skills 能力的 agent loop——不 spawn 任何外部 CLI 二进制，运行时依赖只有 `ai`（Vercel AI SDK，peer）+ `zod`。
+**在常见的基础设施之上，快速搭出一个全能力、可换档的 AI agent。**
 
-## 为什么需要它
+- **全能力**——虚拟文件系统、命令执行、skills、人在回路审批、结构化输出、流式事件、云沙盒，agent 要动手干活需要的执行面都是内置的，不用自己攒。
+- **可换档**——从「本机跑一个」到「k8s 多节点」到「Cloudflare Durable Object / Vercel Functions」，**换的是配置，不是业务代码**。
+- **不接管你的服务**——nimbo 是框架，但它嵌在你的进程里：不提供路由、不做 SSE 序列化、不要求某个 ORM、不 spawn 任何外部 CLI 二进制。运行时依赖只有 `ai`（Vercel AI SDK，peer）+ `zod`。
 
-现有方案的空缺（详见 [core-sdk 产品设计](./features/core-sdk.md)）：
+## 它解决什么问题
+
+拿现成的东西建一个真的 agent 产品，会连着撞两堵墙。
+
+**第一堵：一次执行怎么跑。** 现有方案的空缺（详见 [core-sdk 产品设计](./core/core-sdk/feature.md)）：
 
 - **CLI 封装类**（`@openai/codex-sdk`、`@anthropic-ai/claude-agent-sdk`）：本质是 spawn 平台二进制的进程包装——重、绑定单一厂商、**没有虚拟文件抽象**（agent 只能操作真实磁盘）、会话状态落在用户目录，服务端多租户场景难用。
 - **纯 API client**（`@anthropic-ai/sdk`、`openai`）：只给 messages/tool-use 原语，loop、工具、文件、skills 全要自己搭。
-- **eve**（API 设计优秀，nimbo 的 API 层次即参考它）：但它是带 HTTP server 与 durable workflow 的**框架**，不是可嵌入进程内的库；文件操作在真实沙盒。
+- **eve**（API 设计优秀，nimbo 的 API 层次即参考它）：但它是带 HTTP server 与 durable workflow 的**重框架**，不是可嵌入进程内的库；文件操作在真实沙盒。
 
-**核心痛点**：想在普通 Node 服务里嵌入"能改文件、能执行任务"的 agent，要么被绑死在某家 CLI 上，要么从零手写 loop。
+nimbo 对这一堵的答案是 [`@nimbo/core`](./core/core-sdk/feature.md)：eve 的 API 人体工学 + codex-sdk 的 item 级事件粒度 + AI SDK 的模型层（30+ provider 任选）+ 自有的 VirtualFS 内核与 loop。关键差异化是**虚拟文件系统**——agent 的所有文件读写默认落在内存/overlay 层，全程不碰真实磁盘，天然多租户安全；结束后 `diff()` 导出、`writeBack()` 才落盘。
 
-**nimbo 的答案** = eve 的 API 人体工学 + codex-sdk 的 item 级事件粒度 + AI SDK 的模型层（30+ provider 任选）+ 自有的 VirtualFS 内核与 loop，以可嵌入库的形态交付。关键差异化：**虚拟文件系统**——agent 的所有文件读写默认落在内存/overlay 层，全程不碰真实磁盘，天然多租户安全；结束后 `diff()` 导出、`writeBack()` 才落盘。
+**第二堵（更难、也更少人讲）：一轮跑完之后怎么办。** 只解决「一次执行」的库不知道时间、进程和存储，于是每个想做产品的人都要自己重写这四件事：
 
-典型场景：SaaS 内嵌代码助手（改代码返回 diff，零临时文件）、CI/后台流水线节点（结构化输出接回流水线）、带领域能力的 agent 产品（SKILL.md 生态复用）、自定义执行环境（宿主沙盒经 `NimboExec` 接口注入，loop 零改动）。
+1. **会话怎么接下去**——一轮跑完，下一轮什么时候起？用户在 agent 忙时又发了一条怎么办？
+2. **等人怎么办**——agent 弹出审批卡片，人可能几小时后才回来点，这段时间机器干等着、下不了线。
+3. **崩了怎么办**——进程没了，界面上那一轮永远转圈。
+4. **多开一个进程就全乱**——两个节点同时跑一个会话，账本互相打架、沙盒互相踩文件。
 
-## 5 行上手
+第四件很难写对，**写错是静默的数据损坏**。nimbo 对这一堵的答案是 [`@nimbo/agent`](./agent/agent-kernel/feature.md)：把这四件事收进框架，并把「取决于你怎么部署」的部分做成**可替换的宿主能力**——沙盒、持久化、流分发、归属仲裁机制。
+
+典型场景：SaaS 内嵌代码助手（改代码返回 diff，零临时文件）、CI/后台流水线节点（结构化输出接回流水线）、带领域能力的 agent 产品（SKILL.md 生态复用）、面向最终用户的 chat agent 应用（[apps/](../apps) 里那个就是）、自定义执行环境（宿主沙盒经 `NimboExec` 接口注入，loop 零改动）。
+
+## 跑一轮：5 行嵌进你的服务
 
 ```ts
 import { defineAgent, createSession, NimboFS } from "@nimbo/sdk";
@@ -38,7 +51,95 @@ console.log(result.finalResponse, await session.fs.diff());
 pnpm add @nimbo/sdk ai
 ```
 
-> TODO：npm 裸名 `nimbo` 的发布决策待定（[plans/core-sdk](./plans/core-sdk.md) P7-1 遗留）——目前一律 `@nimbo/sdk`，定了之后全部 README/examples 的 import 同步替换。
+> TODO：npm 裸名 `nimbo` 的发布决策待定（[core/core-sdk/plan](./core/core-sdk/plan.md) P7-1 遗留）——目前一律 `@nimbo/sdk`，定了之后全部 README/examples 的 import 同步替换。
+
+## 一轮接一轮：agent 运行时
+
+> ⚠️ `**@nimbo/agent` 尚未实现**——分层与职责边界已定稿，API 形状会随实现调整。完整设计见 [agent 内核包](./agent/agent-kernel/feature.md)（使用手册）与[技术方案](./agent/agent-kernel/tech.md)；这些能力今天以 chat 应用（`apps/node-server`）里的实现形态存在，正按该方案上移进框架。
+
+`@nimbo/core` 给的是「跑一轮」，`@nimbo/agent` 给的是「**一轮接一轮地跑下去，而且换个部署形态不用改业务代码**」：
+
+```ts
+const runtime = createAgentRuntime(agent, {
+  // 唯一必填：这个会话在哪儿干活
+  workspace: (conversationId) => {
+    const fs = fromDirectory(`./workspaces/${conversationId}`);
+    return { fs, exec: localExec({ materialize: true, fs }) };
+  },
+});
+
+await runtime.enqueue("conv_abc", { text: "把 src 里的 var 都改成 const" });
+```
+
+**零配置即可跑**：持久化、流分发、归属仲裁三样全走内置实现（记内存、走进程内、单进程独占）。要留住历史就换掉持久化，要上多进程再换掉归属仲裁——**换的是这一两行，业务代码不动**。
+
+你的服务跟框架之间只有四个接触点：`enqueue`（用户发消息，忙不忙、排队还是插话由框架判）· `subscribe`（拿一个中立的事件流，序列化成 SSE 还是别的由你定）· `submitDecision`（人点了审批）· `reportPresence`（人还在，别急着挂起）。
+
+### 分层：语义在上、实现在下
+
+```mermaid
+flowchart TB
+    IN["<b>你的接入代码</b><br/>路由 · SSE · 前端 · 审批端点"]
+
+    subgraph LOGIC["agent 逻辑层 —— 框架固定，不可替换"]
+        direction TB
+        ARB["<b>归属仲裁</b><br/>保证同时只有一个执行在跑"]
+        ORCH["<b>轮编排</b><br/>起 · 中断 · 挂起 · 恢复 · 收尾<br/>定义账本 · 裁决 · 待发队列的模型"]
+        ENG["<b>执行引擎</b><br/>调模型 → 跑工具 → 喂回去"]
+        ARB --> ORCH --> ENG
+    end
+
+    subgraph HOST["宿主层 —— 可替换，由你的部署形态决定"]
+        direction LR
+        SBX["沙盒"]
+        PER["持久化"]
+        STR["流分发"]
+        LEASE["归属仲裁机制"]
+    end
+
+    IN -->|调用| ARB
+    ENG -. "要动手时" .-> SBX
+    ORCH -. "跨重启留住时" .-> PER
+    ORCH -. "跨实例时" .-> STR
+    ARB -. "多进程 / 多节点时" .-> LEASE
+```
+
+**虚线是有条件的依赖**——条件不满足时用内置的平凡实现，一个外部件都不用装。
+
+### 六档部署，换档只改配置
+
+
+| 部署形态                             | 要换掉的宿主能力                         | 其余用内置        |
+| -------------------------------- | -------------------------------- | ------------ |
+| **⓪ 本机 CLI**（`npx @nimbo/cli`）   | 沙盒 → 本机目录 + `localExec`          | 持久化、流分发、归属仲裁 |
+| **① 同机多进程 cluster**              | + 持久化 → SQLite、归属仲裁 → 租约         | 流分发          |
+| **②③ Docker / k8s**              | + 沙盒 → 云沙盒、持久化 → Postgres        | 流分发（靠应用层转发）  |
+| **④a Cloudflare Durable Object** | 四样全换成 DO 版（平台自带，一次给全）            | ——           |
+| **④b Vercel Functions**          | 四样全换（流分发 → Redis Streams 是这一档独有） | ——           |
+
+
+
+| 从 → 到                  | 要改的                                                     |
+| ---------------------- | ------------------------------------------------------- |
+| 零配置 → ① cluster        | 加 `persistence` + `arbitration` 两行                      |
+| ① → ②③                 | `dialect` 换字符串、`driver` 换 `Pool`、`workspace` 换云沙盒，加一段转发 |
+| 裸驱动 → drizzle / prisma | **只换构造持久化那一行**                                          |
+| ②③ → ④a DO / ④b Vercel | 换成平台档的实现，**删掉转发**                                       |
+
+
+**业务代码（`enqueue` / `subscribe` / `submitDecision`）一行不动。** AWS Lambda 不支持——29 秒上限连一轮都跑不完。
+
+## 现在能用什么
+
+
+|                                                                                                                              | 状态                                                             |
+| ---------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `@nimbo/core` · `@nimbo/sdk` · `@nimbo/virtual-fs` · `@nimbo/mini-bash` · `@nimbo/just-bash`                                 | ✅ 已发布可用                                                        |
+| `@nimbo/sandbox-e2b` · `@nimbo/sandbox-vercel` · `@nimbo/sandbox-cloudflare`                                                 | ✅ 已发布可用（E2B / Vercel 已对真实沙盒验证）                                 |
+| chat agent 网页应用（`apps/`，不发布）                                                                                                 | ✅ 可跑：会话生命周期、断线续传的 SSE、审批、排队与插话、优雅关闭、遥测                         |
+| `@nimbo/agent`（轮编排 + 归属仲裁）                                                                                                   | 📐 [设计定稿](./agent/agent-kernel/feature.md)，未实现——能力现存于 chat 应用中 |
+| `@nimbo/persist-sql` / `persist-drizzle` / `persist-prisma` · `@nimbo/stream-redis` · `@nimbo/durable-object` · `@nimbo/cli` | 📐 设计定稿，未实现                                                    |
+
 
 ## 配置 agent：模型 / instructions / tools / skills
 
@@ -83,7 +184,9 @@ await Skill.fromFS(fs, "/.agents/skills/frontend-design") // 从任意 NimboFS �
 
 运行机制是渐进式披露：instructions 里只注入名字和描述清单，模型需要时调 `load_skill` 拿正文——只加指令，不加新的执行面。
 
-## 包结构（pnpm monorepo，依赖单向，8 包）
+## 包结构（pnpm monorepo，依赖单向，已发布 8 包）
+
+**打包原则：接口按模块分，实现按「一次装什么」打包**——所以持久化和租约版归属仲裁同包（共享连接与 CAS 原语）、流分发独立、Durable Object 一次给全。
 
 ```mermaid
 graph TD
@@ -113,31 +216,35 @@ graph TD
 箭头表示「依赖」。`@nimbo/sdk` 打包 `core` + `virtual-fs` + `mini-bash`；`just-bash`
 与三个沙盒适配器只依赖 `core`、需单独安装。每个包的细节见下方表格。
 
-| 包                          | 一句话                                                                                                                                                | README                                                                  |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `@nimbo/sdk`                | 主包门面，5 行上手只装它                                                                                                                              | [packages/sdk](../packages/sdk/README.md)                               |
-| `@nimbo/core`               | L0 接口 / L1 定义层 / L2 运行层 / L3 目录约定层 / 内置工具本体                                                                                        | [packages/core](../packages/core/README.md)                             |
-| `@nimbo/virtual-fs`         | MemoryFS / OverlayFS / DirFS、diff / writeBack、文件工具八件套                                                                                        | [packages/virtual-fs](../packages/virtual-fs/README.md)                 |
-| `@nimbo/mini-bash`          | 跑在任意 NimboFS 上的只读命令解释器（bash 工具的纯内存执行环境，零依赖极简档，随 sdk 装入）                                                           | [packages/mini-bash](../packages/mini-bash/README.md)                   |
-| `@nimbo/just-bash`          | 跑在任意 NimboFS 上的全语法档 bash（`if`/`for`/`while`/`case`/函数，vercel-labs/just-bash 适配器，**不随 sdk 装入**，需单独 `pnpm add`）              | [packages/just-bash](../packages/just-bash/README.md)                   |
-| `@nimbo/sandbox-e2b`        | NimboFS & NimboExec 适配 E2B 云沙盒（真实 Firecracker microVM，BYO 实例，e2b 仅类型依赖，**不随 sdk 装入**）                                          | [packages/sandbox-e2b](../packages/sandbox-e2b/README.md)               |
-| `@nimbo/sandbox-vercel`     | NimboFS & NimboExec 适配 Vercel Sandbox（真实 Amazon Linux 2023 Firecracker microVM，BYO 实例，`@vercel/sandbox` 仅类型依赖，**不随 sdk 装入**）      | [packages/sandbox-vercel](../packages/sandbox-vercel/README.md)         |
-| `@nimbo/sandbox-cloudflare` | NimboFS & NimboExec 适配 Cloudflare Sandbox（网关形态：`.` 纯 fetch 客户端跑在任意 Node，`./worker` 网关部署在宿主 wrangler 项目，**不随 sdk 装入**） | [packages/sandbox-cloudflare](../packages/sandbox-cloudflare/README.md) |
+**规划中的包**（📐 设计定稿未实现，见 [agent 内核包 · 技术方案 §8](./agent/agent-kernel/tech.md)）：`@nimbo/agent`（轮编排 + 归属仲裁语义 + 四种宿主能力的接口 + 全套内置实现）· `@nimbo/persist-sql` / `persist-drizzle` / `persist-prisma`（持久化 + 租约版归属仲裁机制）· `@nimbo/stream-redis`（流分发）· `@nimbo/durable-object`（Cloudflare DO 一次给全）· `@nimbo/cli`（拿框架搭的开箱成品，不是框架包）。
 
-**bash 分档说明**：`bash` 工具的命令执行环境（`NimboExec`）分两档，按需二选一注入，一行代码互换、loop/session 代码零改动（[tech/core-sdk §4.5b](./tech/core-sdk.md)）——
 
-- **`@nimbo/mini-bash`（零依赖极简档）**：六个只读命令（`cat`/`grep`/`find`/`tail`/`head`/`echo`）+ 四个控制操作符，随 `@nimbo/sdk` 一起装，无需额外安装，定位安全默认与测试/演示载体。
-- **`@nimbo/just-bash`（全语法档）**：Claude 系模型高频产出的 `if`/`for`/`while`/`case`/函数等控制流脚本超出 mini-bash 语法面时换这一档。因依赖树含 sql.js / quickjs-emscripten 等 wasm 大件，**不进 `@nimbo/sdk` 依赖**，需要的宿主显式 `pnpm add @nimbo/just-bash`。
+| 包                           | 一句话                                                                                                                              | README                                                                  |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `@nimbo/sdk`                | 主包门面，5 行上手只装它                                                                                                                    | [packages/sdk](../packages/sdk/README.md)                               |
+| `@nimbo/core`               | L0 接口 / L1 定义层 / L2 运行层 / L3 目录约定层 / 内置工具本体                                                                                      | [packages/core](../packages/core/README.md)                             |
+| `@nimbo/virtual-fs`         | MemoryFS / OverlayFS / DirFS、diff / writeBack、文件工具八件套                                                                            | [packages/virtual-fs](../packages/virtual-fs/README.md)                 |
+| `@nimbo/mini-bash`          | 跑在任意 NimboFS 上的只读命令解释器（bash 工具的纯内存执行环境，零依赖极简档，随 sdk 装入）                                                                          | [packages/mini-bash](../packages/mini-bash/README.md)                   |
+| `@nimbo/just-bash`          | 跑在任意 NimboFS 上的全语法档 bash（`if`/`for`/`while`/`case`/函数，vercel-labs/just-bash 适配器，**不随 sdk 装入**，需单独 `pnpm add`）                    | [packages/just-bash](../packages/just-bash/README.md)                   |
+| `@nimbo/sandbox-e2b`        | NimboFS &amp; NimboExec 适配 E2B 云沙盒（真实 Firecracker microVM，BYO 实例，e2b 仅类型依赖，**不随 sdk 装入**）                                        | [packages/sandbox-e2b](../packages/sandbox-e2b/README.md)               |
+| `@nimbo/sandbox-vercel`     | NimboFS &amp; NimboExec 适配 Vercel Sandbox（真实 Amazon Linux 2023 Firecracker microVM，BYO 实例，`@vercel/sandbox` 仅类型依赖，**不随 sdk 装入**） | [packages/sandbox-vercel](../packages/sandbox-vercel/README.md)         |
+| `@nimbo/sandbox-cloudflare` | NimboFS &amp; NimboExec 适配 Cloudflare Sandbox（网关形态：`.` 纯 fetch 客户端跑在任意 Node，`./worker` 网关部署在宿主 wrangler 项目，**不随 sdk 装入**）        | [packages/sandbox-cloudflare](../packages/sandbox-cloudflare/README.md) |
 
-两档都是 `NimboExec` 接口的实现，也都不是唯一选项——真实本机命令执行用 `@nimbo/core` 的 `localExec`，宿主自有沙盒（Docker/e2b/远程执行器）直接实现 `NimboExec` 注入即可（示例见 [examples/05-custom-exec.ts](../examples/05-custom-exec.ts)）。
+
+**bash 分档说明**：`bash` 工具的命令执行环境（`NimboExec`）分两档，按需二选一注入，一行代码互换、loop/session 代码零改动（[core/core-sdk/tech §4.5b](./core/core-sdk/tech.md)）——
+
+- `**@nimbo/mini-bash`（零依赖极简档）**：六个只读命令（`cat`/`grep`/`find`/`tail`/`head`/`echo`）+ 四个控制操作符，随 `@nimbo/sdk` 一起装，无需额外安装，定位安全默认与测试/演示载体。
+- `**@nimbo/just-bash`（全语法档）**：Claude 系模型高频产出的 `if`/`for`/`while`/`case`/函数等控制流脚本超出 mini-bash 语法面时换这一档。因依赖树含 sql.js / quickjs-emscripten 等 wasm 大件，**不进 `@nimbo/sdk` 依赖**，需要的宿主显式 `pnpm add @nimbo/just-bash`。
+
+两档都是 `NimboExec` 接口的实现，也都不是唯一选项——真实本机命令执行用 `@nimbo/core` 的 `localExec`，宿主自有沙盒（Docker/e2b/远程执行器）直接实现 `NimboExec` 注入即可（示例见 [examples/05-custom-exec.ts](../examples/src/05-custom-exec.ts)）。
 
 ## 云沙盒适配器
 
-三个适配器把 agent 的 fs/bash 放进真实云沙盒里，而 agent 本身跑在任意 Node 机器上——同一种「模式 A 同源工作区」形态（一个对象实现 `NimboFS & NimboExec`，经 `workspace` 注入）。调研与设计决策见 [沙盒功能](./features/sandbox.md) / [技术方案](./tech/sandbox.md) / [施工进展](./plans/sandbox.md)；E2B 和 Vercel 已对真实沙盒验证，Cloudflare 走自部署网关。
+三个适配器把 agent 的 fs/bash 放进真实云沙盒里，而 agent 本身跑在任意 Node 机器上——同一种「模式 A 同源工作区」形态（一个对象实现 `NimboFS & NimboExec`，经 `workspace` 注入）。调研与设计决策见 [沙盒功能](./host/sandbox/feature.md) / [技术方案](./host/sandbox/tech.md) / [施工进展](./host/sandbox/plan.md)；E2B 和 Vercel 已对真实沙盒验证，Cloudflare 走自部署网关。
 
 ## 示例应用：chat agent 网页应用
 
-[`apps/`](../apps) 下是一个**基于** nimbo 构建的完整 chat agent 网页应用——SDK 的一个产品形态的具体演示。用户在 chat 界面里驱动 agent 在 Vercel 沙盒里修改真实仓库、开 PR、触发 Vercel 部署。亮点：会话级沙盒生命周期（活跃时保持、空闲快照休眠、下一条消息带分支代码恢复）、loop 每个事件断线可续地 SSE 流式推给前端（刷新/HMR 不断）、完整对话 SQLite 持久化、streamdown markdown 渲染、每轮 token 统计（含缓存命中）。设计见 [chat webapp 功能](./features/chat-webapp.md) / [技术方案](./tech/chat-webapp.md) / [施工进展](./plans/chat-webapp.md)。
+[`apps/`](../apps) 下是一个**基于** nimbo 构建的完整 chat agent 网页应用——既是产品形态的具体演示，**也是 `@nimbo/agent` 那四件事今天的实现形态**（会话怎么接下去、等人、崩溃恢复都在这里先跑通，再按 [agent 内核包](./agent/agent-kernel/feature.md)的方案上移进框架）。用户在 chat 界面里驱动 agent 在 Vercel 沙盒里修改真实仓库、开 PR、触发 Vercel 部署。亮点：会话级沙盒生命周期（活跃时保持、空闲快照休眠、下一条消息带分支代码恢复）、loop 每个事件断线可续地 SSE 流式推给前端（刷新/HMR 不断）、完整对话 SQLite 持久化、排队与插话、停止本轮、优雅关闭与崩溃恢复、streamdown markdown 渲染、每轮 token 统计（含缓存命中）。设计见 [chat webapp 功能](./app/chat-webapp/feature.md) / [技术方案](./app/chat-webapp/tech.md) / [施工进展](./app/chat-webapp/plan.md)。
 
 ```sh
 cp .env.template .env         # 填入必需的 key（见模板注释）
@@ -147,20 +254,46 @@ pnpm chat:server              # API 服务
 pnpm chat:web                 # web 开发服务器
 ```
 
+## 文档地图（按分层组织）
+
+文档按 [agent 内核包](./agent/agent-kernel/feature.md)定的**分层与分包**归位，一层一个目录、一个功能一个子目录，子目录里最多三份文档：
+
+```
+docs/<层>/<功能>/feature.md   产品视角 —— 解决什么问题、用户可见行为、范围与非目标、成功标准
+docs/<层>/<功能>/tech.md      技术视角 —— 方案、关键接口/数据结构、取舍与已知限制
+docs/<层>/<功能>/plan.md      施工进展 —— 拆单、验收结论、阶段状态、变更记录
+```
+
+四层从下到上（[terms.md](./terms.md) 里有每层的定义）：
+
+```mermaid
+flowchart TB
+    APP["<b>app/</b> 接入层与成品应用<br/>路由 · SSE · 前端 · 审批端点（构建者写）"]
+    AGENT["<b>agent/</b> agent 逻辑层 · @nimbo/agent<br/>轮编排（连续）+ 归属仲裁（独占）"]
+    CORE["<b>core/</b> 执行引擎 · @nimbo/core<br/>调模型 → 跑工具 → 喂回去（推进）"]
+    HOST["<b>host/</b> 宿主层 —— 可替换<br/>沙盒 · 持久化 · 流分发 · 归属仲裁机制"]
+    APP --> AGENT --> CORE
+    AGENT -. "语义在上、实现在下" .-> HOST
+    CORE -. "动手时" .-> HOST
+```
+
+
+| 层                             | 是什么                                                              | 索引                                                                                                                                                                            |
+| ----------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`core/`](./core/README.md)   | 执行引擎：`@nimbo/core` 与随包（virtual-fs · mini-bash · just-bash · sdk） | core-sdk · builtin-tools · verification                                                                                                                                       |
+| [`agent/`](./agent/README.md) | agent 逻辑层：会话怎么接下去、等人怎么办、崩了怎么办、多进程怎么办（`@nimbo/agent`，未实现）         | agent-kernel · single-ledger · steer-and-queue · turn-abort · graceful-shutdown · turn-checkpoint · compaction · in-flight-draft                                              |
+| [`host/`](./host/README.md)   | 宿主层：四样可替换的资源，目前只有沙盒一支有文档                                         | sandbox · sandbox-provider · sandbox-keepalive · native-search                                                                                                                |
+| [`app/`](./app/README.md)     | 接入层与成品应用：chat 应用、Cloudflare Worker、示例集                           | chat-webapp · chat-ui · composer-skill-mention · approval-grant-split · web-search · push-notification · telemetry · chat-observability · cloudflare-worker-server · examples |
+
+
+**第一次读，按这个顺序**：
+
+1. [core/core-sdk](./core/core-sdk/feature.md)（核心 SDK）→ 2. [core/builtin-tools](./core/builtin-tools/feature.md)（内置工具）→ 3. [host/sandbox](./host/sandbox/feature.md)（云沙盒工作区）→ 4. [app/chat-webapp](./app/chat-webapp/feature.md)（示例 chat 应用）→ 5. [agent/agent-kernel](./agent/agent-kernel/feature.md)（架构总纲：分层、四种可替换的宿主能力、六档部署形态、包怎么拆；设计讨论见 [issue #2](https://github.com/ludafa/nimbo/issues/2)）
+
 ## 更多
 
 - **可运行示例**：[examples/](../examples/README.md)——内存 diff、目录挂载、skills、mini-bash、自定义 exec 注入、结构化输出、流式消费、全语法档 just-bash、E2B/Vercel/Cloudflare 三个云沙盒工作区适配、真实项目端到端设计优化 + Git 工作流，十二个脚本均可无 API key/云凭证试跑（缺 env/凭证只跑确定性段并干净退出；最后一个脚本的真机段一旦配齐凭证会真实修改目标 GitHub 仓库，运行前见其文件头/examples/README 的须知）。
-- **设计文档**：每个功能拆成「功能（产品/使用手册）· 技术（技术方案）· 施工（施工进展）」三视角，落在 `features/` · `tech/` · `plans/` 三个目录。按阅读顺序：
-  1. **core-sdk（核心 SDK）** — [功能](./features/core-sdk.md) · [技术](./tech/core-sdk.md) · [施工](./plans/core-sdk.md)
-  2. **builtin-tools（内置工具）** — [功能](./features/builtin-tools.md) · [技术](./tech/builtin-tools.md)
-  3. **sandbox（云沙盒工作区）** — [功能](./features/sandbox.md) · [技术](./tech/sandbox.md) · [施工](./plans/sandbox.md)
-  4. **chat-webapp（示例 chat 应用）** — [功能](./features/chat-webapp.md) · [技术](./tech/chat-webapp.md) · [施工](./plans/chat-webapp.md)
-  5. **sandbox-keepalive（沙盒保活）** — [功能](./features/sandbox-keepalive.md) · [技术](./tech/sandbox-keepalive.md) · [施工](./plans/sandbox-keepalive.md)（一轮跑多久沙盒就活多久；取代 turn-checkpoint §5 的保活部分）
-  6. **turn-checkpoint（每轮代码快照）** — [功能](./features/turn-checkpoint.md) · [技术](./tech/turn-checkpoint.md) · [施工](./plans/turn-checkpoint.md)
-  7. **single-ledger（UIMessage 单账本）** — [功能](./features/single-ledger.md) · [技术](./tech/single-ledger.md) · [施工](./plans/single-ledger.md)
-  8. **compaction（上下文压缩）** — [功能](./features/compaction.md) · [技术](./tech/compaction.md) · [施工](./plans/compaction.md)
-  9. **telemetry（遥测）** — [功能](./features/telemetry.md) · [技术](./tech/telemetry.md) · [施工](./plans/chat-observability.md)（属「chat 可观测性」拆单）
-  10. **agent-kernel（agent 内核包 `@nimbo/agent`）** — [功能](./features/agent-kernel.md) · [技术](./tech/agent-kernel.md) · [施工](./plans/agent-kernel.md)（会话生命周期的架构总纲：分层、四种可替换的宿主能力、六档部署形态、包怎么拆。设计讨论见 [issue #2](https://github.com/ludafa/nimbo/issues/2)）
-  11. **verification（验证与验收）** — [施工](./plans/verification.md)（仅施工视角）
+- **设计文档**：见下方「文档地图」。
   - **术语表**：[terms.md](./terms.md)（写文档/讨论/代码注释引用术语一律以此为准）
 - **开发**：`corepack pnpm install && corepack pnpm build && corepack pnpm typecheck && corepack pnpm test`（顺序 build 先行——workspace 循环 devDep 下跨包类型解析指向 dist）。Node ≥ 20（examples 与 L3 `tools/*.ts` 动态加载需 ≥ 22.18 原生 TS）。根 build/typecheck/test 脚本只作用于 `./packages/*`；apps 有自己的 `chat:*` 脚本。
+
