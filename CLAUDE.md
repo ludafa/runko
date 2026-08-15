@@ -2,7 +2,7 @@
 
 ## 仓库拓扑
 
-pnpm workspace 三组成员（见 [pnpm-workspace.yaml](./pnpm-workspace.yaml)）：`packages/*` 是对外发布的 `@nimbo/*` 包，`apps/*` 与 `examples` 是 `private: true` 的消费侧、不发布。各包的对外定位与 README 索引见 [docs/README.zh-CN.md](./docs/README.zh-CN.md)，这里只给改代码时要的**落点**与**依赖方向**。
+pnpm workspace 三组成员（见 [pnpm-workspace.yaml](./pnpm-workspace.yaml)）：`packages/*` 是对外发布的 `@nimbo/*` 包，`apps/*` 与 `examples` 是 `private: true` 的消费侧、不发布。各包的对外定位与 README 索引见 [docs/overview.md](./docs/overview.md)，这里只给改代码时要的**落点**与**依赖方向**。
 
 ### packages/\*（发布，changesets 管版本）
 
@@ -19,7 +19,7 @@ pnpm workspace 三组成员（见 [pnpm-workspace.yaml](./pnpm-workspace.yaml)�
 
 **依赖方向单向**：`core` 是根，其余全部指向它。`core` 反向持有 `mini-bash`/`virtual-fs` 的是 **devDependencies**（自测用）——这条循环 devDep 正是「跨包类型解析指向 dist、必须先 `build` 再 `typecheck`」的原因，别改成 dependencies。
 
-### apps/\* 与 examples（private，不发布）
+### apps/\* 、examples 与 docs（private，不发布）
 
 | 成员                                   | 是什么                                                                               | workspace 依赖                                |
 | -------------------------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------- |
@@ -27,14 +27,18 @@ pnpm workspace 三组成员（见 [pnpm-workspace.yaml](./pnpm-workspace.yaml)�
 | `@nimbo-chat/web`                      | chat 应用前端：Vite + React + TanStack Router + shadcn(base-ui) + Tailwind           | core                                          |
 | `@nimbo-chat/cloudflare-worker-server` | 双角色 Worker：进程内直连真实 CF Sandbox，同时对外提供 BYO 网关端点                  | sdk, sandbox-cloudflare                       |
 | `@nimbo/examples`                      | 示例集（实验田），`pnpm example <编号>` 即跑；只有 typecheck，无 build/test          | sdk, just-bash, sandbox-e2b/vercel/cloudflare |
+| `@nimbo/docs`                          | VitePress 设计文档站，**可独立部署**；有 build/typecheck，另有 `check`（front matter 体检） | **无**——它只把 markdown 编译成站点            |
 
-`apps/*` 并入根 workspace，是因为它们要用 `workspace:*` 协议解析 `@nimbo/*`（独立子 workspace 解析不到）；`examples` 不带 `/*`——workspace 根自身就是那个成员。
+`apps/*` 并入根 workspace，是因为它们要用 `workspace:*` 协议解析 `@nimbo/*`（独立子 workspace 解析不到）；`examples` 与 `docs` 不带 `/*`——它们的根目录自身就是那个成员。
+
+**`docs` 独立成员意味着两件事**：① 依赖自管（vitepress/mermaid 装在 `docs/package.json`，不占根）；② **产物可单独部署**——`docs/.vitepress/dist` 是纯静态文件，跟 `packages/*` 的发布流程完全解耦。部署到子路径用 `DOCS_BASE=/nimbo/ pnpm docs:build`，不用改配置。
 
 ### 命令边界（容易踩）
 
-- 根 `pnpm build` / `typecheck` / `test` 只 filter `./packages/*`，**不覆盖 apps 与 examples**；动了 apps 要进对应目录跑它自己的 `typecheck`/`lint`/`test`。
-- CI（`.github/workflows/ci.yml`）跑的是 `pnpm -r build|typecheck|test`，覆盖**全部**成员——本地只跑根脚本会漏掉 apps/examples 的问题。
-- chat 应用另有根级 `chat:bootstrap`（建库 + 生成 OpenAPI 与前端 client）、`chat:server`、`chat:web`。
+- 根 `pnpm build` / `typecheck` / `test` 只 filter `./packages/*`，**不覆盖 apps、examples 与 docs**；动了 apps 要进对应目录跑它自己的 `typecheck`/`lint`/`test`。
+- CI（`.github/workflows/ci.yml`）跑的是 `pnpm -r build|typecheck|test`，覆盖**全部** 14 个成员——本地只跑根脚本会漏掉 apps/examples/docs 的问题。
+- **文档站的死链检查藏在 `pnpm -r build` 里**（`docs` 的 build 就是 `vitepress build`，构建时会校验全站链接）；`typecheck` 查的是 `.vitepress/` 下的配置。但 **front matter 体检（`docs:check`）不在 `-r` 的三个脚本里**，CI 单列了一步。
+- chat 应用另有根级 `chat:bootstrap`（建库 + 生成 OpenAPI 与前端 client）、`chat:server`、`chat:web`；文档站有 `docs:dev` / `docs:build` / `docs:preview` / `docs:check`（都是 `--filter @nimbo/docs` 的快捷方式）。
 
 ### dev server 归我自己管（硬性规范）
 
@@ -52,15 +56,86 @@ pnpm workspace 三组成员（见 [pnpm-workspace.yaml](./pnpm-workspace.yaml)�
 
 ## 文档规范
 
-**目录与职责分离**——一个独立功能的文档按视角拆到三处，不再一个文件混写产品·技术·施工：
+**路径形状是 `docs/<分层>/<视角>/<feature>.md`**——先按架构分层切目录，每个目录里边再分功能·技术方案·施工计划三个视角。
 
-- **产品文档** `docs/features/<feature>.md`：产品视角——以用户使用手册作为目标，聚焦到要解决什么问题、用户可见行为/交互、范围与非目标、成功标准。
-- **技术方案文档** `docs/tech/<feature>.md`：技术视角——方案、关键接口/数据结构、取舍与已知限制。
+**第一层 · 架构分层**——按 [agent 内核包](./docs/architecture/tech/agent-kernel.md) 定义的分层归位。框架本身只有**两块**：agent 逻辑层（固定，不可替换）与宿主层（可替换）。两块之外还有总纲、接入层与周边：
+
+| 目录 | 装什么 | 对应包 |
+| --- | --- | --- |
+| `docs/architecture/` | 架构总纲（分层、部署形态、包怎么拆） | `@nimbo/agent` |
+| **`docs/logic/`** | **agent 逻辑层，三个子层自上而下** | |
+| &nbsp;&nbsp;`logic/arbitration/` | 归属仲裁——语义 + **随宿主变化的多种实现** | `@nimbo/agent` · `persist-*` · `durable-object` |
+| &nbsp;&nbsp;`logic/orchestration/` | 轮编排 | `@nimbo/agent` |
+| &nbsp;&nbsp;`logic/engine/` | 执行引擎 | `@nimbo/core` |
+| **`docs/host/`** | **宿主层，按宿主环境分档** | |
+| &nbsp;&nbsp;`host/contract/` | **跨环境的接口契约**（沙盒 · 持久化 · 流分发），只写一遍 | `@nimbo/agent` · `virtual-fs` |
+| &nbsp;&nbsp;`host/node/` | Node 长驻：单进程 / cluster / Docker / k8s | `persist-*` |
+| &nbsp;&nbsp;`host/cloudflare/` | Worker + Durable Object | `durable-object` · `sandbox-cloudflare` |
+| &nbsp;&nbsp;`host/vercel/` | Functions + Sandbox | `sandbox-vercel` · `stream-redis` |
+| &nbsp;&nbsp;`host/e2b/` | E2B 沙盒（只提供沙盒这一样能力，可配在任何一档下） | `sandbox-e2b` |
+| `docs/ingress/` | 接入层——构建者写的应用代码（`apps/` 下的 chat 应用） | 不发布 |
+| `docs/misc/` | 周边（示例集、验证与验收、文档站） | `@nimbo/examples` |
+
+只有[术语表](./docs/terms.md)、`overview.md`、`index.md` 和 README 留在 `docs/` 根——它们是词典/索引，不是功能文档。
+
+**归位靠两问**：① 这份讲的是**框架固定的语义**，还是**某个宿主环境怎么落地**？前者进 `logic/`，后者进 `host/<环境>/`。② 如果是宿主层，它**跨所有环境**吗？跨的进 `host/contract/`，只对一家成立的进那一家的目录。
+
+判不准就看它主要在改哪个包。**归属仲裁是唯一的例外**：它的语义在逻辑层、实现随宿主变，两样并排放在 `logic/arbitration/`——因为「换一种实现」这件事本身就是它的主题。
+
+**第二层 · 视角**——同一个功能的三份文档在同一个目录下并排，不再一个文件混写产品·技术·施工：
+
+- **产品文档** `<分层>/features/<feature>.md`：产品视角——以用户使用手册作为目标，聚焦到要解决什么问题、用户可见行为/交互、范围与非目标、成功标准。
+- **技术方案文档** `<分层>/tech/<feature>.md`：技术视角——方案、关键接口/数据结构、取舍与已知限制。
   - **涉及 DB 时**必须有**业务数据领域设计图**（实体与关系，用 mermaid `erDiagram`）。
   - **核心流程**必须有**时序图**（用 mermaid `sequenceDiagram`）。
-- **施工进展** `docs/plans/<feature>.md`：拆单、验收结论、阶段状态、变更记录。
+- **施工进展** `<分层>/plans/<feature>.md`：拆单、验收结论、阶段状态、变更记录。
 
-nimbo 是技术产品，**技术面本身就是产品功能**——架构总纲、内置工具、沙盒适配契约这类「底座」对开发者而言都是功能，一律按上面三目录归位，不另设参考目录。唯一例外：术语表 `docs/terms.md` 与总览 `README` 留在 `docs/` 根（它们是词典/索引，不是功能文档）。
+三份的文件名（slug）必须一致，这样 `docs/<分层>/*/x.md` 一把捞全。跨目录同名是允许的、也是有意的——四档宿主的落地文档都叫 `deployment.md`，`docs/host/*/tech/deployment.md` 正好捞出「所有环境怎么落地」。
+
+**每份文档必须有 front matter**，字段固定这几个（`layer`/`module` 的取值以术语表为准）：
+
+```yaml
+---
+title: "单一数据账本（single-ledger）— 功能手册"
+slug: single-ledger              # 与文件名一致；三个视角共用同一个 slug
+view: 功能                        # 功能 | 技术 | 施工
+layer: 逻辑层                     # 总纲 | 逻辑层 | 宿主层 | 接入层 | 周边
+module: 轮编排                    # 执行引擎 | 轮编排 | 归属仲裁 | 沙盒 | 持久化 | 流分发 | —
+packages: ["@nimbo/agent"]        # 这份文档对应哪些包
+tags: ["账本", "UIMessage", "seq", "断线续传", "数据模型"]
+related: ["logic/orchestration/tech/single-ledger.md", "architecture/tech/agent-kernel.md"]  # 相对 docs/ 根
+---
+```
+
+`module` 填的是**逻辑模块**，不是宿主环境——宿主环境的落地文档往往横跨好几个模块（Node 那档同时讲持久化、仲裁机制、流分发），一律填 `—`，靠 tags 区分。**没有「归属仲裁机制」这个取值**：它是归属仲裁模块在宿主层的实现，文档跟语义并排放在 `logic/arbitration/`，统一填「归属仲裁」。
+
+它是**给检索用的**——想按层/按包/按 tag 捞文档直接 grep 字段，别再靠目录扫：
+
+```sh
+grep -rl 'module: 轮编排' docs/          # 轮编排相关的全部文档
+grep -rl '@nimbo/agent' docs/            # 某个包相关的全部文档
+ls docs/host/*/tech/deployment.md        # 全部宿主环境的落地方案
+```
+
+**挪动文档时**：docs 内部有上千条相对链接，手改必漏。正确做法是「把链接解析成绝对路径 → 套用移动表 → 从新位置重算相对路径」，改完跑 `pnpm docs:build`（它做全站死链检查）。**别在标题里嵌文档路径**——路径一改锚点就跟着变，站内链接会静默失效。
+
+### 文档站（VitePress）
+
+`docs/` 同时是一个 VitePress 站点（见[文档站](./docs/misc/features/docs-site.md)）。**导航与侧栏全部从 front matter 现推**，所以新增文档不用改配置——放对目录、写好 front matter 就会自己出现。
+
+```sh
+pnpm docs:check      # front matter 体检：字段齐全、取值合法、不会漏出侧栏
+pnpm docs:build      # 构建 + 全站死链检查（跑完即退）
+pnpm docs:dev        # 常驻进程 —— 按上面「dev server 归我自己管」，别主动起
+```
+
+改完文档**用 `docs:check` + `docs:build` 验证**，两步都跑完即退，CI 里也是这两步。几条容易踩的：
+
+- **正文里裸写 `<T>`、`<Foo>` 会让构建失败**——markdown 会被当 Vue 模板编译，尖括号被当成标签。写进反引号里即可。
+- **`view` 字段是「功能 / 技术 / 施工」**（短形式），侧栏上显示的「技术方案 / 施工进展」是另一回事，别互相冒充。
+- **指向 `docs/` 之外的相对链接不用改**（`../../packages/core/README.md` 这种）——构建时会自动改写成 GitHub 地址，源文件保持相对路径以便在编辑器里跳转。
+
+nimbo 是技术产品，**技术面本身就是产品功能**——架构总纲、内置工具、沙盒适配契约这类「底座」对开发者而言都是功能，一律按上面的分层 + 三视角归位，不另设参考目录。唯一例外：术语表 `docs/terms.md` 与总览 `README` 留在 `docs/` 根（它们是词典/索引，不是功能文档）。
 
 请用简单易懂、清晰明了的语言来编写所有文档，避免晦涩、避免过度术语化。可以的时候尽量多画图，业务领域实体关系图、时序图是很重要的。
 

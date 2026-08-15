@@ -26,3 +26,6 @@ apps/node-server/data.db
 
 .claude/skills
 .agents/skills
+# VitePress 文档站产物与缓存
+docs/.vitepress/cache/
+docs/.vitepress/dist/

@@ -31,3 +31,10 @@ jobs:
       - run: pnpm -r typecheck
 
       - run: pnpm -r test
+
+      # 文档站的死链检查与 typecheck 已经被上面三步覆盖了——docs/ 是 workspace
+      # 成员（@nimbo/docs），`pnpm -r build` 会构建它、构建时做全站死链检查，
+      # `pnpm -r typecheck` 会查 .vitepress/ 下的配置。这里只补 front matter 体检：
+      # 它的脚本名是 `check`，不在 `pnpm -r` 跑的那三个里，写错字段会让文档
+      # 静默漏出侧栏，必须单列一步。
+      - run: pnpm docs:check

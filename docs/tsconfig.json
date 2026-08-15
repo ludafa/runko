@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // 站点配置在 Node 里跑（vitepress 用 esbuild 转译，不做类型检查），
+    // 相对 import 要写全 `.ts` 后缀；noEmit 下这是合法的。
+    "allowImportingTsExtensions": true,
+    "types": ["node"],
+    // .vue 组件由 shims.d.ts 声明成模块——这里只对配置与脚本这些 TS 逻辑做检查，
+    // 单文件组件本身不进类型检查（引 vue-tsc 与本仓的 typescript@7 组合风险不划算）。
+    "jsx": "preserve"
+  },
+  // 只收 .vitepress/ 下的配置与脚本。文档本身是 markdown，node_modules 天然在外。
+  "include": [".vitepress/**/*.ts", ".vitepress/**/*.d.ts"]
+}

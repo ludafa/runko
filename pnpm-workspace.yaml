@@ -15,8 +15,15 @@ packages:
   # build/test，故 pnpm -r 的这两步扫到 examples 会自动跳过。
   # 不带 /*——examples 根自身就是那个 workspace 成员（其 src/ 是示例源码）。
   # 11 号真机段需要的那个 CF 网关不在这里：它已并入 apps/cloudflare-worker-server
-  # （那是个完整的 workspace 成员，见 docs/tech/cloudflare-worker-server.md）。
+  # （那是个完整的 workspace 成员，见 docs/host/cloudflare/tech/cloudflare-worker-server.md）。
   - "examples"
+  # docs/：VitePress 设计文档站。做成独立成员是为了**能单独部署**——自带
+  # vitepress/mermaid 依赖、自己 build，产物 docs/.vitepress/dist 是一堆静态文件，
+  # 跟 packages/* 的发布流程完全解耦（子路径部署用 DOCS_BASE 环境变量指定）。
+  # 它不 import 任何 @nimbo/*，只把 markdown 编译成站点，所以没有 workspace 依赖，
+  # `pnpm -r build` 扫到它时也不需要等别的包先建好。
+  # 同样不带 /*——docs 根自身就是那个成员。
+  - "docs"
 
 # just-bash 的可选依赖（zstd/xz 压缩格式的原生绑定，tar/gzip 之外的小众格式）：
 # 不批准构建脚本——保持"零二进制依赖"（tech-spec §1 原则 1），未安装原生绑定时

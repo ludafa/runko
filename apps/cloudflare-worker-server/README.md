@@ -1,7 +1,7 @@
 # cloudflare-worker-server
 
-> 文档：[产品视角](../../docs/features/cloudflare-worker-server.md) · [技术方案](../../docs/tech/cloudflare-worker-server.md) · [施工进展](../../docs/plans/cloudflare-worker-server.md)
-> 相关：[sandbox 技术方案](../../docs/tech/sandbox.md)（§6 网关形态与协议、§7 workerd 实测）
+> 文档：[产品视角](../../docs/host/cloudflare/features/cloudflare-worker-server.md) · [技术方案](../../docs/host/cloudflare/tech/cloudflare-worker-server.md) · [施工进展](../../docs/host/cloudflare/plans/cloudflare-worker-server.md)
+> 相关：[sandbox 技术方案](../../docs/host/contract/tech/sandbox.md)（§6 网关形态与协议、§7 workerd 实测）
 > 术语：[沙盒](../../docs/terms.md) · [网关形态](../../docs/terms.md)
 
 ## 这是什么
@@ -19,7 +19,7 @@
 
 ## 为什么这两件事能合成一个 Worker
 
-`@nimbo/sandbox-cloudflare` 是[网关形态](../../docs/terms.md)：nimbo 的前提是「agent 跑在任意电脑」，而 CF [沙盒](../../docs/terms.md)只能从 Worker 内部经 Durable Object binding 访问，所以要自部署一个 HTTP 网关把两边接起来（[sandbox 技术方案 §6](../../docs/tech/sandbox.md)）。角色 ② 就是那个网关。
+`@nimbo/sandbox-cloudflare` 是[网关形态](../../docs/terms.md)：nimbo 的前提是「agent 跑在任意电脑」，而 CF [沙盒](../../docs/terms.md)只能从 Worker 内部经 Durable Object binding 访问，所以要自部署一个 HTTP 网关把两边接起来（[sandbox 技术方案 §6](../../docs/host/contract/tech/sandbox.md)）。角色 ② 就是那个网关。
 
 而角色 ① 的服务端自己就在 Worker 里——客户端与网关同进程，那层 HTTP 不必真过网络：
 
@@ -112,11 +112,11 @@ NIMBO_CF_GATEWAY_TOKEN=<与 secret 相同的值>
 - D1 替换 `better-sqlite3`、better-auth 移植、chat 的 conversations/messages 路由——**这不是 `apps/node-server` 的 Workers 版**
 - CF 沙盒 idle 睡眠丢文件系统 与 chat「未提交改动原样还原」的语义落差（产品决策，非工程量）
 
-理由与完整卡点清单见[施工进展](../../docs/plans/cloudflare-worker-server.md)。
+理由与完整卡点清单见[施工进展](../../docs/host/cloudflare/plans/cloudflare-worker-server.md)。
 
 ## 已知缺陷
 
-`AbortSignal` 跨不过 Durable Object RPC 边界，而网关会把 `request.signal` 转发给 `sandbox.exec()`——真机上必然报 `AbortSignal serialization is not enabled.`。本项目用 `stripAbortSignal()` 在示例侧绕过（**两个角色都生效**），不改产品代码。包该怎么修仍待拍板，见[技术方案 §5](../../docs/tech/cloudflare-worker-server.md)。
+`AbortSignal` 跨不过 Durable Object RPC 边界，而网关会把 `request.signal` 转发给 `sandbox.exec()`——真机上必然报 `AbortSignal serialization is not enabled.`。本项目用 `stripAbortSignal()` 在示例侧绕过（**两个角色都生效**），不改产品代码。包该怎么修仍待拍板，见[技术方案 §5](../../docs/host/cloudflare/tech/cloudflare-worker-server.md)。
 
 ## 版本耦合
 

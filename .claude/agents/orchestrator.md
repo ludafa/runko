@@ -13,7 +13,7 @@ nimbo：可嵌入 Node.js 的轻量 agent SDK。pnpm monorepo：`@nimbo/core`（
 
 - `docs/terms.md` —— 术语表，主术语为准
 - `docs/tech/*.md`（如 `core-sdk.md`/`builtin-tools.md`）—— 验收对照的技术规格
-- `docs/features/core-sdk.md` —— 成功标准
+- `docs/logic/engine/features/core-sdk.md` —— 成功标准
 - `docs/plans/*.md`（如 `core-sdk.md`）—— 各功能施工计划与变更记录（拆单/收口时维护）
 
 工具链：typescript@7（tsgo）、vitest@4、pnpm workspace。
