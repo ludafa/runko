@@ -2,10 +2,12 @@
  * 通知决策层（docs/tech/push-notification.md §5、§6.1）——三道闸门的真值表、文案
  * 截断、以及最要紧的那条：**抛错绝不影响一轮**。
  */
+import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { Db } from '../../src/agent/store.js';
-import { createConversation, enqueueMessage } from '../../src/agent/store.js';
+import { createConversation } from '../../src/agent/store.js';
+import { conversations } from '../../src/db/schema.js';
 import { createChatNotifier } from '../../src/push/notifier.js';
 import { markPresent, resetPresence } from '../../src/push/presence.js';
 import type { PushTransport } from '../../src/push/sender.js';
@@ -16,6 +18,28 @@ import { createTestDb, seedUser } from '../helpers/test-db.js';
 
 const CONVERSATION_ID = 'conv-1';
 const TITLE = '给博客站换主题';
+
+/**
+ * 直接往[待发队列](../../../../docs/terms.md)那一列塞一条——形状是 `@nimbo/agent` 的
+ * `QueuedInput`（`persistence.ts` 的 `parseQueuedInputs` 读的就是它）。这里刻意不经
+ * runtime：本文件测的是通知的抑制规则，不该为此拉起一整个轮编排。
+ */
+function seedQueuedInput(db: Db, text: string): void {
+  db.update(conversations)
+    .set({
+      queuedMessagesJson: JSON.stringify([
+        {
+          id: 'q-1',
+          conversationId: CONVERSATION_ID,
+          seq: 1,
+          input: { text, userId: 'user-1' },
+          createdAt: Date.now(),
+        },
+      ]),
+    })
+    .where(eq(conversations.id, CONVERSATION_ID))
+    .run();
+}
 
 /** 收下每一条投出去的载荷；`flush` 等一个微任务队列——notifier 是同步返回的。 */
 function collector(): { sent: PushPayload[]; transport: PushTransport } {
@@ -292,10 +316,7 @@ describe('push/notifier', () => {
   });
 
   it('闸门 3（队列抑制）：待发队列非空时不报「跑完了」', async () => {
-    enqueueMessage(db, CONVERSATION_ID, {
-      userId: 'user-1',
-      text: '接着做下一件事',
-    });
+    seedQueuedInput(db, '接着做下一件事');
     const { sent, transport } = collector();
     notifier(transport).turnSettled({
       conversationId: CONVERSATION_ID,
@@ -307,10 +328,7 @@ describe('push/notifier', () => {
   });
 
   it('队列抑制只管一轮结束，不影响审批（队列里有货照样要人批准）', async () => {
-    enqueueMessage(db, CONVERSATION_ID, {
-      userId: 'user-1',
-      text: '接着做下一件事',
-    });
+    seedQueuedInput(db, '接着做下一件事');
     const { sent, transport } = collector();
     notifier(transport).approvalPending({
       conversationId: CONVERSATION_ID,

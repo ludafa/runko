@@ -50,8 +50,12 @@ import type { Db } from './store.js';
  * 入参对象的键顺序不保证一致。
  */
 function stableStringify(value: JsonValue): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(',')}]`;
+  }
   const keys = Object.keys(value).sort();
   return `{${keys
     .map(
@@ -85,11 +89,16 @@ function extractBashCall(
   toolName: string,
   input: JsonValue,
 ): BashCall | undefined {
-  if (toolName !== BASH_TOOL_NAME) return undefined;
-  if (typeof input !== 'object' || input === null || Array.isArray(input))
+  if (toolName !== BASH_TOOL_NAME) {
     return undefined;
+  }
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    return undefined;
+  }
   const command = input.command;
-  if (typeof command !== 'string') return undefined;
+  if (typeof command !== 'string') {
+    return undefined;
+  }
   const cwd = input.cwd;
   return { command, cwd: typeof cwd === 'string' ? cwd : null };
 }
@@ -101,9 +110,13 @@ function extractBashCall(
  */
 function segmentKeys(toolName: string, input: JsonValue): string[] | undefined {
   const call = extractBashCall(toolName, input);
-  if (call === undefined) return undefined;
+  if (call === undefined) {
+    return undefined;
+  }
   const segments = splitCommand(call.command);
-  if (segments === undefined) return undefined;
+  if (segments === undefined) {
+    return undefined;
+  }
 
   const keys = segments.map(
     (segment) =>
@@ -114,7 +127,7 @@ function segmentKeys(toolName: string, input: JsonValue): string[] | undefined {
         redirects: segment.redirects,
       }),
   );
-  // `a && a` 只记一行；也让 hasSessionGrant 的「命中数 === 键数」比较成立。
+  // `a && a` 只记一行；也让 hasConversationGrant 的「命中数 === 键数」比较成立。
   return [...new Set(keys)];
 }
 
@@ -124,7 +137,7 @@ function segmentKeys(toolName: string, input: JsonValue): string[] | undefined {
  *
  * 拆得动的 bash 记 N 行分段键，其余（非 bash、形状不符、拆不动）记 1 行整串键。
  */
-export function grantSessionApproval(
+export function grantConversationApproval(
   db: Db,
   conversationId: string,
   userId: string,
@@ -151,7 +164,7 @@ export function grantSessionApproval(
  * 2. **全部分段键命中** —— 拆得动的 bash：每一段都记过才放行；有任何一段是新的
  *    就返回 false、照常弹卡片。
  */
-export function hasSessionGrant(
+export function hasConversationGrant(
   db: Db,
   conversationId: string,
   userId: string,
@@ -178,13 +191,17 @@ export function hasSessionGrant(
       .map((row) => row.key),
   );
 
-  if (matched.has(wholeKey)) return true;
-  if (segKeys === undefined) return false;
+  if (matched.has(wholeKey)) {
+    return true;
+  }
+  if (segKeys === undefined) {
+    return false;
+  }
   return segKeys.every((key) => matched.has(key));
 }
 
 /** 清空某会话的全部授权（所有用户）。会话删除时 FK 级联已自动清，这是显式入口（如「重置本会话授权」）。 */
-export function clearSessionGrants(db: Db, conversationId: string): void {
+export function clearConversationGrants(db: Db, conversationId: string): void {
   db.delete(conversationGrants)
     .where(eq(conversationGrants.conversationId, conversationId))
     .run();

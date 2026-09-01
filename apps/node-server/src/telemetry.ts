@@ -23,9 +23,9 @@
  * 在这里永远不会触发——工具维度的数据在 `data-tool-timing` 部件里（见
  * docs/tech/single-ledger.md §3.2），按同一对 (agent_session_id, turn) 即可 join。
  */
-import Database from 'better-sqlite3';
-import type { Telemetry } from 'ai';
 import type { SessionTelemetry } from '@nimbo/core';
+import type { Telemetry } from 'ai';
+import Database from 'better-sqlite3';
 
 const PAYLOAD_MAX_LENGTH = 16_384;
 
@@ -51,9 +51,12 @@ const OMITTED_KEYS = new Set([
 const DROPPED_KEYS = new Set(['functionId', 'recordInputs', 'recordOutputs']);
 
 function summarize(value: unknown): string {
-  if (Array.isArray(value)) return `[omitted: ${String(value.length)} items]`;
-  if (typeof value === 'string')
+  if (Array.isArray(value)) {
+    return `[omitted: ${String(value.length)} items]`;
+  }
+  if (typeof value === 'string') {
     return `[omitted: ${String(value.length)} chars]`;
+  }
   return '[omitted]';
 }
 
@@ -62,19 +65,28 @@ export function curatePayload(event: unknown): string {
   let json: string;
   try {
     json = JSON.stringify(event, (key: string, value: unknown) => {
-      if (key === '') return value;
-      if (DROPPED_KEYS.has(key)) return undefined;
+      if (key === '') {
+        return value;
+      }
+      if (DROPPED_KEYS.has(key)) {
+        return undefined;
+      }
       return OMITTED_KEYS.has(key) ? summarize(value) : value;
     });
   } catch (error) {
     return JSON.stringify({
-      serializationError: error instanceof Error ? error.message : String(error),
+      serializationError:
+        error instanceof Error ? error.message : String(error),
     });
   }
   // JSON.stringify(undefined) === undefined（非字符串）——事件本身不该是
   // undefined，但遥测路径上一切皆防御。
-  if (typeof json !== 'string') return '{}';
-  if (json.length <= PAYLOAD_MAX_LENGTH) return json;
+  if (typeof json !== 'string') {
+    return '{}';
+  }
+  if (json.length <= PAYLOAD_MAX_LENGTH) {
+    return json;
+  }
   return JSON.stringify({
     truncated: true,
     approximateLength: json.length,
@@ -86,12 +98,17 @@ export function parseFunctionId(functionId: string | undefined): {
   agentSessionId: string | null;
   turn: number | null;
 } {
-  if (functionId === undefined || functionId.length === 0)
+  if (functionId === undefined || functionId.length === 0) {
     return { agentSessionId: null, turn: null };
+  }
   const hash = functionId.lastIndexOf('#');
-  if (hash <= 0) return { agentSessionId: functionId, turn: null };
+  if (hash <= 0) {
+    return { agentSessionId: functionId, turn: null };
+  }
   const turn = Number(functionId.slice(hash + 1));
-  if (!Number.isInteger(turn)) return { agentSessionId: functionId, turn: null };
+  if (!Number.isInteger(turn)) {
+    return { agentSessionId: functionId, turn: null };
+  }
   return { agentSessionId: functionId.slice(0, hash), turn };
 }
 
@@ -105,7 +122,11 @@ export interface TelemetryEventRow {
 }
 
 export interface TelemetryStore {
-  record(eventType: string, functionId: string | undefined, event: unknown): void;
+  record(
+    eventType: string,
+    functionId: string | undefined,
+    event: unknown,
+  ): void;
   /** "用 turn 查一下"的程序化入口（测试与后续 API 共用）；直接 sqlite3 查 telemetry_events 表等价。 */
   list(agentSessionId: string, turn: number): TelemetryEventRow[];
   close(): void;
@@ -136,7 +157,9 @@ export function createTelemetryStore(path: string): TelemetryStore {
         'name' in column &&
         column.name === 'session_id',
     );
-  if (hasLegacyColumn) sqlite.exec('DROP TABLE telemetry_events;');
+  if (hasLegacyColumn) {
+    sqlite.exec('DROP TABLE telemetry_events;');
+  }
   sqlite.exec(
     `CREATE TABLE IF NOT EXISTS telemetry_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -158,7 +181,13 @@ export function createTelemetryStore(path: string): TelemetryStore {
   return {
     record(eventType, functionId, event): void {
       const { agentSessionId, turn } = parseFunctionId(functionId);
-      insert.run(agentSessionId, turn, eventType, Date.now(), curatePayload(event));
+      insert.run(
+        agentSessionId,
+        turn,
+        eventType,
+        Date.now(),
+        curatePayload(event),
+      );
     },
     list(agentSessionId, turn): TelemetryEventRow[] {
       const rows = select.all(agentSessionId, turn) as RawEventRow[];
@@ -179,8 +208,12 @@ export function createTelemetryStore(path: string): TelemetryStore {
 
 /** 事件对象上的 `functionId`（ai 把 TelemetryOptions 并进每个事件）——`onError` 的事件是 `unknown`，统一走守卫提取。 */
 function functionIdOf(event: unknown): string | undefined {
-  if (typeof event !== 'object' || event === null) return undefined;
-  if (!('functionId' in event)) return undefined;
+  if (typeof event !== 'object' || event === null) {
+    return undefined;
+  }
+  if (!('functionId' in event)) {
+    return undefined;
+  }
   const value = event.functionId;
   return typeof value === 'string' ? value : undefined;
 }
@@ -228,14 +261,18 @@ let chatTelemetryStore: TelemetryStore | undefined;
  * telemetry.db。`recordInputs`/`recordOutputs` 关死见文件头纪律 2。
  */
 function initChatTelemetry(): void {
-  if (initialized) return;
+  if (initialized) {
+    return;
+  }
   initialized = true;
   const explicitPath = process.env.TELEMETRY_DB_PATH?.trim();
   const hasExplicitPath = explicitPath !== undefined && explicitPath.length > 0;
   const disabled =
     process.env.TELEMETRY_DISABLED === '1' ||
     (process.env.VITEST !== undefined && !hasExplicitPath);
-  if (disabled) return;
+  if (disabled) {
+    return;
+  }
   chatTelemetryStore = createTelemetryStore(
     hasExplicitPath ? explicitPath : 'telemetry.db',
   );

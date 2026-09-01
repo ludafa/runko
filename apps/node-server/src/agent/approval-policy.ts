@@ -1,8 +1,7 @@
 /**
  * Chat approval-bridge policy (docs/tech/chat-webapp.md §2.2c（审批链），
  * docs/tech/single-ledger.md §6 三值重构): pure, side-effect-free
- * helpers only — no I/O, no reference to `turn-runner/`'s in-memory
- * `activeTurns`. `routes/chat.ts`'s `POST .../messages` handler is the one
+ * helpers only — no I/O, no reference to the runtime's in-memory turn registry. `routes/chat.ts`'s `POST .../messages` handler is the one
  * place `classifyApproval` gets wired in as the session-level "审批分类器"
  * (`@nimbo/core`'s `SessionOptions.onApproval`, the `ApprovalPolicy`
  * callback form) handed to `buildSession` (`chat-agent.ts`):
@@ -10,14 +9,14 @@
  *   `classifyApproval(mode, ctx.toolName, input)` decides on the spot
  *   whether a tool call is safe enough to run unattended (`'allow'`) or
  *   needs a human (`'review'`) — `@nimbo/core`'s loop only escalates to the
- *   session's 人审通道 (`onReview`, `turn-runner/human-bridge.ts`'s `requestReview`) for the
+ *   session's 人审通道 (`onReview`, `@nimbo/agent`'s `requestReview`) for the
  *   latter, and only *after* it has already yielded a `tool-approval-request`
  *   chunk (docs/tech/single-ledger.md §6.1) — this module has no part in that visibility step
  *   anymore (the old boolean-driven `shouldAutoAllow` predates that fix).
  *
  * This module never sees an `ApprovalContext`/`callId` — those only matter
  * once a request actually needs to be routed to a pending human decision,
- * which is `turn-runner/`'s job, not this one's. Chat never hands out a
+ * which is `@nimbo/agent`'s job, not this one's. Chat never hands out a
  * hard `'deny'` from this classifier — every escalation is a `'review'`, a
  * human always gets to decide (matches the pre-3-value behavior, where
  * `false` always meant "ask a human", never "silently reject").
@@ -73,7 +72,9 @@ const RM_RECURSIVE_FORCE_RE =
  * per this ticket's "静态无法区分读写，一律人审".
  */
 function isGithubApiCurl(command: string): boolean {
-  if (!/\bcurl\b/.test(command)) return false;
+  if (!/\bcurl\b/.test(command)) {
+    return false;
+  }
   return /api\.github\.com|\$GH_TOKEN/.test(command);
 }
 
@@ -90,8 +91,9 @@ export function commandNeedsHumanApproval(command: string): boolean {
 
 /** Structural extraction of `bash`'s `{ command: string, ... }` input shape — no `any`/assertion: a plain shape check that narrows `JsonValue` down to a record before reading `command` off it. */
 function extractBashCommand(input: JsonValue): string | undefined {
-  if (typeof input !== 'object' || input === null || Array.isArray(input))
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
     return undefined;
+  }
   const command = input.command;
   return typeof command === 'string' ? command : undefined;
 }
@@ -118,11 +120,19 @@ export function classifyApproval(
   toolName: string,
   input: JsonValue,
 ): ApprovalOutcome {
-  if (mode === 'off') return 'allow';
-  if (mode === 'all') return 'review';
+  if (mode === 'off') {
+    return 'allow';
+  }
+  if (mode === 'all') {
+    return 'review';
+  }
 
-  if (toolName !== 'bash') return 'review';
+  if (toolName !== 'bash') {
+    return 'review';
+  }
   const command = extractBashCommand(input);
-  if (command === undefined) return 'review';
+  if (command === undefined) {
+    return 'review';
+  }
   return commandNeedsHumanApproval(command) ? 'review' : 'allow';
 }

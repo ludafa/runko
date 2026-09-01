@@ -2,26 +2,15 @@
  * [在场](../../../../docs/terms.md)心跳接口（docs/tech/push-notification.md §5.2）
  * ——`POST .../presence`。
  */
-import type { MiddlewareHandler } from 'hono';
-import { createMiddleware } from 'hono/factory';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { Db } from '../../src/agent/store.js';
 import { createConversation } from '../../src/agent/store.js';
 import { isPresent, resetPresence } from '../../src/push/presence.js';
-import { createChatApp } from '../../src/routes/chat.js';
+import { buildChatApp } from '../helpers/chat-app.js';
 import { createFakeSandboxManager } from '../helpers/fake-sandbox-manager.js';
 import { stopOnlyModel } from '../helpers/mock-model.js';
 import { createTestDb, seedUser } from '../helpers/test-db.js';
-
-type ChatEnv = { Variables: { userId: string } };
-
-function fakeAuth(userId: string): MiddlewareHandler<ChatEnv> {
-  return createMiddleware<ChatEnv>(async (c, next) => {
-    c.set('userId', userId);
-    await next();
-  });
-}
 
 const CONVERSATION_ID = 'conv-presence-1';
 
@@ -46,12 +35,12 @@ describe('routes/chat —— 在场心跳', () => {
   afterEach(resetPresence);
 
   function app(userId: string) {
-    return createChatApp({
+    return buildChatApp({
       db,
       sandboxManager: createFakeSandboxManager(),
       resolveModel: () => stopOnlyModel('hi'),
-      authMiddleware: fakeAuth(userId),
-    });
+      userId,
+    }).app;
   }
 
   async function post(

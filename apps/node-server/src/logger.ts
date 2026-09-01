@@ -4,7 +4,7 @@
  * `docs/tech/*` 的既有教训），而这里要的能力（分级、单行结构化、可注入
  * sink）用 `process.stdout.write` + 几个纯函数就够。
  *
- * 用法：`turn-runner/` 等调用方经 `createLogger()` 拿一个 `Logger`，或直接
+ * 用法：`agent/`、`routes/` 等调用方经 `createLogger()` 拿一个 `Logger`，或直接
  * 用默认单例 `logger`（未显式注入时的兜底——现有调用方不传 logger 也能跑）。
  * 测试要断言具体输出时，用 `createLogger({ sink })` 注入一个收集数组的假
  * sink，不用碰 `process.stdout`。
@@ -63,7 +63,9 @@ function isLogLevel(value: string): value is LogLevel {
 
 function resolveLevelFromEnv(): LogLevel {
   const raw = process.env.LOG_LEVEL?.trim().toLowerCase();
-  if (raw !== undefined && isLogLevel(raw)) return raw;
+  if (raw !== undefined && isLogLevel(raw)) {
+    return raw;
+  }
   return 'info';
 }
 
@@ -77,7 +79,9 @@ function defaultSink(line: string): void {
  * 报个数，不整体丢弃，方便定位"到底截了多少"。
  */
 export function truncate(value: string, maxLength: number): string {
-  if (value.length <= maxLength) return value;
+  if (value.length <= maxLength) {
+    return value;
+  }
   return `${value.slice(0, maxLength)}…(+${String(value.length - maxLength)})`;
 }
 
@@ -108,7 +112,9 @@ export function createLogger(opts: CreateLoggerOptions = {}): Logger {
     message: string,
     fields?: LogFields,
   ): void {
-    if (LEVEL_RANK[level] < threshold) return;
+    if (LEVEL_RANK[level] < threshold) {
+      return;
+    }
     sink(formatLine(level, scope, message, fields));
   }
 

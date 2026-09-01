@@ -5,16 +5,16 @@
  * (`{seq, message}` — replay-only, a finished `kind = 'message'` row),
  * `chatReplayFrameSchema` (their union — structurally discriminated by which
  * of `chunk`/`message` the frame actually carries, no shared literal
- * discriminant field), and `ConversationEventsListSchema` (`GET .../events`'s
+ * discriminant field), and `ConversationMessagesListSchema` (`GET .../messages`'s
  * `{frames}` response envelope — NOT a bare array, `events` was the retired
  * field name).
  */
 import { describe, expect, it } from 'vitest';
 
 import {
-  ConversationEventsListSchema,
   chatReplayFrameSchema,
   chunkEnvelopeSchema,
+  ConversationMessagesListSchema,
   messageFrameSchema,
 } from '../../src/schemas/chat.js';
 
@@ -115,9 +115,9 @@ describe('schemas/chat: chatReplayFrameSchema (union, structurally discriminated
   });
 });
 
-describe('schemas/chat: ConversationEventsListSchema', () => {
+describe('schemas/chat: ConversationMessagesListSchema', () => {
   it('parses { frames: [...] } — mixed message and chunk frames, in any order', () => {
-    const result = ConversationEventsListSchema.safeParse({
+    const result = ConversationMessagesListSchema.safeParse({
       frames: [
         { seq: 1, message: sampleMessage },
         { seq: 2, chunk: sampleChunk },
@@ -128,19 +128,19 @@ describe('schemas/chat: ConversationEventsListSchema', () => {
   });
 
   it('parses an empty frames array (a session with no events yet)', () => {
-    const result = ConversationEventsListSchema.safeParse({ frames: [] });
+    const result = ConversationMessagesListSchema.safeParse({ frames: [] });
     expect(result.success).toBe(true);
   });
 
   it('rejects the retired bare-array shape (no `frames` wrapper) — `events`/a top-level array is not this schema', () => {
-    const result = ConversationEventsListSchema.safeParse([
+    const result = ConversationMessagesListSchema.safeParse([
       { seq: 1, message: sampleMessage },
     ]);
     expect(result.success).toBe(false);
   });
 
   it('rejects `{ events: [...] }` — the retired field name', () => {
-    const result = ConversationEventsListSchema.safeParse({
+    const result = ConversationMessagesListSchema.safeParse({
       events: [{ seq: 1, message: sampleMessage }],
     });
     expect(result.success).toBe(false);

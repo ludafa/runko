@@ -14,3 +14,6 @@ dist
 # `openapi.yml` is committed — it's the contract that the client's Kubb
 # codegen consumes. Regenerate with `pnpm --filter @nimbo-chat/node-server
 # run generate:openapi`.
+
+# chat-smoke.sh 的本地状态（cookie / 当前会话 id）
+scripts/.smoke/

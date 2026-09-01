@@ -4,20 +4,21 @@
  *
  * **这一层是整个功能唯一"想事情"的地方**：`sender.ts` 只管怎么发、SW 只管怎么显示。
  *
- * 三条接口姿态（与 `turn-runner/` 的 `onMilestone` 一致，理由也一样）：
+ * 三条接口姿态（与 `@nimbo/agent` 的钩子一致，理由也一样）：
  *
  * 1. **同步返回 `void`** —— 调用点在一轮的关键路径上（审批卡片正要上线），不能 await。
  * 2. **绝不抛错** —— 每个方法整体 try/catch，异步部分 `void` 掉并自带 catch。
  * 3. **绝不排在用户可见的事情前面** —— 调用方必须先把审批请求挂上（`requestReview`），
  *    再调这里。顺序反了会让一条通知发得慢一点变成"审批卡片来得慢一点"。
  *
- * 依赖方向：`push/` 不认识 `agent/turn-runner/`（那是运行内核）。它只从
+ * 依赖方向：`push/` 不认识 `@nimbo/agent`（那是运行内核）。它只从
  * `agent/store.ts` 取数据——那是数据访问层，`push/store.ts` 也从那里拿 `Db` 类型。
  */
 import type { JsonValue } from '@nimbo/core';
 
+import { parseQueuedInputs } from '../agent/persistence.js';
 import type { Db } from '../agent/store.js';
-import { getConversation, listQueuedMessages } from '../agent/store.js';
+import { getConversation, getConversationById } from '../agent/store.js';
 import type { Logger } from '../logger.js';
 import { logger as defaultLogger } from '../logger.js';
 import { isEventEnabled } from './events.js';
@@ -37,11 +38,12 @@ const MAX_QUESTION = 80;
 /**
  * 一轮是怎么结束的。
  *
- * **必须与 `turn-runner/drive.ts` 的 `TurnSettledInfo['status']` 保持一致**——刻意各自
- * 声明而不是从那边 import：`push/` 不认识运行内核（见文件头的依赖方向）。两者若
- * 长歪了，接线处（`turn-launcher.ts`）会立刻编译不过，不会静默漂移。
+ * **必须与 `@nimbo/agent` 的 `TurnStatus` 保持一致**——刻意各自声明而不是从那边
+ * import：`push/` 不认识运行内核（见文件头的依赖方向）。两者若长歪了，接线处
+ * （`agent/runtime.ts`）会立刻编译不过，不会静默漂移。
  */
-export type TurnEndStatus = 'completed' | 'failed' | 'interrupted' | 'crashed';
+export type TurnEndStatus =
+  'completed' | 'failed' | 'interrupted' | 'suspended' | 'crashed';
 
 export interface ChatNotifierDeps {
   db: Db;
@@ -144,6 +146,10 @@ const TURN_END_TEXT: Record<TurnEndStatus, { title: string; suffix?: string }> =
     completed: { title: '跑完了' },
     failed: { title: '这一轮没跑完', suffix: '出错了' },
     interrupted: { title: '这一轮没跑完', suffix: '已停止' },
+    // 挂起是**主动且可恢复**的，不是「没跑完」——文案刻意不跟上面三条同形。
+    // 目前没有产出方（等 K3 挂起与恢复落地）。届时要顺带定一个产品问题：
+    // 挂起前必然已经发过一条「等你审批」的推送，这条会不会变成重复打扰。
+    suspended: { title: '这一轮先挂起了', suffix: '在等你' },
     crashed: { title: '这一轮没跑完', suffix: '中断了' },
   };
 
@@ -161,13 +167,21 @@ export function createChatNotifier(deps: ChatNotifierDeps): ChatNotifier {
     conversationId: string,
     userId: string,
   ): string | undefined {
-    if (!isPushEnabled()) return undefined;
-    if (!isEventEnabled(kind)) return undefined;
+    if (!isPushEnabled()) {
+      return undefined;
+    }
+    if (!isEventEnabled(kind)) {
+      return undefined;
+    }
     // [前台抑制](../../../../docs/terms.md)：人就盯着这条会话，审批卡片已经在他
     // 眼前了，再弹一条系统通知纯属打扰。
-    if (isPresent(userId, conversationId)) return undefined;
+    if (isPresent(userId, conversationId)) {
+      return undefined;
+    }
     const row = getConversation(deps.db, conversationId, userId);
-    if (row === undefined) return undefined; // 会话已删/易主，没有可通知的对象
+    if (row === undefined) {
+      return undefined;
+    } // 会话已删/易主，没有可通知的对象
     return truncate(row.title, MAX_TITLE);
   }
 
@@ -224,7 +238,9 @@ export function createChatNotifier(deps: ChatNotifierDeps): ChatNotifier {
     approvalPending(input) {
       guard('approvalPending', () => {
         const title = prepare('approval', input.conversationId, input.userId);
-        if (title === undefined) return;
+        if (title === undefined) {
+          return;
+        }
         dispatch(
           'approval',
           input.conversationId,
@@ -241,7 +257,9 @@ export function createChatNotifier(deps: ChatNotifierDeps): ChatNotifier {
     questionPending(input) {
       guard('questionPending', () => {
         const title = prepare('question', input.conversationId, input.userId);
-        if (title === undefined) return;
+        if (title === undefined) {
+          return;
+        }
         dispatch(
           'question',
           input.conversationId,
@@ -258,12 +276,19 @@ export function createChatNotifier(deps: ChatNotifierDeps): ChatNotifier {
         const kind: PushKind =
           input.status === 'completed' ? 'turn-done' : 'turn-failed';
         const title = prepare(kind, input.conversationId, input.userId);
-        if (title === undefined) return;
+        if (title === undefined) {
+          return;
+        }
 
         // 队列抑制（技术方案 §5.3）：[待发队列](../../../../docs/terms.md)非空意味着
         // 下一轮马上就开始——这不是"活干完了"，只是一轮的分界。不抑制的话用户会被
         // 连着叫醒五次，每次回来都发现它又开始跑下一条了。
-        if (listQueuedMessages(deps.db, input.conversationId, log).length > 0) {
+        const row = getConversationById(deps.db, input.conversationId);
+        const queued =
+          row === undefined ?
+            []
+          : parseQueuedInputs(row.queuedMessagesJson, row.id, log);
+        if (queued.length > 0) {
           return;
         }
 

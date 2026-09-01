@@ -2,13 +2,14 @@
  * telemetry 落库（src/telemetry.ts，docs/tech/chat-webapp.md §11.4）：
  * functionId 解析、载荷收敛（大块正文换摘要 + 16KB 封顶）、事件回调的
  * "永不影响 turn"守卫、getChatTelemetry 的 vitest 守卫，以及经
- * buildSession 全链路（core loop 注入 functionId → 集成落 SQLite →
+ * 建 session 全链路（core loop 注入 functionId → 集成落 SQLite →
  * 按 (session_id, turn) 查回）的端到端验证。
  */
+import { defaultSessionFactory } from '@nimbo/agent';
 import { MemoryFS } from '@nimbo/sdk';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { buildSession } from '../src/agent/chat-agent.js';
+import { buildInstructions } from '../src/agent/chat-agent.js';
 import { loadSkillsFromWorkspace } from '../src/agent/skill-catalog.js';
 import {
   createSqliteTelemetry,
@@ -18,23 +19,38 @@ import {
   parseFunctionId,
 } from '../src/telemetry.js';
 import { stopOnlyModel, toolCallThenStopModel } from './helpers/mock-model.js';
-import { silentLogger } from './helpers/silent-logger.js';
 import { drainTurn } from './helpers/nimbo-chunks.js';
+import { silentLogger } from './helpers/silent-logger.js';
 
 describe('parseFunctionId', () => {
   it('splits "<agentSessionId>#<turn>" into the two columns', () => {
-    expect(parseFunctionId('sess-1#3')).toEqual({ agentSessionId: 'sess-1', turn: 3 });
+    expect(parseFunctionId('sess-1#3')).toEqual({
+      agentSessionId: 'sess-1',
+      turn: 3,
+    });
   });
 
   it('splits on the LAST hash, so a agentSessionId containing "#" still round-trips', () => {
-    expect(parseFunctionId('a#b#7')).toEqual({ agentSessionId: 'a#b', turn: 7 });
+    expect(parseFunctionId('a#b#7')).toEqual({
+      agentSessionId: 'a#b',
+      turn: 7,
+    });
   });
 
   it('falls back gracefully for undefined / empty / non-numeric-turn / hash-less ids', () => {
-    expect(parseFunctionId(undefined)).toEqual({ agentSessionId: null, turn: null });
+    expect(parseFunctionId(undefined)).toEqual({
+      agentSessionId: null,
+      turn: null,
+    });
     expect(parseFunctionId('')).toEqual({ agentSessionId: null, turn: null });
-    expect(parseFunctionId('no-hash')).toEqual({ agentSessionId: 'no-hash', turn: null });
-    expect(parseFunctionId('sess#NaN-ish')).toEqual({ agentSessionId: 'sess#NaN-ish', turn: null });
+    expect(parseFunctionId('no-hash')).toEqual({
+      agentSessionId: 'no-hash',
+      turn: null,
+    });
+    expect(parseFunctionId('sess#NaN-ish')).toEqual({
+      agentSessionId: 'sess#NaN-ish',
+      turn: null,
+    });
   });
 });
 
@@ -65,7 +81,10 @@ describe('curatePayload', () => {
   it('degrades to a serializationError stub instead of throwing (circular reference)', () => {
     const circular: { self?: unknown } = {};
     circular.self = circular;
-    const parsed = JSON.parse(curatePayload(circular)) as Record<string, unknown>;
+    const parsed = JSON.parse(curatePayload(circular)) as Record<
+      string,
+      unknown
+    >;
     expect(typeof parsed.serializationError).toBe('string');
   });
 });
@@ -84,7 +103,10 @@ describe('createTelemetryStore + createSqliteTelemetry', () => {
     const rows = store.list('sess-9', 2);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.eventType).toBe('error');
-    const payload = JSON.parse(rows[0]?.payloadJson ?? '{}') as Record<string, unknown>;
+    const payload = JSON.parse(rows[0]?.payloadJson ?? '{}') as Record<
+      string,
+      unknown
+    >;
     expect(payload.performance).toEqual({ responseTimeMs: 123 });
     // functionId 已拆列，载荷里不再重复。
     expect(payload.functionId).toBeUndefined();
@@ -148,10 +170,12 @@ describe('getChatTelemetry', () => {
   });
 });
 
-describe('端到端：buildSession → core loop 注入 functionId → SQLite 可按 turn 查回', () => {
+describe('端到端：建 session → core loop 注入 functionId → SQLite 可按 turn 查回', () => {
   const stores: { close(): void }[] = [];
   afterEach(() => {
-    for (const store of stores.splice(0)) store.close();
+    for (const store of stores.splice(0)) {
+      store.close();
+    }
   });
 
   it('a drained turn lands model-call events under (session.id, turn 1)', async () => {
@@ -167,29 +191,40 @@ describe('端到端：buildSession → core loop 注入 functionId → SQLite �
       exec: () =>
         Promise.resolve({ exitCode: 0, stdout: '', stderr: '', durationMs: 1 }),
     };
-    const session = await buildSession({
-      model: stopOnlyModel('done'),
-      workspace: Object.assign(fs, exec),
-      skills: await loadSkillsFromWorkspace(fs, silentLogger),
-      repoOwner: 'acme',
-      repoName: 'demo',
-      defaultBranch: 'main',
-      branchName: 'nimbo/chat-t1',
-      telemetry: {
-        integrations: [createSqliteTelemetry(store)],
-        recordInputs: false,
-        recordOutputs: false,
+    // `@nimbo/agent` 的默认工厂——与 `agent/runtime.ts` 每一轮真正用的是同一段装配
+    // （文件工具八件套 + core 的 `createSession`），所以这条 e2e 验的是生产那条路。
+    const session = await defaultSessionFactory(
+      {
+        model: stopOnlyModel('done'),
+        skills: await loadSkillsFromWorkspace(fs, silentLogger),
+        instructions: buildInstructions({
+          repoOwner: 'acme',
+          repoName: 'demo',
+          defaultBranch: 'main',
+          branchName: 'nimbo/chat-t1',
+          hasWebSearch: false,
+        }),
       },
-    });
+      {
+        workspace: Object.assign(fs, exec),
+        telemetry: {
+          integrations: [createSqliteTelemetry(store)],
+          recordInputs: false,
+          recordOutputs: false,
+        },
+      },
+    );
 
     await drainTurn(session.stream('hi'));
 
-    const rows = store.list(session.id, 1);
+    const rows = store.list(session.toJSON().id, 1);
     const eventTypes = rows.map((row) => row.eventType);
     expect(eventTypes).toContain('model-call-start');
     expect(eventTypes).toContain('model-call-end');
     // 载荷是收敛后的 JSON（可解析、无大块正文键的原文）。
-    for (const row of rows) expect(() => JSON.parse(row.payloadJson)).not.toThrow();
+    for (const row of rows) {
+      expect(() => JSON.parse(row.payloadJson)).not.toThrow();
+    }
   });
 
   it('a turn that runs a tool lands tool-execution events (回归护栏：core settleExecution 补发 → SQLite 集成必须挂 onToolExecution* 才接得住)', async () => {
@@ -205,30 +240,37 @@ describe('端到端：buildSession → core loop 注入 functionId → SQLite �
       exec: () =>
         Promise.resolve({ exitCode: 0, stdout: '', stderr: '', durationMs: 1 }),
     };
-    const session = await buildSession({
-      // 一步工具调用（write-file 走 settleExecution → executeToolCall）后停。
-      model: toolCallThenStopModel(
-        'write-file',
-        { path: '/notes.txt', content: 'hi' },
-        'call_1',
-        'wrote it',
-      ),
-      workspace: Object.assign(fs, exec),
-      skills: await loadSkillsFromWorkspace(fs, silentLogger),
-      repoOwner: 'acme',
-      repoName: 'demo',
-      defaultBranch: 'main',
-      branchName: 'nimbo/chat-tool',
-      telemetry: {
-        integrations: [createSqliteTelemetry(store)],
-        recordInputs: false,
-        recordOutputs: false,
+    const session = await defaultSessionFactory(
+      {
+        // 一步工具调用（write-file 走 settleExecution → executeToolCall）后停。
+        model: toolCallThenStopModel(
+          'write-file',
+          { path: '/notes.txt', content: 'hi' },
+          'call_1',
+          'wrote it',
+        ),
+        skills: await loadSkillsFromWorkspace(fs, silentLogger),
+        instructions: buildInstructions({
+          repoOwner: 'acme',
+          repoName: 'demo',
+          defaultBranch: 'main',
+          branchName: 'nimbo/chat-tool',
+          hasWebSearch: false,
+        }),
       },
-    });
+      {
+        workspace: Object.assign(fs, exec),
+        telemetry: {
+          integrations: [createSqliteTelemetry(store)],
+          recordInputs: false,
+          recordOutputs: false,
+        },
+      },
+    );
 
     await drainTurn(session.stream('write a file'));
 
-    const rows = store.list(session.id, 1);
+    const rows = store.list(session.toJSON().id, 1);
     const eventTypes = rows.map((row) => row.eventType);
     // 若 createSqliteTelemetry 漏挂 onToolExecutionStart/End，core 发出的工具
     // 事件无人记录——账本 toolDurationMs>0、遥测却零工具事件（2026-07-17 bug）。

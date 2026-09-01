@@ -14,25 +14,25 @@ import type { NimboChunk, NimboUIMessage } from '@nimbo/core';
 // - `session.stream()` now yields `NimboChunk` (ai's `UIMessageChunk`
 //   vocabulary, instantiated for `NimboUIMessage` — `@nimbo/core`'s
 //   `state.ts`) directly — the wire's live tail forwards these verbatim
-//   (`turn-runner/drive.ts`'s `driveTurn`), no server-invented wrapper events left.
+//   (`@nimbo/agent`'s `runtime/turn.ts`), no server-invented wrapper events left.
 // - Approval visibility is now a `tool-approval-request`/
 //   `tool-approval-response` chunk pair `@nimbo/core`'s own loop produces
 //   (docs/tech/single-ledger.md §6.1) — the server no longer emits its own `approval.*` events
-//   (`turn-runner/human-bridge.ts`'s 人审通道 bridge, `requestReview`/`resolveReview`, is
-//   pure in-memory promise routing now, no `TurnEmitter` calls at all).
+//   (`@nimbo/agent`'s `runtime/human.ts` 人审通道 bridge is pure in-memory promise
+//   routing, no server-emitted events at all).
 // - `ask-user` visibility is the `tool-ask-user` part's own
 //   `input-available`/`output-available` states (already a normal tool call
 //   as far as the loop is concerned) — no `question.*` events either.
 // - The turn-starting user message now has a real wire position of its own
 //   (closing what used to be a known gap inherited from `@nimbo/core`'s
 //   `Session.stream()`, which pushes it onto its own internal ledger but
-//   never yields anything for it): `turn-runner/drive.ts`'s `driveTurn` synthesizes
+//   never yields anything for it): `@nimbo/agent`'s `runtime/turn.ts` synthesizes
 //   a user `NimboUIMessage` (its own `id`, a single `text` part — chat input
 //   is always plain text) *before* it ever starts consuming
 //   `session.stream()`, persists it as a `kind = 'message'` row, and
 //   broadcasts it as a `MessageFrame` — sharing the exact same monotonic
 //   `seq` counter the turn's subsequent chunks use
-//   (`turn-runner/persistence.ts`'s `createTurnEmitter`), so any listener sees it
+//   (the turn's `Grant.nextSeq()`), so any listener sees it
 //   strictly before anything else from that turn. `finalizeTurnPersistence`
 //   skips over `@nimbo/core`'s own (structurally-identical, different-`id`)
 //   copy of that same message when persisting the turn's newly-appended
@@ -46,12 +46,11 @@ import type { NimboChunk, NimboUIMessage } from '@nimbo/core';
 //
 // - **Live tail** (`GET .../stream`, its non-replay portion): mostly a
 //   stream of `ChunkEnvelope`s (`{ seq?, chunk }`) — `seq` present ⇔ this
-//   chunk was durable (persisted, replayable — `turn-runner/persistence.ts`'s
-//   `isDurableChunk`); absent ⇔ ephemeral (`text-delta`/`reasoning-delta`/any
+//   chunk was durable (replayable — `@nimbo/agent`'s `isDurableChunk`); absent ⇔ ephemeral (`text-delta`/`reasoning-delta`/any
 //   `transient: true` data part — P13-1's durable/ephemeral split, carried
 //   over verbatim) — plus exactly one `MessageFrame` per turn, its very
 //   first frame: the synthesized turn-start user message (see above).
-// - **Replay** (`GET .../events`, and `GET .../stream`'s replay-before-tail
+// - **Replay** (`GET .../messages`, and `GET .../stream`'s replay-before-tail
 //   portion): a sequence of `ChatReplayFrame`s, each *either* a
 //   `ChunkEnvelope` (a still-`kind = 'chunk'` row — the in-progress or
 //   crashed turn's durable chunks) *or* a `MessageFrame` (`{ seq, message }`
@@ -127,10 +126,10 @@ export type ChunkEnvelope = z.infer<typeof chunkEnvelopeSchema>;
  * `{ seq, message }` — usually replay-only (see file header): a finished
  * `NimboUIMessage`, read back verbatim from a `kind = 'message'` row. Most
  * `kind = 'message'` rows are only ever written once a turn has already
- * finished (`turn-runner/persistence.ts`'s `finalizeTurnPersistence`), by which point
+ * finished (`@nimbo/agent`'s `finalize`), by which point
  * there's no "live" activity left for that turn to broadcast — the one
  * exception is the turn-start synthesized user message, which *is*
- * broadcast live (as the turn's very first frame, `turn-runner/drive.ts`'s
+ * broadcast live (as the turn's very first frame, `@nimbo/agent`'s
  * `driveTurn`) the same instant it's persisted, precisely so a client never
  * has to guess at its own just-sent message's final wire shape.
  */
@@ -149,7 +148,7 @@ export type MessageFrame = z.infer<typeof messageFrameSchema>;
  * 队列端点响应的元素。
  *
  * `userId` 不是冗余镜像 conversation owner：[出队](../../../../docs/terms.md)起轮时
- * [会话级授权](../../../../docs/terms.md)按「本轮发起者」匹配（`session-grants.ts`），
+ * [会话级授权](../../../../docs/terms.md)按「本轮发起者」匹配（`conversation-grants.ts`），
  * 必须知道这条消息是谁排的。
  */
 export const QueuedMessageSchema = z
@@ -222,26 +221,24 @@ export const chatReplayFrameSchema = z.union([
 ]);
 
 export type ChatReplayFrame =
-  | ChunkEnvelope
-  | MessageFrame
-  | QueueFrame
-  | TurnStateFrame;
+  ChunkEnvelope | MessageFrame | QueueFrame | TurnStateFrame;
 
 /**
- * `GET .../events` response shape (docs/tech/chat-webapp.md §2.2 "契约细化", front-end-consumed
- * contract — NOT a bare array): every persisted row for the session, in seq
- * order — thanks to `store.ts`'s `deleteChunkEventsAfter` GC running at the
- * end of every gracefully-finished turn, this is already exactly "finished
- * message history + the in-progress (or crashed) turn's durable chunks"
- * (docs/tech/single-ledger.md §5 单-3's replay algorithm) with no extra filtering needed on the
- * way out.
+ * `GET .../messages` response shape (docs/tech/chat-webapp.md §2.2 "契约细化", front-end-consumed
+ * contract — NOT a bare array): every persisted row for the session, in seq order.
+ *
+ * **账本里现在只有成品消息。** [进行中草稿](../../../../docs/terms.md)搬进内存之后
+ * （`@nimbo/agent`），这一列不再写 `kind = 'chunk'` 行，那套「跑完 GC 掉本轮 chunk」的
+ * 逻辑也随之删除。回放因此就是一串 `MessageFrame`；`ChunkEnvelope` 这一支只为**迁移前
+ * 留下的存量 chunk 行**保留，读时被 `agent/persistence.ts` 过滤掉。进行中那一轮的草稿
+ * 走[直播流](../../../../docs/terms.md)重连补发，不再经这个端点。
  */
-export const ConversationEventsListSchema = z
+export const ConversationMessagesListSchema = z
   .object({ frames: z.array(chatReplayFrameSchema) })
-  .openapi('ConversationEventsList');
+  .openapi('ConversationMessagesList');
 
-export type ConversationEventsListDto = z.infer<
-  typeof ConversationEventsListSchema
+export type ConversationMessagesListDto = z.infer<
+  typeof ConversationMessagesListSchema
 >;
 
 // ---------------------------------------------------------------------------
@@ -284,6 +281,17 @@ export const ConversationSchema = z
      * 与 `queuedMessages` 同一姿态——前端拿到会话就拿到菜单，零额外往返。
      */
     availableSkills: z.array(SkillSummarySchema),
+    /**
+     * 这个会话此刻有没有[轮](../../../../docs/terms.md)在跑——**服务端的权威答案**，
+     * 直接读[起轮标记](../../../../docs/terms.md)那一列（`conversations.turn_holder`），
+     * 零额外查询。
+     *
+     * 在它之前前端只能猜（「历史回放的最后一帧是不是 chunk」）。[进行中草稿](../../../../docs/terms.md)
+     * 搬进内存之后账本里根本不再有 chunk 行，那个猜测**恒为假**——于是页面刚打开的那几十
+     * 毫秒里，一个明明在跑的会话会被当成空闲，用户此时发的消息会去「起新轮」而不是
+     * [排队](../../../../docs/terms.md)。有了这个字段就不用猜了。
+     */
+    turnInProgress: z.boolean(),
     createdAt: z.string(),
   })
   .openapi('Conversation');
@@ -322,15 +330,16 @@ export const PostChatMessageInputSchema = z
  * `text` went into the conversation's 待发队列 instead, to be dequeued as the
  * next turn once this one finishes.
  *
- * 第四档 `'aborted'`（docs/tech/turn-abort.md §3.3）：这一轮起来了一半——正在
- * [起轮装配](../../../../docs/terms.md)——就被用户按[停止](../../../../docs/terms.md)
- * 掐掉了，**从没启动**。它仍是 202 而不是错误：用户要的结果达成了。这一档的收尾
- * （用户消息 + 「已停止」标记）照常走 `GET .../stream`，与其余三档一致。
+ * **曾经有第四档 `'aborted'`，已经取消。** 轮编排搬进 `@nimbo/agent` 之后
+ * [起轮占位](../../../../docs/terms.md)成了装配的**第一件事**，所以本端点一登记就返回
+ * `'started'`，不再等装配走完——老实现是 ack 卡在装配里，才有机会把它改判成 `aborted`。
+ * 装配窗口里按停止的行为没变（照样停），只是那条 ack 说的是 `'started'`，「已停止」这个
+ * 结果跟其余情形一样走 `GET .../stream`。框架的 `EnqueueResult` 也只有这三档 + 拒绝。
  */
 export const StartTurnAckSchema = z
   .object({
     ok: z.literal(true),
-    mode: z.enum(['started', 'steered', 'queued', 'aborted']),
+    mode: z.enum(['started', 'steered', 'queued']),
   })
   .openapi('StartTurnAck');
 
@@ -359,7 +368,8 @@ export const ConversationParamsSchema = z.object({
     .openapi({ param: { name: 'id', in: 'path' }, examples: ['3f1b2c4d-...'] }),
 });
 
-export const ConversationEventsQuerySchema = z.object({
+/** 两个回放端点（`GET .../messages` 与 `GET .../stream`）共用的断线续传游标。 */
+export const ConversationReplayQuerySchema = z.object({
   after: z.coerce
     .number()
     .int()
@@ -408,7 +418,7 @@ export const ChatQueueParamsSchema = z.object({
  * `allow-session` = 会话级授权（docs/terms.md §四）：放行本次 **并且** 记住这次
  * 具体调用 (tool + 入参指纹)，本会话内相同调用后续直接放行、不再弹卡片。对
  * `@nimbo/core` 而言它和 `allow` 无异（都映射成 `HumanDecision.{behavior:'allow'}`）
- * ——「会话内记住」是纯 chat 层概念（`session-grants.ts`），core 不感知。
+ * ——「会话内记住」是纯 chat 层概念（`conversation-grants.ts`），core 不感知。
  */
 export const PostApprovalInputSchema = z
   .object({

@@ -1,0 +1,12 @@
+-- 裁决表的 scope 取值更名：'broader' → 'conversation'（2026-08-22）。
+--
+-- 起因是术语对齐：框架侧原本记的是含糊的「比这一次更宽」（`broader`），不定义宽到哪。
+-- 但轮编排框架本来就知道 conversation 这个粒度（它的 API 全是 `enqueue(conversationId, …)`），
+-- 所以直接记准确的范围名更好。`session` 这个候选被否掉了——它作为「聊天会话」的叫法
+-- 已于 2026-07-17 整体退役（见 0004 那次迁移），再用会造成第四重超载。
+--
+-- 注意：`scope` 列没有 CHECK 约束（drizzle 的 `enum` 只是类型级的），所以这里只需要
+-- 把存量取值刷一遍，不用重建表。本表是**纯审计表**——没有任何代码读 scope 回来做放行
+-- 判断（真正的放行走 `conversation_grants`），所以刷不刷都不影响行为，刷是为了让
+-- 库里的值与 TS 类型不再对不上。
+UPDATE `conversation_decisions` SET `scope` = 'conversation' WHERE `scope` = 'broader';

@@ -76,6 +76,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SkillSummary"
+        turnInProgress:
+          type: boolean
         createdAt:
           type: string
       required:
@@ -89,6 +91,7 @@ components:
         - lastActiveAt
         - queuedMessages
         - availableSkills
+        - turnInProgress
         - createdAt
     QueuedMessage:
       type: object
@@ -129,7 +132,7 @@ components:
           enum:
             - vercel
             - e2b
-    ConversationEventsList:
+    ConversationMessagesList:
       type: object
       properties:
         frames:
@@ -207,7 +210,6 @@ components:
             - started
             - steered
             - queued
-            - aborted
       required:
         - ok
         - mode
@@ -467,11 +469,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
-  /api/chat/conversations/{id}/events:
+  /api/chat/conversations/{id}/messages:
     get:
       tags:
         - Chat
-      summary: Replay a session’s persisted agent events (reconnection/history)
+      summary: 回放一个会话落盘的成品消息（历史 / 断线续传）
       parameters:
         - schema:
             type: string
@@ -489,11 +491,11 @@ paths:
           in: query
       responses:
         "200":
-          description: Events, in seq order
+          description: Messages, in seq order
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ConversationEventsList"
+                $ref: "#/components/schemas/ConversationMessagesList"
         "401":
           description: Unauthorized
           content:
@@ -502,6 +504,76 @@ paths:
                 $ref: "#/components/schemas/ApiError"
         "404":
           description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    post:
+      tags:
+        - Chat
+      summary: 'Start a turn, queue this message for the next one, or steer the
+        in-progress turn (docs/tech/steer-and-queue.md §4.1): with no turn
+        running this acquires the sandbox, builds the session and hands off to
+        the in-process turn runner (mode "started"); with one running it either
+        queues `text` onto the conversation’s 待发队列 (mode "queued", the default)
+        or injects it into the running turn via `Session.steer()` (mode
+        "steered", `intent: "steer"`). Either way, events arrive over `GET
+        .../stream`, not this response'
+      parameters:
+        - schema:
+            type: string
+            examples: *a2
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostChatMessageInput"
+      responses:
+        "202":
+          description: Accepted — see `mode` ("started" | "steered" | "queued");
+            poll/stream `GET .../stream` for its events. Stopping a turn while
+            it is still being assembled still works, but the ack for that
+            message is "started" — the stopped-turn frames arrive on the stream
+            like any other outcome
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StartTurnAck"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Either the 待发队列 is full (docs/features/steer-and-queue.md §2.3 —
+            nothing is ever silently dropped), or a turn was already in progress
+            and could not be steered either (narrow race — the turn ended
+            between the steer attempt and the fallback start)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Model/sandbox configuration or provisioning error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: "The server is shutting down (docs/tech/graceful-shutdown.md §3.3)
+            — no new turn is accepted during shutdown. Retryable: resend once
+            the new process is up"
           content:
             application/json:
               schema:
@@ -544,77 +616,6 @@ paths:
                 $ref: "#/components/schemas/ApiError"
         "404":
           description: Not found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-  /api/chat/conversations/{id}/messages:
-    post:
-      tags:
-        - Chat
-      summary: 'Start a turn, queue this message for the next one, or steer the
-        in-progress turn (docs/tech/steer-and-queue.md §4.1): with no turn
-        running this acquires the sandbox, builds the session and hands off to
-        the in-process turn runner (mode "started"); with one running it either
-        queues `text` onto the conversation’s 待发队列 (mode "queued", the default)
-        or injects it into the running turn via `Session.steer()` (mode
-        "steered", `intent: "steer"`). Either way, events arrive over `GET
-        .../stream`, not this response'
-      parameters:
-        - schema:
-            type: string
-            examples: *a2
-          required: true
-          name: id
-          in: path
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/PostChatMessageInput"
-      responses:
-        "202":
-          description: Accepted — see `mode` ("started" | "steered" | "queued" |
-            "aborted"); poll/stream `GET .../stream` for its events. "aborted"
-            (docs/tech/turn-abort.md §3.3) means the user stopped this turn
-            while it was still being assembled, so it never started running —
-            the stopped-turn frames are on the stream like any other outcome
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/StartTurnAck"
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "404":
-          description: Not found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "409":
-          description: Either the 待发队列 is full (docs/features/steer-and-queue.md §2.3 —
-            nothing is ever silently dropped), or a turn was already in progress
-            and could not be steered either (narrow race — the turn ended
-            between the steer attempt and the fallback start)
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "500":
-          description: Model/sandbox configuration or provisioning error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "503":
-          description: "The server is shutting down (docs/tech/graceful-shutdown.md §3.3)
-            — no new turn is accepted during shutdown. Retryable: resend once
-            the new process is up"
           content:
             application/json:
               schema:

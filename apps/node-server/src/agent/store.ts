@@ -1,30 +1,24 @@
 /**
- * `conversations` + `conversation_events` reads/writes (docs/tech/chat-webapp.md
- * §2.2 `store.ts`, docs/tech/single-ledger.md §5 单-3 "UIMessage 单
- * 账本") — plain functions over an injected `Db` (the same
- * `BetterSQLite3Database<typeof schema>` shape as `db/instance.ts`'s
- * singleton), so tests can point them at an isolated in-memory database
- * instead of the real `db/instance.ts` (see test/agent/store.test.ts).
+ * `conversations` 这张表的读写——纯函数 + 注入的 `Db`，所以测试可以指向一个隔离的内存
+ * 数据库而不是 `db/instance.ts` 的单例（见 test/agent/store.test.ts）。
  *
- * This module stays deliberately agnostic of `@nimbo/core`'s concrete
- * `NimboUIMessage`/`NimboChunk` types (same discipline the pre-migration
- * version already had for `SessionEvent`) — every helper here trades in
- * plain strings (`payloadJson`) and the `kind` discriminator; typed
- * parsing/serialization is the caller's job (`turn-runner/` writes,
- * `routes/chat.ts` reads back via `schemas/chat.ts`'s zod schemas).
+ * **[账本](../../../../docs/terms.md)、[裁决表](../../../../docs/terms.md)、
+ * [待发队列](../../../../docs/terms.md)、[起轮标记](../../../../docs/terms.md)不在这里**
+ * ——它们是 `@nimbo/agent` 的宿主能力接口，实现落在 `persistence.ts`。本文件只剩
+ * chat 应用自己的那些列：标题、仓库、分支、沙盒 provider/名字、[skill 清单](../../../../docs/terms.md)缓存。
  */
-import { randomUUID } from 'node:crypto';
-
 import type { InferSelectModel } from 'drizzle-orm';
-import { and, asc, desc, eq, gt, max } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 
 import type { db as DbInstance } from '../db/instance.js';
 import { conversationEvents, conversations } from '../db/schema.js';
 import type { Logger } from '../logger.js';
 import { logger as defaultLogger } from '../logger.js';
-import type { QueuedMessage, SkillSummaryDto } from '../schemas/chat.js';
-import { QueuedMessageSchema, SkillSummarySchema } from '../schemas/chat.js';
+import type { SkillSummaryDto } from '../schemas/chat.js';
+import { SkillSummarySchema } from '../schemas/chat.js';
+
+const LOG_SCOPE = 'store';
 
 export type Db = typeof DbInstance;
 
@@ -73,7 +67,9 @@ export function createConversation(
     agentSessionCreatedAt: null,
     agentSessionTurn: null,
     queuedMessagesJson: '[]', // 空[待发队列](../../../../docs/terms.md)，与列默认值一致
-    availableSkillsJson: '[]', // 空 [skill 清单](../../../../docs/terms.md)——沙盒就绪后由 `writeAvailableSkills` 首次填上
+    availableSkillsJson: '[]', // 空 [skill 清单](../../../../docs/terms.md)——沙盒就绪后首次填上
+    turnHolder: null, // [起轮标记](../../../../docs/terms.md)：没有轮在跑
+    turnStartedAt: null,
     createdAt: now,
   };
   db.insert(conversations).values(row).run();
@@ -101,6 +97,21 @@ export function getConversation(
     .get();
 }
 
+/**
+ * 不带属主过滤的按 id 读——**只给系统级路径用**（`runtime.ts` 的
+ * [起轮装配](../../../../docs/terms.md)：这一轮可能是[自动出队](../../../../docs/terms.md)
+ * 起的，此刻没有请求上下文，属主校验早在入队那次请求里做过了）。
+ *
+ * 请求路径上一律用 `getConversation(db, id, userId)`——不存在与不属于自己都回 404，
+ * 不泄露存在性。
+ */
+export function getConversationById(
+  db: Db,
+  id: string,
+): ConversationRow | undefined {
+  return db.select().from(conversations).where(eq(conversations.id, id)).get();
+}
+
 export interface ConversationPatch {
   status?: ConversationStatus;
   lastActiveAt?: Date;
@@ -109,7 +120,7 @@ export interface ConversationPatch {
   /**
    * The nimbo session-scalar header (docs/tech/single-ledger.md §5 单-3, schema.ts's own doc
    * comment) — all three always written together, at the end of every turn
-   * that finishes gracefully (`turn-runner/persistence.ts`'s `finalizeTurnPersistence`).
+   * that finishes gracefully (`@nimbo/agent`'s `finalize`).
    * There is no partial-update case, so this is one combined optional group
    * rather than three independent optional fields.
    */
@@ -141,201 +152,18 @@ export function updateConversation(
     .run();
 }
 
-// ---- conversation_events ----
-
-/** Seq continuation point for a session (docs/tech/chat-webapp.md §2.2 "seq 单调，从 DB max(seq) 续") — `0` if the session has no events yet, so the first appended event is `seq = 1`. Spans both `kind`s — one counter for the whole ledger (docs/tech/single-ledger.md §5 单-3). */
-export function getMaxEventSeq(db: Db, conversationId: string): number {
-  const row = db
-    .select({ value: max(conversationEvents.seq) })
-    .from(conversationEvents)
-    .where(eq(conversationEvents.conversationId, conversationId))
-    .get();
-  return row?.value ?? 0;
-}
-
-/**
- * 全部会话的 id（**不按用户过滤**）——给[崩溃恢复](../../../../docs/terms.md)扫
- * [孤儿轮](../../../../docs/terms.md)用（`crash-recovery.ts`，启动时跑一次）。
- *
- * 这是本文件唯一一个不带 `userId` 的会话读函数，刻意如此：崩溃恢复是**系统级**维护
- * 动作，不属于任何用户，也不该受某个用户的可见范围限制。别在请求路径上用它。
- */
-export function listAllConversationIds(db: Db): string[] {
-  return db
-    .select({ id: conversations.id })
-    .from(conversations)
-    .all()
-    .map((row) => row.id);
-}
-
-/**
- * 一个会话[账本](../../../../docs/terms.md)里的**最后一行**（按 seq），空会话返回
- * `undefined`——[孤儿轮](../../../../docs/terms.md)的识别就看它是不是 `kind = 'chunk'`
- * （docs/tech/graceful-shutdown.md §5）。
- *
- * 单独一条 `ORDER BY seq DESC LIMIT 1`，而不是 `listConversationEvents(...).at(-1)`：
- * 崩溃恢复要对**每个**会话问一次，把整份历史读进内存再丢掉太浪费。
- */
-export function getLastConversationEvent(
-  db: Db,
-  conversationId: string,
-): ConversationEventRow | undefined {
-  return db
-    .select()
-    .from(conversationEvents)
-    .where(eq(conversationEvents.conversationId, conversationId))
-    .orderBy(desc(conversationEvents.seq))
-    .limit(1)
-    .get();
-}
-
-export interface AppendConversationEventInput {
-  conversationId: string;
-  seq: number;
-  kind: ConversationEventKind;
-  payloadJson: string;
-}
-
-export function appendConversationEvent(
-  db: Db,
-  input: AppendConversationEventInput,
-): ConversationEventRow {
-  const row: ConversationEventRow = {
-    conversationId: input.conversationId,
-    seq: input.seq,
-    ts: new Date(),
-    kind: input.kind,
-    payloadJson: input.payloadJson,
-  };
-  db.insert(conversationEvents).values(row).run();
-  return row;
-}
-
-/**
- * Replay, in arrival (seq) order; `afterSeq` (exclusive) drives
- * `GET .../events?after=<seq>` / `GET .../stream?after=<seq>` pagination
- * (docs/tech/chat-webapp.md §2.2). Returns both `kind`s mixed together — thanks to
- * `deleteChunkEventsAfter` running at the end of every turn that finishes
- * gracefully, whatever rows remain are already exactly "finished-message
- * history + the currently in-progress (or crashed) turn's durable chunks"
- * (docs/tech/single-ledger.md §5 单-3's replay algorithm), with no extra filtering needed here.
- */
-export function listConversationEvents(
-  db: Db,
-  conversationId: string,
-  afterSeq?: number,
-): ConversationEventRow[] {
-  const condition =
-    afterSeq !== undefined ?
-      and(
-        eq(conversationEvents.conversationId, conversationId),
-        gt(conversationEvents.seq, afterSeq),
-      )
-    : eq(conversationEvents.conversationId, conversationId);
-  return db
-    .select()
-    .from(conversationEvents)
-    .where(condition)
-    .orderBy(asc(conversationEvents.seq))
-    .all();
-}
-
-/**
- * Turn-finalization GC (docs/tech/single-ledger.md §5 单-3 "turn 收尾…GC 本轮的 chunk 条目"):
- * deletes every `kind = 'chunk'` row with `seq > afterSeq` for this session.
- * `afterSeq` is the session's `getMaxEventSeq` reading taken at the *start*
- * of the turn being finalized (`turn-runner/start.ts`'s `startTurn`) — since a
- * session only ever has one turn driving it at a time (`startTurn` rejects a
- * second concurrent one), every `chunk`-kind row with a higher seq than that
- * necessarily belongs to *this* turn (any earlier turn's stray chunk rows,
- * from a crash, already have `seq <= afterSeq` and are left untouched — see
- * schema.ts's own doc comment on accepted crash residue). Message-kind rows
- * (this same turn's own, just appended) are unaffected by the `kind` filter.
- */
-export function deleteChunkEventsAfter(
-  db: Db,
-  conversationId: string,
-  afterSeq: number,
-): void {
-  db.delete(conversationEvents)
-    .where(
-      and(
-        eq(conversationEvents.conversationId, conversationId),
-        eq(conversationEvents.kind, 'chunk'),
-        gt(conversationEvents.seq, afterSeq),
-      ),
-    )
-    .run();
-}
-
-// ---------------------------------------------------------------------------
-// 待发队列（[排队](../../../../docs/terms.md)，docs/tech/steer-and-queue.md §2）
-//
-// 全部落在 `conversations.queued_messages_json` 这一列上——**不是**账本
-// （`conversation_events`）的一部分：账本记「已发生的事」（`kind='message'` 行永不
-// 删除、`seq` 被回放/续传/GC 三处依赖），排队消息是「尚未发生的意图」（可删可清空）。
-// 见 `db/schema.ts` 该列的注释与 docs/tech/steer-and-queue.md §2。
-//
-// 每个写操作都是**读-改-写整个数组**：读列 → 改数组 → 写回。中间不 `await`
-// （better-sqlite3 全同步），所以在 chat 应用的单进程前提下无并发丢更新窗口
-// （多进程部署的限制见 docs/tech/steer-and-queue.md §7）。
-// ---------------------------------------------------------------------------
-
-const LOG_SCOPE = 'store';
-
-/** 一个会话最多排多少条（docs/features/steer-and-queue.md §2.3）——满了 `enqueueMessage` 返回 `'full'`，路由转成 409，绝不静默丢弃。 */
-export const MAX_QUEUED_MESSAGES = 10;
-
-/** JSON 列的反序列化边界：`JSON.parse` 的 `any` 直接喂进 `safeParse`，不落进任何具名变量——`any` 不会逃出这个表达式（与 `schemas/chat.ts` 里同类边界一致的姿态）。 */
-const queuedMessagesSchema = z.array(QueuedMessageSchema);
-
-/**
- * `queued_messages_json` 列 → `QueuedMessage[]`。列内容损坏（手改过库、旧版本写坏）时
- * **当作空队列**并记一行 warn，而不是抛出——队列是辅助状态，不该让一次
- * `GET .../conversations/{id}` 或一轮收尾因为它而 500。
- *
- * 单独导出是因为路由把整行 `select` 出来了（`listConversations`/`getConversation`），
- * 直接解析手上这一列比再查一次库便宜。
- */
-export function parseQueuedMessages(
-  json: string,
-  conversationId: string,
-  log: Logger = defaultLogger,
-): QueuedMessage[] {
-  let parsedJson: unknown;
-  try {
-    parsedJson = JSON.parse(json);
-  } catch (error) {
-    log.warn(LOG_SCOPE, 'queued messages column is not valid JSON', {
-      conversationId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return [];
-  }
-
-  const result = queuedMessagesSchema.safeParse(parsedJson);
-  if (!result.success) {
-    log.warn(LOG_SCOPE, 'queued messages column failed validation', {
-      conversationId,
-      error: result.error.message,
-    });
-    return [];
-  }
-  return result.data;
-}
-
 /** 同 `queuedMessagesSchema`：JSON 列的反序列化边界（docs/tech/composer-skill-mention.md §3）。 */
 const availableSkillsSchema = z.array(SkillSummarySchema);
 
 /**
  * `available_skills_json` 列 → `SkillSummary[]`（[skill 清单](../../../../docs/terms.md)）。
  *
- * 列内容损坏时**当作空清单**并记一行 warn，与 `parseQueuedMessages` 同一取舍——
+ * 列内容损坏时**当作空清单**并记一行 warn，与 `agent/persistence.ts` 的 `parseQueuedInputs` 同一取舍——
  * 清单只是给 [composer](../../../../docs/terms.md) 列菜单用的缓存，不该让一次
  * `GET .../conversations` 因为它而 500。菜单空着时用户仍能正常发消息，agent 也
  * 照常能用 skill（`buildSession` 自己扫沙盒，不读这一列）。
  *
- * 单独导出的理由同 `parseQueuedMessages`：路由已把整行 `select` 出来了，直接解析
+ * 单独导出的理由同 `parseQueuedInputs`：路由已把整行 `select` 出来了，直接解析
  * 手上这一列比再查一次库便宜。
  */
 export function parseAvailableSkills(
@@ -371,7 +199,7 @@ export function parseAvailableSkills(
  * 拼 DTO，不必再查一次库。
  *
  * 调用点两处：会话创建时沙盒首次就绪（`routes/chat.ts`）、以及每轮
- * [起轮装配](../../../../docs/terms.md)（`turn-launcher.ts`）。后者是每轮必经路径，
+ * [起轮装配](../../../../docs/terms.md)（`agent/runtime.ts` 的 `prepareTurn`）。后者是每轮必经路径，
  * 而清单绝大多数轮次纹丝不动——所以这里**由调用方把手上已有的当前值传进来**
  * （`ConversationRow.availableSkillsJson`，起轮时早就 select 出来了）做一次字符串
  * 比对，零额外查询地省掉那次无谓 `UPDATE`。
@@ -390,125 +218,12 @@ export function syncAvailableSkills(
   skills: readonly SkillSummaryDto[],
 ): string {
   const nextJson = JSON.stringify(skills);
-  if (nextJson === currentJson) return currentJson;
+  if (nextJson === currentJson) {
+    return currentJson;
+  }
   db.update(conversations)
     .set({ availableSkillsJson: nextJson })
     .where(eq(conversations.id, conversationId))
     .run();
   return nextJson;
-}
-
-/** 读回队列。会话不存在返回空数组（路由侧已先鉴权 404）。 */
-export function listQueuedMessages(
-  db: Db,
-  conversationId: string,
-  log: Logger = defaultLogger,
-): QueuedMessage[] {
-  const row = db
-    .select({ json: conversations.queuedMessagesJson })
-    .from(conversations)
-    .where(eq(conversations.id, conversationId))
-    .get();
-  if (row === undefined) return [];
-  return parseQueuedMessages(row.json, conversationId, log);
-}
-
-function writeQueue(
-  db: Db,
-  conversationId: string,
-  queue: QueuedMessage[],
-): QueuedMessage[] {
-  db.update(conversations)
-    .set({ queuedMessagesJson: JSON.stringify(queue) })
-    .where(eq(conversations.id, conversationId))
-    .run();
-  return queue;
-}
-
-export interface EnqueueMessageInput {
-  text: string;
-  /** 入队者——[出队](../../../../docs/terms.md)起轮时用它匹配[会话级授权](../../../../docs/terms.md)，见 `schemas/chat.ts` 的 `QueuedMessageSchema`。 */
-  userId: string;
-}
-
-export type EnqueueResult =
-  | { ok: true; queued: QueuedMessage; queue: QueuedMessage[] }
-  | { ok: false; reason: 'full'; queue: QueuedMessage[] };
-
-/** 入队到队尾（先到先发）。已满则原样返回当前队列 + `reason: 'full'`，不截断、不覆盖。 */
-export function enqueueMessage(
-  db: Db,
-  conversationId: string,
-  input: EnqueueMessageInput,
-  log: Logger = defaultLogger,
-): EnqueueResult {
-  const queue = listQueuedMessages(db, conversationId, log);
-  if (queue.length >= MAX_QUEUED_MESSAGES) {
-    return { ok: false, reason: 'full', queue };
-  }
-  const queued: QueuedMessage = {
-    id: randomUUID(),
-    text: input.text,
-    userId: input.userId,
-    createdAt: Date.now(),
-  };
-  return {
-    ok: true,
-    queued,
-    queue: writeQueue(db, conversationId, [...queue, queued]),
-  };
-}
-
-/** 删一条。`removed: false` = 这个 `messageId` 不在队列里（已发出/已删/从未存在）——路由转成 404。 */
-export function removeQueuedMessage(
-  db: Db,
-  conversationId: string,
-  messageId: string,
-  log: Logger = defaultLogger,
-): { removed: boolean; queue: QueuedMessage[] } {
-  const queue = listQueuedMessages(db, conversationId, log);
-  const next = queue.filter((message) => message.id !== messageId);
-  if (next.length === queue.length) return { removed: false, queue };
-  return { removed: true, queue: writeQueue(db, conversationId, next) };
-}
-
-export function clearQueuedMessages(
-  db: Db,
-  conversationId: string,
-): QueuedMessage[] {
-  return writeQueue(db, conversationId, []);
-}
-
-/**
- * [出队](../../../../docs/terms.md)：取队首并**立即**从队列移除，一次读-改-写。
- * 空队列返回 `message: undefined`。
- *
- * 「取出即移除」而不是「先读后删」是刻意的：`turn-launcher.ts` 的自动出队在一轮收尾
- * 后跑，若起轮失败会调 `requeueFront` 把这条放回队首（见其注释）——先移除保证了任何
- * 中途异常都不会让同一条消息被起两轮。
- */
-export function dequeueMessage(
-  db: Db,
-  conversationId: string,
-  log: Logger = defaultLogger,
-): { message: QueuedMessage | undefined; queue: QueuedMessage[] } {
-  const queue = listQueuedMessages(db, conversationId, log);
-  const [head, ...rest] = queue;
-  if (head === undefined) return { message: undefined, queue };
-  return { message: head, queue: writeQueue(db, conversationId, rest) };
-}
-
-/**
- * 起轮失败时把出队的那条放**回队首**，保住它原有的顺序位置（用户排的是「下一件事」，
- * 退回队尾会让后面的消息插队）。刻意**不受 `MAX_QUEUED_MESSAGES` 约束**：这是回滚一次
- * 已经发生的出队，不是新的入队请求；上限在此拦一下只会真的丢消息。
- */
-export function requeueFront(
-  db: Db,
-  conversationId: string,
-  message: QueuedMessage,
-  log: Logger = defaultLogger,
-): QueuedMessage[] {
-  const queue = listQueuedMessages(db, conversationId, log);
-  return writeQueue(db, conversationId, [message, ...queue]);
 }

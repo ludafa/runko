@@ -113,13 +113,13 @@ export const conversations = sqliteTable('conversations', {
   /**
    * 待发队列（[排队](../../../../docs/terms.md)，docs/tech/steer-and-queue.md §2）：
    * `QueuedMessage[]` 的 JSON——一轮进行中用户发的消息若走默认的排队路径就落这里，
-   * 本轮收尾后由 `turn-launcher.ts` 取队首起下一轮。
+   * 本轮收尾后由 `@nimbo/agent` 的[自动出队](../../../../docs/terms.md)取队首起下一轮。
    *
    * **刻意不进 `conversation_events` 账本**：账本记的是「已发生的事」（`kind='message'`
    * 行永不删除、`seq` 单调且被回放/断线续传/`finalizeTurnPersistence` 的 GC 阈值三处
    * 依赖），而排队消息是「尚未发生的意图」，可删可清空——两种语义混在一张表里会同时
    * 破坏「永不删除」与 seq 空间。也刻意不另开子表：队列与 conversation 天然 1:1、有序、
-   * 量小（`MAX_QUEUED_MESSAGES`）、永远整体读写，没有按条件查询的需求来兑现一张表的代价。
+   * 量小（框架的 `queue.max`，默认 10）、永远整体读写，没有按条件查询的需求来兑现一张表的代价。
    *
    * 读回一律走 `store.ts` 的 `queuedMessagesSchema.safeParse`（不是类型断言）——这是
    * JSON 列的反序列化边界。
@@ -142,6 +142,21 @@ export const conversations = sqliteTable('conversations', {
    * 与上面 `queuedMessagesJson` 同一姿态。
    */
   availableSkillsJson: text('available_skills_json').notNull().default('[]'),
+  /**
+   * [起轮标记](../../../../docs/terms.md)（`@nimbo/agent` 的[归属仲裁机制](../../../../docs/terms.md)
+   * 在这一档的落地）：起轮时写下「这一轮由谁在跑」，收尾时置回 null。
+   *
+   * **它不是「为多机预留」**，是[进行中草稿](../../../../docs/terms.md)搬进内存的直接
+   * 依赖：草稿一不落库，旧的[孤儿轮](../../../../docs/terms.md)判据（「事件行以
+   * `kind='chunk'` 收尾」）就永远为假，崩溃残留的会话会静默地停在「正在干活」。
+   * 换成直接判据之后——**启动时这一列还非空 = 那一轮没人管了**，补一条「已停止」。
+   *
+   * 目前只有「谁在跑」，还没有心跳、没有[租期标识](../../../../docs/terms.md)：单进程
+   * 部署下这就够了。将来上多进程时在它上面长（加心跳列 + CAS），不用推倒重来。
+   */
+  turnHolder: text('turn_holder'),
+  /** 这一轮是什么时候起的——纯运维可见性（「这个标记卡了多久」），没有代码读它做判断。 */
+  turnStartedAt: integer('turn_started_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
 
@@ -149,28 +164,20 @@ export const conversations = sqliteTable('conversations', {
 // conversation's agent activity（2026-07-17 由 `agent_events` 更名——事件属于
 // conversation 这个父实体，"agent" 是悬空修饰词），two kinds of row (`kind`)
 // sharing one seq space (monotonic per conversation, continues across
-// process restarts — from `MAX(seq)`, see src/agent/store.ts's
-// `getMaxEventSeq` — not a global autoincrement):
+// process restarts — from `MAX(seq)`, see src/agent/persistence.ts's
+// `maxSeq` — not a global autoincrement):
 //
 // - `kind = 'message'`: one *finished* `NimboUIMessage` (`@nimbo/core`),
 //   `payloadJson` holding the message verbatim, byte-for-byte the same shape
 //   `Session.toJSON().messages` would produce — this is what agent-session
 //   resume reads back (src/agent/store.ts's `loadResumeState`), and it's
 //   also permanent history for replay: never deleted, never rewritten.
-// - `kind = 'chunk'`: one *durable* `NimboChunk` (ai's `UIMessageChunk`
-//   vocabulary — tool state incl. approval-requested/responded, data parts,
-//   step markers, message start/finish/metadata; NOT text-delta/
-//   reasoning-delta/transient data parts, which only ever live on the SSE
-//   wire, see turn-runner/persistence.ts's `isDurableChunk`) belonging to the
-//   *in-progress* turn currently being driven. These rows exist so a page
-//   refresh mid-turn can still reconstruct pending approvals/questions from
-//   a replay; every one of them is deleted the instant its turn finishes
-//   gracefully (superseded by that turn's own `kind = 'message'` rows —
-//   src/agent/store.ts's `deleteChunkEventsAfter`, called from
-//   turn-runner/drive.ts's `driveTurn`). A `kind = 'chunk'` row surviving past its
-//   turn only ever means that turn crashed mid-flight without a graceful
-//   finish (docs/tech/single-ledger.md §5 单-3 "crash mid-turn（无收尾）：本轮无 message 条目、
-//   chunk 条目残留") — accepted residue, not cleaned up later.
+// - `kind = 'chunk'`: **不再写入**。[进行中草稿](../../../../docs/terms.md)搬进内存
+//   之后（`@nimbo/agent`），这一档只剩迁移前留下的存量行；`agent/persistence.ts` 的
+//   `read` 读时把它们过滤掉，`maxSeq` 则仍然数上它们（否则新写的 seq 会跟这些旧行撞
+//   主键）。存量行没有清理计划——读时过滤零成本零风险，真删要跑一次一次性脚本。
+//   历史背景：它们当初存在是为了让「跑到一半刷新页面」能从回放里重建挂起的审批；
+//   现在这件事由直播流重连时补发内存草稿完成。
 //
 // 旧 `type` 列（`payloadJson` 判别字段的冗余镜像，纯调试便利、无代码读取）
 // 已随更名删除——临时查询用 `json_extract(payload_json, '$.type')`。
@@ -195,7 +202,7 @@ export const conversationEvents = sqliteTable(
 //
 // `user_id` = 做出这次授权的人（点按钮的已认证用户）。当前单用户下它恒等于会话
 // owner；记它是为**将来一个 conversation 多用户**时按用户隔离授权留好数据——授权
-// 只放行**授权者本人**的调用（`hasSessionGrant` 按本轮发起者查），A 的授权不会
+// 只放行**授权者本人**的调用（`hasConversationGrant` 按本轮发起者查），A 的授权不会
 // 悄悄放行 B 的操作。多用户的卡片可见性/可点性是未来的渲染层决策，不影响这张表。
 // [推送订阅](docs/terms.md)（docs/tech/push-notification.md §2）：一台设备的一个
 // 浏览器一行——用户点铃铛开启通知时，浏览器生成一张「投递地址」（endpoint URL +
@@ -239,6 +246,52 @@ export const pushSubscriptions = sqliteTable(
   (table) => [index('push_subscriptions_user_id_idx').on(table.userId)],
 );
 
+/**
+ * [人工裁决](../../../../docs/terms.md)留底（`@nimbo/agent` 的 `DecisionStore` 在这一档
+ * 的落地）：agent 每请求一次人审 / 每问用户一个问题就记一行待定，人答复（或超时）时
+ * 补上结局。
+ *
+ * **是纯审计表**：人的答复走的是框架内存里那条 promise 路由，不是读这张表——落库是
+ * 为了留底（谁在什么时候批了什么）与将来的[挂起](../../../../docs/terms.md)恢复（人隔
+ * 几小时回来时，裁决要能跨进程读回来）。这张表坏了不影响任何一轮跑完。
+ *
+ * 与 `conversation_grants` 的分别：那张记的是「以后同样的调用直接放行」这条**规则**
+ * （产品概念，chat 层自己的），这张记的是「这一次调用当时是怎么裁的」这个**事实**。
+ */
+export const conversationDecisions = sqliteTable(
+  'conversation_decisions',
+  {
+    conversationId: text('conversation_id')
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    /** core 的 `ApprovalContext.callId`——对应[账本](../../../../docs/terms.md)里那次工具调用。 */
+    toolCallId: text('tool_call_id').notNull(),
+    kind: text('kind', { enum: ['approval', 'question'] }).notNull(),
+    /** 审批才有（提问没有工具名）。 */
+    toolName: text('tool_name'),
+    /** 这次调用的入参（审批）或问题正文（提问），JSON。 */
+    payloadJson: text('payload_json'),
+    /** 待定时为 null。 */
+    outcome: text('outcome', {
+      enum: ['allow', 'deny', 'answered', 'timeout'],
+    }),
+    /**
+     * 这次裁决管多远。框架只**记**、不执行——真正的放行判断走 `conversation_grants`
+     * 那张表（记账粒度是 chat 层自己的产品决策，见 `agent/conversation-grants.ts`）。
+     * 本表是纯审计表。
+     */
+    scope: text('scope', { enum: ['once', 'conversation'] }),
+    decidedBy: text('decided_by'),
+    /** 拒绝理由 / 回答正文。 */
+    message: text('message'),
+    requestedAt: integer('requested_at', { mode: 'timestamp' }).notNull(),
+    decidedAt: integer('decided_at', { mode: 'timestamp' }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.conversationId, table.toolCallId] }),
+  ],
+);
+
 export const conversationGrants = sqliteTable(
   'conversation_grants',
   {
@@ -248,7 +301,7 @@ export const conversationGrants = sqliteTable(
     userId: text('user_id')
       .notNull()
       .references(() => user.id),
-    /** `${toolName} ${稳定序列化(input)}` —— 见 src/agent/session-grants.ts 的 `grantKey`。 */
+    /** `${toolName} ${稳定序列化(input)}` —— 见 src/agent/conversation-grants.ts 的 `grantKey`。 */
     grantKey: text('grant_key').notNull(),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   },
