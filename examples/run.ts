@@ -29,7 +29,7 @@ function exampleStems(): string[] {
 
 function printAvailable(): void {
   console.log("可用示例（pnpm example <编号或名字前缀>）：");
-  for (const stem of exampleStems()) console.log(`  ${stem}`);
+  for (const stem of exampleStems()) {console.log(`  ${stem}`);}
 }
 
 const arg = process.argv[2]?.trim();
@@ -52,18 +52,18 @@ if (picked.length === 0) {
 }
 if (picked.length > 1) {
   console.error(`"${arg}" 匹配到多个示例，请写得更具体：`);
-  for (const stem of picked) console.error(`  ${stem}`);
+  for (const stem of picked) {console.error(`  ${stem}`);}
   process.exit(1);
 }
 
 // picked.length === 1；下面的 undefined 分支在类型上收窄，运行时不可达（不用非空断言）。
 const [chosen] = picked;
-if (chosen === undefined) process.exit(1);
+if (chosen === undefined) {process.exit(1);}
 
 const scriptPath = join(srcDir, `${chosen}.ts`);
 const passthrough = process.argv.slice(3);
 const child = spawn(process.execPath, [scriptPath, ...passthrough], { stdio: "inherit" });
 child.on("exit", (code, signal) => {
-  if (signal !== null) process.kill(process.pid, signal);
-  else process.exit(code ?? 0);
+  if (signal !== null) {process.kill(process.pid, signal);}
+  else {process.exit(code ?? 0);}
 });
