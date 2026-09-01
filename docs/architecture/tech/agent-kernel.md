@@ -115,7 +115,7 @@ erDiagram
         string conversationId PK
         string toolCallId     PK "对应账本里那次工具调用"
         string outcome           "allow | deny；待定则此行尚未 settle"
-        string scope             "once | broader —— nimbo 不定义 broader 有多宽"
+        string scope             "once | conversation —— 框架只记范围，不执行"
         string decidedBy         "谁批的，不透明字符串"
         date   requestedAt
         date   decidedAt

@@ -101,7 +101,7 @@ app.post("/conversations/:id/approvals/:callId", async (c) => {
   const { outcome, scope } = await c.req.json();
   await runtime.submitDecision(c.req.param("id"), c.req.param("callId"), {
     outcome,              // 'allow' | 'deny'
-    scope,                // 'once' | 'broader'
+    scope,                // 'once' | 'conversation'
     decidedBy: c.get("userId"),
   });
   return c.body(null, 204);
@@ -281,7 +281,7 @@ const runtime = createAgentRuntime(agent, {
     enabled: true,
     max: 10,
     onFull: "reject",           // 'reject' | 'dropOldest'
-    steer: "never",             // 'never' | 'always' | (input) => boolean —— 插进当前这一轮还是排队
+    steer: "onRequest",         // 插进当前这一轮还是排队，见下
   },
 
   // 等人
@@ -289,11 +289,21 @@ const runtime = createAgentRuntime(agent, {
     memoryWindow: "5m",         // 内存里先等多久，等不到就挂起。0 = 立刻挂起
     onPresence: "extend",       // 上报「人还在」时延长这个窗口
   },
-
-  // 工作区能恢复多久（只对支持快照过期的沙盒有意义，比如 Vercel）
-  workspaceRetention: "7d",     // '24h' | '3d' | '7d' | 'forever'
 });
 ```
+
+`steer` 有四种写法，前三种是枚举、第四种是回调：
+
+| 写法 | 什么时候插话 |
+|---|---|
+| `"never"` | 从不——一律排队 |
+| `"always"` | 有轮在跑就插 |
+| `"onRequest"`（缺省） | 看调用方 `enqueue` 时传的 `intent`。适合「用户在界面上自己选」的宿主 |
+| `(input) => boolean` | 你自己按这条输入判断。适合「没有显式表态、想按内容自动分流」的宿主——比如认出「停一下」就插队 |
+
+回调拿到的是整条 `TurnInput`（`text` / `userId` / `meta` 都在），所以「只有发起者能插话」这类策略也写得出来。回调抛错一律**当排队处理**，不会把 `enqueue` 打挂。
+
+> **工作区留存期不在这里配。** 「快照能恢复多久」归沙盒适配器管——各家平台的过期语义根本不一样（E2B 暂停后无限期保存、不计费；Vercel 才有快照过期），框架层给一个统一的 `'24h' | '7d'` 只会造成「配了但在某些 provider 上完全不生效」。见[沙盒契约](../../host/contract/tech/sandbox.md)。
 
 **这些都不影响正确性**——配错了最多是产品行为不符合预期，不会写坏数据。真正难写对的部分（释放归属时的竞态、租期校验、seq 分配）在框架里，你碰不到也不用碰。
 

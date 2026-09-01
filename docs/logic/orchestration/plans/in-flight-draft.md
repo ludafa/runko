@@ -17,7 +17,9 @@ related: ["logic/orchestration/tech/in-flight-draft.md", "architecture/tech/agen
 
 ## 状态
 
-**⬜ 未开工。** 技术方案已定稿（见上），拆单如下。
+**✅ 已交付**（2026-08-16），随 [`@nimbo/agent`](./agent-runtime.md) 一并上线——草稿放进框架的
+`ActiveTurn.draft`（内存数组），[账本](../../../terms.md)从此只写成品消息，[孤儿轮](../../../terms.md)
+判据换成[起轮标记](../../../terms.md)（`conversations.turn_holder` 列）。
 
 ## 阶段拆单
 
@@ -25,16 +27,16 @@ related: ["logic/orchestration/tech/in-flight-draft.md", "architecture/tech/agen
 
 | # | 干什么 | 动谁 | 状态 |
 |---|---|---|---|
-| 1 | 草稿改写内存；去掉删除逻辑与「本轮起始编号」 | 服务端 | ⬜ |
-| **1b** | **起轮标记**：起轮写、收尾删；启动扫描改用它判[孤儿轮](../../../terms.md) | 服务端 | ⬜ |
-| 2 | 删掉删除函数；跑一次历史垃圾清理 | 服务端 | ⬜ |
-| 3 | SSE 补发草稿快照（注意方案 5.4 两个坑）；会话详情加「有没有在跑」 | 服务端 | ⬜ |
-| 4 | 接口改名 `events` → `messages`，返回体收窄；重生成接口文档与前端 client | 服务端 + 前端 | ⬜ |
-| 5 | SSE 给成品消息帧补 `id` | 服务端 | ⬜ |
-| 6 | 网络数据形状去掉编号字段 | 服务端 + 前端 | ⬜ |
-| 7 | 前端改用新接口与新字段；拼装消息的模块**不动** | 前端 | ⬜ |
-| 8 | 测试（见下「验收」） | 服务端 + 前端 | ⬜ |
-| 9 | 回头修订账本设计 §2.4／§6；产品文档补行为变化；术语表「孤儿轮」改识别特征 | 文档 | ⬜ |
+| 1 | 草稿改写内存；去掉删除逻辑与「本轮起始编号」 | 框架 | ✅ `runtime/registry.ts` 的 `ActiveTurn.draft` |
+| **1b** | **起轮标记**：起轮写、收尾删；启动扫描改用它判[孤儿轮](../../../terms.md) | 框架 + 服务端 | ✅ `Arbitration` 接口 + `conversations.turn_holder` |
+| 2 | 删掉删除函数；跑一次历史垃圾清理 | 服务端 | ✅ **就此定案不清理**（2026-08-22）。删除函数已删；历史遗留的 `kind='chunk'` 行**永久读时滤掉**。**顺带纠正一个数**：原先写的「几十万行」错了三个数量级——dev 库实测 425 条 chunk / 435 条 message、全表 860 行、库 2.2 MB，都是测试数据。真正的理由是：读时过滤是**永久兼容层**（任何没升级的旧库连上来都可能带遗留行），删不掉；既然它必须留着，再跑一次清理脚本的收益就只剩「库小 1 MB」 |
+| 3 | SSE 补发草稿快照（注意方案 5.4 两个坑）；会话详情加「有没有在跑」 | 框架 + 服务端 | ✅ `runtime.subscribe` 的同步临界区 + DTO 的 `turnInProgress` |
+| 4 | 接口改名 `events` → `messages`，返回体收窄 | 服务端 + 前端 | ✅ **已做**（2026-08-22 构建者拍板：「没发布过，名义对齐更重要」）。`GET .../messages` 与既有的 `POST .../messages` 配成一对；schema 更名为 `ConversationMessagesList`，`after` 游标 schema 因两个回放端点共用而改叫 `ConversationReplayQuerySchema`；openapi + kubb client 已重生成 |
+| 5 | SSE 给成品消息帧补 `id` | 服务端 | ⬜ 没做（`MessageFrame.message.id` 本来就带着） |
+| 6 | 网络数据形状去掉编号字段 | 服务端 + 前端 | 🟡 chunk 帧已不再带 `seq`；`MessageFrame.seq` **保留**（断线续传游标靠它） |
+| 7 | 前端改用新字段；拼装消息的模块**不动** | 前端 | ✅ `lastFrameIsChunk` 猜测退役，改用 `conversation.turnInProgress` |
+| 8 | 测试 | 框架 + 服务端 + 前端 | ✅ 61 + 395 + 278 个用例跑绿 |
+| 9 | 术语表「孤儿轮」改识别特征 | 文档 | ✅ 已改 |
 
 **顺序**：1 + 1b → 2/3/4/5/6 → 7 → 8 → 9。
 
@@ -56,10 +58,11 @@ related: ["logic/orchestration/tech/in-flight-draft.md", "architecture/tech/agen
 ## 待登记的术语
 
 - **起轮标记**——已登记，见 [docs/terms.md](../../../terms.md)。
-- **孤儿轮**——词条已有，但「识别特征」一栏写的是旧判据，落地后按第 9 项修订。
+- **孤儿轮**——词条的「识别特征」已改成起轮标记这条直接判据。
 
 ## 变更记录
 
 | 时间 | 变更 |
 |---|---|
+| 2026-08-16 | 随 `@nimbo/agent` 一并交付。三项与原计划有偏差并已在上表标注：历史垃圾行改为读时过滤（第 2 项）、`events → messages` 改名没做（第 4 项）、`MessageFrame.seq` 保留（第 6 项——断线续传游标依赖它，去掉等于把续传也拆了） |
 | 2026-08-15 | 建档。按 [issue #2](https://github.com/ludafa/nimbo/issues/2) 的分层重划文档时补齐——此前技术方案里链的施工进展文件一直不存在。同时按 issue #2 补上 1b（起轮标记）这项，原清单缺它。 |

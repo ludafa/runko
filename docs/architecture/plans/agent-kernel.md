@@ -15,7 +15,9 @@ related: ["architecture/features/agent-kernel.md", "architecture/tech/agent-kern
 
 ## 状态
 
-**设计已收敛，代码未开工**（2026-08-09）。三份文档刚落地，术语待登记，阶段拆单如下。
+**K1 + K2 + K4 + K7 已交付**（2026-08-16）——`@nimbo/agent` 落地，chat 应用完成迁移。
+**K5 已交付**（2026-08-23）——持久化实现落地，但产出物与原计划不同（单包 `persist-sql` 被推翻，改成 Kysely 核心 + 一种库一个薄壳），见[持久化 · 施工](../../host/contract/plans/persistence.md)。
+**K3 前置已解**（2026-08-22，core 入口定为 `settleAndRun`），主体未开工；**K6 / K8 / K9 未开工**。
 
 **起因**：`apps/node-server` 只绑 SQLite、只跑单进程。作为 demo 够用，作为框架不够——别人拿 nimbo 建产品，得把「会话怎么接下去 / 等人怎么办 / 崩了怎么办 / 多进程怎么办」四件事重写一遍，而其中第四件很难写对，写错是静默的数据损坏。
 
@@ -24,13 +26,13 @@ related: ["architecture/features/agent-kernel.md", "architecture/tech/agent-kern
 | 阶段 | 目标 | 涉及 | 产出物 | 状态 |
 |---|---|---|---|---|
 | **K0** | 三份文档 + 术语登记 | `docs/*` | 本三件套 + `terms.md` 新词条 | 🟡 文档已落，术语待登记 |
-| **K1** | 进行中草稿放内存 + 起轮标记 | node-server | 库里只剩成品消息；孤儿轮判据换成起轮标记 | ⬜ 未开工 |
-| **K2** | 接口定型：四种宿主能力 + 全套内置实现 | 新包 `@nimbo/agent` | 零配置能跑通一个会话 | ⬜ 未开工 |
-| **K3** | 挂起与恢复 | `@nimbo/agent` + core | 等人超时挂起、人回来在任意节点恢复 | ⬜ 未开工 |
-| **K4** | 队列与插话回到框架 | `@nimbo/agent` | `enqueue` + `conversation-drained`，竞态框架内处理一次 | ⬜ 未开工 |
-| **K5** | 持久化实现 | `persist-sql` | SQLite + Postgres 两个方言跑绿 | ⬜ 未开工 |
-| **K6** | 租约版归属仲裁 | `persist-sql` | 多进程 cluster 端到端 | ⬜ 未开工 |
-| **K7** | chat 应用迁移到新包 | `apps/node-server` | 行为不变，代码减少 | ⬜ 未开工 |
+| **K1** | 进行中草稿放内存 + 起轮标记 | node-server | 库里只剩成品消息；孤儿轮判据换成起轮标记 | ✅ 已交付 |
+| **K2** | 接口定型：四种宿主能力 + 全套内置实现 | 新包 `@nimbo/agent` | 零配置能跑通一个会话 | ✅ 已交付 |
+| **K3** | 挂起与恢复 | `@nimbo/agent` + core | 等人超时挂起、人回来在任意节点恢复 | ⬜ **可开工**——2026-08-22 前置解开：core 入口定为 `settleAndRun(callId, decision)`（下面第 3 条）。`suspended` 收尾态与 `TurnStatus` 已先行落地 |
+| **K4** | 队列与插话回到框架 | `@nimbo/agent` | `enqueue` + `conversation-drained`，竞态框架内处理一次 | ✅ 已交付 |
+| **K5** | 持久化实现 | `persist-kysely` + `-sqlite` / `-postgres` / `-mysql` | 三个方言跑绿 | ✅ **已交付**（2026-08-23，见[持久化 · 施工](../../host/contract/plans/persistence.md)）。**产出物与原计划不同**：单包 `persist-sql` 被推翻，改成「Kysely 核心 + 一种库一个薄壳」 |
+| **K6** | 租约版归属仲裁 | `persist-sql` | 多进程 cluster 端到端 | ⬜ 未开工（接口已按它定形） |
+| **K7** | chat 应用迁移到新包 | `apps/node-server` | 行为不变，代码减少 | ✅ 已交付 |
 | **K8** | `@nimbo/cli` | 新包 | `npx` 一条命令可用 | ⬜ 未开工 |
 | **K9** | 其余实现包 | `persist-drizzle` / `persist-prisma` / `stream-redis` / `durable-object` | 四档部署各自跑通 | ⬜ 未开工 |
 
@@ -63,7 +65,7 @@ related: ["architecture/features/agent-kernel.md", "architecture/tech/agent-kern
 | [中途插话与排队 · 技术方案](../../logic/orchestration/tech/steer-and-queue.md) | §7.1「进程重启中断的那一轮不会自动续上队列」——队列回到框架之后这条自动关闭 | ✅ 已改（新增 §8「队列归框架，策略归构建者」，含逐条影响对照） |
 | [优雅关闭与崩溃恢复 · 技术方案](../../logic/orchestration/tech/graceful-shutdown.md) | 附录 B 的「多实例要怎么改」被本方案取代，改成指过来 | ✅ 已改 |
 | [单一数据账本（single-ledger） · 技术方案](../../logic/orchestration/tech/single-ledger.md) | 账本的写入时机与「消息级同 id 覆盖」要按新方案修订 | 🟡 部分——已补「人审桥纯内存路由只覆盖等人的前几分钟 / 裁决表是纯审计表」；写入时机待 K1 落地后回填 |
-| [`terms.md`](../../terms.md) | 「排队」词条里「队列存 `conversations.queued_messages_json`」在 K4 之后要改 | ⬜ 待 K4 |
+| [`terms.md`](../../terms.md) | 「排队」词条里「队列存 `conversations.queued_messages_json`」在 K4 之后要改 | ✅ 已改（列还是那一列，形状换成框架的 `QueuedInput`；读写走 `QueueStore`）；同批把「孤儿轮」词条的目标态判据改成现状 |
 
 ## 变更记录
 
@@ -75,6 +77,7 @@ related: ["architecture/features/agent-kernel.md", "architecture/tech/agent-kern
 | 2026-08-07 | 从第一性原理重推分层。定 21–23：两块结构、三个角色、归属仲裁三种实现 + 租期标识用 ULID |
 | 2026-08-08 | 定 24–26：**推翻决定 17**（队列回到框架）、六档部署（Vercel 从出局改为有条件成立）、包拆成 15 个 |
 | 2026-08-09 | 三份文档落地；issue 正文重排为「架构 → 机制 → 契约与落地」三部分 |
+| 2026-08-16 | **K1+K2+K4+K7 落地**：新包 `@nimbo/agent`（轮编排运行时 + 四种宿主能力接口 + 三样内置实现，61 个单测）；`apps/node-server` 迁移完成——删掉 `turn-runner/`（9 文件）、`turn-launcher.ts`、`crash-recovery.ts`，换成 `agent/runtime.ts`（起轮装配）+ `agent/persistence.ts`（drizzle 实现四个宿主接口）；账本从此只写成品消息，孤儿轮判据换成起轮标记（`conversations.turn_holder`）。**K5 就此取消而非顺延**：chat 应用已有 drizzle schema，让它自己实现领域接口反而是对接口更真实的检验，硬塞一个 `persist-sql` 只会造出第二套数据访问方式 |
 | 2026-08-15 | **整个 docs 按本方案的分层分包重划**：路径形状改成 `docs/<层或包>/<视角>/<feature>.md`——顶层按架构分层分包切成 `architecture` / `engine` / `orchestration` / `host` / `ingress` / `misc` 六个目录，每个目录内部再分 `features` / `tech` / `plans` 三视角（术语表与 README 留 `docs/` 根）。72 份文档归位、全量相对链接重算并校验（0 断链、0 失效锚点）；每份文档加 front matter（`view`/`layer`/`module`/`packages`/`tags`/`related`）。同批补齐宿主层三块空位文档（持久化 · 流分发 · 归属仲裁机制，features/tech 各 3 份，接口未定稿处标 TODO）、补建 `orchestration/plans/in-flight-draft.md`（此前技术方案链的施工文档一直不存在）、把上表五处既有文档按 issue #2 修订、术语表补 6 个词条并把小节标题里的文档路径挪出（锚点从此稳定） |
 
 ### 期间被推翻的判断
@@ -91,10 +94,16 @@ related: ["architecture/features/agent-kernel.md", "architecture/tech/agent-kern
 | 决定 17「待发队列归宿主」 | **被决定 24 推翻**。它把「要不要这个功能」和「怎么实现」混成一件事，还自己制造了一个跨存储竞态 |
 | 「记录自成一层」 | 持久化**贯穿整个逻辑层**，不该是一层；账本/裁决/队列的模型归轮编排，存储归宿主层 |
 
-## 还没定的
+## 已定案（2026-08-22）
 
-1. **阶段划分要不要按新分层再排一次**——上面 K0–K9 是这次重排的结果，取代了 issue 里原来那张 0–4 的表。
-2. **`in-flight-draft.md` 附录 D（成品边跑边存）要不要并进 K1**。澄清：**挂起不需要它**（挂起是主动的、停在干净边界，可以一次性写下当前进度），附录 D 是为**崩溃**准备的持续写入。两者不是一回事。
-3. **core 的「恢复开轮」入口怎么加**（K3 的直接依赖）：扩展 `stream` 的入参（破坏性）还是并列一个 `settleAndRun(callId, result)`（推荐）。
-4. **收尾状态加第四种 `suspended`**（现有 `completed`/`failed`/`interrupted`）——挂起是主动、可恢复的，不该显示成「已中断」。基本没争议，备案。
-5. **挂起裁决记录里「会话内都允许」要不要单独成一个结局值**——倾向用 `scope: 'once' | 'broader'`，nimbo 只知道「比这一次更宽」，不定义宽到哪。
+原来这里的五条**全部定案**，逐条如下。11 个问题的完整定案与理由见[轮编排运行时 · 施工进展](../../logic/orchestration/plans/agent-runtime.md)。
+
+1. **阶段划分要不要按新分层再排一次** —— **关闭**。上面 K0–K9 那张表就是重排的结果，本批走掉四个（K1/K2/K4/K7），已经受过一次真实施工的检验。
+2. **`in-flight-draft.md` 附录 D（成品边跑边存）要不要并进 K1** —— **关闭，但改写成一条独立待办**（见下）。这个问法已经失效：K1 早已交付，挂在它名下没意义了。
+3. **core 的「恢复开轮」入口怎么加** —— **选 B：并列一个 `settleAndRun(callId, decision)`**，`stream()` 签名一个字不动。K3 的前置就此解开。理由（语义不同不该挤一个入口 / 纯新增 vs 破坏性）见轮编排那份的「Q1」。
+4. **收尾状态加第四种 `suspended`** —— **加，而且现在就加**，不等 K3。已落地：core `NimboMessageMetadata.status`（含 zod）、`@nimbo/agent` `TurnStatus`、node-server `TurnEndStatus`。**目前没有产出方**——`finalizeTurn` 至今只产出前三态，先加是为了让宿主/界面提前占好渲染分支。
+5. **「会话内都允许」要不要单独成一个结局值** —— **定为 `scope: 'once' | 'conversation'`**（原落地的 `'broader'` 就此更名），**框架只记、不执行**。`session` 这个候选被否——它作为「聊天会话」的叫法 2026-07-17 已正式退役。完整理由见轮编排那份的「Q4」。
+
+## 新开的待办
+
+- **崩溃时进行中的成品消息会丢，要不要做持续写入** —— 由上面第 2 条改写而来。澄清过：**挂起不需要它**（挂起是主动的、停在干净边界，可以一次性写下进度），[附录 D](../../logic/orchestration/plans/in-flight-draft.md) 是为**崩溃**准备的持续写入。这是一个独立的「可靠性 vs 写库量」取舍，跟 K1 无关，需要单独排期。

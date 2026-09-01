@@ -286,7 +286,7 @@ await Skill.fromFS(fs, "/.agents/skills/frontend-design") // 从任意 NimboFS �
 | 层 / 模块 | 包 | 状态 |
 | --- | --- | --- |
 | 逻辑层 · **执行引擎** | `@nimbo/core` | ✅ 已有 |
-| 逻辑层 · **轮编排 + 归属仲裁** | `@nimbo/agent`（四种宿主能力的**接口** + 语义实现 + **全套内置实现**） | 🚧 待建 |
+| 逻辑层 · **轮编排 + 归属仲裁** | `@nimbo/agent`（四种宿主能力的**接口** + 语义实现 + **全套内置实现**） | ✅ 已有（[挂起与恢复](./logic/orchestration/plans/agent-runtime.md)未做） |
 | 宿主层 · **沙盒**（文件） | `@nimbo/virtual-fs` | ✅ 已有 |
 | 宿主层 · **沙盒**（命令） | `@nimbo/mini-bash` · `@nimbo/just-bash` | ✅ 已有 |
 | 宿主层 · **沙盒**（远端） | `@nimbo/sandbox-e2b` · `-vercel` · `-cloudflare` | ✅ 已有 |
@@ -304,6 +304,7 @@ await Skill.fromFS(fs, "/.agents/skills/frontend-design") // 从任意 NimboFS �
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | `@nimbo/sdk`                | 主包门面，5 行上手只装它                                                                                                                              | [packages/sdk](../packages/sdk/README.md)                               |
 | `@nimbo/core`               | L0 接口 / L1 定义层 / L2 运行层 / L3 目录约定层 / 内置工具本体                                                                                        | [packages/core](../packages/core/README.md)                             |
+| `@nimbo/agent`              | 轮编排运行时：一轮接一轮地跑下去（起 / 停 / 收尾、待发队列与插话、人在回路、崩溃恢复），外加四种宿主能力的接口与内置实现                              | [packages/agent](../packages/agent/README.md)                           |
 | `@nimbo/virtual-fs`         | MemoryFS / OverlayFS / DirFS、diff / writeBack、文件工具八件套                                                                                        | [packages/virtual-fs](../packages/virtual-fs/README.md)                 |
 | `@nimbo/mini-bash`          | 跑在任意 NimboFS 上的只读命令解释器（bash 工具的纯内存执行环境，零依赖极简档，随 sdk 装入）                                                           | [packages/mini-bash](../packages/mini-bash/README.md)                   |
 | `@nimbo/just-bash`          | 跑在任意 NimboFS 上的全语法档 bash（`if`/`for`/`while`/`case`/函数，vercel-labs/just-bash 适配器，**不随 sdk 装入**，需单独 `pnpm add`）              | [packages/just-bash](../packages/just-bash/README.md)                   |
@@ -399,6 +400,7 @@ ls docs/logic/orchestration/*/            # 轮编排的三视角文档一把捞
 | 功能 | 三视角 |
 | --- | --- |
 | **single-ledger**（UIMessage 单账本） | [功能](./logic/orchestration/features/single-ledger.md) · [技术](./logic/orchestration/tech/single-ledger.md) · [施工](./logic/orchestration/plans/single-ledger.md) |
+| **agent-runtime**（轮编排运行时 `@nimbo/agent`） | [功能](./logic/orchestration/features/agent-runtime.md) · [技术](./logic/orchestration/tech/agent-runtime.md) · [施工](./logic/orchestration/plans/agent-runtime.md) |
 | **in-flight-draft**（进行中草稿放内存） | [技术](./logic/orchestration/tech/in-flight-draft.md) · [施工](./logic/orchestration/plans/in-flight-draft.md) |
 | **turn-abort**（停止本轮） | [功能](./logic/orchestration/features/turn-abort.md) · [技术](./logic/orchestration/tech/turn-abort.md) · [施工](./logic/orchestration/plans/turn-abort.md) |
 | **steer-and-queue**（插话与排队） | [功能](./logic/orchestration/features/steer-and-queue.md) · [技术](./logic/orchestration/tech/steer-and-queue.md) · [施工](./logic/orchestration/plans/steer-and-queue.md) |

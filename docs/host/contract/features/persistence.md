@@ -15,7 +15,8 @@ related: ["host/contract/tech/persistence.md", "architecture/tech/agent-kernel.m
 > 宿主层的另两样能力：[沙盒](./sandbox.md) · [流分发](./stream-fanout.md)。第四样[归属仲裁机制](../../../logic/arbitration/features/arbitration-impl.md)的实现文档跟它的语义并排放在逻辑层。
 > 术语：[宿主层](../../../terms.md) · [账本](../../../terms.md) · [待发队列](../../../terms.md)。
 >
-> **状态：接口未定稿。** 本文写的是已经拍板的形态与约束；具体方法签名随 `@nimbo/agent` 一起定，未定处标了 `TODO`。
+> **状态：领域接口已定稿**（2026-08-16 随 `@nimbo/agent` 交付，见 `packages/agent/src/persistence.ts`）。
+> 官方实现包首发 `@nimbo/persist-sql`，施工见[施工进展](../plans/persistence.md)。
 
 ## 0. 一句话
 
@@ -31,17 +32,71 @@ related: ["host/contract/tech/persistence.md", "architecture/tech/agent-kernel.m
 
 ## 2. 三条腿，按你已有的东西挑
 
-| 你的情况 | 装哪个 | 你要给它什么 |
-|---|---|---|
-| 应用里没有 ORM，直接用驱动 | `@nimbo/persist-sql` | 一个 `pg.Pool` 或 `better-sqlite3` 实例 |
-| 应用里已经在用 drizzle | `@nimbo/persist-drizzle` | 你已有的 drizzle 实例 |
-| 应用里已经在用 Prisma | `@nimbo/persist-prisma` | 你已有的 Prisma client |
-| 跑在 Cloudflare Durable Object 上 | `@nimbo/durable-object` | 什么都不用给（用 `ctx.storage.sql`） |
-| 只是本地跑跑、不要求重启后还在 | **什么都不用装** | 内置内存实现，零配置 |
+| 你的情况 | 装哪个 | 你要给它什么 | 有了吗 |
+|---|---|---|---|
+| 只是本地跑跑、不要求重启后还在 | **什么都不用装** | 内置内存实现，零配置 | ✅ 随 `@nimbo/agent` |
+| 用 SQLite，只有一个驱动 | `@nimbo/persist-sqlite` | 一个 `better-sqlite3` 实例 | ✅ |
+| 用 PostgreSQL，只有一个驱动 | `@nimbo/persist-postgres` | 一个 `pg.Pool` | ✅ |
+| 用 MySQL，只有一个驱动 | `@nimbo/persist-mysql` | 一个 `mysql2` 连接池 | ✅ |
+| 用 **MongoDB** | `@nimbo/persist-mongo` | 一个 MongoDB `Db` | ✅ |
+| 已经在用 **Kysely** | `@nimbo/persist-kysely` | 你已有的 Kysely 实例 | ✅ |
+| 已经在用 drizzle | `@nimbo/persist-drizzle` | 你已有的 drizzle 实例 | ⬜ 未开工 |
+| 已经在用 Prisma | `@nimbo/persist-prisma` | 你已有的 Prisma client | ⬜ 未开工 |
+| 跑在 Cloudflare Durable Object 上 | `@nimbo/durable-object` | 什么都不用给（用 `ctx.storage.sql`） | ⬜ 未开工 |
+| **你的 schema 跟哪个都对不上** | **什么都不用装，自己实现三个接口** | —— | ✅ 头等路径，见下 |
 
-**方言不是包。** `persist-sql` 一个包同时支持 SQLite 与 Postgres，方言是参数——不是两个包。首批官方支持这两种。
+### 一种库一个包
 
-> 为什么要出「裸驱动」和「ORM」两条腿，而不是两个 SQL 方言：见[技术方案 §2](../tech/persistence.md)。简单说，**这两条腿的形状差异比两个方言大得多，能真检验出接口有没有漏假设。**
+**每种数据库是独立的包，各自只 peer-dep 自己那个驱动。** 装 `@nimbo/persist-postgres`
+不会把 `better-sqlite3` 或 `mysql2` 拖进你的依赖树。
+
+四个包的关系很简单——**三个薄壳共用一个核心**：
+
+```
+persist-sqlite ─┐
+persist-postgres ┼─→ persist-kysely ─→ 你的库
+persist-mysql  ─┘      （三个 Store + 建表）
+```
+
+薄壳只做一件事：把你的驱动包成一个 Kysely 实例，转交核心。所以**已经在用 Kysely 的人
+直接装核心**——nimbo 的三张表和你自己的表就在同一个实例、同一套迁移之下。
+
+> **为什么底下是 Kysely**：这跟 better-auth 是同一个答案（它的内置适配器也是 kysely）。
+> 自己手搓一个方言层，在「MySQL 不支持 `RETURNING`」这类差异上很快就要开始长分支；
+> 用现成的之后，三个方言真正的差异只剩三处（列类型、幂等插入写法、JSON 读回来要不要
+> 自己 parse）。
+
+### MongoDB 那一档不在这棵树上
+
+`@nimbo/persist-mongo` **不是薄壳**——Kysely 是 SQL 查询构建器，Mongo 用不上，所以它
+直接实现三个领域接口。
+
+它同时是对本文 §4「不做的」那三条准则的**第一次真检验**。那三条（不要求事务能跨接口 /
+不要求 CAS / 不管跨会话查询）当初就是为了不把非关系型挡在门外才那么写的：
+
+| 准则 | 在 Mongo 上成不成立 |
+|---|---|
+| 不要求事务能跨接口 | ✅ 需要原子的只有出队，Mongo 的 `findOneAndDelete` 原生原子 |
+| 不要求 CAS | ✅ 一次都没用上 |
+| 不管跨会话查询 | ✅ 每个查询都以会话 id 打头，正好是索引前缀 |
+
+**三条全成立，接口没有漏掉关系型假设。** 而且有一处 Mongo 反而更干净：出队要求
+「取出即移除、一个方法内原子完成」，SQL 那几家是读-删两步 + 竞态重试，Mongo 是
+数据库直接给的。
+
+### 第六行不是降级方案
+
+最后那一行**是头等路径，不是兜底**。框架的设计就是「逻辑层定义模型、宿主负责存」——三个接口一共十来个方法，架在你**已有的表**上通常比迁就官方包的表更省事。
+
+本仓库的 chat 应用（`apps/node-server`）走的正是这条：它的[待发队列](../../../terms.md)存在 `conversations` 的一个 JSON 列里、[起轮标记](../../../terms.md)存在同表的一个列上，跟下面「参考 schema」的四张表**结构上就不一样**——而这是有理由的（队列与会话天然 1:1、有序、量小、永远整体读写，不值得为它单开一张表）。
+
+**两个真实实现并存是刻意的**：官方包和自建实现互相当对照，接口有没有漏假设才检验得出来。
+
+> **2026-08-23 推翻了原来的「方言不是包」。** 原方案是一个 `@nimbo/persist-sql` 同时支持
+> 两种方言、方言作参数。改成一种库一个包，两个理由：① 依赖关系一眼能看明白——每个包
+> 只 peer-dep 自己那个驱动，装 Postgres 的人不会被 `better-sqlite3` 和 `mysql2` 污染；
+> ② 加 MySQL 时才发现「方言是参数」这个说法掩盖了真实成本——三家的差异要么进一个越长
+> 越大的 `if`，要么进包名。进包名更诚实。
 
 ## 3. 你会看到的行为
 
@@ -59,14 +114,79 @@ related: ["host/contract/tech/persistence.md", "architecture/tech/agent-kernel.m
 - **不要求 CAS**（比对后再写）。CAS 是[租约版归属仲裁机制](../../../logic/arbitration/features/arbitration-impl.md)的要求，**不是持久化的要求**——用 Durable Object 的人根本不碰它。
 - **不管跨会话的查询**（「列出这个用户的所有会话」）。那是你的应用该建的索引，不是 agent 运行需要的东西。
 
-**TODO（未定）**：
+**这一版还不做的**：
 
-- 领域接口的具体方法名与签名（`LedgerStore` / `DecisionStore` / `QueueStore` / `LeaseStore` 这组名字本身也未定稿）。
-- 「通用适配器」那一层要不要跟 better-auth 一样声明式描述 model，还是每条腿各写各的。
-- 官方参考 DDL 放在哪、以什么形式发。
+- **租约版[归属仲裁](../../../terms.md)**（心跳 + [租期标识](../../../terms.md) + CAS）。`persist-sql` 这一版只出**持久化**，仲裁仍用内置的单进程实现。两者同包但**分两次发**——混做的话之后每个诡异现象都要先分辨是谁的锅。
+- **SQLite / PostgreSQL / MySQL 之外的方言**。这三种官方支持；其余走「自己实现接口」那条路，或者自己配一个 Kysely dialect 再用 `@nimbo/persist-kysely`。
+- **「通用适配器」那一层**（照 better-auth 那样声明式描述 model）。三条腿各写各的够用了；等真出到第三条腿、发现三份代码在抄同一段逻辑时再抽。
 
-## 5. 成功标准
+## 5. 怎么用
 
-1. 同一套端到端测试，把持久化从内存换成 SQLite 再换成 Postgres，**行为完全一致**。
-2. 一个已经在用 drizzle 的应用，接上 `@nimbo/persist-drizzle` 之后，nimbo 的表和它自己的表**在同一套 schema 管理之下**。
-3. 不装任何持久化包时，`@nimbo/agent` 能直接跑起来。
+装包，给它一个驱动实例，装配时传进去——**就这三步**，三种库都一样。
+
+```ts
+import { createAgentRuntime } from "@nimbo/agent";
+import { migrate, sqlitePersistence } from "@nimbo/persist-sqlite";
+import Database from "better-sqlite3";
+
+const db = new Database("app.db");
+await migrate(db);                      // 建表，幂等，跑几次都一样
+
+const runtime = createAgentRuntime(agent, { persistence: sqlitePersistence(db) });
+```
+
+换库 = 换包 + 换驱动，**业务代码一个字不动**：
+
+```ts
+// PostgreSQL
+import { migrate, postgresPersistence } from "@nimbo/persist-postgres";
+import { Pool } from "pg";
+const db = new Pool({ connectionString: process.env.DATABASE_URL });
+
+// MySQL
+import { migrate, mysqlPersistence } from "@nimbo/persist-mysql";
+import { createPool } from "mysql2";
+const db = createPool(process.env.DATABASE_URL);
+```
+
+### 已经在用 Kysely 的话
+
+别装薄壳，直接装核心，把你自己的实例给它——nimbo 的三张表和你的表就在同一个实例、
+同一套迁移之下：
+
+```ts
+import { kyselyPersistence, migrate } from "@nimbo/persist-kysely";
+import type { NimboDatabase } from "@nimbo/persist-kysely";
+
+// 把 nimbo 的三张表并进你自己的库类型
+interface MyDatabase extends NimboDatabase {
+  my_users: MyUsersTable;
+}
+
+const db = new Kysely<MyDatabase>({ dialect: new PostgresDialect({ pool }) });
+await migrate(db, { flavor: "postgres" });
+
+createAgentRuntime(agent, { persistence: kyselyPersistence(db, { flavor: "postgres" }) });
+```
+
+### 表名
+
+固定叫 `nimbo_ledger` / `nimbo_decisions` / `nimbo_queue`，**不提供前缀开关**。
+Kysely 的类型是按字面量表名推的，前缀一动态化就得退回 `any`，等于把类型安全的查询
+扔掉去换一个几乎没人用的开关。真要隔离，Postgres/MySQL 有 **schema / database**
+这个更对的工具。
+
+### 迁移
+
+`migrate()` 是**你自己调**的，不是包在背后偷偷跑的——什么时候建表归你（启动时？部署
+脚本里？）。它幂等，重复调用无副作用。
+
+不想用它、想让 nimbo 的表进你自己的迁移体系也行：表结构就是 `NimboDatabase` 那三个
+interface，照着写进你的迁移即可。**迁移不是接口的一部分**这条准则就是为这个留的口子。
+
+## 6. 成功标准
+
+1. **一致性测试套件**：同一套用例分别跑内存实现、SQLite、Postgres（pglite 与真库）、MySQL（真库）、**MongoDB（真库）**，全部行为一致。这是主验收项——它同时验证了「换实现不改行为」这个承诺，以及**接口对非关系型也成立**。
+2. **零 ORM 的应用能只靠这几个包跑起来**：`apps/persist-demo` 从空库开始，建表 → 跑几轮 → 重启进程 → 历史还在、队列还在，三种库各跑一遍。
+3. 不装任何持久化包时，`@nimbo/agent` 仍能直接跑起来（内置内存实现不受影响）。
+4. `apps/node-server` **一行不改**仍然全绿——它是「宿主自己实现接口」那条路的对照组。

@@ -22,7 +22,7 @@ related: ["logic/engine/features/approval-grant-split.md", "logic/engine/tech/ap
 |---|---|---|
 | G-0 文档 | 产品 / 技术 / 施工三份 + 术语表词条 | ✅ 已完成 |
 | G-1 拆分器 | `split-command.ts` 纯函数 + 表驱动单测 | ✅ 已完成 |
-| G-2 记账查询 | `session-grants.ts` 按段记/查 + 单测 | ✅ 已完成 |
+| G-2 记账查询 | `conversation-grants.ts` 按段记/查 + 单测 | ✅ 已完成 |
 | G-3 端到端 | routes 集成测试 + 卡片文案 | ⚠️ 服务端已完成，卡片文案待补（见变更记录） |
 | G-4 文档回填 | chat-webapp 技术/产品文档同步 | ✅ 已完成 |
 | G-5（可选） | 卡片展示"会记住哪几段" | 🕓 待定，见技术方案 §6.4 |
@@ -54,8 +54,8 @@ related: ["logic/engine/features/approval-grant-split.md", "logic/engine/tech/ap
 
 ### G-2 记账与查询（依赖 G-1）
 
-- **目标**：`session-grants.ts` 内部改为按段记账，**对外签名不变**。
-- **涉及文件**：`src/agent/session-grants.ts`、`test/agent/session-grants.test.ts`。
+- **目标**：`conversation-grants.ts` 内部改为按段记账，**对外签名不变**。
+- **涉及文件**：`src/agent/conversation-grants.ts`、`test/agent/conversation-grants.test.ts`。
 - **对应 spec**：技术方案 §2.1（键形状）、§4（记账/查询伪码）。
 - **验收标准**：
   1. 复合命令 `allow-session` 后，其任一子集组合命中；含新段的不命中。
@@ -65,7 +65,7 @@ related: ["logic/engine/features/approval-grant-split.md", "logic/engine/tech/ap
   5. 手工插入的旧整串 key 行仍能放行（向后兼容，无需迁移）。
   6. 既有「按用户隔离」用例继续通过。
   7. 段查询是**一次** `IN` 查询，不是 N 次往返。
-- **产出物**：改造后的 `session-grants.ts` + 扩充的单测。
+- **产出物**：改造后的 `conversation-grants.ts` + 扩充的单测。
 
 ### G-3 端到端（依赖 G-2）
 
@@ -88,7 +88,7 @@ related: ["logic/engine/features/approval-grant-split.md", "logic/engine/tech/ap
 
 - **2026-07-25 G-1~G-4 交付**：
   - **G-1**：`src/agent/split-command.ts`（约 260 行含注释）+ `test/agent/split-command.test.ts`，**71 个用例全绿**。接受组覆盖 §3.2 每种语法（引号/词边界/`$VAR`/glob/环境变量前缀/11 种重定向形态）；拒绝组覆盖 §3.4 **14 条逐条**共 36 个用例。
-  - **G-2**：`session-grants.ts` 内部改按段记账，**对外签名零改动**（`resolveReview` / `onApproval` 调用点一行没动——两处传进来的 `input` 里本来就有 `command` 和 `cwd`）。查询是**一次** `IN`，把整串键与全部分段键放在同一条 SQL 里比对。单测 7 → **21 个全绿**，新增覆盖 §G-2 全部 7 条验收标准。
+  - **G-2**：`conversation-grants.ts` 内部改按段记账，**对外签名零改动**（`resolveReview` / `onApproval` 调用点一行没动——两处传进来的 `input` 里本来就有 `command` 和 `cwd`）。查询是**一次** `IN`，把整串键与全部分段键放在同一条 SQL 里比对。单测 7 → **21 个全绿**，新增覆盖 §G-2 全部 7 条验收标准。
   - **G-3（服务端部分）**：`test/routes/chat.test.ts` 新增三轮端到端用例——授权复合命令 → 只发其中一段（无 `tool-approval-request`，工具直接跑完）→ 发含新段的命令（审批照常弹出）。**node-server 全量 338 用例绿、`tsc --noEmit` 干净、新增文件 lint 零 error。**
   - **G-4**：`docs/ingress/tech/chat-webapp.md` §6 增记账粒度段并互链；`docs/terms.md` §四 新增「命令段」「分段授权」两词条、「会话级授权」词条改写。
   - **与计划的偏差（一处）**：G-3 的「卡片 `title` 文案」**未落地**。改动写入 `apps/web/.../components/approval-card.tsx` 后，该文件在本次会话期间被**工作区里进行中的 web 重构删除**（`conversation.tsx`/`message.tsx` 同批消失，`rail.tsx` 被引用但不存在），web 侧 typecheck 与 3 个测试文件因此在本功能之外已经处于红的状态。文案改动随文件一起没了，**需在审批卡片重构落地后重新加上**：「会话内都允许」按钮的 `title` 应说明记住的是这条命令里的每一条子命令、出现新命令时仍会问。服务端行为不依赖它。

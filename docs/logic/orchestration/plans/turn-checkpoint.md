@@ -18,6 +18,7 @@ related: ["logic/orchestration/features/turn-checkpoint.md", "logic/orchestratio
 **方案定稿待施工**（2026-07-14 随 P13 持久化分析逐项讨论定案）。
 
 - 阶段：**计划中，尚未施工**。技术方案（接口、写入顺序、恢复阶梯）已定案，代码未落地。
+- **排期：2026-08-22 定为往后延。** 它与 [K3 挂起与恢复](../../../architecture/plans/agent-kernel.md) 有因果关系——K3 会让「会话跨小时存活」变成常态，那时沙盒被平台回收的概率大增，没有代码快照就是真丢工作；而现在会话都是分钟级的，快照价值有限。合理顺序是 K3 → 本方案，紧挨着做。
 - 拆单归属：P13-2 checkpoint、P13-2b 保活（同一 coder 连续施工）。
 - 前置：P13-1（transcript 减量）已交付；P13-5（[UIMessage 单账本](../features/single-ledger.md)）落地后 `lastSeq` 对齐简化为直接取账本 `seq`。
 

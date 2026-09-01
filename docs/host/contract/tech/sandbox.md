@@ -187,6 +187,19 @@ type ApprovalPolicy =
 
 - **沙盒过期 / 已停止**：适配器**必须**返回带指导文案的错误（exec 面是非零结果，文件面是异常），告诉宿主「沙盒已停，请重建或续期」；**不得**擅自重建——重建是宿主策略（自动重建参考实现见 chat webapp 功能）。
 - **会话恢复**：nimbo 的会话状态（`session.toJSON()`，消息史）和沙盒文件态**分开保存、分开恢复**。宿主记下重连键（E2B `sandboxId`、Vercel `name`），恢复时先重建 workspace，再 `createSession({ resume, workspace })`。
+- **工作区能恢复多久，归适配器 / provider，不归框架。** 这一条 2026-08-22 定案：轮编排的 runtime 配置里**不设** `workspaceRetention` 这类统一开关。
+
+#### 为什么留存期不能提到框架层
+
+各家的过期语义根本不是一回事，一个统一的 `'24h' | '3d' | '7d' | 'forever'` 会同时骗到两边的人：
+
+| provider | 暂停后怎么算 |
+|---|---|
+| **E2B** | 暂停后**无限期保存、不计费**；恢复还会重置连续运行窗口。这里没有「留存期」这个旋钮可拧（`idleTimeoutMs` 是**连续运行**上限，不是恢复窗口——见[沙盒保活 · 技术方案](../../../logic/orchestration/tech/sandbox-keepalive.md) §7） |
+| **Vercel** | 有快照过期，留存期才是个真参数 |
+| **Cloudflare** | 由 Durable Object 的生命周期决定，宿主管不着 |
+
+把它放进 runtime 配置的后果是：在 E2B 上配了完全不生效，用户却以为配上了。真要控留存，走适配器自己的构造参数——那是唯一知道该怎么翻译这个意图的地方。
 
 ### 4.7 工程要求
 

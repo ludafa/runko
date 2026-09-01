@@ -81,7 +81,7 @@ erDiagram
 interface QueuedMessage {
   id: string;        // randomUUID，删除端点按它定位
   text: string;      // 1..N，与 PostChatMessageInput.text 同约束
-  userId: string;    // 入队者（= 起轮时的审批发起人，见 session-grants 的 userId 语义）
+  userId: string;    // 入队者（= 起轮时的审批发起人，见 conversation-grants 的 userId 语义）
   createdAt: number; // epoch ms
 }
 ```
