@@ -9,6 +9,44 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+
+    # 三个真库。**没有它们的话 `persist-mysql` / `persist-mongo` 在 CI 里一条测试都不跑**
+    # （两个包都靠 `NIMBO_TEST_*_URL` 开关，没给就整档 skip），而 `persist-mongo` 是 700 多行
+    # 的**独立实现**、跟 kysely 那条路一行代码都不共享，MySQL 那一档也有自己的
+    # 幂等插入与排序规则分支——不跑等于「CI 绿说明不了任何事」。
+    # 起容器是几行 YAML 的成本，换的是这两档不再靠人肉记得手动验。
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: nimbo
+          POSTGRES_PASSWORD: nimbo
+          POSTGRES_DB: nimbo
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U nimbo"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      mysql:
+        image: mysql:9
+        env:
+          MYSQL_ROOT_PASSWORD: nimbo
+          MYSQL_DATABASE: nimbo
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pnimbo"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+      mongo:
+        image: mongo:8
+        ports: ['27017:27017']
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ping:1})'"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+
+    env:
+      NIMBO_TEST_POSTGRES_URL: postgres://nimbo:nimbo@127.0.0.1:5432/nimbo
+      NIMBO_TEST_MYSQL_URL: mysql://root:nimbo@127.0.0.1:3306/nimbo
+      NIMBO_TEST_MONGO_URL: mongodb://127.0.0.1:27017
+
     steps:
       - uses: actions/checkout@v4
 
