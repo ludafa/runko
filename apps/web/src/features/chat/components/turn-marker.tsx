@@ -40,6 +40,24 @@ const KNOWN_ERROR_TITLE: Record<NimboError['code'], string> = {
 const SHUTDOWN_ABORT_MESSAGE =
   'The server shut down while this turn was running.';
 
+/**
+ * [挂起](../../../../../docs/terms.md)：等人等太久，这一轮落盘退出了，人回来还能接着跑。
+ *
+ * **不是失败**——跟 `aborted` 一样走中性呈现。它没有 `NimboError`（没有出错），所以
+ * 单独一个组件，不挂在 `TurnFailedBar` 上。
+ */
+export function TurnSuspendedBar() {
+  return (
+    <Alert className="mb-2" data-testid="turn-suspended-bar">
+      <CircleStopIcon />
+      <AlertTitle>等待你的答复，这一轮已挂起</AlertTitle>
+      <AlertDescription>
+        已经做过的事都保留着；答复之后会从挂起的地方接着跑。
+      </AlertDescription>
+    </Alert>
+  );
+}
+
 export function TurnFailedBar({ error }: { error: NimboError }) {
   if (error.code === 'aborted') {
     // 两档都不是故障、都走中性呈现，差别只在「是谁停的」——用户没按任何按钮却看到

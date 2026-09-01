@@ -35,6 +35,7 @@
         "x-readme-ref-name": "SkillSummary"
       }
     },
+    "turnInProgress": { "type": "boolean" },
     "createdAt": { "type": "string" }
   },
   "required": [
@@ -48,6 +49,7 @@
     "lastActiveAt",
     "queuedMessages",
     "availableSkills",
+    "turnInProgress",
     "createdAt"
   ],
   "x-readme-ref-name": "Conversation"

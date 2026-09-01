@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 
-import { fetchConversationEvents, getConversation } from '@/features/chat/api';
+import {
+  fetchConversationMessages,
+  getConversation,
+} from '@/features/chat/api';
 import { BranchHeader } from '@/features/chat/components/branch-header';
 import { MessageComposer } from '@/features/chat/components/message-composer';
 import { QueuedMessages } from '@/features/chat/components/queued-messages';
@@ -52,7 +55,7 @@ function ConversationContent({ conversationId }: { conversationId: string }) {
     const controller = new AbortController();
     Promise.all([
       getConversation(conversationId, controller.signal),
-      fetchConversationEvents(conversationId, { signal: controller.signal }),
+      fetchConversationMessages(conversationId, { signal: controller.signal }),
     ])
       .then(([sessionDetail, frames]) => {
         setConversation(sessionDetail);
@@ -63,7 +66,9 @@ function ConversationContent({ conversationId }: { conversationId: string }) {
         // change, or React StrictMode's dev double-mount) — it is not a load
         // failure, and letting it set loadError would clobber the successful
         // second mount's state. Mirrors the SSE hook's AbortError handling.
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted) {
+          return;
+        }
         setLoadError(error instanceof Error ? error.message : String(error));
       });
     return () => controller.abort();
@@ -103,6 +108,9 @@ function ConversationTimeline({
     conversationId,
     initialFrames,
     conversation.queuedMessages,
+    // 「有没有轮在跑」的初值同样来自会话详情——服务端读[起轮标记](../../../../docs/terms.md)
+    // 那一列给出的权威答案，不再靠前端猜（见 `use-chat-messages.ts` 的同名参数）。
+    conversation.turnInProgress,
   );
   const wasSleeping = conversation.status === 'sleeping';
 

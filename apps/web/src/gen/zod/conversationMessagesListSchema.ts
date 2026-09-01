@@ -9,7 +9,7 @@ import { chatQueueFrameSchema } from './chatQueueFrameSchema.ts';
 import { chatTurnStateFrameSchema } from './chatTurnStateFrameSchema.ts';
 import { z } from 'zod/v4';
 
-export const conversationEventsListSchema = z.object({
+export const conversationMessagesListSchema = z.object({
   get frames() {
     return z.array(
       z.union([

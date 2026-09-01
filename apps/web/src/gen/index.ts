@@ -13,7 +13,7 @@ export type {
   ConversationProviderEnumKey,
   ConversationStatusEnumKey,
 } from './types/Conversation.ts';
-export type { ConversationEventsList } from './types/ConversationEventsList.ts';
+export type { ConversationMessagesList } from './types/ConversationMessagesList.ts';
 export type {
   CreateConversationInput,
   CreateConversationInputProviderEnumKey,
@@ -50,14 +50,14 @@ export type {
   GetApiChatConversationsIdQueryResponse,
 } from './types/GetApiChatConversationsId.ts';
 export type {
-  GetApiChatConversationsIdEvents200,
-  GetApiChatConversationsIdEvents401,
-  GetApiChatConversationsIdEvents404,
-  GetApiChatConversationsIdEventsPathParams,
-  GetApiChatConversationsIdEventsQuery,
-  GetApiChatConversationsIdEventsQueryParams,
-  GetApiChatConversationsIdEventsQueryResponse,
-} from './types/GetApiChatConversationsIdEvents.ts';
+  GetApiChatConversationsIdMessages200,
+  GetApiChatConversationsIdMessages401,
+  GetApiChatConversationsIdMessages404,
+  GetApiChatConversationsIdMessagesPathParams,
+  GetApiChatConversationsIdMessagesQuery,
+  GetApiChatConversationsIdMessagesQueryParams,
+  GetApiChatConversationsIdMessagesQueryResponse,
+} from './types/GetApiChatConversationsIdMessages.ts';
 export type {
   GetApiChatConversationsIdStream200,
   GetApiChatConversationsIdStream401,
@@ -200,7 +200,7 @@ export { deleteApiChatConversationsIdQueue } from './clients/deleteApiChatConver
 export { deleteApiChatConversationsIdQueueMessageid } from './clients/deleteApiChatConversationsIdQueueMessageid.ts';
 export { getApiChatConversations } from './clients/getApiChatConversations.ts';
 export { getApiChatConversationsId } from './clients/getApiChatConversationsId.ts';
-export { getApiChatConversationsIdEvents } from './clients/getApiChatConversationsIdEvents.ts';
+export { getApiChatConversationsIdMessages } from './clients/getApiChatConversationsIdMessages.ts';
 export { getApiChatConversationsIdStream } from './clients/getApiChatConversationsIdStream.ts';
 export { getApiChatConversationsIdTurnsTurnTelemetry } from './clients/getApiChatConversationsIdTurnsTurnTelemetry.ts';
 export { getApiNotes } from './clients/getApiNotes.ts';
@@ -232,7 +232,7 @@ export { chatChunkEnvelopeSchema } from './zod/chatChunkEnvelopeSchema.ts';
 export { chatMessageFrameSchema } from './zod/chatMessageFrameSchema.ts';
 export { chatQueueFrameSchema } from './zod/chatQueueFrameSchema.ts';
 export { chatTurnStateFrameSchema } from './zod/chatTurnStateFrameSchema.ts';
-export { conversationEventsListSchema } from './zod/conversationEventsListSchema.ts';
+export { conversationMessagesListSchema } from './zod/conversationMessagesListSchema.ts';
 export { conversationSchema } from './zod/conversationSchema.ts';
 export { createConversationInputSchema } from './zod/createConversationInputSchema.ts';
 export { createNoteInputSchema } from './zod/createNoteInputSchema.ts';
@@ -251,13 +251,13 @@ export {
   deleteApiChatConversationsIdQueuePathParamsSchema,
 } from './zod/deleteApiChatConversationsIdQueueSchema.ts';
 export {
-  getApiChatConversationsIdEvents200Schema,
-  getApiChatConversationsIdEvents401Schema,
-  getApiChatConversationsIdEvents404Schema,
-  getApiChatConversationsIdEventsPathParamsSchema,
-  getApiChatConversationsIdEventsQueryParamsSchema,
-  getApiChatConversationsIdEventsQueryResponseSchema,
-} from './zod/getApiChatConversationsIdEventsSchema.ts';
+  getApiChatConversationsIdMessages200Schema,
+  getApiChatConversationsIdMessages401Schema,
+  getApiChatConversationsIdMessages404Schema,
+  getApiChatConversationsIdMessagesPathParamsSchema,
+  getApiChatConversationsIdMessagesQueryParamsSchema,
+  getApiChatConversationsIdMessagesQueryResponseSchema,
+} from './zod/getApiChatConversationsIdMessagesSchema.ts';
 export {
   getApiChatConversationsId200Schema,
   getApiChatConversationsId401Schema,

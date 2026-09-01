@@ -49,6 +49,7 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
     lastActiveAt: new Date(0).toISOString(),
     queuedMessages: [],
     availableSkills: [],
+    turnInProgress: false,
     createdAt: new Date(0).toISOString(),
     ...overrides,
   };

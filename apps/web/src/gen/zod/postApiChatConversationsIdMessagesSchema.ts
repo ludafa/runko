@@ -13,7 +13,7 @@ export const postApiChatConversationsIdMessagesPathParamsSchema = z.object({
 });
 
 /**
- * @description Accepted — see `mode` (\"started\" | \"steered\" | \"queued\" | \"aborted\"); poll/stream `GET .../stream` for its events. \"aborted\" (docs/tech/turn-abort.md §3.3) means the user stopped this turn while it was still being assembled, so it never started running — the stopped-turn frames are on the stream like any other outcome
+ * @description Accepted — see `mode` (\"started\" | \"steered\" | \"queued\"); poll/stream `GET .../stream` for its events. Stopping a turn while it is still being assembled still works, but the ack for that message is \"started\" — the stopped-turn frames arrive on the stream like any other outcome
  */
 export const postApiChatConversationsIdMessages202Schema = z.lazy(
   () => startTurnAckSchema,

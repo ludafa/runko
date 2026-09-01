@@ -11,8 +11,8 @@ import {
   abortTurnAckSchema,
   type ChatReplayFrame,
   type Conversation,
-  conversationEventsListSchema,
   conversationListSchema,
+  conversationMessagesListSchema,
   type ConversationProvider,
   conversationSchema,
   parseChatReplayFrame,
@@ -49,9 +49,12 @@ async function readBodyText(response: Response): Promise<string> {
 
 async function requestJson(input: string, init: RequestInit): Promise<unknown> {
   const response = await fetch(input, { credentials: 'include', ...init });
-  if (!response.ok)
+  if (!response.ok) {
     throw new ChatApiError(response.status, await readBodyText(response));
-  if (response.status === 204 || response.status === 205) return null;
+  }
+  if (response.status === 204 || response.status === 205) {
+    return null;
+  }
   return response.json() as Promise<unknown>;
 }
 
@@ -90,13 +93,13 @@ export async function getConversation(
 }
 
 /**
- * `GET .../events?after=<seq>` (docs/tech/chat-webapp.md §2.2, docs/tech/single-ledger.md §5 单-3): the full
+ * `GET .../messages?after=<seq>` (docs/tech/chat-webapp.md §2.2, docs/tech/single-ledger.md §5 单-3): the full
  * persisted history, in seq order — `{ frames: ChatReplayFrame[] }`, not a
- * bare/paginated array (`apps/node-server`'s `schemas/chat.ts` `ChatEventsListSchema`
+ * bare/paginated array (`apps/node-server`'s `schemas/chat.ts` `ChatMessagesListSchema`
  * doc comment: GC already keeps this bounded to "finished message history +
  * the in-progress/crashed turn's durable chunks", no pagination needed).
  */
-export async function fetchConversationEvents(
+export async function fetchConversationMessages(
   conversationId: string,
   opts?: { after?: number; signal?: AbortSignal },
 ): Promise<ChatReplayFrame[]> {
@@ -105,10 +108,10 @@ export async function fetchConversationEvents(
       `?after=${encodeURIComponent(String(opts.after))}`
     : '';
   const json = await requestJson(
-    `/api/chat/conversations/${encodeURIComponent(conversationId)}/events${query}`,
+    `/api/chat/conversations/${encodeURIComponent(conversationId)}/messages${query}`,
     { method: 'GET', signal: opts?.signal },
   );
-  return conversationEventsListSchema.parse(json).frames;
+  return conversationMessagesListSchema.parse(json).frames;
 }
 
 export interface ChatFrameStreamHandlers {
@@ -321,10 +324,12 @@ export async function streamConversationTail(
       signal,
     },
   );
-  if (!response.ok)
+  if (!response.ok) {
     throw new ChatApiError(response.status, await readBodyText(response));
-  if (response.body === null)
+  }
+  if (response.body === null) {
     throw new Error('chat conversation tail response has no body');
+  }
 
   await consumeSSEStream(response.body, (message) => {
     const parsed = parseChatReplayFrame(message.data);

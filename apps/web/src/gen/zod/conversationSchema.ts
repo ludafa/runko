@@ -22,5 +22,6 @@ export const conversationSchema = z.object({
   get availableSkills() {
     return z.array(skillSummarySchema);
   },
+  turnInProgress: z.boolean(),
   createdAt: z.string(),
 });

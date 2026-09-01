@@ -34,7 +34,9 @@ import { count } from './turn-stats-dialog';
 /** 固定用 ISO 风格的本地时间，不走 `toLocaleString()`——后者的输出随环境 ICU 数据变化，测试里对不齐。 */
 function formatTimestamp(iso: string): string {
   const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
+  if (Number.isNaN(date.getTime())) {
+    return iso;
+  }
   const pad = (n: number) => String(n).padStart(2, '0');
   return (
     `${String(date.getFullYear())}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
@@ -47,6 +49,11 @@ function formatTimestamp(iso: string): string {
 export interface ConversationStats {
   completedTurns: number;
   failedTurns: number;
+  /**
+   * [挂起](../../../../../docs/terms.md)的轮数。**单独一档，不并进 `failedTurns`**——
+   * 挂起是「等人等太久，落盘退出，人回来接着跑」，不是出错。
+   */
+  suspendedTurns: number;
   /** 有 `durationMs` 的轮的墙钟之和；没有任何一轮带该字段时为 `undefined`（旧记录）。 */
   durationMs: number | undefined;
   toolDurationMs: number | undefined;
@@ -61,7 +68,9 @@ function addOptional(
   acc: number | undefined,
   value: number | undefined,
 ): number | undefined {
-  if (value === undefined) return acc;
+  if (value === undefined) {
+    return acc;
+  }
   return (acc ?? 0) + value;
 }
 
@@ -71,6 +80,7 @@ export function summarizeConversation(
   const stats: ConversationStats = {
     completedTurns: 0,
     failedTurns: 0,
+    suspendedTurns: 0,
     durationMs: undefined,
     toolDurationMs: undefined,
     inputTokens: undefined,
@@ -81,9 +91,14 @@ export function summarizeConversation(
 
   for (const message of messages) {
     const metadata = message.metadata;
-    if (metadata?.status === undefined) continue;
-    if (metadata.status === 'completed') stats.completedTurns += 1;
-    else {
+    if (metadata?.status === undefined) {
+      continue;
+    }
+    if (metadata.status === 'completed') {
+      stats.completedTurns += 1;
+    } else if (metadata.status === 'suspended') {
+      stats.suspendedTurns += 1;
+    } else {
       stats.failedTurns += 1;
       // 失败轮照样计入耗时与用量——token 是真花掉了，不能因为这轮没成就当没发生。
     }
@@ -123,7 +138,7 @@ function Row({
 }
 
 function StatsPanel({ stats }: { stats: ConversationStats }) {
-  const turns = stats.completedTurns + stats.failedTurns;
+  const turns = stats.completedTurns + stats.failedTurns + stats.suspendedTurns;
   if (turns === 0) {
     return (
       <p className="text-muted-foreground py-2 text-sm">
@@ -139,6 +154,11 @@ function StatsPanel({ stats }: { stats: ConversationStats }) {
         {stats.failedTurns > 0 && (
           <span className="text-muted-foreground ml-2 text-xs">
             其中 {count(stats.failedTurns)} 轮失败
+          </span>
+        )}
+        {stats.suspendedTurns > 0 && (
+          <span className="text-muted-foreground ml-2 text-xs">
+            {count(stats.suspendedTurns)} 轮挂起
           </span>
         )}
       </Row>

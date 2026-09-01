@@ -144,11 +144,15 @@ function parseTelemetryRows(events: TurnTelemetryEvent[]): {
     }
     if (event.eventType === 'model-call-end') {
       const parsed = modelCallEndPayloadSchema.safeParse(payload);
-      if (!parsed.success) continue;
+      if (!parsed.success) {
+        continue;
+      }
       modelCalls.push({ ...parsed.data, index: modelCalls.length + 1 });
     } else if (event.eventType === 'tool-execution-end') {
       const parsed = toolExecutionEndPayloadSchema.safeParse(payload);
-      if (!parsed.success) continue;
+      if (!parsed.success) {
+        continue;
+      }
       toolExecutions.push({
         index: toolExecutions.length + 1,
         toolName: parsed.data.toolCall?.toolName ?? '(unknown)',
@@ -157,10 +161,15 @@ function parseTelemetryRows(events: TurnTelemetryEvent[]): {
       });
     } else if (event.eventType === 'turn-prepare') {
       const parsed = turnPreparePayloadSchema.safeParse(payload);
-      if (parsed.success) prepare = parsed.data; // 一轮只有一条；真有重复就以最后一条为准
+      // 一轮只有一条；真有重复就以最后一条为准
+      if (parsed.success) {
+        prepare = parsed.data;
+      }
     } else if (event.eventType === 'turn-first-output') {
       const parsed = turnFirstOutputPayloadSchema.safeParse(payload);
-      if (parsed.success) firstOutputMs = parsed.data.firstOutputMs;
+      if (parsed.success) {
+        firstOutputMs = parsed.data.firstOutputMs;
+      }
     }
   }
   return { modelCalls, toolExecutions, prepare, firstOutputMs };
@@ -226,35 +235,47 @@ function overviewRows(
       });
     }
   }
-  if (usage.inputTokens !== undefined)
+  if (usage.inputTokens !== undefined) {
     rows.push({ label: '输入', value: count(usage.inputTokens) });
-  if (usage.cachedInputTokens !== undefined)
+  }
+  if (usage.cachedInputTokens !== undefined) {
     rows.push({ label: '缓存命中', value: count(usage.cachedInputTokens) });
-  if (usage.outputTokens !== undefined)
+  }
+  if (usage.outputTokens !== undefined) {
     rows.push({ label: '输出', value: count(usage.outputTokens) });
-  if (usage.totalTokens !== undefined)
+  }
+  if (usage.totalTokens !== undefined) {
     rows.push({ label: '共计', value: `${count(usage.totalTokens)} tokens` });
+  }
   return rows;
 }
 
 // ---- 模型调用明细行的两段文案（性能 / token 用量） ----
 
 function modelCallPerfParts(perf: ModelCallRow['performance']): string[] {
-  if (perf === undefined) return [];
+  if (perf === undefined) {
+    return [];
+  }
   const parts: string[] = [];
-  if (present(perf.responseTimeMs))
+  if (present(perf.responseTimeMs)) {
     parts.push(`响应 ${formatDuration(perf.responseTimeMs)}`);
-  if (present(perf.timeToFirstOutputMs))
+  }
+  if (present(perf.timeToFirstOutputMs)) {
     parts.push(`首 token ${formatDuration(perf.timeToFirstOutputMs)}`);
-  if (present(perf.outputTokensPerSecond))
+  }
+  if (present(perf.outputTokensPerSecond)) {
     parts.push(`输出 ${perf.outputTokensPerSecond.toFixed(1)} tok/s`);
-  if (present(perf.inputTokensPerSecond))
+  }
+  if (present(perf.inputTokensPerSecond)) {
     parts.push(`输入 ${count(Math.round(perf.inputTokensPerSecond))} tok/s`);
+  }
   return parts;
 }
 
 function modelCallUsageParts(usage: ModelCallRow['usage']): string[] {
-  if (usage === undefined) return [];
+  if (usage === undefined) {
+    return [];
+  }
   const parts: string[] = [];
   if (usage.inputTokens !== undefined) {
     const cached = usage.inputTokenDetails?.cacheReadTokens;
@@ -272,8 +293,9 @@ function modelCallUsageParts(usage: ModelCallRow['usage']): string[] {
       : `输出 ${count(usage.outputTokens)}`,
     );
   }
-  if (usage.totalTokens !== undefined)
+  if (usage.totalTokens !== undefined) {
     parts.push(`共计 ${count(usage.totalTokens)}`);
+  }
   return parts;
 }
 
@@ -325,17 +347,22 @@ function DetailPanel({
   state: PanelState;
   expandable: boolean;
 }) {
-  if (!expandable)
+  if (!expandable) {
     return (
       <p className="text-muted-foreground text-xs">
         此记录无遥测明细（缺 turn 键）
       </p>
     );
-  if (state.phase === 'loading')
+  }
+  if (state.phase === 'loading') {
     return <p className="text-muted-foreground text-xs">加载中…</p>;
-  if (state.phase === 'error')
+  }
+  if (state.phase === 'error') {
     return <p className="text-muted-foreground text-xs">遥测数据加载失败</p>;
-  if (state.phase !== 'loaded') return null;
+  }
+  if (state.phase !== 'loaded') {
+    return null;
+  }
 
   const { modelCalls, toolExecutions, prepare, firstOutputMs } =
     parseTelemetryRows(state.events);
@@ -343,8 +370,9 @@ function DetailPanel({
     modelCalls.length === 0 &&
     toolExecutions.length === 0 &&
     prepare === undefined
-  )
+  ) {
     return <p className="text-muted-foreground text-xs">无遥测数据</p>;
+  }
 
   return (
     <>

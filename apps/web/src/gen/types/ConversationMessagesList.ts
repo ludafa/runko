@@ -8,7 +8,7 @@ import type { ChatMessageFrame } from './ChatMessageFrame.ts';
 import type { ChatQueueFrame } from './ChatQueueFrame.ts';
 import type { ChatTurnStateFrame } from './ChatTurnStateFrame.ts';
 
-export type ConversationEventsList = {
+export type ConversationMessagesList = {
   /**
    * @type array
    */

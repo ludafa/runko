@@ -10,7 +10,7 @@ export type {
   ConversationProviderEnumKey,
   ConversationStatusEnumKey,
 } from './Conversation.ts';
-export type { ConversationEventsList } from './ConversationEventsList.ts';
+export type { ConversationMessagesList } from './ConversationMessagesList.ts';
 export type {
   CreateConversationInput,
   CreateConversationInputProviderEnumKey,
@@ -47,14 +47,14 @@ export type {
   GetApiChatConversationsIdQueryResponse,
 } from './GetApiChatConversationsId.ts';
 export type {
-  GetApiChatConversationsIdEvents200,
-  GetApiChatConversationsIdEvents401,
-  GetApiChatConversationsIdEvents404,
-  GetApiChatConversationsIdEventsPathParams,
-  GetApiChatConversationsIdEventsQuery,
-  GetApiChatConversationsIdEventsQueryParams,
-  GetApiChatConversationsIdEventsQueryResponse,
-} from './GetApiChatConversationsIdEvents.ts';
+  GetApiChatConversationsIdMessages200,
+  GetApiChatConversationsIdMessages401,
+  GetApiChatConversationsIdMessages404,
+  GetApiChatConversationsIdMessagesPathParams,
+  GetApiChatConversationsIdMessagesQuery,
+  GetApiChatConversationsIdMessagesQueryParams,
+  GetApiChatConversationsIdMessagesQueryResponse,
+} from './GetApiChatConversationsIdMessages.ts';
 export type {
   GetApiChatConversationsIdStream200,
   GetApiChatConversationsIdStream401,

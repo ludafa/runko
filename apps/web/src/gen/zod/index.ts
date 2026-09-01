@@ -5,7 +5,7 @@ export { chatChunkEnvelopeSchema } from './chatChunkEnvelopeSchema.ts';
 export { chatMessageFrameSchema } from './chatMessageFrameSchema.ts';
 export { chatQueueFrameSchema } from './chatQueueFrameSchema.ts';
 export { chatTurnStateFrameSchema } from './chatTurnStateFrameSchema.ts';
-export { conversationEventsListSchema } from './conversationEventsListSchema.ts';
+export { conversationMessagesListSchema } from './conversationMessagesListSchema.ts';
 export { conversationSchema } from './conversationSchema.ts';
 export { createConversationInputSchema } from './createConversationInputSchema.ts';
 export { createNoteInputSchema } from './createNoteInputSchema.ts';
@@ -24,13 +24,13 @@ export {
   deleteApiChatConversationsIdQueuePathParamsSchema,
 } from './deleteApiChatConversationsIdQueueSchema.ts';
 export {
-  getApiChatConversationsIdEvents200Schema,
-  getApiChatConversationsIdEvents401Schema,
-  getApiChatConversationsIdEvents404Schema,
-  getApiChatConversationsIdEventsPathParamsSchema,
-  getApiChatConversationsIdEventsQueryParamsSchema,
-  getApiChatConversationsIdEventsQueryResponseSchema,
-} from './getApiChatConversationsIdEventsSchema.ts';
+  getApiChatConversationsIdMessages200Schema,
+  getApiChatConversationsIdMessages401Schema,
+  getApiChatConversationsIdMessages404Schema,
+  getApiChatConversationsIdMessagesPathParamsSchema,
+  getApiChatConversationsIdMessagesQueryParamsSchema,
+  getApiChatConversationsIdMessagesQueryResponseSchema,
+} from './getApiChatConversationsIdMessagesSchema.ts';
 export {
   getApiChatConversationsId200Schema,
   getApiChatConversationsId401Schema,

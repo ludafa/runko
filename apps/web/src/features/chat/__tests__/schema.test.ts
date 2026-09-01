@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   chatReplayFrameSchema,
-  conversationEventsListSchema,
+  conversationMessagesListSchema,
   frameSeq,
   isMessageFrame,
   parseChatReplayFrame,
@@ -20,7 +20,9 @@ describe('chatReplayFrameSchema / parseChatReplayFrame', () => {
     const raw = JSON.stringify({ seq: 3, chunk: startChunk('msg-1') });
     const result = parseChatReplayFrame(raw);
     expect(result.ok).toBe(true);
-    if (!result.ok) return;
+    if (!result.ok) {
+      return;
+    }
     expect(result.frame).toEqual({ seq: 3, chunk: startChunk('msg-1') });
     expect(isMessageFrame(result.frame)).toBe(false);
   });
@@ -31,7 +33,9 @@ describe('chatReplayFrameSchema / parseChatReplayFrame', () => {
     });
     const result = parseChatReplayFrame(raw);
     expect(result.ok).toBe(true);
-    if (!result.ok) return;
+    if (!result.ok) {
+      return;
+    }
     expect(frameSeq(result.frame)).toBeUndefined();
     expect(isMessageFrame(result.frame)).toBe(false);
   });
@@ -43,9 +47,13 @@ describe('chatReplayFrameSchema / parseChatReplayFrame', () => {
     const raw = JSON.stringify({ seq: 5, message });
     const result = parseChatReplayFrame(raw);
     expect(result.ok).toBe(true);
-    if (!result.ok) return;
+    if (!result.ok) {
+      return;
+    }
     expect(isMessageFrame(result.frame)).toBe(true);
-    if (!isMessageFrame(result.frame)) return;
+    if (!isMessageFrame(result.frame)) {
+      return;
+    }
     expect(frameSeq(result.frame)).toBe(5);
     expect(result.frame.message).toEqual(message);
   });
@@ -64,7 +72,9 @@ describe('chatReplayFrameSchema / parseChatReplayFrame', () => {
   it('parseChatReplayFrame reports invalid JSON without throwing', () => {
     const result = parseChatReplayFrame('not json at all {');
     expect(result.ok).toBe(false);
-    if (result.ok) return;
+    if (result.ok) {
+      return;
+    }
     expect(result.error).toContain('invalid JSON');
   });
 
@@ -77,7 +87,9 @@ describe('chatReplayFrameSchema / parseChatReplayFrame', () => {
     const raw = JSON.stringify({ seq: 0, chunk: finishChunk('stop') });
     const result = parseChatReplayFrame(raw);
     expect(result.ok).toBe(true);
-    if (!result.ok) return;
+    if (!result.ok) {
+      return;
+    }
     expect(frameSeq(result.frame)).toBe(0);
   });
 });
@@ -94,7 +106,7 @@ describe('isMessageFrame', () => {
   });
 });
 
-describe('conversationEventsListSchema', () => {
+describe('conversationMessagesListSchema', () => {
   it('parses { frames: [...] } — not a bare array', () => {
     const payload = {
       frames: [
@@ -102,21 +114,23 @@ describe('conversationEventsListSchema', () => {
         messageFrame(2, userMessage('msg-1', 'hi')),
       ],
     };
-    const result = conversationEventsListSchema.safeParse(payload);
+    const result = conversationMessagesListSchema.safeParse(payload);
     expect(result.success).toBe(true);
-    if (!result.success) return;
+    if (!result.success) {
+      return;
+    }
     expect(result.data.frames).toHaveLength(2);
   });
 
   it('rejects a bare array (not wrapped in { frames })', () => {
-    const result = conversationEventsListSchema.safeParse([
+    const result = conversationMessagesListSchema.safeParse([
       { seq: 1, chunk: startChunk('msg-1') },
     ]);
     expect(result.success).toBe(false);
   });
 
   it('accepts an empty frame list (a brand-new session with no history yet)', () => {
-    const result = conversationEventsListSchema.safeParse({ frames: [] });
+    const result = conversationMessagesListSchema.safeParse({ frames: [] });
     expect(result.success).toBe(true);
   });
 });

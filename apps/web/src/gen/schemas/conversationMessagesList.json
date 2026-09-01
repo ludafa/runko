@@ -48,5 +48,5 @@
     }
   },
   "required": ["frames"],
-  "x-readme-ref-name": "ConversationEventsList"
+  "x-readme-ref-name": "ConversationMessagesList"
 }

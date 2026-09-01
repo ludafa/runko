@@ -60,7 +60,7 @@ export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
  * sees the precise TypeScript type — `any` never leaks past this one
  * declaration. Both only ever parse a value that has already round-tripped
  * through `JSON.parse()` (an SSE `data:` payload, or a fetched
- * `GET .../events` JSON body) — the server already validated the real
+ * `GET .../messages` JSON body) — the server already validated the real
  * `NimboChunk`/`NimboUIMessage` shape before ever serializing it, so this
  * boundary only needs "is this JSON, structurally, in the right envelope
  * shape" — not a redundant re-implementation of `@nimbo/core`'s own
@@ -130,11 +130,12 @@ export type QueueFrame = z.infer<typeof queueFrameSchema>;
  * 目前有一档会：请求 [插话](../../../../../docs/terms.md) 但那一轮还卡在
  * [起轮装配](../../../../../docs/terms.md)里时插不进去，服务端只能给它
  * [排队](../../../../../docs/terms.md)，回 `'queued'`（docs/tech/turn-abort.md §3.3）。
- * `'aborted'` 则是「这一轮在装配阶段就被用户按停止掐掉了，从没启动」。
+ * 曾经还有一档 `'aborted'`，随[轮编排运行时](../../../../../docs/logic/orchestration/plans/agent-runtime.md)
+ * 落地取消了——起轮占位成了装配的第一件事，服务端一登记就回 `'started'`。
  */
 export const startTurnAckSchema = z.object({
   ok: z.literal(true),
-  mode: z.enum(['started', 'steered', 'queued', 'aborted']),
+  mode: z.enum(['started', 'steered', 'queued']),
 });
 
 export type StartTurnMode = z.infer<typeof startTurnAckSchema>['mode'];
@@ -210,16 +211,18 @@ export function isTurnStateFrame(
  * chunk 在去重/续传簿记上走同一条「没有 seq」的路径。
  */
 export function frameSeq(frame: ChatReplayFrame): number | undefined {
-  if (isQueueFrame(frame) || isTurnStateFrame(frame)) return undefined;
+  if (isQueueFrame(frame) || isTurnStateFrame(frame)) {
+    return undefined;
+  }
   return frame.seq;
 }
 
-/** `GET .../events` response shape — `{ frames: ChatReplayFrame[] }`, not a bare array (docs/tech/chat-webapp.md §2.2 "契约细化"). */
-export const conversationEventsListSchema = z.object({
+/** `GET .../messages` response shape — `{ frames: ChatReplayFrame[] }`, not a bare array (docs/tech/chat-webapp.md §2.2 "契约细化"). */
+export const conversationMessagesListSchema = z.object({
   frames: z.array(chatReplayFrameSchema),
 });
 
-export type ChatEventsList = z.infer<typeof conversationEventsListSchema>;
+export type ChatMessagesList = z.infer<typeof conversationMessagesListSchema>;
 
 /**
  * Parses one SSE `data:` payload's JSON text into a `ChatReplayFrame`.
@@ -294,6 +297,19 @@ export const conversationSchema = z.object({
    * composer，而不是整页 parse 失败。
    */
   availableSkills: z.array(skillSummarySchema).default([]),
+  /**
+   * 这个会话此刻有没有[轮](../../../../../docs/terms.md)在跑——**服务端的权威答案**
+   * （读的是[起轮标记](../../../../../docs/terms.md)那一列）。`useChatMessages` 拿它当
+   * 挂载时的初值，撑到直播流那帧[轮状态快照](../../../../../docs/terms.md)到达为止。
+   *
+   * **必填，跟生成的契约一致**（`openapi.yml` 把它列进了 `required`，`gen/zod/` 也是
+   * `z.boolean()`）。这里曾经写 `.default(false)`，理由是「给本字段上线前建的会话留
+   * 兼容位」——但那个理由不成立：它是**每次请求现算**的（服务端读起轮标记那一列），
+   * 不是存在会话行上的值，老会话照样有。留着 default 的实际后果是：将来字段改名时
+   * 前端不会报错，而是静默退回 `false`——正好就是这个字段当初要修的那个 bug
+   * （有轮在跑却显示空闲）。
+   */
+  turnInProgress: z.boolean(),
   createdAt: z.string(),
 });
 

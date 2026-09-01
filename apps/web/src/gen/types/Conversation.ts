@@ -65,6 +65,10 @@ export type Conversation = {
    */
   availableSkills: SkillSummary[];
   /**
+   * @type boolean
+   */
+  turnInProgress: boolean;
+  /**
    * @type string
    */
   createdAt: string;

@@ -17,7 +17,8 @@
  *
  * 它有三个写入源，权威性递增：
  *
- * 1. **挂载时的临时猜测**（`lastFrameIsChunk`）：只用来撑到 tail 连上的那几十毫秒。
+ * 1. **挂载时的初值**（会话详情的 `turnInProgress`，服务端读[起轮标记](../../../../../docs/terms.md)
+ *    那一列给出）：只用来撑到 tail 连上的那几十毫秒。
  * 2. **`MessageLedger` 的 `onTurnEnd`**（docs/tech/single-ledger.md §5 单-3 那条收尾
  *    `message-metadata`）：一轮真正结束的那一刻翻假。
  * 3. **[轮状态快照](../../../../../docs/terms.md)**（`applyTurnState`，
@@ -147,29 +148,13 @@ function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
 }
 
-/**
- * 「历史以 chunk 收尾」——`turnInProgressRef` 挂载时的**临时**初值，只用来撑到 tail 连上
- * （那一刻[轮状态快照](../../../../../docs/terms.md)给出服务端的权威答案，见文件头）。
- *
- * 依据：`finalizeTurnPersistence`（`apps/node-server` 的 `turn-runner/persistence.ts`）只在一轮**优雅
- * 收尾**后才 GC 它的 `kind = 'chunk'` 行，所以正常结束的一轮，历史里只剩 `MessageFrame`。
- *
- * **但它推不出「有轮在跑」**——这里曾经写着「这是服务端持久化的结构性不变量，不是
- * 启发式」，那句话是错的：以 chunk 收尾同时覆盖了「真在跑」与「崩溃过」两种情况，而
- * 这两者对「有没有轮在跑」的答案**恰好相反**。崩溃的轮（进程重启、`driveTurn` 的 catch
- * 分支）永远不会来收尾 metadata，它那些 chunk 行也永不 GC，于是这个判断此后每次都猜
- * 「在跑」并且永不自愈（后果见文件头）。所以它现在降级为一个明确的猜测：猜错的代价被
- * 限制在 tail 连上前那几十毫秒，而且刻意猜「在跑」而不是「空闲」——万一真有一轮在跑，
- * 这几十毫秒里用户发的消息会被正确地排队，而不是去起第二轮。
- */
-function lastFrameIsChunk(frames: readonly ChatReplayFrame[]): boolean {
-  const last = frames.at(-1);
-  return last !== undefined && !('message' in last);
-}
-
 function describeError(error: unknown): string {
-  if (error instanceof ChatApiError) return error.message;
-  if (error instanceof Error) return error.message;
+  if (error instanceof ChatApiError) {
+    return error.message;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
   return String(error);
 }
 
@@ -190,19 +175,29 @@ export function useChatMessages(
   conversationId: string,
   initialFrames: ChatReplayFrame[],
   initialQueuedMessages: QueuedMessage[] = [],
+  /**
+   * 挂载时「这个会话有没有轮在跑」的初值——来自会话详情的 `turnInProgress`
+   * （服务端读[起轮标记](../../../../../docs/terms.md)那一列给出的权威答案）。
+   *
+   * 它取代了本 hook 曾经的那个猜测（「历史回放的最后一帧是不是 chunk」）：
+   * [进行中草稿](../../../../../docs/terms.md)搬进内存之后账本里根本不再有 chunk 行，
+   * 那个猜测**恒为假**，于是页面刚打开的几十毫秒里一个明明在跑的会话会被当成空闲。
+   * 这个初值只需要撑到 tail 连上——那一刻[轮状态快照](../../../../../docs/terms.md)
+   * 会再校正一次（见文件头写入源 3）。
+   */
+  initialTurnInProgress = false,
 ): UseChatMessagesResult {
   const [messages, setMessages] = useState<NimboUIMessage[]>([]);
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>(
     () =>
       // 初值优先取 `initialFrames` 里最后一帧队列快照（纯防御——今天
-      // `GET .../events` 只返回账本帧，不会带 `QueueFrame`），否则用会话详情给的
+      // `GET .../messages` 只返回账本帧，不会带 `QueueFrame`），否则用会话详情给的
       // 那一份（docs/tech/steer-and-queue.md §4.2）。之后一律由直播流的快照接管。
       initialFrames.filter(isQueueFrame).at(-1)?.queue ?? initialQueuedMessages,
   );
   const [pendingUserEchoes, setPendingUserEchoes] = useState<PendingUserEcho[]>(
     [],
   );
-  const initialTurnInProgress = lastFrameIsChunk(initialFrames);
   const [status, setStatus] = useState<ChatTurnStatus>(
     initialTurnInProgress ? 'streaming' : 'idle',
   );
@@ -301,7 +296,9 @@ export function useChatMessages(
   const ledgerRef = useRef<MessageLedger | undefined>(undefined);
   const initializedRef = useRef(false);
   useEffect(() => {
-    if (initializedRef.current) return;
+    if (initializedRef.current) {
+      return;
+    }
     initializedRef.current = true;
     const ledger = new MessageLedger(
       (nextMessages) => {
@@ -350,9 +347,11 @@ export function useChatMessages(
       // 两种状态快照帧都不属于账本（`QueueFrame`，docs/tech/steer-and-queue.md §4.3；
       // [轮状态快照](../../../../../docs/terms.md)，docs/tech/chat-webapp.md §5.1）
       // ——跳过，不喂 `MessageLedger`。队列快照对状态的贡献已经在 `queuedMessages` 的
-      // 初值里算过了（见上）；轮状态快照根本不会出现在 `initialFrames` 里（`GET .../events`
+      // 初值里算过了（见上）；轮状态快照根本不会出现在 `initialFrames` 里（`GET .../messages`
       // 只回放持久行，它只走直播流），这里跳过它纯粹是让类型收窄在一处说清。
-      if (isQueueFrame(frame) || isTurnStateFrame(frame)) continue;
+      if (isQueueFrame(frame) || isTurnStateFrame(frame)) {
+        continue;
+      }
       ledger.applyFrame(frame);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `initialFrames` is this hook instance's fixed seed, not a reactive prop (see comment above)
@@ -371,7 +370,10 @@ export function useChatMessages(
       }
       const seq = frame.seq;
       if (seq !== undefined) {
-        if (seenSeqs.current.has(seq)) return; // dedupe: tail reconnect overlap / re-delivery safety net
+        // dedupe: tail reconnect overlap / re-delivery safety net
+        if (seenSeqs.current.has(seq)) {
+          return;
+        }
         seenSeqs.current.add(seq);
         lastSeqRef.current = Math.max(lastSeqRef.current, seq);
       }
@@ -401,9 +403,18 @@ export function useChatMessages(
     tailAbortRef.current = controller;
 
     function maybeReconnect(): void {
-      if (controller.signal.aborted) return; // intentionally stopped (unmount/cancel/superseded) — never auto-reconnect
-      if (!turnInProgressRef.current) return; // turn already concluded — quiet, nothing to catch up on
-      if (reconnectAttemptRef.current >= TAIL_RECONNECT_MAX_ATTEMPTS) return; // give up quietly
+      // intentionally stopped (unmount/cancel/superseded) — never auto-reconnect
+      if (controller.signal.aborted) {
+        return;
+      }
+      // turn already concluded — quiet, nothing to catch up on
+      if (!turnInProgressRef.current) {
+        return;
+      }
+      // give up quietly
+      if (reconnectAttemptRef.current >= TAIL_RECONNECT_MAX_ATTEMPTS) {
+        return;
+      }
       const attempt = reconnectAttemptRef.current;
       reconnectAttemptRef.current += 1;
       const delay = TAIL_RECONNECT_BASE_DELAY_MS * 2 ** attempt;
@@ -422,7 +433,10 @@ export function useChatMessages(
         maybeReconnect(); // the tail closed — could be a finished turn (no-op above) or a server hiccup
       })
       .catch((tailError: unknown) => {
-        if (isAbortError(tailError)) return; // intentional cancel/unmount/supersede, not a disconnect
+        // intentional cancel/unmount/supersede, not a disconnect
+        if (isAbortError(tailError)) {
+          return;
+        }
         maybeReconnect();
       });
   }
@@ -455,7 +469,9 @@ export function useChatMessages(
   const sendMessage = useCallback(
     (text: string, intent: SendIntent = 'queue') => {
       const trimmed = text.trim();
-      if (trimmed.length === 0) return;
+      if (trimmed.length === 0) {
+        return;
+      }
 
       if (turnInProgressRef.current) {
         // 有进行中的一轮：`intent` 决定这条消息是排队还是插话
@@ -644,7 +660,10 @@ export function useChatMessages(
    *   `message-metadata`（与审批同一姿态）；这里只置一个「正在停」的中间态。
    */
   const stopTurn = useCallback(() => {
-    if (!turnInProgressRef.current) return; // 没有进行中的一轮 = 无操作
+    // 没有进行中的一轮 = 无操作
+    if (!turnInProgressRef.current) {
+      return;
+    }
     setStopping(true);
     postAbortTurn(conversationId)
       .then(applyQueueSnapshot)
@@ -665,7 +684,9 @@ export function useChatMessages(
 
   const clearSubmitting = useCallback((callId: string) => {
     setSubmittingCallIds((prev) => {
-      if (!prev.has(callId)) return prev;
+      if (!prev.has(callId)) {
+        return prev;
+      }
       const next = new Set(prev);
       next.delete(callId);
       return next;
@@ -686,7 +707,10 @@ export function useChatMessages(
    */
   const submitDecision = useCallback(
     (callId: string, request: () => Promise<void>) => {
-      if (submittingCallIds.has(callId)) return; // one in flight per callId — the card also disables its own button, this is defense in depth
+      // one in flight per callId — the card also disables its own button, this is defense in depth
+      if (submittingCallIds.has(callId)) {
+        return;
+      }
       markSubmitting(callId);
       request()
         .catch((requestError: unknown) => {
@@ -718,7 +742,9 @@ export function useChatMessages(
   const submitAnswer = useCallback(
     (callId: string, answer: string) => {
       const trimmed = answer.trim();
-      if (trimmed.length === 0) return;
+      if (trimmed.length === 0) {
+        return;
+      }
       submitDecision(callId, () =>
         postQuestionAnswer(conversationId, callId, trimmed),
       );

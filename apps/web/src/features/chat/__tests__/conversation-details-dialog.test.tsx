@@ -29,6 +29,7 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
     lastActiveAt: '2026-07-25T16:37:00.000Z',
     queuedMessages: [],
     availableSkills: [],
+    turnInProgress: false,
     createdAt: '2026-07-19T20:23:00.000Z',
     ...overrides,
   };

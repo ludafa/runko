@@ -46,7 +46,7 @@ import type { QuestionPart } from './question-card';
 import { QuestionCard } from './question-card';
 import { ReasoningBlock } from './reasoning-block';
 import { ToolCallCard } from './tool-call-card';
-import { TurnFailedBar } from './turn-marker';
+import { TurnFailedBar, TurnSuspendedBar } from './turn-marker';
 import { TurnStatsButton } from './turn-stats-dialog';
 
 const ASK_USER_TOOL_NAME = 'ask-user';
@@ -93,7 +93,10 @@ export function MessageEntry({
 }: MessageEntryProps) {
   /** 这条消息所属的轮已结束 = 它里面还没落定的卡片都已失效（见 `turnLive` 的注释）。 */
   const staleByTurnEnd = !turnLive;
-  if (message.role === 'system') return null; // defensive — nimbo never pushes a system message onto the ledger (the system prompt is passed to streamText() separately, loop.ts's runOneStep)
+  // defensive — nimbo never pushes a system message onto the ledger (the system prompt is passed to streamText() separately, loop.ts's runOneStep)
+  if (message.role === 'system') {
+    return null;
+  }
 
   if (message.role === 'user') {
     const text = message.parts
@@ -143,7 +146,10 @@ export function MessageEntry({
             case 'step-start':
               return null;
             default: {
-              if (!isNimboToolPart(part)) return null; // file/source-*/dynamic-tool/custom — never produced by nimbo (see @nimbo/core's state.ts NimboUIMessage doc comment)
+              // file/source-*/dynamic-tool/custom — never produced by nimbo (see @nimbo/core's state.ts NimboUIMessage doc comment)
+              if (!isNimboToolPart(part)) {
+                return null;
+              }
 
               // `data-tool-timing` never renders as its own card (no `case` for
               // it above — falls through here, rejected by `isNimboToolPart`)
@@ -211,6 +217,10 @@ export function MessageEntry({
               conversationId={conversationId}
               turn={message.metadata.turn}
             />
+          : message.metadata.status === 'suspended' ?
+            // [挂起](../../../../../docs/terms.md)不是失败，也没有 error——不单独判一下的话
+            // 这一轮的尾部会是一片空白。
+            <TurnSuspendedBar />
           : message.metadata.error !== undefined && (
               <TurnFailedBar error={message.metadata.error} />
             ))}

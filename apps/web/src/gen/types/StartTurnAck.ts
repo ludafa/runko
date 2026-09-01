@@ -14,7 +14,6 @@ export const startTurnAckModeEnum = {
   started: 'started',
   steered: 'steered',
   queued: 'queued',
-  aborted: 'aborted',
 } as const;
 
 export type StartTurnAckModeEnumKey =

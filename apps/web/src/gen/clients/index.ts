@@ -2,7 +2,7 @@ export { deleteApiChatConversationsIdQueue } from './deleteApiChatConversationsI
 export { deleteApiChatConversationsIdQueueMessageid } from './deleteApiChatConversationsIdQueueMessageid.ts';
 export { getApiChatConversations } from './getApiChatConversations.ts';
 export { getApiChatConversationsId } from './getApiChatConversationsId.ts';
-export { getApiChatConversationsIdEvents } from './getApiChatConversationsIdEvents.ts';
+export { getApiChatConversationsIdMessages } from './getApiChatConversationsIdMessages.ts';
 export { getApiChatConversationsIdStream } from './getApiChatConversationsIdStream.ts';
 export { getApiChatConversationsIdTurnsTurnTelemetry } from './getApiChatConversationsIdTurnsTurnTelemetry.ts';
 export { getApiNotes } from './getApiNotes.ts';

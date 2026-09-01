@@ -32,7 +32,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('useChatMessages — mount / lastFrameIsChunk', () => {
+describe('useChatMessages — 挂载', () => {
   it('a history ending in a MessageFrame (gracefully finished turn) starts idle and opens the tail with after=<max seq>', () => {
     const fake = setup();
     const stream = fake.queueStream();
@@ -66,11 +66,16 @@ describe('useChatMessages — mount / lastFrameIsChunk', () => {
     stream.close();
   });
 
-  it('a history ending in a raw ChunkEnvelope (turn still in progress / crashed) starts "streaming"', () => {
+  it('挂载时的初值来自会话详情的 turnInProgress（服务端读起轮标记那一列给出）——为真即 streaming', () => {
     const fake = setup();
     const stream = fake.queueStream();
     const { result } = renderHook(() =>
-      useChatMessages('sess_1', [{ seq: 1, chunk: startChunk('m1') }]),
+      useChatMessages(
+        'sess_1',
+        [{ seq: 1, chunk: startChunk('m1') }],
+        [],
+        true,
+      ),
     );
 
     expect(result.current.status).toBe('streaming');
@@ -114,10 +119,11 @@ describe('useChatMessages — 轮状态快照（turn-state 帧）', () => {
     const fake = setup();
     const stream = fake.queueStream();
     const { result } = renderHook(() =>
-      useChatMessages('sess_1', crashResidueHistory),
+      useChatMessages('sess_1', crashResidueHistory, [], true),
     );
 
-    // 挂载时前端只能靠猜——这里就是猜错的那一档（服务端其实没有轮在跑）。
+    // 挂载初值说「在跑」，但服务端此刻其实已经没有轮了（这一轮崩过）——
+    // 下一帧轮状态快照会把它纠正过来。
     expect(result.current.status).toBe('streaming');
 
     act(() => {
@@ -331,10 +337,17 @@ describe('useChatMessages — reconnect backoff', () => {
     // Turn already in progress at mount (history ends in a raw chunk) — the
     // mount's own tail attempt plus 5 reconnect attempts, all failing with a
     // non-2xx status (a disconnect, not an AbortError).
-    for (let i = 0; i < 6; i++) fake.queueStreamError(503);
+    for (let i = 0; i < 6; i++) {
+      fake.queueStreamError(503);
+    }
 
     renderHook(() =>
-      useChatMessages('sess_1', [{ seq: 1, chunk: startChunk('m1') }]),
+      useChatMessages(
+        'sess_1',
+        [{ seq: 1, chunk: startChunk('m1') }],
+        [],
+        true,
+      ),
     );
 
     await vi.waitFor(() => {
@@ -344,7 +357,9 @@ describe('useChatMessages — reconnect backoff', () => {
     const delays = [1000, 2000, 4000, 8000, 16000];
     for (let i = 0; i < delays.length; i++) {
       const delay = delays[i];
-      if (delay === undefined) continue;
+      if (delay === undefined) {
+        continue;
+      }
 
       await vi.advanceTimersByTimeAsync(delay);
 
@@ -364,7 +379,12 @@ describe('useChatMessages — reconnect backoff', () => {
     const fake = setup();
     const stream = fake.queueStream();
     const { unmount } = renderHook(() =>
-      useChatMessages('sess_1', [{ seq: 1, chunk: startChunk('m1') }]),
+      useChatMessages(
+        'sess_1',
+        [{ seq: 1, chunk: startChunk('m1') }],
+        [],
+        true,
+      ),
     );
     unmount(); // aborts the tail — streamConversationTail rejects with AbortError
     stream.error(new DOMException('aborted', 'AbortError'));
@@ -802,7 +822,12 @@ describe('useChatMessages — 待发队列', () => {
     const stream = fake.queueStream();
     // 历史以 chunk 收尾 = 挂载时就有进行中的一轮。
     const { result } = renderHook(() =>
-      useChatMessages('sess_1', [{ seq: 1, chunk: startChunk('m1') }]),
+      useChatMessages(
+        'sess_1',
+        [{ seq: 1, chunk: startChunk('m1') }],
+        [],
+        true,
+      ),
     );
 
     act(() => {
@@ -852,7 +877,12 @@ describe('useChatMessages — 待发队列', () => {
     fake.setMessagePostMode('queued');
     const stream = fake.queueStream();
     const { result } = renderHook(() =>
-      useChatMessages('sess_1', [{ seq: 1, chunk: startChunk('m1') }]),
+      useChatMessages(
+        'sess_1',
+        [{ seq: 1, chunk: startChunk('m1') }],
+        [],
+        true,
+      ),
     );
 
     act(() => {
@@ -1008,9 +1038,12 @@ describe('useChatMessages — 停止本轮（docs/tech/turn-abort.md）', () => 
     const fake = setup();
     const stream = fake.queueStream();
     const { result } = renderHook(() =>
-      useChatMessages('sess_1', IN_PROGRESS_FRAMES, [
-        queuedMessage('q1', '排着的一条'),
-      ]),
+      useChatMessages(
+        'sess_1',
+        IN_PROGRESS_FRAMES,
+        [queuedMessage('q1', '排着的一条')],
+        true,
+      ),
     );
     expect(result.current.status).toBe('streaming');
 
@@ -1039,7 +1072,7 @@ describe('useChatMessages — 停止本轮（docs/tech/turn-abort.md）', () => 
     const fake = setup();
     const stream = fake.queueStream();
     const { result } = renderHook(() =>
-      useChatMessages('sess_1', IN_PROGRESS_FRAMES),
+      useChatMessages('sess_1', IN_PROGRESS_FRAMES, [], true),
     );
 
     act(() => {
@@ -1076,7 +1109,7 @@ describe('useChatMessages — 停止本轮（docs/tech/turn-abort.md）', () => 
     const fake = setup();
     const stream = fake.queueStream();
     const { result } = renderHook(() =>
-      useChatMessages('sess_1', IN_PROGRESS_FRAMES),
+      useChatMessages('sess_1', IN_PROGRESS_FRAMES, [], true),
     );
 
     act(() => {
@@ -1104,7 +1137,7 @@ describe('useChatMessages — 停止本轮（docs/tech/turn-abort.md）', () => 
     const stream = fake.queueStream();
     fake.setAbortStatus(409);
     const { result } = renderHook(() =>
-      useChatMessages('sess_1', IN_PROGRESS_FRAMES),
+      useChatMessages('sess_1', IN_PROGRESS_FRAMES, [], true),
     );
 
     act(() => {
@@ -1124,7 +1157,7 @@ describe('useChatMessages — 停止本轮（docs/tech/turn-abort.md）', () => 
     const stream = fake.queueStream();
     fake.setAbortStatus(500);
     const { result } = renderHook(() =>
-      useChatMessages('sess_1', IN_PROGRESS_FRAMES),
+      useChatMessages('sess_1', IN_PROGRESS_FRAMES, [], true),
     );
 
     act(() => {

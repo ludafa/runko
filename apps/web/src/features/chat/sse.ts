@@ -27,12 +27,16 @@ export class SSEStreamParser {
     const messages: SSEMessage[] = [];
     for (;;) {
       const match = /\r\n|\r|\n/.exec(this.buffer);
-      if (match === null) break;
+      if (match === null) {
+        break;
+      }
       const line = this.buffer.slice(0, match.index);
       this.buffer = this.buffer.slice(match.index + match[0].length);
       if (line.length === 0) {
         const message = this.dispatch();
-        if (message !== undefined) messages.push(message);
+        if (message !== undefined) {
+          messages.push(message);
+        }
         continue;
       }
       this.processLine(line);
@@ -41,11 +45,16 @@ export class SSEStreamParser {
   }
 
   private processLine(line: string): void {
-    if (line.startsWith(':')) return; // comment line, ignored per spec
+    // comment line, ignored per spec
+    if (line.startsWith(':')) {
+      return;
+    }
     const colonIndex = line.indexOf(':');
     const field = colonIndex === -1 ? line : line.slice(0, colonIndex);
     let value = colonIndex === -1 ? '' : line.slice(colonIndex + 1);
-    if (value.startsWith(' ')) value = value.slice(1);
+    if (value.startsWith(' ')) {
+      value = value.slice(1);
+    }
     switch (field) {
       case 'event':
         this.eventName = value;
@@ -95,9 +104,13 @@ export async function consumeSSEStream(
   try {
     for (;;) {
       const { value, done } = await reader.read();
-      if (done) break;
+      if (done) {
+        break;
+      }
       const chunk = decoder.decode(value, { stream: true });
-      for (const message of parser.push(chunk)) onMessage(message);
+      for (const message of parser.push(chunk)) {
+        onMessage(message);
+      }
     }
   } finally {
     reader.releaseLock();

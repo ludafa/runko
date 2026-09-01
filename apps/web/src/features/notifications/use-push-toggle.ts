@@ -61,7 +61,9 @@ export function usePushToggle(): PushToggle {
     void (async () => {
       try {
         const config = await fetchPushConfig(controller.signal);
-        if (cancelled) return;
+        if (cancelled) {
+          return;
+        }
         if (!config.enabled || config.publicKey === null) {
           setState('disabled');
           return;
@@ -79,7 +81,9 @@ export function usePushToggle(): PushToggle {
 
         const registration = await ensureServiceWorker();
         const existing = await getExistingSubscription(registration);
-        if (cancelled) return;
+        if (cancelled) {
+          return;
+        }
         if (existing === null) {
           setState('off');
           return;
@@ -87,10 +91,14 @@ export function usePushToggle(): PushToggle {
         // 幂等重上报（技术方案 §3.1）：浏览器可能悄悄换过 endpoint，页面每次加载
         // 补一次，是我们兜住 `pushsubscriptionchange` 的全部手段。
         const synced = await syncSubscription(existing);
-        if (cancelled) return;
+        if (cancelled) {
+          return;
+        }
         setState(synced ? 'on' : 'off');
       } catch (err) {
-        if (cancelled || controller.signal.aborted) return;
+        if (cancelled || controller.signal.aborted) {
+          return;
+        }
         // 问不到配置就当没这个功能——比顶着一个点不动的铃铛强。
         setState('disabled');
         setError(describeError(err));
@@ -105,13 +113,18 @@ export function usePushToggle(): PushToggle {
 
   const enable = useCallback(async () => {
     const publicKey = publicKeyRef.current;
-    if (publicKey === undefined) return;
+    if (publicKey === undefined) {
+      return;
+    }
     const permission = await Notification.requestPermission();
     if (permission === 'denied') {
       setState('blocked');
       return;
     }
-    if (permission !== 'granted') return; // 用户直接关掉了弹框：留在 off，不报错
+    // 用户直接关掉了弹框：留在 off，不报错
+    if (permission !== 'granted') {
+      return;
+    }
     const registration = await ensureServiceWorker();
     const existing = await getExistingSubscription(registration);
     const subscription = existing ?? (await subscribe(registration, publicKey));
@@ -122,13 +135,19 @@ export function usePushToggle(): PushToggle {
   const disable = useCallback(async () => {
     const registration = await ensureServiceWorker();
     const existing = await getExistingSubscription(registration);
-    if (existing !== null) await unsubscribe(existing);
+    if (existing !== null) {
+      await unsubscribe(existing);
+    }
     setState('off');
   }, []);
 
   const toggle = useCallback(() => {
-    if (busy) return;
-    if (state !== 'off' && state !== 'on') return;
+    if (busy) {
+      return;
+    }
+    if (state !== 'off' && state !== 'on') {
+      return;
+    }
     setBusy(true);
     setError(undefined);
     void (state === 'off' ? enable() : disable())
