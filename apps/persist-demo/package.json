@@ -1,0 +1,43 @@
+{
+  "name": "@nimbo-demo/persist-demo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "零 ORM 的 nimbo 宿主 demo：持久化只用官方 @nimbo/persist-* 包，证明「装个包 + 一个驱动实例」就能跑起来",
+  "scripts": {
+    "dev": "node --env-file-if-exists=../../.env --import tsx --watch src/index.ts",
+    "start": "node --import tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
+    "lint:fix": "eslint . --fix",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.0.1",
+    "@nimbo/agent": "workspace:*",
+    "@nimbo/core": "workspace:*",
+    "@nimbo/mini-bash": "workspace:*",
+    "@nimbo/persist-mongo": "workspace:*",
+    "@nimbo/persist-mysql": "workspace:*",
+    "@nimbo/persist-postgres": "workspace:*",
+    "@nimbo/persist-sqlite": "workspace:*",
+    "@nimbo/virtual-fs": "workspace:*",
+    "ai": "catalog:",
+    "better-sqlite3": "catalog:",
+    "hono": "^4.10.3",
+    "kysely": "catalog:",
+    "mongodb": "catalog:",
+    "mysql2": "catalog:",
+    "pg": "catalog:"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "catalog:",
+    "@types/better-sqlite3": "catalog:",
+    "@types/node": "catalog:",
+    "@types/pg": "catalog:",
+    "eslint": "^10.3.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3",
+    "vitest": "catalog:"
+  }
+}
