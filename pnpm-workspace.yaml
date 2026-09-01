@@ -72,9 +72,34 @@ catalog:
   e2b: ^2.32.0
   "@vercel/sandbox": ^2.5.0
   "@cloudflare/sandbox": ^0.12.3
+  # K5 引入（docs/host/contract/plans/persistence.md）：@nimbo/persist-* 的两个
+  # 驱动。跟三个沙盒 SDK 同款姿态——包里只 `import type` 一个手写的最小结构接口，
+  # 运行时零驱动 import，所以它们只进 devDependencies（类型对照 + 跑测试）。
+  pg: ^8.23.0
+  "@types/pg": ^8.23.1
+  better-sqlite3: ^13.0.3
+  "@types/better-sqlite3": ^9.6.0
+  # Postgres 编译成 WASM，进程内跑——一致性套件的 Postgres 替身。用它 CI 就不用配
+  # service container、贡献者也不用装 Docker（真 Postgres 只在开发期手动实测）。
+  "@electric-sql/pglite": ^0.5.6
+  # K5 第二版：改用 kysely 当跨方言的 SQL 层（better-auth 也是它——同一类问题的
+  # 同一个答案）。它是 persist-* 那几个包的**运行时依赖**，不是类型对照：手搓方言层
+  # 那版已经在「MySQL 不支持 RETURNING」这类差异上要开始长分支了，不如用现成的。
+  kysely: ^0.29.5
+  mysql2: ^3.23.4
+  # K5 第三档：@nimbo/persist-mongo 的驱动。Mongo 不是 SQL，走不了 kysely 那条路，
+  # 直接实现三个领域接口——它同时是对「不假设事务能跨接口 / 不要求 CAS」这两条
+  # 契约准则的硬检验（那两条当初就是为了不把非关系型挡在门外才那么写的）。
+  mongodb: ^7.5.0
 
 minimumReleaseAgeExclude:
   - ai@7.0.20
+  - pg@8.23.0
+  - better-sqlite3@13.0.3
+  - "@electric-sql/pglite@0.5.6"
+  - kysely@0.29.5
+  - mysql2@3.23.4
+  - mongodb@7.5.0
   - just-bash@3.1.0
   - e2b@2.32.0
   - "@vercel/sandbox@2.5.0"

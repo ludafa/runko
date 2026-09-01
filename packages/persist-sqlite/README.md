@@ -1,0 +1,54 @@
+# @nimbo/persist-sqlite
+
+nimbo 的持久化实现，**SQLite（better-sqlite3）**。
+
+你只有一个驱动实例、没在用任何 ORM 时装这个。
+
+```sh
+pnpm add @nimbo/persist-sqlite better-sqlite3
+```
+
+```ts
+import { createAgentRuntime } from "@nimbo/agent";
+import { migrate, sqlitePersistence } from "@nimbo/persist-sqlite";
+import Database from "better-sqlite3";
+
+const db = new Database("app.db");
+
+await migrate(db);          // 建表，幂等，跑几次都一样
+
+const runtime = createAgentRuntime(agent, { persistence: sqlitePersistence(db) });
+```
+
+## 它是个薄壳
+
+本包只做一件事：把你的驱动包成一个 Kysely 实例，转交
+[`@nimbo/persist-kysely`](../persist-kysely/README.md)。三个 Store 与建表的实现都在那儿。
+
+```
+persist-sqlite ─┐
+persist-postgres ┼─→ persist-kysely ─→ 你的库
+persist-mysql  ─┘
+```
+
+**已经在用 Kysely 了？** 别用这个包——直接装 `@nimbo/persist-kysely`，把你自己的实例
+给它，nimbo 的三张表和你的表就在同一个实例、同一套迁移之下。
+
+**一种库一个包**，所以本包只 `peerDependencies` `better-sqlite3`——不会把别家的驱动拖进你的
+依赖树。
+
+## 它存什么
+
+三张表：`nimbo_ledger`（账本）· `nimbo_decisions`（人工裁决留底）· `nimbo_queue`（待发队列）。
+表名固定，不提供前缀开关——要隔离请用 schema/database。
+
+**它不存你的东西。** nimbo 只认一个不透明的 `conversationId`，会话叫什么、属于谁，
+全归你自己存。它不建外键、不碰你的用户表。
+
+## 文档
+
+[功能手册](../../docs/host/contract/features/persistence.md) ·
+[技术方案](../../docs/host/contract/tech/persistence.md) ·
+[施工进展](../../docs/host/contract/plans/persistence.md)
+
+跑得起来的例子：`apps/persist-demo`——一个零 ORM 的 Hono 服务，三种库都能跑。

@@ -1,0 +1,54 @@
+{
+  "name": "@nimbo/persist-sqlite",
+  "version": "0.0.0",
+  "description": "持久化实现：SQLite（better-sqlite3）—— 你只有一个驱动实例时装这个",
+  "type": "module",
+  "license": "ISC",
+  "engines": {
+    "node": ">=24"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
+    "lint:fix": "eslint . --fix",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nimbo/agent": "workspace:*",
+    "@nimbo/persist-kysely": "workspace:*",
+    "kysely": "catalog:"
+  },
+  "peerDependencies": {
+    "better-sqlite3": "^13"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "catalog:",
+    "@types/better-sqlite3": "catalog:",
+    "@types/node": "catalog:",
+    "better-sqlite3": "catalog:",
+    "kysely": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

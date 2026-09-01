@@ -1,0 +1,57 @@
+{
+  "name": "@nimbo/persist-kysely",
+  "version": "0.0.0",
+  "description": "持久化实现：Kysely —— 你已经在用 Kysely 时把实例给它；SQLite / Postgres / MySQL 三个方言的差异只剩三处",
+  "type": "module",
+  "license": "ISC",
+  "engines": {
+    "node": ">=24"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "schema.sql"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
+    "lint:fix": "eslint . --fix",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nimbo/agent": "workspace:*",
+    "@nimbo/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "kysely": "^0.29"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "catalog:",
+    "@types/better-sqlite3": "catalog:",
+    "@types/node": "catalog:",
+    "@types/pg": "catalog:",
+    "better-sqlite3": "catalog:",
+    "kysely": "catalog:",
+    "mysql2": "catalog:",
+    "pg": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
