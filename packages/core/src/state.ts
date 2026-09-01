@@ -35,16 +35,26 @@ const nimboErrorMetadataSchema = z.object({
 });
 
 /**
- * `status: 'completed' | 'failed' | 'interrupted'`——`'interrupted'` 对应
- * `NimboError.code === 'aborted'`（signal abort，宿主主动中断，不是模型/工具
+ * `status: 'completed' | 'failed' | 'interrupted' | 'suspended'`——`'interrupted'`
+ * 对应 `NimboError.code === 'aborted'`（signal abort，宿主主动中断，不是模型/工具
  * 出错），其余三个 `NimboError.code`（max_turns/context_overflow/
  * provider_error）都归 `'failed'`——四态错误码折叠进三态 status 的映射见
  * `loop.ts` 的 `statusForError()`。
+ *
+ * `'suspended'` 是**挂起**（docs/architecture/tech/agent-kernel.md §4）的收尾态：
+ * 一轮停在「正在等人」这个干净边界上、主动落盘并释放归属，人回来之后由
+ * **新的一轮**接着跑。它与 `'interrupted'` 的区别是**主动且可恢复**——界面
+ * 不该把它渲染成「已中断」（那会让用户以为出错了）。
+ *
+ * **本层只定义、暂不产出**：`loop.ts` 的 `finalizeTurn` 至今只产出前三态
+ * （它的 `status` 参数就是三值联合，不是笔误）。产出方要等 K3 挂起与恢复落地
+ * 时才补上；先加进这里是为了让宿主/界面提前把渲染分支占好，避免 K3 落地那天
+ * 前后端不同步。
  */
 export interface NimboMessageMetadata {
   turn?: number;
   usage?: Usage;
-  status?: "completed" | "failed" | "interrupted";
+  status?: "completed" | "failed" | "interrupted" | "suspended";
   /** 全 turn 墙钟耗时（`runTurn` 入口到收尾，含每一步模型往返与工具执行）——`loop.ts` 的 `finalizeTurn` 统一落点写入，成功/失败/中断皆有。 */
   durationMs?: number;
   /**
@@ -62,7 +72,7 @@ export interface NimboMessageMetadata {
 export const nimboMessageMetadataSchema: z.ZodType<NimboMessageMetadata> = z.object({
   turn: z.number().optional(),
   usage: usageMetadataSchema.optional(),
-  status: z.enum(["completed", "failed", "interrupted"]).optional(),
+  status: z.enum(["completed", "failed", "interrupted", "suspended"]).optional(),
   durationMs: z.number().optional(),
   toolDurationMs: z.number().optional(),
   error: nimboErrorMetadataSchema.optional(),
@@ -190,11 +200,11 @@ const UI_MESSAGE_ROLES = new Set(["system", "user", "assistant"]);
  * 校验每种 part 各自的字段形状（那正是 `validateUIMessages()` 的职责）。
  */
 function isUIMessageShape(value: unknown): value is NimboUIMessage {
-  if (!isRecord(value)) return false;
+  if (!isRecord(value)) {return false;}
   const { id, role, parts } = value;
-  if (typeof id !== "string") return false;
-  if (typeof role !== "string" || !UI_MESSAGE_ROLES.has(role)) return false;
-  if (!Array.isArray(parts)) return false;
+  if (typeof id !== "string") {return false;}
+  if (typeof role !== "string" || !UI_MESSAGE_ROLES.has(role)) {return false;}
+  if (!Array.isArray(parts)) {return false;}
   return parts.every((part) => isRecord(part) && typeof part.type === "string");
 }
 

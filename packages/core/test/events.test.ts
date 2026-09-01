@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { nimboMessageMetadataSchema } from "../src/state.js";
 import type { NimboChunk, NimboDataParts, NimboMessageMetadata } from "../src/state.js";
 import type { NimboError, Usage } from "../src/events.js";
 
@@ -192,7 +193,14 @@ describe("NimboDataParts", () => {
   });
 });
 
-/** 穷尽 `NimboMessageMetadata.status` 的三态（`interrupted` 对应 `NimboError.code === "aborted"`，loop.ts 的 `statusForError`）。 */
+/**
+ * 穷尽 `NimboMessageMetadata.status` 的四态（`interrupted` 对应 `NimboError.code === "aborted"`，
+ * loop.ts 的 `statusForError`）。
+ *
+ * `suspended` 目前**只有类型、没有产出方**——它是[挂起](../../../docs/architecture/tech/agent-kernel.md)
+ * 的收尾态，等 K3 落地才会真的被写出来（`finalizeTurn` 的 `status` 参数至今仍是三值联合）。
+ * 先进联合类型是为了让宿主/界面提前占好渲染分支。这条穷尽性测试保证它别被遗漏。
+ */
 function describeStatus(status: NonNullable<NimboMessageMetadata["status"]>): string {
   switch (status) {
     case "completed":
@@ -201,15 +209,27 @@ function describeStatus(status: NonNullable<NimboMessageMetadata["status"]>): st
       return "failed";
     case "interrupted":
       return "interrupted";
+    case "suspended":
+      return "suspended";
     default:
       return assertNever(status);
   }
 }
 
 describe("NimboMessageMetadata.status", () => {
-  it("covers completed/failed/interrupted exhaustively", () => {
-    const statuses: NonNullable<NimboMessageMetadata["status"]>[] = ["completed", "failed", "interrupted"];
-    expect(statuses.map(describeStatus)).toEqual(["completed", "failed", "interrupted"]);
+  it("covers completed/failed/interrupted/suspended exhaustively", () => {
+    const statuses: NonNullable<NimboMessageMetadata["status"]>[] = [
+      "completed",
+      "failed",
+      "interrupted",
+      "suspended",
+    ];
+    expect(statuses.map(describeStatus)).toEqual(["completed", "failed", "interrupted", "suspended"]);
+  });
+
+  it("schema 也认 suspended（类型与 zod 两处不能漂）", () => {
+    expect(nimboMessageMetadataSchema.safeParse({ status: "suspended" }).success).toBe(true);
+    expect(nimboMessageMetadataSchema.safeParse({ status: "nope" }).success).toBe(false);
   });
 });
 

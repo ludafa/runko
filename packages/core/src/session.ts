@@ -331,7 +331,7 @@ function buildSystemPrompt(agent: AgentDefinition, opts: SessionOptions): string
   const instructions = base === undefined ? append : append === undefined ? base : `${base}\n\n${append}`;
 
   const skillsBlock = buildAvailableSkillsBlock(agent.skills ?? []);
-  if (skillsBlock === undefined) return instructions;
+  if (skillsBlock === undefined) {return instructions;}
   return instructions === undefined ? skillsBlock : `${instructions}\n\n${skillsBlock}`;
 }
 
@@ -347,7 +347,7 @@ function buildSystemPrompt(agent: AgentDefinition, opts: SessionOptions): string
  * e.g. `@nimbo/virtual-fs`'s `memory.ts`).
  */
 function toUserUIMessagePart(block: InputBlock): TextUIPart | FileUIPart {
-  if (block.type === "text") return { type: "text", text: block.text };
+  if (block.type === "text") {return { type: "text", text: block.text };}
   const base64 = typeof block.data === "string" ? block.data : Buffer.from(block.data).toString("base64");
   return { type: "file", mediaType: block.mediaType, url: `data:${block.mediaType};base64,${base64}` };
 }
@@ -360,8 +360,8 @@ function toUserUIMessage(input: Input, metadata?: NimboMessageMetadata): NimboUI
 
 /** `builtinTools` 是否包含 `update-plan`（默认全开；`false` 全关；数组按成员判断）。 */
 function isUpdatePlanEnabled(builtinTools: BuiltinToolName[] | false | undefined): boolean {
-  if (builtinTools === false) return false;
-  if (builtinTools === undefined) return true;
+  if (builtinTools === false) {return false;}
+  if (builtinTools === undefined) {return true;}
   return builtinTools.includes("update-plan");
 }
 
@@ -465,11 +465,11 @@ function collectActivityTargets(
   exec: NimboExec | undefined,
 ): ((signal: ActivitySignal) => void) | undefined {
   const targets: Required<NimboActivityAware>[] = [];
-  if (hasActivityCapability(fs)) targets.push(fs);
-  if (exec !== undefined && hasActivityCapability(exec) && !targets.includes(exec)) targets.push(exec);
-  if (targets.length === 0) return undefined;
+  if (hasActivityCapability(fs)) {targets.push(fs);}
+  if (exec !== undefined && hasActivityCapability(exec) && !targets.includes(exec)) {targets.push(exec);}
+  if (targets.length === 0) {return undefined;}
   return (signal) => {
-    for (const target of targets) target.onActivity(signal);
+    for (const target of targets) {target.onActivity(signal);}
   };
 }
 
@@ -509,7 +509,7 @@ const FS_RESTORE_NOT_SUPPORTED_MESSAGE =
  * （不 await），`stream()`/`send()` 顶部才真正等它，理由见本文件头。
  */
 function resolveResumedState(resume: SessionState | undefined): SessionState | undefined {
-  if (resume === undefined) return undefined;
+  if (resume === undefined) {return undefined;}
   const parsed = sessionStateSchema.safeParse(resume);
   if (!parsed.success) {
     throw new Error(
@@ -528,7 +528,7 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
   /** 见 `collectActivityTargets`：装配期探测一次，之后 `stream()` 里零探测开销；都不支持时恒为 `undefined`。 */
   const notifyActivityTarget = collectActivityTargets(fs, exec);
   if (resumedState?.fsSnapshot !== undefined) {
-    if (!hasRestoreCapability(fs)) throw new Error(FS_RESTORE_NOT_SUPPORTED_MESSAGE);
+    if (!hasRestoreCapability(fs)) {throw new Error(FS_RESTORE_NOT_SUPPORTED_MESSAGE);}
     fs.restore(resumedState.fsSnapshot);
   }
   const system = buildSystemPrompt(agent, opts);
@@ -545,8 +545,15 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
    * `messagesReady` 是一个已 resolve 的 no-op。
    */
   let messages: NimboUIMessage[] = resumedState !== undefined ? [...resumedState.messages] : [];
+  /**
+   * **空账本跳过深层校验**：ai 的 `validateUIMessages()` 对空数组直接报
+   * "Messages array must not be empty"，但「resume 一个还没产出任何消息的会话」是完全
+   * 合法的（`sessionStateSchema` 本来就允许 `messages: []`）——宿主想让会话 id 从第一轮
+   * 起就稳定（`@nimbo/agent` 拿 conversationId 当 session id，遥测的关联键靠它）时，
+   * 传的正是这种空 state。没有消息可校验，也就没有什么可拒绝的。
+   */
   const messagesReady: Promise<void> =
-    resumedState !== undefined
+    resumedState !== undefined && resumedState.messages.length > 0
       ? validateSessionMessages(resumedState.messages).then((validated) => {
           messages = validated;
         })
@@ -589,7 +596,7 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
    * termination paths do drain.
    */
   function steer(input: Input): boolean {
-    if (!turnActive) return false;
+    if (!turnActive) {return false;}
     pendingSteers.push(toUserUIMessage(input, { steered: true }));
     return true;
   }
@@ -609,7 +616,7 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
       let lastActivityAt = 0;
       let lastSignalWasApproval = false;
       const notifyActivity = (chunk: NimboChunk): void => {
-        if (notifyActivityTarget === undefined) return;
+        if (notifyActivityTarget === undefined) {return;}
         const isApprovalRequest = chunk.type === "tool-approval-request";
         /**
          * 两种边沿必须立刻送达、不能被节流吃掉：
@@ -621,7 +628,7 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
          */
         const isEdge = isApprovalRequest || lastSignalWasApproval;
         const now = Date.now();
-        if (!isEdge && now - lastActivityAt < ACTIVITY_THROTTLE_MS) return;
+        if (!isEdge && now - lastActivityAt < ACTIVITY_THROTTLE_MS) {return;}
         lastActivityAt = now;
         lastSignalWasApproval = isApprovalRequest;
         notifyActivityTarget({
@@ -705,10 +712,10 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
       }
       step = await gen.next();
     }
-    if (failure !== undefined) throw new NimboSessionError(failure);
+    if (failure !== undefined) {throw new NimboSessionError(failure);}
 
     const turnResult = step.value;
-    if (turnOpts.outputSchema === undefined) return turnResult;
+    if (turnOpts.outputSchema === undefined) {return turnResult;}
 
     const requestMessages = await convertToModelMessages(messages);
     const structuredOutput = await generateStructuredOutput({
@@ -725,7 +732,7 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
   function toJSON(toJSONOpts: { includeFs?: boolean } = {}): SessionState {
     const state: SessionState = { id, turn, messages: [...messages], createdAt };
     if (toJSONOpts.includeFs === true) {
-      if (!hasSnapshotCapability(fs)) throw new Error(FS_SNAPSHOT_NOT_SUPPORTED_MESSAGE);
+      if (!hasSnapshotCapability(fs)) {throw new Error(FS_SNAPSHOT_NOT_SUPPORTED_MESSAGE);}
       state.fsSnapshot = toCleanJsonValue(fs.snapshot());
     }
     return state;

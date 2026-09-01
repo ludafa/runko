@@ -188,6 +188,27 @@ describe("Session.toJSON", () => {
 });
 
 describe("SessionOptions.resume", () => {
+  it("**接受空账本**（messages: []）——恢复一个还没说过话的会话是合法的", async () => {
+    // ai 的 `validateUIMessages()` 会拒绝空数组，所以这条路必须绕开深校验。
+    // **失败姿态是异步的**：`createSession()` 当场不报错，要到第一次 `stream()`/`send()`
+    // 才 reject——所以没有这条用例的话，把那个 `messages.length > 0` 判断删掉，
+    // 现有的 resume 用例一条都不会红。
+    //
+    // 真实调用方是 `@nimbo/agent`：它每一轮都从账本重建 `SessionState` 再 resume，
+    // 会话的第一轮账本必然是空的。传 `undefined` 让 core 自己 mint 一个 id 也不行——
+    // 那样第一轮与后续轮的 `session.id` 会不一样，遥测的 `"<sessionId>#<turn>"` 键就断了。
+    const model = mockModel(() => ({ doStream: stopStream("first reply") }));
+    const session = createSession(baseAgent(model), {
+      resume: { id: "conv-empty", turn: 0, messages: [], createdAt: Date.now() },
+    });
+
+    expect(session.toJSON().id).toBe("conv-empty");
+    const result = await session.send("hello");
+    expect(result.finalResponse).toBe("first reply");
+    // id 跨轮稳定——这正是传空账本而不是传 undefined 的理由。
+    expect(session.toJSON().id).toBe("conv-empty");
+  });
+
   it("round-trips two turns through toJSON()/resume, and the third turn's prompt carries the full prior history", async () => {
     const model1 = mockModel(() => ({ doStream: [stopStream("first reply"), stopStream("second reply")] }));
     const session1 = createSession(baseAgent(model1));
