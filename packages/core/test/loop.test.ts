@@ -646,7 +646,7 @@ describe("runTurn", () => {
       resolveReview?.({ behavior: "allow" });
       await pendingNext;
       let rest = await gen.next();
-      while (!rest.done) rest = await gen.next();
+      while (!rest.done) {rest = await gen.next();}
 
       expect(execute).toHaveBeenCalledTimes(1);
     });
@@ -1246,7 +1246,7 @@ describe("runTurn", () => {
     // 没有任何 data-tool-progress 部件残留在账本里。
     const assistant = messages.find((m) => allToolParts([m]).some((p) => p.toolCallId === "call_1"));
     expect(assistant).toBeDefined();
-    if (assistant !== undefined) expect(toolProgressParts(assistant)).toHaveLength(0);
+    if (assistant !== undefined) {expect(toolProgressParts(assistant)).toHaveLength(0);}
   });
 
   it("tool-input-delta chunks are consumed without independently driving tool-input-available (see loop.ts file header)", async () => {
@@ -1377,7 +1377,7 @@ describe("runTurn", () => {
       expect(hooks).toContain("call-start");
       expect(hooks).toContain("call-end");
       // 关联键：每个事件都自带 "<sessionId>#<turn>"，集成端据此归档/按 turn 查询。
-      for (const entry of seen) expect(entry.functionId).toBe("sess_42#7");
+      for (const entry of seen) {expect(entry.functionId).toBe("sess_42#7");}
     });
 
     it("no telemetry injected: the turn runs identically (functionId alone is inert metadata)", async () => {

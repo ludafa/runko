@@ -75,14 +75,14 @@ const textEncoder = new TextEncoder();
  */
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
+  for (const byte of bytes) {binary += String.fromCharCode(byte);}
   return btoa(binary);
 }
 
 function base64ToBytes(base64: string): Uint8Array {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  for (let i = 0; i < binary.length; i += 1) {bytes[i] = binary.charCodeAt(i);}
   return bytes;
 }
 
@@ -117,15 +117,15 @@ async function parseErrorBody(res: Response): Promise<ErrorBody> {
     return { code: "sandbox_error", message: `gateway returned ${String(res.status)} ${res.statusText} with a non-JSON body` };
   }
   const parsed = errorBodySchema.safeParse(raw);
-  if (!parsed.success) return { code: "sandbox_error", message: `gateway returned ${String(res.status)} with an unrecognized error body` };
+  if (!parsed.success) {return { code: "sandbox_error", message: `gateway returned ${String(res.status)} with an unrecognized error body` };}
   return parsed.data;
 }
 
 /** 把网关的 `{code,message}` 翻译成调用方能 `instanceof` 判别的错误——`path` 用调用方本地已知的值，不依赖 wire 回传。 */
 async function fsErrorFromResponse(res: Response, path: string): Promise<Error> {
   const body = await parseErrorBody(res);
-  if (body.code === "not_found") return new NotFoundError(path);
-  if (body.code === "dir_not_empty") return new DirectoryNotEmptyError(path);
+  if (body.code === "not_found") {return new NotFoundError(path);}
+  if (body.code === "dir_not_empty") {return new DirectoryNotEmptyError(path);}
   return new Error(`cloudflare sandbox gateway error (${body.code}): ${body.message}`);
 }
 
@@ -137,7 +137,7 @@ async function fsCall<Req, Res>(
   errorPath: string,
 ): Promise<Res> {
   const res = await ctx.fetchImpl(`${ctx.baseUrl}${endpoint}`, requestInit(ctx, req));
-  if (!res.ok) throw await fsErrorFromResponse(res, errorPath);
+  if (!res.ok) {throw await fsErrorFromResponse(res, errorPath);}
   const json: unknown = await res.json();
   return responseSchema.parse(json);
 }
@@ -238,7 +238,7 @@ async function readExecResultFromStream(res: Response, onOutput: ExecOptions["on
 
   const processLine = (line: string): void => {
     const trimmed = line.trim();
-    if (trimmed.length === 0) return;
+    if (trimmed.length === 0) {return;}
     let raw: unknown;
     try {
       raw = JSON.parse(trimmed);
@@ -246,7 +246,7 @@ async function readExecResultFromStream(res: Response, onOutput: ExecOptions["on
       return; // 网关协议不应产出坏行；防御性丢弃而不是让整次 exec 失败
     }
     const parsed = execStreamEventSchema.safeParse(raw);
-    if (!parsed.success) return;
+    if (!parsed.success) {return;}
     if (parsed.data.type === "output") {
       onOutput?.({ stream: parsed.data.stream, data: parsed.data.data });
     } else {
@@ -257,7 +257,7 @@ async function readExecResultFromStream(res: Response, onOutput: ExecOptions["on
   try {
     for (;;) {
       const { value, done } = await reader.read();
-      if (done) break;
+      if (done) {break;}
       buffer += decoder.decode(value, { stream: true });
       let newlineIndex = buffer.indexOf("\n");
       while (newlineIndex !== -1) {
@@ -267,7 +267,7 @@ async function readExecResultFromStream(res: Response, onOutput: ExecOptions["on
       }
     }
     buffer += decoder.decode();
-    if (buffer.length > 0) processLine(buffer);
+    if (buffer.length > 0) {processLine(buffer);}
   } finally {
     reader.releaseLock();
   }
@@ -339,7 +339,7 @@ async function execImpl(ctx: ClientContext, req: ExecRequest, opts: ExecOptions 
     }
     return { exitCode: 1, stdout: "", stderr: `cloudflareWorkspace: internal error: ${describeError(error)}`, durationMs: Date.now() - start };
   } finally {
-    if (timer !== undefined) clearTimeout(timer);
+    if (timer !== undefined) {clearTimeout(timer);}
   }
 }
 

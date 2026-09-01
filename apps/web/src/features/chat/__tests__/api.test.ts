@@ -308,7 +308,9 @@ describe('streamConversationTail', () => {
     await streamConversationTail('sess_1', 0, {
       onFrame: (frame: ChatReplayFrame) => {
         received.push(frameSeq(frame));
-        if (isMessageFrame(frame)) sawMessageFrame = true;
+        if (isMessageFrame(frame)) {
+          sawMessageFrame = true;
+        }
       },
     });
 

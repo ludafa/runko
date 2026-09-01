@@ -31,7 +31,7 @@ export class OverlayFS implements NimboFS {
   private isTombstoned(path: string): boolean {
     let current: string | undefined = path;
     while (current !== undefined) {
-      if (this.tombstones.has(current)) return true;
+      if (this.tombstones.has(current)) {return true;}
       const parent = dirname(current);
       current = parent === current ? undefined : parent;
     }
@@ -48,15 +48,15 @@ export class OverlayFS implements NimboFS {
       await fs.stat(path);
       return true;
     } catch (error) {
-      if (error instanceof NotFoundError) return false;
+      if (error instanceof NotFoundError) {return false;}
       throw error;
     }
   }
 
   async readFile(path: string): Promise<Uint8Array> {
     const p = normalizePath(path);
-    if (await this.existsIn(this.overlayFs, p)) return this.overlayFs.readFile(p);
-    if (this.isTombstoned(p)) throw new NotFoundError(p);
+    if (await this.existsIn(this.overlayFs, p)) {return this.overlayFs.readFile(p);}
+    if (this.isTombstoned(p)) {throw new NotFoundError(p);}
     return this.base.readFile(p);
   }
 
@@ -73,7 +73,7 @@ export class OverlayFS implements NimboFS {
     const st = await this.stat(p);
     if (st.type === "dir" && !opts?.recursive) {
       const children = await this.readdir(p);
-      if (children.length > 0) throw new DirectoryNotEmptyError(p);
+      if (children.length > 0) {throw new DirectoryNotEmptyError(p);}
     }
     this.tombstones.add(p);
     if (await this.existsIn(this.overlayFs, p)) {
@@ -95,7 +95,7 @@ export class OverlayFS implements NimboFS {
     }
     for (const entry of baseEntries) {
       const childPath = p === "/" ? `/${entry.name}` : `${p}/${entry.name}`;
-      if (this.isTombstoned(childPath) && !(await this.existsIn(this.overlayFs, childPath))) continue;
+      if (this.isTombstoned(childPath) && !(await this.existsIn(this.overlayFs, childPath))) {continue;}
       merged.set(entry.name, entry);
     }
     let overlayEntries: DirEntry[] = [];
@@ -112,8 +112,8 @@ export class OverlayFS implements NimboFS {
 
   async stat(path: string): Promise<FileStat> {
     const p = normalizePath(path);
-    if (await this.existsIn(this.overlayFs, p)) return this.overlayFs.stat(p);
-    if (this.isTombstoned(p)) throw new NotFoundError(p);
+    if (await this.existsIn(this.overlayFs, p)) {return this.overlayFs.stat(p);}
+    if (this.isTombstoned(p)) {throw new NotFoundError(p);}
     return this.base.stat(p);
   }
 
@@ -124,7 +124,7 @@ export class OverlayFS implements NimboFS {
     ]);
     const result = new Set<string>(overlayMatches);
     for (const p of baseMatches) {
-      if (this.isTombstoned(p)) continue;
+      if (this.isTombstoned(p)) {continue;}
       result.add(p);
     }
     return [...result].sort();
@@ -145,16 +145,16 @@ export class OverlayFS implements NimboFS {
       } catch {
         st = undefined;
       }
-      if (!st) continue;
+      if (!st) {continue;}
       if (st.type === "file") {
-        if (!(await this.existsIn(this.overlayFs, t))) deleted.add(t);
+        if (!(await this.existsIn(this.overlayFs, t))) {deleted.add(t);}
         continue;
       }
       if (st.type === "dir") {
         const suffix = t === "/" ? "/**" : `${t}/**`;
         const nested = await this.base.glob(suffix).catch((): string[] => []);
         for (const f of nested) {
-          if (!(await this.existsIn(this.overlayFs, f))) deleted.add(f);
+          if (!(await this.existsIn(this.overlayFs, f))) {deleted.add(f);}
         }
       }
     }
@@ -176,18 +176,18 @@ export class OverlayFS implements NimboFS {
         // base 侧是 dir/reference：没有可比的文本基线，按 created 处理。
       }
       const fileDiff = buildFileDiff(path, before, after);
-      if (fileDiff) results.push(fileDiff);
+      if (fileDiff) {results.push(fileDiff);}
     }
     for (const path of await this.collectDeletedBaseFiles()) {
       const before = textDecoder.decode(await this.base.readFile(path));
       const fileDiff = buildFileDiff(path, before, undefined);
-      if (fileDiff) results.push(fileDiff);
+      if (fileDiff) {results.push(fileDiff);}
     }
     return results.sort((a, b) => a.path.localeCompare(b.path));
   }
 
   private defaultWriteBackDir(): string {
-    if (this.base instanceof DirFS) return this.base.rootDir;
+    if (this.base instanceof DirFS) {return this.base.rootDir;}
     throw new Error("writeBack(targetDir) requires an explicit targetDir when base is not a DirFS");
   }
 

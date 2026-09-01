@@ -44,7 +44,9 @@ export function QueuedMessages({
   /** 没有进行中的一轮时不显示「插进本轮」——没有「本轮」可插。 */
   streaming?: boolean;
 }) {
-  if (messages.length === 0) return null;
+  if (messages.length === 0) {
+    return null;
+  }
 
   const canPromote = onPromote !== undefined && streaming === true;
 

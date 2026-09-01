@@ -69,7 +69,7 @@ async function resolveInstructionsFromFS(fs: NimboFS, dir: string, opts: LoadAge
   try {
     return new TextDecoder().decode(await fs.readFile(path));
   } catch (error) {
-    if (opts.instructions !== undefined) return opts.instructions;
+    if (opts.instructions !== undefined) {return opts.instructions;}
     throw new Error(
       `loadAgentFromFS(fs, "${dir}"): could not read required "${INSTRUCTIONS_FILENAME}" at "${path}": ` +
         `${describeError(error)} Add the file, or pass loadAgentFromFS(fs, dir, { instructions: "..." }).`,

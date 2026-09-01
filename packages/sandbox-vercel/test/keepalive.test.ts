@@ -119,7 +119,7 @@ describe("KA-3 Vercel：租期不累加（回归「每条消息盲加 5 分钟�
     const sandbox = keepAliveFake(IDLE);
     const workspace = vercelWorkspace(sandbox, { keepAlive: { idleTimeoutMs: IDLE } });
 
-    for (let i = 0; i < 10; i++) await workspace.keepAlive?.(IDLE);
+    for (let i = 0; i < 10; i++) {await workspace.keepAlive?.(IDLE);}
 
     expect(sandbox.extensions).toHaveLength(0); // 一直满水位，一次都没打网络
     expect(sandbox.expiresAt?.getTime()).toBe(Date.now() + IDLE);

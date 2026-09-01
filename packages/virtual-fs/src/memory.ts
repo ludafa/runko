@@ -147,9 +147,9 @@ export class MemoryFS implements NimboFS {
   }
 
   private ensureDir(path: string): void {
-    if (this.dirs.has(path)) return;
+    if (this.dirs.has(path)) {return;}
     const parent = dirname(path);
-    if (parent !== path) this.ensureDir(parent);
+    if (parent !== path) {this.ensureDir(parent);}
     this.dirs.add(path);
   }
 
@@ -161,7 +161,7 @@ export class MemoryFS implements NimboFS {
     const p = normalizePath(path);
     const entry = this.files.get(p);
     if (!entry) {
-      if (this.dirs.has(p)) throw new Error(`cannot read: "${p}" is a directory`);
+      if (this.dirs.has(p)) {throw new Error(`cannot read: "${p}" is a directory`);}
       throw new NotFoundError(p);
     }
     if (entry.kind === "reference") {
@@ -185,7 +185,7 @@ export class MemoryFS implements NimboFS {
    */
   async writeFile(path: string, data: Uint8Array | string): Promise<void> {
     const p = normalizePath(path);
-    if (this.dirs.has(p)) throw new Error(`cannot write: "${p}" is a directory`);
+    if (this.dirs.has(p)) {throw new Error(`cannot write: "${p}" is a directory`);}
     this.ensureParentDirs(p);
     const bytes = typeof data === "string" ? textEncoder.encode(data) : data;
     const existing = this.files.get(p);
@@ -200,7 +200,7 @@ export class MemoryFS implements NimboFS {
   /** 不在 NimboFS 接口内——fromMemory() 用它构造 reference 条目。同步，理由同 writeFile。 */
   writeReference(path: string, init: ReferenceInit): void {
     const p = normalizePath(path);
-    if (this.dirs.has(p)) throw new Error(`cannot write: "${p}" is a directory`);
+    if (this.dirs.has(p)) {throw new Error(`cannot write: "${p}" is a directory`);}
     this.ensureParentDirs(p);
     this.files.set(p, {
       kind: "reference",
@@ -213,10 +213,10 @@ export class MemoryFS implements NimboFS {
 
   async rm(path: string, opts?: { recursive?: boolean }): Promise<void> {
     const p = normalizePath(path);
-    if (p === "/") throw new Error("cannot remove the root directory");
+    if (p === "/") {throw new Error("cannot remove the root directory");}
     const isDir = this.dirs.has(p);
     const isFile = this.files.has(p);
-    if (!isDir && !isFile) throw new NotFoundError(p);
+    if (!isDir && !isFile) {throw new NotFoundError(p);}
     if (isDir) {
       const prefix = `${p}/`;
       const childDirs = [...this.dirs].filter((d) => d.startsWith(prefix));
@@ -224,8 +224,8 @@ export class MemoryFS implements NimboFS {
       if (!opts?.recursive && (childDirs.length > 0 || childFiles.length > 0)) {
         throw new DirectoryNotEmptyError(p);
       }
-      for (const d of childDirs) this.dirs.delete(d);
-      for (const f of childFiles) this.files.delete(f);
+      for (const d of childDirs) {this.dirs.delete(d);}
+      for (const f of childFiles) {this.files.delete(f);}
       this.dirs.delete(p);
     } else {
       this.files.delete(p);
@@ -234,14 +234,14 @@ export class MemoryFS implements NimboFS {
 
   async mkdir(path: string): Promise<void> {
     const p = normalizePath(path);
-    if (this.files.has(p)) throw new Error(`cannot mkdir: a file already exists at "${p}"`);
+    if (this.files.has(p)) {throw new Error(`cannot mkdir: a file already exists at "${p}"`);}
     this.ensureDir(p);
   }
 
   async readdir(path: string): Promise<DirEntry[]> {
     const p = normalizePath(path);
     if (!this.dirs.has(p)) {
-      if (this.files.has(p)) throw new Error(`cannot readdir: "${p}" is not a directory`);
+      if (this.files.has(p)) {throw new Error(`cannot readdir: "${p}" is not a directory`);}
       throw new NotFoundError(p);
     }
     const entries: DirEntry[] = [];
@@ -261,9 +261,9 @@ export class MemoryFS implements NimboFS {
 
   async stat(path: string): Promise<FileStat> {
     const p = normalizePath(path);
-    if (this.dirs.has(p)) return { type: "dir" };
+    if (this.dirs.has(p)) {return { type: "dir" };}
     const entry = this.files.get(p);
-    if (!entry) throw new NotFoundError(p);
+    if (!entry) {throw new NotFoundError(p);}
     return this.toFileStat(p, entry);
   }
 
@@ -271,7 +271,7 @@ export class MemoryFS implements NimboFS {
     const re = globToRegExp(pattern);
     const matches: string[] = [];
     for (const filePath of this.files.keys()) {
-      if (re.test(filePath)) matches.push(filePath);
+      if (re.test(filePath)) {matches.push(filePath);}
     }
     return matches.sort();
   }
@@ -306,10 +306,10 @@ export class MemoryFS implements NimboFS {
   diff(): FileDiff[] {
     const results: FileDiff[] = [];
     for (const [path, entry] of this.files) {
-      if (entry.kind === "reference") continue;
+      if (entry.kind === "reference") {continue;}
       const after = textDecoder.decode(entry.data);
       const fileDiff = buildFileDiff(path, undefined, after);
-      if (fileDiff) results.push(fileDiff);
+      if (fileDiff) {results.push(fileDiff);}
     }
     return results.sort((a, b) => a.path.localeCompare(b.path));
   }
@@ -321,7 +321,7 @@ export class MemoryFS implements NimboFS {
    */
   async writeBack(targetDir: string): Promise<void> {
     for (const [path, entry] of this.files) {
-      if (entry.kind !== "file") continue; // reference 条目没有本地内容可写
+      if (entry.kind !== "file") {continue;} // reference 条目没有本地内容可写
       const real = nodePath.join(targetDir, ...path.split("/").filter((s) => s.length > 0));
       await nodeFs.mkdir(nodePath.dirname(real), { recursive: true });
       await nodeFs.writeFile(real, entry.data);

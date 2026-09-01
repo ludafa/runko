@@ -26,9 +26,9 @@ export interface CommandExitErrorLike {
 }
 
 export function isCommandExitErrorLike(error: unknown): error is CommandExitErrorLike {
-  if (typeof error !== "object" || error === null) return false;
-  if (!("exitCode" in error) || typeof error.exitCode !== "number") return false;
-  if (!("stdout" in error) || typeof error.stdout !== "string") return false;
-  if (!("stderr" in error) || typeof error.stderr !== "string") return false;
+  if (typeof error !== "object" || error === null) {return false;}
+  if (!("exitCode" in error) || typeof error.exitCode !== "number") {return false;}
+  if (!("stdout" in error) || typeof error.stdout !== "string") {return false;}
+  if (!("stderr" in error) || typeof error.stderr !== "string") {return false;}
   return true;
 }

@@ -102,10 +102,16 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  if (ORIGINAL_KEY === undefined) delete process.env.E2B_API_KEY;
-  else process.env.E2B_API_KEY = ORIGINAL_KEY;
-  if (ORIGINAL_TEMPLATE === undefined) delete process.env.E2B_TEMPLATE;
-  else process.env.E2B_TEMPLATE = ORIGINAL_TEMPLATE;
+  if (ORIGINAL_KEY === undefined) {
+    delete process.env.E2B_API_KEY;
+  } else {
+    process.env.E2B_API_KEY = ORIGINAL_KEY;
+  }
+  if (ORIGINAL_TEMPLATE === undefined) {
+    delete process.env.E2B_TEMPLATE;
+  } else {
+    process.env.E2B_TEMPLATE = ORIGINAL_TEMPLATE;
+  }
 });
 
 describe('createE2bProvider', () => {

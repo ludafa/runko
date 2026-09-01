@@ -36,9 +36,9 @@ interface ParsedFilesPayload {
 }
 
 function parseFilesPayload(raw: string | undefined): ParsedFilesPayload {
-  if (raw === undefined) throw new Error("expected a payload argument, got none");
+  if (raw === undefined) {throw new Error("expected a payload argument, got none");}
   const value: unknown = JSON.parse(raw);
-  if (!isRecord(value)) throw new Error(`expected an object payload, got: ${raw}`);
+  if (!isRecord(value)) {throw new Error(`expected an object payload, got: ${raw}`);}
   const { op, rootPrefix, startReal, patternSource, ignoreSources, limit } = value;
   if (
     typeof op !== "string" ||
@@ -68,9 +68,9 @@ interface ParsedContentPayload {
 }
 
 function parseContentPayload(raw: string | undefined): ParsedContentPayload {
-  if (raw === undefined) throw new Error("expected a payload argument, got none");
+  if (raw === undefined) {throw new Error("expected a payload argument, got none");}
   const value: unknown = JSON.parse(raw);
-  if (!isRecord(value)) throw new Error(`expected an object payload, got: ${raw}`);
+  if (!isRecord(value)) {throw new Error(`expected an object payload, got: ${raw}`);}
   const { op, rootPrefix, startReal, scopeSource, ignoreSources, patternSource, ignoreCase, mode, context, maxFiles, maxLines } = value;
   if (
     typeof op !== "string" ||

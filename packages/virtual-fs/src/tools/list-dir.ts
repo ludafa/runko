@@ -18,12 +18,12 @@ function buildMetaSuffix(entry: DirEntry): string {
   let suffix = "";
   if (entry.type === "reference") {
     suffix += ` → ${entry.href ?? ""}`;
-    if (entry.mimeType !== undefined) suffix += ` [${entry.mimeType}]`;
+    if (entry.mimeType !== undefined) {suffix += ` [${entry.mimeType}]`;}
   } else if (entry.type === "file" && !isTextMimeType(entry.mimeType)) {
     suffix += ` [${entry.mimeType ?? "application/octet-stream"}]`;
   }
   const description = entry.annotations?.description;
-  if (description) suffix += ` — ${description}`;
+  if (description) {suffix += ` — ${description}`;}
   return suffix;
 }
 
@@ -33,7 +33,7 @@ interface WalkState {
 }
 
 async function walk(fs: NimboFS, dirPath: string, currentDepth: number, maxDepth: number, indent: string, lines: string[], state: WalkState): Promise<void> {
-  if (state.truncated) return;
+  if (state.truncated) {return;}
   const entries = await fs.readdir(dirPath);
   for (const entry of entries) {
     if (state.count >= LIST_DIR_MAX_ENTRIES) {
@@ -47,7 +47,7 @@ async function walk(fs: NimboFS, dirPath: string, currentDepth: number, maxDepth
       lines.push(`${indent}${entry.name}/${suffix}`);
       if (currentDepth < maxDepth) {
         await walk(fs, childPath, currentDepth + 1, maxDepth, `${indent}  `, lines, state);
-        if (state.truncated) return;
+        if (state.truncated) {return;}
       }
     } else {
       lines.push(`${indent}${entry.name}${suffix}`);

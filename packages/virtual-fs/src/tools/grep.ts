@@ -33,7 +33,7 @@ async function readTextOrSkip(fs: NimboFS, path: string): Promise<string | undef
   } catch {
     return undefined;
   }
-  if (stat.type !== "file" || !isTextMimeType(stat.mimeType)) return undefined;
+  if (stat.type !== "file" || !isTextMimeType(stat.mimeType)) {return undefined;}
   try {
     return decode(await fs.readFile(path));
   } catch {
@@ -50,15 +50,15 @@ function collectFileMatches(text: string, regex: RegExp, context: number): Conte
   const lines = text.length === 0 ? [] : text.split("\n");
   const matchedIdx: number[] = [];
   for (let i = 0; i < lines.length; i++) {
-    if (regex.test(lines[i] ?? "")) matchedIdx.push(i);
+    if (regex.test(lines[i] ?? "")) {matchedIdx.push(i);}
   }
-  if (matchedIdx.length === 0) return undefined;
+  if (matchedIdx.length === 0) {return undefined;}
 
   const included = new Set<number>();
   for (const idx of matchedIdx) {
     const from = Math.max(0, idx - context);
     const to = Math.min(lines.length - 1, idx + context);
-    for (let j = from; j <= to; j++) included.add(j);
+    for (let j = from; j <= to; j++) {included.add(j);}
   }
   const matchedSet = new Set(matchedIdx);
   return [...included].sort((a, b) => a - b).map((i) => ({ line: i + 1, text: lines[i] ?? "", match: matchedSet.has(i) }));
@@ -108,12 +108,12 @@ async function fallbackSearchContent(fs: NimboFS, regex: RegExp, query: ContentS
   const groups: ContentSearchGroup[] = [];
   for (const path of sorted) {
     const text = await readTextOrSkip(fs, path);
-    if (text === undefined) continue;
+    if (text === undefined) {continue;}
     if (query.mode === "files") {
-      if (regex.test(text)) groups.push({ path, lines: [] });
+      if (regex.test(text)) {groups.push({ path, lines: [] });}
     } else {
       const lines = collectFileMatches(text, regex, query.context ?? 0);
-      if (lines !== undefined) groups.push({ path, lines });
+      if (lines !== undefined) {groups.push({ path, lines });}
     }
   }
 
@@ -125,7 +125,7 @@ async function resolveContentSearch(fs: NimboFS, regex: RegExp, query: ContentSe
     try {
       return await fs.searchContent(query);
     } catch (error) {
-      if (!(error instanceof SearchUnsupportedError)) throw error;
+      if (!(error instanceof SearchUnsupportedError)) {throw error;}
       // 落空则回退到下面的 JS 扫描——不是错误路径。
     }
   }

@@ -142,7 +142,9 @@ function startSteerMessage(
   metadata: NimboMessageMetadata | undefined,
 ): SteerMessageBuilder {
   const message: NimboUIMessage = { id: messageId, role: 'user', parts: [] };
-  if (metadata !== undefined) message.metadata = metadata;
+  if (metadata !== undefined) {
+    message.metadata = metadata;
+  }
   return { message, openText: new Map() };
 }
 
@@ -159,12 +161,16 @@ function applySteerChunk(
     }
     case 'text-delta': {
       const part = builder.openText.get(chunk.id);
-      if (part !== undefined) part.text += chunk.delta;
+      if (part !== undefined) {
+        part.text += chunk.delta;
+      }
       break;
     }
     case 'text-end': {
       const part = builder.openText.get(chunk.id);
-      if (part !== undefined) part.state = 'done';
+      if (part !== undefined) {
+        part.state = 'done';
+      }
       break;
     }
     case 'file': {
@@ -232,7 +238,9 @@ export class MessageLedger {
   applyFrame(frame: LedgerFrame): void {
     if (isMessageFrame(frame)) {
       this.upsert(frame.message);
-      if (frame.message.role === 'user') this.onUserMessage?.();
+      if (frame.message.role === 'user') {
+        this.onUserMessage?.();
+      }
       return;
     }
     this.applyChunk(frame.chunk);
@@ -283,13 +291,16 @@ export class MessageLedger {
     if (this.openController === undefined) {
       // No message currently open — the only chunk `@nimbo/core`'s loop ever
       // produces outside a start/finish window (see file header).
-      if (chunk.type === 'message-metadata')
+      if (chunk.type === 'message-metadata') {
         this.applyStandaloneMetadata(chunk.messageMetadata);
+      }
       return;
     }
 
     this.openController.enqueue(chunk);
-    if (chunk.type === 'finish') this.closeOpenMessage();
+    if (chunk.type === 'finish') {
+      this.closeOpenMessage();
+    }
   }
 
   private closeOpenMessage(): void {
@@ -300,7 +311,9 @@ export class MessageLedger {
   private async consume(
     iterable: AsyncIterable<NimboUIMessage>,
   ): Promise<void> {
-    for await (const message of iterable) this.upsert(message);
+    for await (const message of iterable) {
+      this.upsert(message);
+    }
   }
 
   private applyStandaloneMetadata(metadata: NimboMessageMetadata): void {
@@ -346,7 +359,9 @@ export class MessageLedger {
    * 崩溃轮之后还能继续对话（docs/tech/graceful-shutdown.md），它就浮出来了。
    */
   private ensureOrder(id: string): void {
-    if (this.ordered.has(id)) return;
+    if (this.ordered.has(id)) {
+      return;
+    }
     this.ordered.add(id);
     this.order.push(id);
   }
@@ -368,9 +383,13 @@ export class MessageLedger {
       // `readUIMessageStream` 要一个微任务之后才吐出第一版消息）——这一格暂时跳过，
       // 等物化完成的那次 `notifyChange` 它自然出现在**这个位置**上，而不是末尾。
       // 刻意不塞一条空 assistant 消息占坑：那会在界面上闪一个空气泡。
-      if (message === undefined) return [];
+      if (message === undefined) {
+        return [];
+      }
       const pending = this.pendingMetadata.get(id);
-      if (pending === undefined) return [message];
+      if (pending === undefined) {
+        return [message];
+      }
       const mergedMetadata: NimboMessageMetadata =
         message.metadata === undefined ?
           pending

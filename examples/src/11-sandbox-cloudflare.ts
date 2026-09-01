@@ -114,7 +114,7 @@ function createFakeSandbox(): CfSandboxLike {
     },
     async readFile(path) {
       const data = files.get(path);
-      if (data === undefined) throw new Error(`no such file: ${path}`);
+      if (data === undefined) {throw new Error(`no such file: ${path}`);}
       return { content: Buffer.from(data).toString("base64") };
     },
     async writeFile(path, content) {

@@ -14,9 +14,12 @@ import {
 import { Shimmer } from '@/components/ai-elements/shimmer';
 
 function thinkingMessage(isStreaming: boolean, duration?: number) {
-  if (isStreaming || duration === 0)
+  if (isStreaming || duration === 0) {
     return <Shimmer duration={1}>思考中…</Shimmer>;
-  if (duration === undefined) return <p>思考过程</p>;
+  }
+  if (duration === undefined) {
+    return <p>思考过程</p>;
+  }
   return <p>思考了 {duration} 秒</p>;
 }
 

@@ -26,8 +26,8 @@ export function describeError(error: unknown): string {
  */
 export function translateFsError(op: string, path: string, error: unknown): Error {
   if (isErrnoException(error)) {
-    if (error.code === "ENOENT") return new NotFoundError(path);
-    if (error.code === "ENOTEMPTY") return new DirectoryNotEmptyError(path);
+    if (error.code === "ENOENT") {return new NotFoundError(path);}
+    if (error.code === "ENOTEMPTY") {return new DirectoryNotEmptyError(path);}
   }
   return new Error(`vercel sandbox: fs.${op} "${path}" failed: ${describeError(error)}`, {
     cause: error instanceof Error ? error : undefined,

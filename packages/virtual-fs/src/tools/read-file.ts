@@ -78,7 +78,7 @@ function renderNumberedLines(bodyLines: string[], startLine: number): string {
 
 function formatTextContent(text: string, offset: number, limit: number | undefined): ToolReturn {
   const lines = text.length === 0 ? [] : text.split("\n");
-  if (lines.length === 0) return "(empty file)";
+  if (lines.length === 0) {return "(empty file)";}
   if (offset >= lines.length) {
     return errorResult(
       `offset ${offset} is at or beyond the end of the file (it has ${lines.length} line${lines.length === 1 ? "" : "s"}, ` +
@@ -127,11 +127,11 @@ export function createReadFileTool(opts: CreateFileToolsOptions): Tool {
       if (stat.type === "reference") {
         try {
           const data = await ctx.fs.readFile(input.path);
-          if (stat.mtime !== undefined) opts.readState.set(input.path, stat.mtime);
+          if (stat.mtime !== undefined) {opts.readState.set(input.path, stat.mtime);}
           return formatTextContent(decode(data), input.offset ?? 0, input.limit);
         } catch (error) {
           if (error instanceof ReferenceNotResolvable) {
-            if (stat.mtime !== undefined) opts.readState.set(input.path, stat.mtime);
+            if (stat.mtime !== undefined) {opts.readState.set(input.path, stat.mtime);}
             return {
               type: "reference",
               path: error.path,
@@ -150,7 +150,7 @@ export function createReadFileTool(opts: CreateFileToolsOptions): Tool {
 
       // stat.type === "file"
       if (!isTextMimeType(stat.mimeType)) {
-        if (stat.mtime !== undefined) opts.readState.set(input.path, stat.mtime);
+        if (stat.mtime !== undefined) {opts.readState.set(input.path, stat.mtime);}
         const mimeType = stat.mimeType ?? "application/octet-stream";
         const description = stat.annotations?.description;
         return {
@@ -169,7 +169,7 @@ export function createReadFileTool(opts: CreateFileToolsOptions): Tool {
       } catch (error) {
         return errorResult(`Failed to read "${input.path}": ${describeError(error)}.`);
       }
-      if (stat.mtime !== undefined) opts.readState.set(input.path, stat.mtime);
+      if (stat.mtime !== undefined) {opts.readState.set(input.path, stat.mtime);}
       return formatTextContent(decode(data), input.offset ?? 0, input.limit);
     },
   });

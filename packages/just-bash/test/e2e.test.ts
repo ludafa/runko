@@ -80,7 +80,7 @@ async function drainStream(gen: AsyncGenerator<NimboChunk, unknown>): Promise<Ni
 function toolPartsOf(message: NimboUIMessage): ToolUIPart<UITools>[] {
   const result: ToolUIPart<UITools>[] = [];
   for (const part of message.parts) {
-    if (isToolUIPart<UITools>(part) && part.type !== "dynamic-tool") result.push(part);
+    if (isToolUIPart<UITools>(part) && part.type !== "dynamic-tool") {result.push(part);}
   }
   return result;
 }
@@ -95,9 +95,9 @@ function stringOutput(output: unknown): string {
 }
 /** Same `{ isError, content }` narrowing pattern as core's `integration.test.ts`. */
 function errorResultContent(output: unknown): string {
-  if (typeof output !== "object" || output === null || Array.isArray(output)) return "";
-  if (!("isError" in output) || output.isError !== true) return "";
-  if (!("content" in output)) return "";
+  if (typeof output !== "object" || output === null || Array.isArray(output)) {return "";}
+  if (!("isError" in output) || output.isError !== true) {return "";}
+  if (!("content" in output)) {return "";}
   return typeof output.content === "string" ? output.content : "";
 }
 

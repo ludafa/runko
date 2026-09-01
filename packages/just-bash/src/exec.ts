@@ -197,10 +197,10 @@ export function justBash(fs: NimboFS, opts: JustBashOptions = {}): NimboExec {
         const result = await raceAbort(work, combined);
 
         const endCwd = endingCwdOf(result, startCwd);
-        if (endCwd !== startCwd) instanceCwd = endCwd;
+        if (endCwd !== startCwd) {instanceCwd = endCwd;}
 
-        if (result.stdout.length > 0) execOpts?.onOutput?.({ stream: "stdout", data: result.stdout });
-        if (result.stderr.length > 0) execOpts?.onOutput?.({ stream: "stderr", data: result.stderr });
+        if (result.stdout.length > 0) {execOpts?.onOutput?.({ stream: "stdout", data: result.stdout });}
+        if (result.stderr.length > 0) {execOpts?.onOutput?.({ stream: "stderr", data: result.stderr });}
 
         return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr, durationMs: Date.now() - start };
       } catch (error) {
@@ -218,7 +218,7 @@ export function justBash(fs: NimboFS, opts: JustBashOptions = {}): NimboExec {
         // 真实异常，兜底成一个 ExecResult 而不是让它冒泡。
         return { exitCode: 1, stdout: "", stderr: `just-bash: internal error: ${describeError(error)}`, durationMs: Date.now() - start };
       } finally {
-        if (timer !== undefined) clearTimeout(timer);
+        if (timer !== undefined) {clearTimeout(timer);}
       }
     },
   };

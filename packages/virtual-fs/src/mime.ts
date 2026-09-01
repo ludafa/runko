@@ -61,7 +61,7 @@ export const DEFAULT_MIME_TYPE = "application/octet-stream";
 export function inferMimeType(path: string): string {
   const base = path.slice(path.lastIndexOf("/") + 1);
   const dotIndex = base.lastIndexOf(".");
-  if (dotIndex <= 0) return DEFAULT_MIME_TYPE;
+  if (dotIndex <= 0) {return DEFAULT_MIME_TYPE;}
   const ext = base.slice(dotIndex + 1).toLowerCase();
   return EXTENSION_MIME_TABLE[ext] ?? DEFAULT_MIME_TYPE;
 }

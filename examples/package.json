@@ -10,7 +10,9 @@
   },
   "scripts": {
     "example": "node run.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
+    "lint:fix": "eslint . --fix"
   },
   "dependencies": {
     "@nimbo/sdk": "workspace:*",

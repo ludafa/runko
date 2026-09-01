@@ -74,8 +74,8 @@ const ALL_FILE_TOOL_NAMES = [
  * 过滤各自独立、互不影响）。
  */
 function resolveEnabledFileToolNames(builtinTools: BuiltinToolName[] | false | undefined): readonly FileToolName[] {
-  if (builtinTools === false) return [];
-  if (builtinTools === undefined) return ALL_FILE_TOOL_NAMES;
+  if (builtinTools === false) {return [];}
+  if (builtinTools === undefined) {return ALL_FILE_TOOL_NAMES;}
   const requested = new Set<BuiltinToolName>(builtinTools);
   return ALL_FILE_TOOL_NAMES.filter((name) => requested.has(name));
 }
@@ -90,23 +90,23 @@ function resolveEnabledFileToolNames(builtinTools: BuiltinToolName[] | false | u
  */
 function buildDefaultFileTools(agent: AgentDefinition, readState: SessionReadState, derivedData: DerivedDataCollector): Record<string, Tool> {
   const enabledNames = resolveEnabledFileToolNames(agent.builtinTools);
-  if (enabledNames.length === 0) return {};
+  if (enabledNames.length === 0) {return {};}
 
   const allFileTools = createFileTools({
     readState,
     onFileChange: (changes: FileChange[]) => {
-      for (const change of changes) derivedData.recordFileChange(change);
+      for (const change of changes) {derivedData.recordFileChange(change);}
     },
   });
 
   const enabled: Record<string, Tool> = {};
-  for (const name of enabledNames) enabled[name] = allFileTools[name];
+  for (const name of enabledNames) {enabled[name] = allFileTools[name];}
   return enabled;
 }
 
 /** `fs`/`workspace` 都未提供时才注入默认 `MemoryFS`——两者任一存在都原样透传给 core 自行解析（含互斥校验与 exec 派生）。 */
 function withDefaultFs(opts: CoreSessionOptions): CoreSessionOptions {
-  if (opts.fs !== undefined || opts.workspace !== undefined) return opts;
+  if (opts.fs !== undefined || opts.workspace !== undefined) {return opts;}
   return { ...opts, fs: new MemoryFS() };
 }
 

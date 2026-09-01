@@ -30,13 +30,13 @@ function errnoError(code: string, message: string): Error & { code: string } {
 type Entry = { kind: "file"; data: Uint8Array; mtimeMs: number } | { kind: "dir"; mtimeMs: number };
 
 function dirnameOf(path: string): string {
-  if (path === "/") return "/";
+  if (path === "/") {return "/";}
   const idx = path.lastIndexOf("/");
   return idx <= 0 ? "/" : path.slice(0, idx);
 }
 
 function basenameOf(path: string): string {
-  if (path === "/") return "/";
+  if (path === "/") {return "/";}
   return path.slice(path.lastIndexOf("/") + 1);
 }
 
@@ -63,8 +63,8 @@ export class FakeFileSystem implements VercelFileSystemLike {
   }
 
   private ensureDir(path: string): void {
-    if (this.entries.has(path)) return;
-    if (path !== "/") this.ensureDir(dirnameOf(path));
+    if (this.entries.has(path)) {return;}
+    if (path !== "/") {this.ensureDir(dirnameOf(path));}
     this.entries.set(path, { kind: "dir", mtimeMs: this.nextMtime() });
   }
 
@@ -75,41 +75,41 @@ export class FakeFileSystem implements VercelFileSystemLike {
 
   async readFile(path: string): Promise<Uint8Array> {
     const entry = this.entries.get(path);
-    if (entry === undefined) throw errnoError("ENOENT", `ENOENT: no such file or directory, open '${path}'`);
-    if (entry.kind === "dir") throw errnoError("EISDIR", `EISDIR: illegal operation on a directory, read '${path}'`);
+    if (entry === undefined) {throw errnoError("ENOENT", `ENOENT: no such file or directory, open '${path}'`);}
+    if (entry.kind === "dir") {throw errnoError("EISDIR", `EISDIR: illegal operation on a directory, read '${path}'`);}
     return entry.data;
   }
 
   async writeFile(path: string, data: Uint8Array | string): Promise<void> {
     const parentKind = this.kindOf(dirnameOf(path));
-    if (parentKind === undefined) throw errnoError("ENOENT", `ENOENT: no such file or directory, open '${path}'`);
-    if (parentKind === "file") throw errnoError("ENOTDIR", `ENOTDIR: not a directory, open '${path}'`);
-    if (this.kindOf(path) === "dir") throw errnoError("EISDIR", `EISDIR: illegal operation on a directory, open '${path}'`);
+    if (parentKind === undefined) {throw errnoError("ENOENT", `ENOENT: no such file or directory, open '${path}'`);}
+    if (parentKind === "file") {throw errnoError("ENOTDIR", `ENOTDIR: not a directory, open '${path}'`);}
+    if (this.kindOf(path) === "dir") {throw errnoError("EISDIR", `EISDIR: illegal operation on a directory, open '${path}'`);}
     const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
     this.entries.set(path, { kind: "file", data: bytes, mtimeMs: this.nextMtime() });
   }
 
   async mkdir(path: string, options?: { recursive?: boolean }): Promise<string | undefined> {
-    if (this.kindOf(path) === "dir") return undefined;
-    if (this.kindOf(path) === "file") throw errnoError("EEXIST", `EEXIST: file already exists, mkdir '${path}'`);
+    if (this.kindOf(path) === "dir") {return undefined;}
+    if (this.kindOf(path) === "file") {throw errnoError("EEXIST", `EEXIST: file already exists, mkdir '${path}'`);}
     if (options?.recursive) {
       this.ensureDir(path);
       return path;
     }
     const parentKind = this.kindOf(dirnameOf(path));
-    if (parentKind !== "dir") throw errnoError("ENOENT", `ENOENT: no such file or directory, mkdir '${path}'`);
+    if (parentKind !== "dir") {throw errnoError("ENOENT", `ENOENT: no such file or directory, mkdir '${path}'`);}
     this.entries.set(path, { kind: "dir", mtimeMs: this.nextMtime() });
     return path;
   }
 
   async readdir(path: string, _options: { withFileTypes: true }): Promise<VercelDirentLike[]> {
     const kind = this.kindOf(path);
-    if (kind === undefined) throw errnoError("ENOENT", `ENOENT: no such file or directory, scandir '${path}'`);
-    if (kind === "file") throw errnoError("ENOTDIR", `ENOTDIR: not a directory, scandir '${path}'`);
+    if (kind === undefined) {throw errnoError("ENOENT", `ENOENT: no such file or directory, scandir '${path}'`);}
+    if (kind === "file") {throw errnoError("ENOTDIR", `ENOTDIR: not a directory, scandir '${path}'`);}
     const results: VercelDirentLike[] = [];
     for (const [candidate, entry] of this.entries) {
-      if (candidate === path) continue;
-      if (dirnameOf(candidate) !== path) continue;
+      if (candidate === path) {continue;}
+      if (dirnameOf(candidate) !== path) {continue;}
       const name = basenameOf(candidate);
       results.push({ name, isDirectory: () => entry.kind === "dir", isFile: () => entry.kind === "file" });
     }
@@ -118,7 +118,7 @@ export class FakeFileSystem implements VercelFileSystemLike {
 
   async stat(path: string): Promise<VercelStatsLike> {
     const entry = this.entries.get(path);
-    if (entry === undefined) throw errnoError("ENOENT", `ENOENT: no such file or directory, stat '${path}'`);
+    if (entry === undefined) {throw errnoError("ENOENT", `ENOENT: no such file or directory, stat '${path}'`);}
     return {
       isDirectory: () => entry.kind === "dir",
       isFile: () => entry.kind === "file",
@@ -131,7 +131,7 @@ export class FakeFileSystem implements VercelFileSystemLike {
   async rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void> {
     const kind = this.kindOf(path);
     if (kind === undefined) {
-      if (options?.force) return;
+      if (options?.force) {return;}
       throw errnoError("ENOENT", `ENOENT: no such file or directory, rm '${path}'`);
     }
     if (kind === "dir" && !options?.recursive) {
@@ -140,7 +140,7 @@ export class FakeFileSystem implements VercelFileSystemLike {
     if (kind === "dir" && options?.recursive) {
       const prefix = `${path}/`;
       for (const candidate of [...this.entries.keys()]) {
-        if (candidate.startsWith(prefix)) this.entries.delete(candidate);
+        if (candidate.startsWith(prefix)) {this.entries.delete(candidate);}
       }
     }
     this.entries.delete(path);
@@ -149,11 +149,11 @@ export class FakeFileSystem implements VercelFileSystemLike {
   /** 真实 node 怪癖：空目录成功、非空 ENOTEMPTY——`src/fs.ts` 靠这个方法而非 `rm()` 实现非递归删除目录。 */
   async rmdir(path: string): Promise<void> {
     const kind = this.kindOf(path);
-    if (kind === undefined) throw errnoError("ENOENT", `ENOENT: no such file or directory, rmdir '${path}'`);
-    if (kind === "file") throw errnoError("ENOTDIR", `ENOTDIR: not a directory, rmdir '${path}'`);
+    if (kind === undefined) {throw errnoError("ENOENT", `ENOENT: no such file or directory, rmdir '${path}'`);}
+    if (kind === "file") {throw errnoError("ENOTDIR", `ENOTDIR: not a directory, rmdir '${path}'`);}
     const prefix = `${path}/`;
     const hasChildren = [...this.entries.keys()].some((candidate) => candidate.startsWith(prefix));
-    if (hasChildren) throw errnoError("ENOTEMPTY", `ENOTEMPTY: directory not empty, rmdir '${path}'`);
+    if (hasChildren) {throw errnoError("ENOTEMPTY", `ENOTEMPTY: directory not empty, rmdir '${path}'`);}
     this.entries.delete(path);
   }
 }
@@ -209,7 +209,7 @@ export class FakeVercelSandbox implements VercelSandboxLike {
 
 /** 把字符串按若干小块顺序写进一个 Writable，模拟增量流式输出。 */
 export async function writeChunks(stream: Writable | undefined, chunks: string[]): Promise<void> {
-  if (stream === undefined) return;
+  if (stream === undefined) {return;}
   for (const chunk of chunks) {
     await new Promise<void>((resolve, reject) => {
       stream.write(chunk, (error?: Error | null) => (error ? reject(error) : resolve()));

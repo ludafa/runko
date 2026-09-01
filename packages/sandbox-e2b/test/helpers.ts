@@ -65,15 +65,15 @@ export function createFakeE2bSandbox(seedDirs: readonly string[] = ["/home/user"
   }
 
   function ensureDir(path: string): void {
-    if (dirs.has(path)) return;
+    if (dirs.has(path)) {return;}
     const parent = dirnameOf(path);
-    if (parent !== path) ensureDir(parent);
+    if (parent !== path) {ensureDir(parent);}
     dirs.add(path);
   }
 
   function toEntryInfo(path: string): E2bEntryInfo {
     const file = fileMap.get(path);
-    if (file) return { name: basenameOf(path), type: "file", path, size: file.data.byteLength, modifiedTime: file.mtime };
+    if (file) {return { name: basenameOf(path), type: "file", path, size: file.data.byteLength, modifiedTime: file.mtime };}
     return { name: basenameOf(path), type: "dir", path, size: 0 };
   }
 
@@ -93,7 +93,7 @@ export function createFakeE2bSandbox(seedDirs: readonly string[] = ["/home/user"
     files: {
       async read(path: string): Promise<Uint8Array> {
         const file = fileMap.get(path);
-        if (!file) throw notFoundError(path);
+        if (!file) {throw notFoundError(path);}
         return file.data;
       },
       async write(path: string, data: string | ArrayBuffer) {
@@ -102,13 +102,13 @@ export function createFakeE2bSandbox(seedDirs: readonly string[] = ["/home/user"
       },
       async list(path: string, opts?: E2bFilesystemListOpts): Promise<E2bEntryInfo[]> {
         if (!dirs.has(path)) {
-          if (fileMap.has(path)) throw namedError("InvalidArgumentError", `not a directory: ${path}`);
+          if (fileMap.has(path)) {throw namedError("InvalidArgumentError", `not a directory: ${path}`);}
           throw notFoundError(path);
         }
         const depth = opts?.depth ?? 1;
         const results: E2bEntryInfo[] = [];
         const collect = (dirPath: string, remaining: number): void => {
-          if (remaining <= 0) return;
+          if (remaining <= 0) {return;}
           for (const d of dirs) {
             if (d !== dirPath && dirnameOf(d) === dirPath) {
               results.push(toEntryInfo(d));
@@ -116,7 +116,7 @@ export function createFakeE2bSandbox(seedDirs: readonly string[] = ["/home/user"
             }
           }
           for (const f of fileMap.keys()) {
-            if (dirnameOf(f) === dirPath) results.push(toEntryInfo(f));
+            if (dirnameOf(f) === dirPath) {results.push(toEntryInfo(f));}
           }
         };
         collect(path, depth);
@@ -129,20 +129,20 @@ export function createFakeE2bSandbox(seedDirs: readonly string[] = ["/home/user"
         }
         if (dirs.has(path)) {
           const prefix = `${path === "/" ? "" : path}/`;
-          for (const d of [...dirs]) if (d.startsWith(prefix)) dirs.delete(d);
-          for (const f of [...fileMap.keys()]) if (f.startsWith(prefix)) fileMap.delete(f);
+          for (const d of [...dirs]) {if (d.startsWith(prefix)) {dirs.delete(d);}}
+          for (const f of [...fileMap.keys()]) {if (f.startsWith(prefix)) {fileMap.delete(f);}}
           dirs.delete(path);
           return;
         }
         throw notFoundError(path);
       },
       async makeDir(path: string): Promise<boolean> {
-        if (dirs.has(path)) return false;
+        if (dirs.has(path)) {return false;}
         ensureDir(path);
         return true;
       },
       async getInfo(path: string): Promise<E2bEntryInfo> {
-        if (fileMap.has(path) || dirs.has(path)) return toEntryInfo(path);
+        if (fileMap.has(path) || dirs.has(path)) {return toEntryInfo(path);}
         throw notFoundError(path);
       },
     },
@@ -150,7 +150,7 @@ export function createFakeE2bSandbox(seedDirs: readonly string[] = ["/home/user"
       async run(command: string, opts?: E2bCommandRunOpts): Promise<E2bCommandResult> {
         lastRunCwd = opts?.cwd;
 
-        if (command === "hang") return new Promise<E2bCommandResult>(() => {});
+        if (command === "hang") {return new Promise<E2bCommandResult>(() => {});}
 
         if (command.startsWith("echo:")) {
           const text = command.slice("echo:".length);
@@ -177,8 +177,8 @@ export function createFakeE2bSandbox(seedDirs: readonly string[] = ["/home/user"
           throw commandExitError({ exitCode: Number(codeText), stdout: "", stderr: message });
         }
 
-        if (command === "timeout-error") throw namedError("TimeoutError", "simulated e2b command timeout");
-        if (command === "sandbox-error") throw namedError("SandboxNotFoundError", "sandbox not found (stopped or expired)");
+        if (command === "timeout-error") {throw namedError("TimeoutError", "simulated e2b command timeout");}
+        if (command === "sandbox-error") {throw namedError("SandboxNotFoundError", "sandbox not found (stopped or expired)");}
 
         if (command.startsWith("write-file:")) {
           const rest = command.slice("write-file:".length);
@@ -191,7 +191,7 @@ export function createFakeE2bSandbox(seedDirs: readonly string[] = ["/home/user"
           return { exitCode: 0, stdout: "", stderr: "" };
         }
 
-        if (command === "pwd") return { exitCode: 0, stdout: `${opts?.cwd ?? ""}\n`, stderr: "" };
+        if (command === "pwd") {return { exitCode: 0, stdout: `${opts?.cwd ?? ""}\n`, stderr: "" };}
 
         return { exitCode: 0, stdout: command, stderr: "" };
       },

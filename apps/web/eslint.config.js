@@ -81,4 +81,14 @@ export default tseslint.config(
     },
   },
   prettierConfig,
+  {
+    // 花括号强制：if / else / for / while / do 的语句体一律写花括号，
+    // 哪怕只有一行。放在 prettierConfig **之后**是必须的——
+    // eslint-config-prettier 会把 `curly` 关掉（它默认的 multi-line 档
+    // 确实和 prettier 的折行打架），写在前面会被它覆盖成 off。
+    // `all` 档只管加括号、不动折行，与 prettier 不冲突。
+    rules: {
+      curly: ['error', 'all'],
+    },
+  },
 );

@@ -126,13 +126,13 @@ async function resolvePolicy(
   onceMemory: OnceApprovalMemory | undefined,
   escalate: () => Promise<ApprovalResolution>,
 ): Promise<ApprovalResolution> {
-  if (policy === "allow") return { outcome: "allow" };
-  if (policy === "deny") return { outcome: "deny", reason: DEFAULT_DENY_MESSAGE };
+  if (policy === "allow") {return { outcome: "allow" };}
+  if (policy === "deny") {return { outcome: "deny", reason: DEFAULT_DENY_MESSAGE };}
 
   if (typeof policy === "function") {
     const outcome: ApprovalOutcome = await policy(input, ctx);
-    if (outcome === "allow") return { outcome: "allow" };
-    if (outcome === "deny") return { outcome: "deny", reason: DEFAULT_DENY_MESSAGE };
+    if (outcome === "allow") {return { outcome: "allow" };}
+    if (outcome === "deny") {return { outcome: "deny", reason: DEFAULT_DENY_MESSAGE };}
     // 回调直接决定，不升级（同旧行为"per-tool 回调决定不咨询 onApproval"）——
     // 回调本身返回 "review" 就是这一级的终局判断，交给 loop 去问真人。
     return { outcome: "review", markOnceOnApprove: false };
@@ -159,12 +159,12 @@ export async function evaluateApproval(opts: EvaluateApprovalInput): Promise<App
   const { toolName, input, ctx, toolApproval, onApproval, onceMemory } = opts;
 
   const escalateToSession = (): Promise<ApprovalResolution> => {
-    if (onApproval === undefined) return Promise.resolve(noArbiterResolution(toolName));
+    if (onApproval === undefined) {return Promise.resolve(noArbiterResolution(toolName));}
     return resolvePolicy(onApproval, toolName, input, ctx, onceMemory, () =>
       Promise.resolve(noArbiterResolution(toolName)),
     );
   };
 
-  if (toolApproval === undefined) return { outcome: "allow" };
+  if (toolApproval === undefined) {return { outcome: "allow" };}
   return resolvePolicy(toolApproval, toolName, input, ctx, onceMemory, escalateToSession);
 }

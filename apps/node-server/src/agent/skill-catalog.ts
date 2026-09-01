@@ -201,7 +201,9 @@ export function buildModelText(
   text: string,
   mentioned: readonly string[],
 ): string {
-  if (mentioned.length === 0) return text;
+  if (mentioned.length === 0) {
+    return text;
+  }
   const names = mentioned.join('、');
   return (
     `${text}\n\n` +

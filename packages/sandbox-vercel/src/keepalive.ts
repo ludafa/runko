@@ -44,9 +44,9 @@ function createDriver(sandbox: VercelSandboxLike): KeepAliveDriver {
       return expiresAt === undefined ? undefined : expiresAt.getTime() - Date.now();
     },
     renew: async (targetMs, remainingMs) => {
-      if (sandbox.extendTimeout === undefined) throw new Error(KEEPALIVE_UNSUPPORTED_MESSAGE);
+      if (sandbox.extendTimeout === undefined) {throw new Error(KEEPALIVE_UNSUPPORTED_MESSAGE);}
       const extendBy = extensionFor(targetMs, remainingMs);
-      if (extendBy <= 0) return;
+      if (extendBy <= 0) {return;}
       await sandbox.extendTimeout(extendBy);
     },
   };
@@ -60,8 +60,8 @@ export function createVercelKeepAlive(
   sandbox: VercelSandboxLike,
   opts: KeepAliveOptions | undefined,
 ): KeepAlive | undefined {
-  if (opts === undefined) return undefined;
+  if (opts === undefined) {return undefined;}
   // 提前失败：等到第一次续期才发现补不了期，那时错误会被闸门吞进 onRenew，很难查。
-  if (sandbox.extendTimeout === undefined) throw new Error(KEEPALIVE_UNSUPPORTED_MESSAGE);
+  if (sandbox.extendTimeout === undefined) {throw new Error(KEEPALIVE_UNSUPPORTED_MESSAGE);}
   return createKeepAlive(createDriver(sandbox), opts);
 }

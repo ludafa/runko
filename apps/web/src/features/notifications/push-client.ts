@@ -29,9 +29,13 @@ export function isPushSupported(): boolean {
 
 /** 粗略判断是不是 iOS（含把自己报成 Mac 的 iPadOS），只用于给一句更有用的提示文案。 */
 export function looksLikeIos(): boolean {
-  if (typeof navigator === 'undefined') return false;
+  if (typeof navigator === 'undefined') {
+    return false;
+  }
   const ua = navigator.userAgent;
-  if (/iPhone|iPad|iPod/.test(ua)) return true;
+  if (/iPhone|iPad|iPod/.test(ua)) {
+    return true;
+  }
   return /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
 }
 
@@ -49,7 +53,9 @@ export async function ensureServiceWorker(): Promise<ServiceWorkerRegistration> 
 function bufferToBase64Url(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
   return btoa(binary)
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
@@ -69,7 +75,9 @@ function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
   );
   const binary = atob(padded);
   const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
   return bytes;
 }
 
@@ -85,7 +93,9 @@ function describeSubscription(
 ): { endpoint: string; p256dh: string; auth: string } | undefined {
   const p256dh = subscription.getKey('p256dh');
   const auth = subscription.getKey('auth');
-  if (p256dh === null || auth === null) return undefined;
+  if (p256dh === null || auth === null) {
+    return undefined;
+  }
   return {
     endpoint: subscription.endpoint,
     p256dh: bufferToBase64Url(p256dh),
@@ -98,7 +108,9 @@ export async function syncSubscription(
   subscription: PushSubscription,
 ): Promise<boolean> {
   const described = describeSubscription(subscription);
-  if (described === undefined) return false;
+  if (described === undefined) {
+    return false;
+  }
   await postSubscription({
     ...described,
     ...(typeof navigator === 'undefined' ?

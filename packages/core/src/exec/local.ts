@@ -100,7 +100,7 @@ function joinVirtualPath(parentDir: string, name: string): string {
 
 function resolveCwd(opts: LocalExecOptions, req: ExecRequest, tmpDir: string | undefined): string {
   const requested = req.cwd ?? opts.cwd;
-  if (tmpDir === undefined) return requested ?? process.cwd();
+  if (tmpDir === undefined) {return requested ?? process.cwd();}
   return requested === undefined ? tmpDir : toRealPath(tmpDir, requested);
 }
 
@@ -152,7 +152,7 @@ async function reconcileFS(fs: NimboFS, tmpDir: string, baseline: Map<string, nu
         await walk(childVirtualPath);
         continue;
       }
-      if (!dirent.isFile()) continue; // 符号链接等特殊条目：v1 不回收，理由见头注释。
+      if (!dirent.isFile()) {continue;} // 符号链接等特殊条目：v1 不回收，理由见头注释。
       seen.add(childVirtualPath);
       const childRealPath = nodePath.join(realDir, dirent.name);
       const stat = await nodeFs.stat(childRealPath);
@@ -210,13 +210,13 @@ function spawnShell(command: string, cwd: string, req: ExecRequest, execOpts: Ex
       aborted = true;
       child.kill("SIGTERM");
     };
-    if (req.signal.aborted) onAbort();
-    else req.signal.addEventListener("abort", onAbort, { once: true });
+    if (req.signal.aborted) {onAbort();}
+    else {req.signal.addEventListener("abort", onAbort, { once: true });}
 
     const finish = (exitCode: number): void => {
-      if (settled) return;
+      if (settled) {return;}
       settled = true;
-      if (timer !== undefined) clearTimeout(timer);
+      if (timer !== undefined) {clearTimeout(timer);}
       req.signal.removeEventListener("abort", onAbort);
       resolve({ exitCode, stdout, stderr });
     };
@@ -276,7 +276,7 @@ async function runLocalExec(opts: LocalExecOptions, req: ExecRequest, execOpts: 
 
     return { exitCode, stdout, stderr, durationMs: Date.now() - start };
   } finally {
-    if (tmpDir !== undefined) await nodeFs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    if (tmpDir !== undefined) {await nodeFs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});}
   }
 }
 

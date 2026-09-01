@@ -41,7 +41,7 @@ export function createMoveFileTool(opts: CreateFileToolsOptions): Tool {
       try {
         fromStat = await ctx.fs.stat(from);
       } catch (error) {
-        if (error instanceof NotFoundError) return errorResult(`"${from}" does not exist.`);
+        if (error instanceof NotFoundError) {return errorResult(`"${from}" does not exist.`);}
         return errorResult(`Failed to stat "${from}": ${describeError(error)}.`);
       }
 
@@ -53,8 +53,8 @@ export function createMoveFileTool(opts: CreateFileToolsOptions): Tool {
       try {
         await ctx.fs.stat(to);
       } catch (error) {
-        if (error instanceof NotFoundError) toExists = false;
-        else return errorResult(`Failed to stat destination "${to}": ${describeError(error)}.`);
+        if (error instanceof NotFoundError) {toExists = false;}
+        else {return errorResult(`Failed to stat destination "${to}": ${describeError(error)}.`);}
       }
       if (toExists && !input.overwrite) {
         return errorResult(`"${to}" already exists. Pass { overwrite: true } to replace it, or choose a different destination.`);
@@ -101,7 +101,7 @@ export function createMoveFileTool(opts: CreateFileToolsOptions): Tool {
         changes.push({ path: from, kind: "delete" }, { path: to, kind: "add" });
       }
 
-      if (changes.length > 0) opts.onFileChange?.(changes);
+      if (changes.length > 0) {opts.onFileChange?.(changes);}
       return `Moved "${from}" to "${to}".`;
     },
   });

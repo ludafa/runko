@@ -128,8 +128,9 @@ describe('MessageLedger (materialize.ts)', () => {
 
   it('a gated tool call goes through approval-requested → approval-responded(allowed) → output-available, in order', async () => {
     const { ledger, latest } = collectLedger();
-    for (const frame of approvalTurnFrames.slice(0, 8))
-      ledger.applyFrame(frame); // up through tool-approval-request only
+    for (const frame of approvalTurnFrames.slice(0, 8)) {
+      ledger.applyFrame(frame);
+    } // up through tool-approval-request only
     await flushLedger();
 
     const pending = toolPartById(latest()[0] as NimboUIMessage, 'call-bash-1');
@@ -138,7 +139,9 @@ describe('MessageLedger (materialize.ts)', () => {
       'call-bash-1',
     );
 
-    for (const frame of approvalTurnFrames.slice(8)) ledger.applyFrame(frame);
+    for (const frame of approvalTurnFrames.slice(8)) {
+      ledger.applyFrame(frame);
+    }
     await flushLedger();
 
     const resolved = toolPartById(latest()[0] as NimboUIMessage, 'call-bash-1');
@@ -153,7 +156,9 @@ describe('MessageLedger (materialize.ts)', () => {
       toolInputAvailableChunk('call-x', 'bash', { command: 'rm -rf /' }),
       finishStepChunk(),
     ];
-    for (const frame of toChunkEnvelopes(chunks)) ledger.applyFrame(frame);
+    for (const frame of toChunkEnvelopes(chunks)) {
+      ledger.applyFrame(frame);
+    }
     await flushLedger();
 
     // deny path: approval-request → approval-response(denied) → output-denied
@@ -175,7 +180,9 @@ describe('MessageLedger (materialize.ts)', () => {
       ],
       9,
     );
-    for (const frame of denyChunks) ledger.applyFrame(frame);
+    for (const frame of denyChunks) {
+      ledger.applyFrame(frame);
+    }
     await flushLedger();
 
     const part = toolPartById(latest()[0] as NimboUIMessage, 'call-x');
@@ -187,7 +194,9 @@ describe('MessageLedger (materialize.ts)', () => {
 
   it('an ask-user tool call stays pending (input-available, no finish yet) until answered, then resolves to output-available', async () => {
     const { ledger, latest } = collectLedger();
-    for (const frame of askUserPendingFrames) ledger.applyFrame(frame);
+    for (const frame of askUserPendingFrames) {
+      ledger.applyFrame(frame);
+    }
     await flushLedger();
 
     const pendingMessages = latest();
@@ -198,7 +207,9 @@ describe('MessageLedger (materialize.ts)', () => {
     );
     expect(pendingPart?.state).toBe('input-available');
 
-    for (const frame of askUserAnsweredFrames) ledger.applyFrame(frame);
+    for (const frame of askUserAnsweredFrames) {
+      ledger.applyFrame(frame);
+    }
     await flushLedger();
 
     const answeredPart = toolPartById(
@@ -217,7 +228,9 @@ describe('MessageLedger (materialize.ts)', () => {
       messageId: 'steer-1',
       text: '等一下，改用暗色主题',
     });
-    for (const frame of toChunkEnvelopes(chunks)) ledger.applyFrame(frame);
+    for (const frame of toChunkEnvelopes(chunks)) {
+      ledger.applyFrame(frame);
+    }
 
     // The steer path is fully synchronous (see materialize.ts's file header) — no flush needed.
     const messages = latest();
@@ -237,15 +250,17 @@ describe('MessageLedger (materialize.ts)', () => {
       textEndChunk('t'),
       finishStepChunk(),
       finishChunk('stop'),
-    ]))
+    ])) {
       ledger.applyFrame(frame);
+    }
     await flushLedger();
 
     for (const frame of toChunkEnvelopes(
       steerTextMessageChunks({ messageId: 'steer-2', text: '再加一句' }),
       10,
-    ))
+    )) {
       ledger.applyFrame(frame);
+    }
 
     ledger.applyFrame({
       seq: 20,
@@ -292,7 +307,9 @@ describe('MessageLedger (materialize.ts)', () => {
       toolOutputAvailableChunk('call-p', { exitCode: 0 }),
       finishChunk('tool-calls'),
     ];
-    for (const frame of toChunkEnvelopes(chunks)) ledger.applyFrame(frame);
+    for (const frame of toChunkEnvelopes(chunks)) {
+      ledger.applyFrame(frame);
+    }
     await flushLedger();
 
     const message = latest()[0] as NimboUIMessage;
@@ -317,7 +334,9 @@ describe('MessageLedger (materialize.ts)', () => {
       }),
       finishChunk('tool-calls'),
     ];
-    for (const frame of toChunkEnvelopes(chunks)) ledger.applyFrame(frame);
+    for (const frame of toChunkEnvelopes(chunks)) {
+      ledger.applyFrame(frame);
+    }
     await flushLedger();
 
     const message = latest()[0] as NimboUIMessage;
@@ -339,7 +358,9 @@ describe('MessageLedger (materialize.ts)', () => {
       dataToolTimingChunk('call-timing', 1_700_000_000_000, 1_700_000_000_800), // complete half
       finishChunk('tool-calls'),
     ];
-    for (const frame of toChunkEnvelopes(chunks)) ledger.applyFrame(frame);
+    for (const frame of toChunkEnvelopes(chunks)) {
+      ledger.applyFrame(frame);
+    }
     await flushLedger();
 
     const message = latest()[0] as NimboUIMessage;
@@ -376,7 +397,9 @@ describe('MessageLedger (materialize.ts)', () => {
     // applies `initialFrames` in exactly this shape — a plain synchronous
     // `for` loop with no `await` between frames.
     const replay = collectLedger();
-    for (const frame of crashedTurnFrames) replay.ledger.applyFrame(frame);
+    for (const frame of crashedTurnFrames) {
+      replay.ledger.applyFrame(frame);
+    }
     await flushLedger();
 
     // "直播": the same frames, arriving one at a time with a real tick
@@ -409,7 +432,9 @@ describe('MessageLedger onUserMessage (this ticket’s fix — the FIFO-pop sign
       messageId: 'steer-1',
       text: '插一句',
     });
-    for (const frame of toChunkEnvelopes(chunks)) ledger.applyFrame(frame);
+    for (const frame of toChunkEnvelopes(chunks)) {
+      ledger.applyFrame(frame);
+    }
     expect(userMessageCount()).toBe(0);
   });
 
@@ -520,7 +545,9 @@ describe('tool-part narrowing helpers (timeline.ts)', () => {
     await flushLedger();
     const part = toolPartById(latest()[0] as NimboUIMessage, 'call-bash-1');
     expect(part).toBeDefined();
-    if (part === undefined) return;
+    if (part === undefined) {
+      return;
+    }
     expect(toolPartName(part)).toBe('bash');
   });
 
@@ -691,7 +718,9 @@ describe('tool timing helpers (timeline.ts) — chat 可观测性：工具起止
 describe('BUG (see report): replay ("回放", bulk/synchronous applyFrame) vs live ("直播", one frame at a time) must materialize the same NimboUIMessage[] — currently they do not for any turn that ends in the standalone message-metadata chunk', () => {
   it('a plain completed turn materializes the same way whether applied all-at-once or one frame at a time', async () => {
     const replay = collectLedger();
-    for (const frame of plainTextTurnFrames) replay.ledger.applyFrame(frame);
+    for (const frame of plainTextTurnFrames) {
+      replay.ledger.applyFrame(frame);
+    }
     await flushLedger();
 
     const live = collectLedger();
@@ -703,7 +732,9 @@ describe('BUG (see report): replay ("回放", bulk/synchronous applyFrame) vs li
 
   it('a full ask-user turn (pending → answered) materializes the same way for both feed styles', async () => {
     const replay = collectLedger();
-    for (const frame of askUserTurnFrames) replay.ledger.applyFrame(frame);
+    for (const frame of askUserTurnFrames) {
+      replay.ledger.applyFrame(frame);
+    }
     await flushLedger();
 
     const live = collectLedger();
@@ -727,7 +758,9 @@ describe('BUG (see report): replay ("回放", bulk/synchronous applyFrame) vs li
     ]);
 
     const replay = collectLedger();
-    for (const frame of frames) replay.ledger.applyFrame(frame);
+    for (const frame of frames) {
+      replay.ledger.applyFrame(frame);
+    }
     await flushLedger();
 
     const live = collectLedger();

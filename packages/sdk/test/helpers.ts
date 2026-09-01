@@ -80,7 +80,7 @@ export async function drainStreamFull(gen: AsyncGenerator<NimboChunk, TurnResult
 export function toolPartsOf(message: NimboUIMessage): ToolUIPart<UITools>[] {
   const result: ToolUIPart<UITools>[] = [];
   for (const part of message.parts) {
-    if (isToolUIPart<UITools>(part) && part.type !== "dynamic-tool") result.push(part);
+    if (isToolUIPart<UITools>(part) && part.type !== "dynamic-tool") {result.push(part);}
   }
   return result;
 }
@@ -95,7 +95,7 @@ export function fileChangeItems(messages: NimboUIMessage[]): DataUIPart<{ "file-
   const result: DataUIPart<{ "file-change": FileChangeData }>[] = [];
   for (const message of messages) {
     for (const part of message.parts) {
-      if (part.type === "data-file-change") result.push(part);
+      if (part.type === "data-file-change") {result.push(part);}
     }
   }
   return result;

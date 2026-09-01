@@ -59,7 +59,7 @@ describe("list-dir", () => {
 
   it("truncates at the 500-entry cap with guidance to narrow the listing", async () => {
     const files: Record<string, string> = {};
-    for (let i = 0; i < 600; i++) files[`f${i}.txt`] = "x";
+    for (let i = 0; i < 600; i++) {files[`f${i}.txt`] = "x";}
     const fs = fromMemory(files);
     const tool = createListDirTool();
 

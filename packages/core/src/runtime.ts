@@ -165,7 +165,7 @@ export async function resolveToolCallApproval(opts: ResolveToolCallApprovalOptio
     onceMemory: opts.onceMemory,
   });
 
-  if (resolution.outcome === "deny") return { status: "deny", reason: resolution.reason };
+  if (resolution.outcome === "deny") {return { status: "deny", reason: resolution.reason };}
   if (resolution.outcome === "review") {
     return { status: "review", input: parsedInput.data, markOnceOnApprove: resolution.markOnceOnApprove };
   }

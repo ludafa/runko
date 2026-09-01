@@ -102,8 +102,8 @@ async function resolveInstructions(absoluteDir: string, opts: LoadAgentOptions):
   try {
     return await nodeFs.readFile(filePath, "utf8");
   } catch (error) {
-    if (!isEnoent(error)) throw error;
-    if (opts.instructions !== undefined) return opts.instructions;
+    if (!isEnoent(error)) {throw error;}
+    if (opts.instructions !== undefined) {return opts.instructions;}
     throw new Error(
       `loadAgent("${absoluteDir}"): missing required "${INSTRUCTIONS_FILENAME}" (looked for it at "${filePath}"). ` +
         `Add the file, or pass loadAgent(dir, { instructions: "..." }).`,
@@ -159,8 +159,8 @@ function isLanguageModelInstance(value: unknown): value is Exclude<LanguageModel
  */
 function readModelField(record: Record<string, unknown>, filePath: string, allowObjectModel: boolean): LanguageModel | undefined {
   const value = record.model;
-  if (value === undefined) return undefined;
-  if (typeof value === "string") return value;
+  if (value === undefined) {return undefined;}
+  if (typeof value === "string") {return value;}
   if (allowObjectModel && isLanguageModelInstance(value)) {
     // `defineAgent`（agent.ts 头注释）对 model 本身也是零运行时校验的恒等函数，
     // 这里的信任级别与之一致——探针通过后原样透传用户在 agent.ts 里构造的实例。
@@ -174,8 +174,8 @@ function readModelField(record: Record<string, unknown>, filePath: string, allow
 
 function readBuiltinToolsField(record: Record<string, unknown>, filePath: string): BuiltinToolName[] | false | undefined {
   const value = record.builtinTools;
-  if (value === undefined) return undefined;
-  if (value === false) return false;
+  if (value === undefined) {return undefined;}
+  if (value === false) {return false;}
   if (!Array.isArray(value)) {
     throw new Error(`loadAgent: "${filePath}"'s "builtinTools" field must be false or an array of built-in tool names.`);
   }
@@ -197,15 +197,15 @@ function readOptionalNumber(record: Record<string, unknown>, key: string): numbe
 function parseAgentConfigRecord(record: Record<string, unknown>, filePath: string, allowObjectModel: boolean): AgentConfigFromFile {
   const config: AgentConfigFromFile = {};
   const model = readModelField(record, filePath, allowObjectModel);
-  if (model !== undefined) config.model = model;
+  if (model !== undefined) {config.model = model;}
   const builtinTools = readBuiltinToolsField(record, filePath);
-  if (builtinTools !== undefined) config.builtinTools = builtinTools;
+  if (builtinTools !== undefined) {config.builtinTools = builtinTools;}
   const maxTurnsPerRun = readOptionalNumber(record, "maxTurnsPerRun");
-  if (maxTurnsPerRun !== undefined) config.maxTurnsPerRun = maxTurnsPerRun;
+  if (maxTurnsPerRun !== undefined) {config.maxTurnsPerRun = maxTurnsPerRun;}
   const maxOutputTokens = readOptionalNumber(record, "maxOutputTokens");
-  if (maxOutputTokens !== undefined) config.maxOutputTokens = maxOutputTokens;
+  if (maxOutputTokens !== undefined) {config.maxOutputTokens = maxOutputTokens;}
   const maxContextTokens = readOptionalNumber(record, "maxContextTokens");
-  if (maxContextTokens !== undefined) config.maxContextTokens = maxContextTokens;
+  if (maxContextTokens !== undefined) {config.maxContextTokens = maxContextTokens;}
   return config;
 }
 
@@ -256,7 +256,7 @@ const TOOL_FILE_EXTENSIONS = [".ts", ".mts", ".cts", ".js", ".mjs", ".cjs"];
 
 /** 隐藏文件（`.` 开头）与 `.d.ts` 声明文件不是工具实现，跳过；非以上扩展名的文件同样跳过。 */
 function toolNameFromFileName(fileName: string): string | undefined {
-  if (fileName.startsWith(".") || fileName.endsWith(".d.ts")) return undefined;
+  if (fileName.startsWith(".") || fileName.endsWith(".d.ts")) {return undefined;}
   const ext = TOOL_FILE_EXTENSIONS.find((candidate) => fileName.endsWith(candidate));
   return ext === undefined ? undefined : fileName.slice(0, -ext.length);
 }
@@ -317,14 +317,14 @@ function parseToolRecord(record: Record<string, unknown>, filePath: string): Too
 
 async function loadToolsDir(absoluteDir: string): Promise<Record<string, Tool>> {
   const toolsDir = nodePath.join(absoluteDir, TOOLS_DIRNAME);
-  if (!(await fileExists(toolsDir))) return {};
+  if (!(await fileExists(toolsDir))) {return {};}
 
   const entries = (await nodeFs.readdir(toolsDir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name));
   const tools: Record<string, Tool> = {};
   for (const entry of entries) {
-    if (!entry.isFile()) continue;
+    if (!entry.isFile()) {continue;}
     const toolName = toolNameFromFileName(entry.name);
-    if (toolName === undefined) continue;
+    if (toolName === undefined) {continue;}
     const filePath = nodePath.join(toolsDir, entry.name);
     const record = await importDefaultExport(filePath, `${TOOLS_DIRNAME}/${entry.name}`);
     tools[toolName] = parseToolRecord(record, filePath);
@@ -336,7 +336,7 @@ async function loadToolsDir(absoluteDir: string): Promise<Record<string, Tool>> 
 
 async function loadSkillsDir(absoluteDir: string): Promise<Skill[]> {
   const skillsDir = nodePath.join(absoluteDir, SKILLS_DIRNAME);
-  if (!(await fileExists(skillsDir))) return [];
+  if (!(await fileExists(skillsDir))) {return [];}
 
   const entries = (await nodeFs.readdir(skillsDir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name));
   const skills: Skill[] = [];

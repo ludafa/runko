@@ -61,7 +61,7 @@ function diffLines(a: string[], b: string[]): DiffOp[] {
     const lineB = b[j];
     // i<n / j<m 已保证两者必然存在；显式判空是满足 noUncheckedIndexedAccess 的
     // 类型收窄手段，不是断言。
-    if (lineA === undefined || lineB === undefined) break;
+    if (lineA === undefined || lineB === undefined) {break;}
     if (lineA === lineB) {
       ops.push({ type: "equal", line: lineA });
       i += 1;
@@ -76,13 +76,13 @@ function diffLines(a: string[], b: string[]): DiffOp[] {
   }
   while (i < n) {
     const lineA = a[i];
-    if (lineA === undefined) break;
+    if (lineA === undefined) {break;}
     ops.push({ type: "delete", line: lineA });
     i += 1;
   }
   while (j < m) {
     const lineB = b[j];
-    if (lineB === undefined) break;
+    if (lineB === undefined) {break;}
     ops.push({ type: "insert", line: lineB });
     j += 1;
   }
@@ -95,13 +95,13 @@ function diffLines(a: string[], b: string[]): DiffOp[] {
  * 的可读约定。before/after 相同时返回空串（调用方据此判断"无变化"）。
  */
 export function computeUnifiedDiff(path: string, before: string, after: string): string {
-  if (before === after) return "";
+  if (before === after) {return "";}
   const beforeLines = splitLines(before);
   const afterLines = splitLines(after);
   const ops = diffLines(beforeLines, afterLines);
   const body = ops.map((op) => {
-    if (op.type === "equal") return ` ${op.line}`;
-    if (op.type === "delete") return `-${op.line}`;
+    if (op.type === "equal") {return ` ${op.line}`;}
+    if (op.type === "delete") {return `-${op.line}`;}
     return `+${op.line}`;
   });
   const beforeStart = beforeLines.length > 0 ? 1 : 0;
@@ -119,7 +119,7 @@ export function computeUnifiedDiff(path: string, before: string, after: string):
  * 表示"无变化"，调用方据此跳过。
  */
 export function buildFileDiff(path: string, before: string | undefined, after: string | undefined): FileDiff | undefined {
-  if (before === after) return undefined;
+  if (before === after) {return undefined;}
   if (before === undefined) {
     return { path, kind: "created", after, patch: computeUnifiedDiff(path, "", after ?? "") };
   }

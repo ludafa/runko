@@ -106,7 +106,7 @@ function loadRootDotEnv(): void {
   try {
     process.loadEnvFile(dotEnvPath);
   } catch (error) {
-    if (!isEnoentError(error)) throw error;
+    if (!isEnoentError(error)) {throw error;}
   }
 }
 
@@ -126,7 +126,7 @@ function resolveDeepSeekModel(): LanguageModel | undefined {
 /** AI SDK Gateway path (see header comment, point 2) — `undefined` when not configured. */
 function resolveGatewayModel(): LanguageModel | undefined {
   const spec = process.env.NIMBO_MODEL;
-  if (spec === undefined || spec.trim().length === 0) return undefined;
+  if (spec === undefined || spec.trim().length === 0) {return undefined;}
   return spec;
 }
 
@@ -139,7 +139,7 @@ export function resolveModel(): LanguageModel {
   loadRootDotEnv();
 
   const model = resolveDeepSeekModel() ?? resolveGatewayModel();
-  if (model !== undefined) return model;
+  if (model !== undefined) {return model;}
 
   console.log(SETUP_INSTRUCTIONS);
   process.exit(0);

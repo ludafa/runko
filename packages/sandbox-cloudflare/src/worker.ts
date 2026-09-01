@@ -173,7 +173,7 @@ async function withNormalizedPath<Req extends { path: string }>(
   handler: (virtualPath: string, body: Req) => Promise<Response>,
 ): Promise<Response> {
   const normalized = normalizeOrBadRequest(body.path);
-  if (!normalized.ok) return normalized.response;
+  if (!normalized.ok) {return normalized.response;}
   return handler(normalized.path, body);
 }
 
@@ -184,7 +184,7 @@ type EntryLookup = { found: true; entry: CfFileInfo } | { found: false };
 
 /** 工单要求的 "stat 经 listFiles(dirname) 找条目" 策略——stat/readdir/rm 三个端点共用。 */
 async function findEntry(sandbox: CfSandboxLike, virtualPath: string): Promise<EntryLookup> {
-  if (virtualPath === "/") return { found: true, entry: ROOT_ENTRY };
+  if (virtualPath === "/") {return { found: true, entry: ROOT_ENTRY };}
   const parentVirtual = dirname(virtualPath);
   let listing: CfListFilesResult;
   try {
@@ -215,8 +215,8 @@ function toStatResponse(entry: CfFileInfo): StatResponse {
 /** existence/kind 查不出更具体原因时的兜底翻译：找不到→404，是目录→400 not_dir，否则→500 sandbox_error。 */
 async function translateFsError(sandbox: CfSandboxLike, virtualPath: string, error: unknown): Promise<Response> {
   const lookup = await findEntry(sandbox, virtualPath);
-  if (!lookup.found) return errorResponse(404, "not_found", `no such file or directory: "${virtualPath}"`);
-  if (lookup.entry.type === "directory") return errorResponse(400, "not_dir", `"${virtualPath}" is a directory: ${describeError(error)}`);
+  if (!lookup.found) {return errorResponse(404, "not_found", `no such file or directory: "${virtualPath}"`);}
+  if (lookup.entry.type === "directory") {return errorResponse(400, "not_dir", `"${virtualPath}" is a directory: ${describeError(error)}`);}
   return errorResponse(500, "sandbox_error", `sandbox operation failed for "${virtualPath}": ${describeError(error)}`);
 }
 
@@ -252,8 +252,8 @@ async function handleMkdir(sandbox: CfSandboxLike, virtualPath: string): Promise
 
 async function handleReaddir(sandbox: CfSandboxLike, virtualPath: string): Promise<Response> {
   const lookup = await findEntry(sandbox, virtualPath);
-  if (!lookup.found) return errorResponse(404, "not_found", `no such file or directory: "${virtualPath}"`);
-  if (lookup.entry.type !== "directory") return errorResponse(400, "not_dir", `"${virtualPath}" is not a directory`);
+  if (!lookup.found) {return errorResponse(404, "not_found", `no such file or directory: "${virtualPath}"`);}
+  if (lookup.entry.type !== "directory") {return errorResponse(400, "not_dir", `"${virtualPath}" is not a directory`);}
   try {
     const listing = await sandbox.listFiles(toSandboxPath(virtualPath), { recursive: false });
     const entries: WireDirEntry[] = listing.files.map((f) => ({ name: f.name, type: mapEntryType(f.type) }));
@@ -265,7 +265,7 @@ async function handleReaddir(sandbox: CfSandboxLike, virtualPath: string): Promi
 
 async function handleStat(sandbox: CfSandboxLike, virtualPath: string): Promise<Response> {
   const lookup = await findEntry(sandbox, virtualPath);
-  if (!lookup.found) return errorResponse(404, "not_found", `no such file or directory: "${virtualPath}"`);
+  if (!lookup.found) {return errorResponse(404, "not_found", `no such file or directory: "${virtualPath}"`);}
   return jsonResponse<StatResponse>(toStatResponse(lookup.entry));
 }
 
@@ -286,10 +286,10 @@ async function handleGlob(sandbox: CfSandboxLike, pattern: string): Promise<Resp
 }
 
 async function handleRm(sandbox: CfSandboxLike, virtualPath: string, recursive: boolean | undefined): Promise<Response> {
-  if (virtualPath === "/") return errorResponse(400, "bad_request", 'cannot remove the virtual root "/"');
+  if (virtualPath === "/") {return errorResponse(400, "bad_request", 'cannot remove the virtual root "/"');}
 
   const lookup = await findEntry(sandbox, virtualPath);
-  if (!lookup.found) return errorResponse(404, "not_found", `no such file or directory: "${virtualPath}"`);
+  if (!lookup.found) {return errorResponse(404, "not_found", `no such file or directory: "${virtualPath}"`);}
 
   const sandboxPath = toSandboxPath(virtualPath);
   if (lookup.entry.type === "directory" && recursive !== true) {
@@ -329,7 +329,7 @@ async function handleExec(sandbox: CfSandboxLike, body: ExecRequestBody, request
   let sandboxCwd: string | undefined;
   if (body.cwd !== undefined) {
     const normalized = normalizeOrBadRequest(body.cwd);
-    if (!normalized.ok) return normalized.response;
+    if (!normalized.ok) {return normalized.response;}
     sandboxCwd = toSandboxPath(normalized.path);
   }
 

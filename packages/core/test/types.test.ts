@@ -57,7 +57,7 @@ describe("HumanDecision (docs/tech/single-ledger.md §6.3 — two values only, u
     const decision: HumanDecision = { behavior: "allow" };
     expect(decision.behavior).toBe("allow");
 
-    if (decision.behavior !== "allow") throw new Error("unreachable");
+    if (decision.behavior !== "allow") {throw new Error("unreachable");}
     expectTypeOf(decision).not.toHaveProperty("message");
     expectTypeOf(decision).not.toHaveProperty("updatedInput");
   });
@@ -66,7 +66,7 @@ describe("HumanDecision (docs/tech/single-ledger.md §6.3 — two values only, u
     const decision: HumanDecision = { behavior: "deny", message: "not allowed" };
     expect(decision.behavior).toBe("deny");
 
-    if (decision.behavior !== "deny") throw new Error("unreachable");
+    if (decision.behavior !== "deny") {throw new Error("unreachable");}
     expectTypeOf(decision).toHaveProperty("message");
     expectTypeOf(decision.message).toEqualTypeOf<string | undefined>();
   });

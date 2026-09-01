@@ -105,8 +105,12 @@ export type PushTransport = (
  * 任何类型断言。
  */
 function statusCodeOf(error: unknown): number | undefined {
-  if (typeof error !== 'object' || error === null) return undefined;
-  if (!('statusCode' in error)) return undefined;
+  if (typeof error !== 'object' || error === null) {
+    return undefined;
+  }
+  if (!('statusCode' in error)) {
+    return undefined;
+  }
   const { statusCode } = error;
   return typeof statusCode === 'number' ? statusCode : undefined;
 }
@@ -117,7 +121,9 @@ function describe(error: unknown): string {
 
 function createDefaultTransport(): PushTransport | undefined {
   const vapid = getVapidConfig();
-  if (vapid === undefined) return undefined;
+  if (vapid === undefined) {
+    return undefined;
+  }
   return async (subscription, payload, options) => {
     await webpush.sendNotification(subscription, payload, {
       ...options,
@@ -152,7 +158,9 @@ export async function sendToUser(
 ): Promise<void> {
   const log = opts.logger ?? defaultLogger;
   const transport = opts.transport ?? createDefaultTransport();
-  if (transport === undefined) return; // 总闸关着（没配 VAPID）
+  if (transport === undefined) {
+    return;
+  } // 总闸关着（没配 VAPID）
 
   let subscriptions;
   try {
@@ -164,7 +172,9 @@ export async function sendToUser(
     });
     return;
   }
-  if (subscriptions.length === 0) return;
+  if (subscriptions.length === 0) {
+    return;
+  }
 
   const body = JSON.stringify(payload);
   const options: TransportOptions = {

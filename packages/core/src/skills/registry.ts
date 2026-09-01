@@ -18,7 +18,7 @@ function decodeFileContent(content: string | Uint8Array): string {
 /** skill 附属文件挂载目录的约定前缀（docs/tech/builtin-tools.md §1.9 / docs/tech/core-sdk.md §4.6 第 3 点）。 */
 export function skillMountPath(skillName: string, relPath?: string): string {
   const base = `/.skills/${skillName}`;
-  if (relPath === undefined) return base;
+  if (relPath === undefined) {return base;}
   return `${base}/${relPath}`;
 }
 
@@ -29,7 +29,7 @@ export function skillMountPath(skillName: string, relPath?: string): string {
  * prompt"的决策（那是 session 的组装职责）。
  */
 export function buildAvailableSkillsBlock(skills: readonly Skill[]): string | undefined {
-  if (skills.length === 0) return undefined;
+  if (skills.length === 0) {return undefined;}
   const lines = skills.map((skill) => `${skill.name}: ${skill.description}`);
   return `<available_skills>\n${lines.join("\n")}\n</available_skills>`;
 }
@@ -93,7 +93,7 @@ function describeError(error: unknown): string {
  */
 export async function mountSkillFiles(fs: NimboFS, skills: readonly Skill[]): Promise<void> {
   for (const skill of skills) {
-    if (skill.files === undefined) continue;
+    if (skill.files === undefined) {continue;}
     for (const [relPath, content] of Object.entries(skill.files)) {
       const targetPath = skillMountPath(skill.name, relPath);
       try {

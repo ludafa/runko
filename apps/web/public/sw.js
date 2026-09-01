@@ -29,10 +29,16 @@ const FALLBACK_URL = '/chat';
  * @returns {string | undefined}
  */
 function readString(source, key, maxLength) {
-  if (typeof source !== 'object' || source === null) return undefined;
+  if (typeof source !== 'object' || source === null) {
+    return undefined;
+  }
   const value = Reflect.get(source, key);
-  if (typeof value !== 'string') return undefined;
-  if (value.length === 0 || value.length > maxLength) return undefined;
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  if (value.length === 0 || value.length > maxLength) {
+    return undefined;
+  }
   return value;
 }
 
@@ -45,7 +51,9 @@ function readString(source, key, maxLength) {
  * @returns {boolean}
  */
 function readBoolean(source, key) {
-  if (typeof source !== 'object' || source === null) return false;
+  if (typeof source !== 'object' || source === null) {
+    return false;
+  }
   return Reflect.get(source, key) === true;
 }
 
@@ -61,16 +69,24 @@ const BEHAVIORS = ['allow', 'allow-session', 'deny'];
  * @returns {{id: string, title: string, behavior: string}[]}
  */
 function readActions(source) {
-  if (typeof source !== 'object' || source === null) return [];
+  if (typeof source !== 'object' || source === null) {
+    return [];
+  }
   const raw = Reflect.get(source, 'actions');
-  if (!Array.isArray(raw)) return [];
+  if (!Array.isArray(raw)) {
+    return [];
+  }
   const result = [];
   for (const item of raw) {
     const id = readString(item, 'id', 40);
     const title = readString(item, 'title', 40);
     const behavior = readString(item, 'behavior', 40);
-    if (id === undefined || title === undefined) continue;
-    if (behavior === undefined || !BEHAVIORS.includes(behavior)) continue;
+    if (id === undefined || title === undefined) {
+      continue;
+    }
+    if (behavior === undefined || !BEHAVIORS.includes(behavior)) {
+      continue;
+    }
     result.push({ id, title, behavior });
   }
   return result;
@@ -84,7 +100,9 @@ function readActions(source) {
  * @returns {string}
  */
 function safeUrl(url) {
-  if (url === undefined) return FALLBACK_URL;
+  if (url === undefined) {
+    return FALLBACK_URL;
+  }
   return url.startsWith('/') && !url.startsWith('//') ? url : FALLBACK_URL;
 }
 

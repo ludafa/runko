@@ -25,14 +25,19 @@ const ORIGINAL = Object.fromEntries(VARS.map((v) => [v, process.env[v]]));
 afterEach(() => {
   for (const v of VARS) {
     const original = ORIGINAL[v];
-    if (original === undefined) delete process.env[v];
-    else process.env[v] = original;
+    if (original === undefined) {
+      delete process.env[v];
+    } else {
+      process.env[v] = original;
+    }
   }
 });
 
 describe('e2b template spec', () => {
   it('falls back to the constants when the env vars are unset', () => {
-    for (const v of VARS) delete process.env[v];
+    for (const v of VARS) {
+      delete process.env[v];
+    }
 
     expect(resolveE2bTemplate()).toBe(DEFAULT_E2B_TEMPLATE_NAME);
     expect(resolveE2bTemplateMemoryMB()).toBe(DEFAULT_E2B_TEMPLATE_MEMORY_MB);

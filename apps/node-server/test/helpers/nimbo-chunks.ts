@@ -68,8 +68,9 @@ export function assistantTextMessage(
 export function toolParts(message: NimboUIMessage): ToolUIPart<UITools>[] {
   const result: ToolUIPart<UITools>[] = [];
   for (const part of message.parts) {
-    if (isToolUIPart<UITools>(part) && part.type !== 'dynamic-tool')
+    if (isToolUIPart<UITools>(part) && part.type !== 'dynamic-tool') {
       result.push(part);
+    }
   }
   return result;
 }
@@ -93,9 +94,13 @@ export function lastAssistantMessage(
 /** Concatenates every `text` part on a message (accepts `undefined` so callers don't need a non-null assertion on `lastAssistantMessage`'s result). */
 export function collectText(message: NimboUIMessage | undefined): string {
   let text = '';
-  if (message === undefined) return text;
+  if (message === undefined) {
+    return text;
+  }
   for (const part of message.parts) {
-    if (part.type === 'text') text += part.text;
+    if (part.type === 'text') {
+      text += part.text;
+    }
   }
   return text;
 }

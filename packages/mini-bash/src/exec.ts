@@ -107,9 +107,9 @@ function resolvePipeline(pipeline: ParsedPipeline): ResolvedPipeline {
   const stages: ResolvedStage[] = [];
   for (const stage of pipeline) {
     const name = stage.argv[0];
-    if (name === undefined) return { ok: false, message: "mini-bash: 管道中出现空命令" };
+    if (name === undefined) {return { ok: false, message: "mini-bash: 管道中出现空命令" };}
     const command = COMMANDS[name];
-    if (command === undefined) return { ok: false, message: `${name}: command not found` };
+    if (command === undefined) {return { ok: false, message: `${name}: command not found` };}
     stages.push({ command, args: stage.argv.slice(1), mergeStderr: stage.mergeStderr });
   }
   return { ok: true, stages };
@@ -177,7 +177,7 @@ async function runPipeline(
     }
   }
 
-  if (stdout.length > 0) opts?.onOutput?.({ stream: "stdout", data: stdout });
+  if (stdout.length > 0) {opts?.onOutput?.({ stream: "stdout", data: stdout });}
 
   return { stdout, stderr, exitCode, cwd: nextCwd };
 }
@@ -274,7 +274,7 @@ export function miniBash(fs: NimboFS): NimboExec {
           stdout += result.stdout;
           stderr += result.stderr;
           exitCode = result.exitCode;
-          if (result.cwd !== currentCwd) instanceCwd = result.cwd;
+          if (result.cwd !== currentCwd) {instanceCwd = result.cwd;}
           currentCwd = result.cwd;
         }
 
@@ -291,7 +291,7 @@ export function miniBash(fs: NimboFS): NimboExec {
               : String(error);
         return { exitCode: timedOut ? 124 : 130, stdout: "", stderr: message, durationMs: Date.now() - start };
       } finally {
-        if (timer !== undefined) clearTimeout(timer);
+        if (timer !== undefined) {clearTimeout(timer);}
       }
     },
   };

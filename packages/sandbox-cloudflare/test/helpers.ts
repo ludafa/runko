@@ -28,19 +28,19 @@ interface FakeEntry {
 }
 
 function normalizeSandboxPath(path: string): string {
-  if (path === "." || path === "" || path === "/") return ".";
+  if (path === "." || path === "" || path === "/") {return ".";}
   const segments = path.split("/").filter((segment) => segment.length > 0 && segment !== ".");
   return segments.length === 0 ? "." : segments.join("/");
 }
 
 function sandboxDirname(path: string): string {
-  if (path === ".") return ".";
+  if (path === ".") {return ".";}
   const idx = path.lastIndexOf("/");
   return idx === -1 ? "." : path.slice(0, idx);
 }
 
 function sandboxBasename(path: string): string {
-  if (path === ".") return ".";
+  if (path === ".") {return ".";}
   const idx = path.lastIndexOf("/");
   return idx === -1 ? path : path.slice(idx + 1);
 }
@@ -48,7 +48,7 @@ function sandboxBasename(path: string): string {
 /** `"echo foo"` / `"echo -n foo"` 形状的命令的文本负载；不是这类命令则 `undefined`。 */
 function extractEchoText(command: string): string | undefined {
   const trimmed = command.trim();
-  if (!trimmed.startsWith("echo ")) return undefined;
+  if (!trimmed.startsWith("echo ")) {return undefined;}
   const rest = trimmed.slice("echo ".length);
   return rest.startsWith("-n ") ? rest.slice("-n ".length) : rest;
 }
@@ -86,10 +86,10 @@ export class FakeCfSandbox implements CfSandboxLike {
   }
 
   private ensureDir(path: string): void {
-    if (path === ".") return;
+    if (path === ".") {return;}
     const existing = this.entries.get(path);
-    if (existing?.kind === "dir") return;
-    if (existing?.kind === "file") throw new Error(`FakeCfSandbox: "${path}" already exists as a file`);
+    if (existing?.kind === "dir") {return;}
+    if (existing?.kind === "file") {throw new Error(`FakeCfSandbox: "${path}" already exists as a file`);}
     this.ensureDir(sandboxDirname(path));
     this.entries.set(path, { kind: "dir", mtimeMs: this.nextMtime() });
   }
@@ -99,7 +99,7 @@ export class FakeCfSandbox implements CfSandboxLike {
   }
 
   async exec(command: string, options: CfExecOptions = {}): Promise<CfExecResult> {
-    if (this.execHandler) return this.execHandler(command, options);
+    if (this.execHandler) {return this.execHandler(command, options);}
     return this.runBuiltinCommand(command, options);
   }
 
@@ -136,15 +136,15 @@ export class FakeCfSandbox implements CfSandboxLike {
   async readFile(path: string, options?: { encoding?: "utf-8" | "base64" }): Promise<CfReadFileResult> {
     const p = normalizeSandboxPath(path);
     const entry = this.entries.get(p);
-    if (entry === undefined || entry.kind !== "file") throw new Error(`FakeCfSandbox: no such file "${p}"`);
+    if (entry === undefined || entry.kind !== "file") {throw new Error(`FakeCfSandbox: no such file "${p}"`);}
     const data = entry.data ?? new Uint8Array();
-    if (options?.encoding === "utf-8") return { content: new TextDecoder().decode(data) };
+    if (options?.encoding === "utf-8") {return { content: new TextDecoder().decode(data) };}
     return { content: Buffer.from(data).toString("base64") };
   }
 
   async writeFile(path: string, content: string, options?: { encoding?: "utf-8" | "base64" }): Promise<CfWriteFileResult> {
     const p = normalizeSandboxPath(path);
-    if (this.entries.get(p)?.kind === "dir") throw new Error(`FakeCfSandbox: "${p}" is a directory`);
+    if (this.entries.get(p)?.kind === "dir") {throw new Error(`FakeCfSandbox: "${p}" is a directory`);}
     this.ensureParentDirs(p);
     const data = options?.encoding === "utf-8" ? new TextEncoder().encode(content) : new Uint8Array(Buffer.from(content, "base64"));
     this.entries.set(p, { kind: "file", data, mtimeMs: this.nextMtime() });
@@ -159,11 +159,11 @@ export class FakeCfSandbox implements CfSandboxLike {
   async deleteFile(path: string): Promise<CfDeleteFileResult> {
     const p = normalizeSandboxPath(path);
     const entry = this.entries.get(p);
-    if (entry === undefined) throw new Error(`FakeCfSandbox: no such file or directory "${p}"`);
+    if (entry === undefined) {throw new Error(`FakeCfSandbox: no such file or directory "${p}"`);}
     if (entry.kind === "dir") {
       const prefix = p === "." ? "" : `${p}/`;
       for (const key of [...this.entries.keys()]) {
-        if (key !== p && (p === "." || key.startsWith(prefix))) this.entries.delete(key);
+        if (key !== p && (p === "." || key.startsWith(prefix))) {this.entries.delete(key);}
       }
     }
     this.entries.delete(p);
@@ -173,15 +173,15 @@ export class FakeCfSandbox implements CfSandboxLike {
   async listFiles(path: string, options?: { recursive?: boolean }): Promise<CfListFilesResult> {
     const p = normalizeSandboxPath(path);
     const dirEntry = this.entries.get(p);
-    if (dirEntry === undefined || dirEntry.kind !== "dir") throw new Error(`FakeCfSandbox: not a directory "${p}"`);
+    if (dirEntry === undefined || dirEntry.kind !== "dir") {throw new Error(`FakeCfSandbox: not a directory "${p}"`);}
     const recursive = options?.recursive === true;
     const prefix = p === "." ? "" : `${p}/`;
     const files: CfFileInfo[] = [];
     for (const [key, entry] of this.entries) {
-      if (key === p) continue;
-      if (!(p === "." || key.startsWith(prefix))) continue;
+      if (key === p) {continue;}
+      if (!(p === "." || key.startsWith(prefix))) {continue;}
       const rest = p === "." ? key : key.slice(prefix.length);
-      if (!recursive && rest.includes("/")) continue;
+      if (!recursive && rest.includes("/")) {continue;}
       files.push({
         name: sandboxBasename(key),
         relativePath: rest,

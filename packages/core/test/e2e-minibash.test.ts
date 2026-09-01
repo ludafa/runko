@@ -78,9 +78,9 @@ function stringOutput(output: unknown): string {
 
 /** Same `{ isError, content }` narrowing pattern as `integration.test.ts`'s `errorResultContent`. */
 function errorResultContent(output: unknown): string {
-  if (typeof output !== "object" || output === null || Array.isArray(output)) return "";
-  if (!("isError" in output) || output.isError !== true) return "";
-  if (!("content" in output)) return "";
+  if (typeof output !== "object" || output === null || Array.isArray(output)) {return "";}
+  if (!("isError" in output) || output.isError !== true) {return "";}
+  if (!("content" in output)) {return "";}
   return typeof output.content === "string" ? output.content : "";
 }
 
@@ -293,9 +293,9 @@ describe("mode A: same-source workspace, fs + exec: miniBash(fs) (docs/tech/core
         defaultApproval: "allow",
         exec: async (req) => {
           const match = /^write (\S+) (.*)$/s.exec(req.command);
-          if (match === null) return { exitCode: 127, stdout: "", stderr: `unsupported: ${req.command}`, durationMs: 1 };
+          if (match === null) {return { exitCode: 127, stdout: "", stderr: `unsupported: ${req.command}`, durationMs: 1 };}
           const [, path, content] = match;
-          if (path === undefined) return { exitCode: 2, stdout: "", stderr: "missing path", durationMs: 1 };
+          if (path === undefined) {return { exitCode: 2, stdout: "", stderr: "missing path", durationMs: 1 };}
           await fs.writeFile(path, content ?? "");
           return { exitCode: 0, stdout: "", stderr: "", durationMs: 1 };
         },

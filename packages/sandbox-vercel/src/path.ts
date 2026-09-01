@@ -11,7 +11,7 @@ import { normalizePath } from "@nimbo/virtual-fs";
 
 /** 去掉 root 末尾的斜杠，便于和虚拟路径拼接；root 为 "/" 时视为空前缀。 */
 function cleanRoot(root: string): string {
-  if (root === "/") return "";
+  if (root === "/") {return "";}
   return root.endsWith("/") ? root.slice(0, -1) : root;
 }
 
@@ -19,7 +19,7 @@ function cleanRoot(root: string): string {
 export function toRealPath(root: string, virtualPath: string): string {
   const prefix = cleanRoot(root);
   const v = normalizePath(virtualPath);
-  if (v === "/") return prefix === "" ? "/" : prefix;
+  if (v === "/") {return prefix === "" ? "/" : prefix;}
   return `${prefix}${v}`;
 }
 

@@ -70,11 +70,17 @@ function requestOf(fetchImpl: Mock<typeof fetch>): {
   rawBodyKeys: string[];
 } {
   const call = fetchImpl.mock.calls[0];
-  if (call === undefined) throw new Error('fetch was never called');
+  if (call === undefined) {
+    throw new Error('fetch was never called');
+  }
   const [input, init] = call;
-  if (typeof input !== 'string') throw new Error('expected a string URL');
+  if (typeof input !== 'string') {
+    throw new Error('expected a string URL');
+  }
   const raw = init?.body;
-  if (typeof raw !== 'string') throw new Error('expected a string body');
+  if (typeof raw !== 'string') {
+    throw new Error('expected a string body');
+  }
   const headers = new Headers(init?.headers);
   const parsedRaw: unknown = JSON.parse(raw);
   return {

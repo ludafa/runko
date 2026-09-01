@@ -74,8 +74,9 @@ function createFakeProvisioned(
     ensureLifetimeCalls,
     ensureLifetimeError: undefined,
     async ensureLifetime(targetMs) {
-      if (provisioned.ensureLifetimeError !== undefined)
+      if (provisioned.ensureLifetimeError !== undefined) {
         throw provisioned.ensureLifetimeError;
+      }
       ensureLifetimeCalls.push(targetMs);
     },
   };
@@ -156,7 +157,9 @@ function managerWithLog(fake: FakeProvider, idleTimeoutMs = 1000) {
       .filter((line) => line.includes(message))
       .map((line): Record<string, unknown> => {
         const start = line.indexOf('{');
-        if (start === -1) return {};
+        if (start === -1) {
+          return {};
+        }
         const value: unknown = JSON.parse(line.slice(start));
         return typeof value === 'object' && value !== null ? { ...value } : {};
       });
@@ -392,7 +395,9 @@ describe('sandbox-manager', () => {
     await manager.acquire(input);
     const sandbox = fake.createdSandboxes[0];
     expect(sandbox).toBeDefined();
-    if (sandbox === undefined) return;
+    if (sandbox === undefined) {
+      return;
+    }
 
     sandbox.ensureLifetimeError = fakeGoneError();
     await expect(manager.ensureLifetime(input.conversationId)).rejects.toThrow(
@@ -414,7 +419,9 @@ describe('sandbox-manager', () => {
     await manager.acquire(input);
     const sandbox = fake.createdSandboxes[0];
     expect(sandbox).toBeDefined();
-    if (sandbox === undefined) return;
+    if (sandbox === undefined) {
+      return;
+    }
 
     sandbox.ensureLifetimeError = new Error('ECONNRESET');
     await expect(manager.ensureLifetime(input.conversationId)).rejects.toThrow(
@@ -438,7 +445,9 @@ describe('sandbox-manager', () => {
       await manager.acquire(input);
       const sandbox = fake.createdSandboxes[0];
       expect(sandbox).toBeDefined();
-      if (sandbox === undefined) return;
+      if (sandbox === undefined) {
+        return;
+      }
 
       // 光推进时钟：以前这里有个 turn 级心跳定时器会打出续期，现在一次都不该有。
       await vi.advanceTimersByTimeAsync(600_000);
@@ -593,8 +602,11 @@ describe('resolveDefaultProvider (docs/tech/sandbox-provider.md §6)', () => {
   const ORIGINAL = process.env.SANDBOX_PROVIDER;
 
   afterEach(() => {
-    if (ORIGINAL === undefined) delete process.env.SANDBOX_PROVIDER;
-    else process.env.SANDBOX_PROVIDER = ORIGINAL;
+    if (ORIGINAL === undefined) {
+      delete process.env.SANDBOX_PROVIDER;
+    } else {
+      process.env.SANDBOX_PROVIDER = ORIGINAL;
+    }
   });
 
   it('defaults to "vercel" when SANDBOX_PROVIDER is unset', () => {

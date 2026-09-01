@@ -136,7 +136,7 @@ async function rmImpl(fs: NimboFS, path: string, options: RmOptions | undefined)
   try {
     await fs.rm(normalizePath(path), { recursive: options?.recursive });
   } catch (error) {
-    if (options?.force === true) return; // force：不存在也不算错误（IFileSystem.rm 的文档契约）
+    if (options?.force === true) {return;} // force：不存在也不算错误（IFileSystem.rm 的文档契约）
     throw error;
   }
 }
@@ -171,7 +171,7 @@ export function createFsAdapter(fs: NimboFS): JustBashFsAdapter {
       while (!dirs.has(dir)) {
         dirs.add(dir);
         const parent = dirnameOf(dir);
-        if (parent === dir) break;
+        if (parent === dir) {break;}
         dir = parent;
       }
     }

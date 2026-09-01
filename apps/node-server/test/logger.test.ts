@@ -82,8 +82,11 @@ describe('createLogger — LOG_LEVEL environment variable', () => {
   });
 
   afterEach(() => {
-    if (originalLogLevel === undefined) delete process.env.LOG_LEVEL;
-    else process.env.LOG_LEVEL = originalLogLevel;
+    if (originalLogLevel === undefined) {
+      delete process.env.LOG_LEVEL;
+    } else {
+      process.env.LOG_LEVEL = originalLogLevel;
+    }
   });
 
   it('reads LOG_LEVEL when no explicit level is passed', () => {

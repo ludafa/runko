@@ -21,9 +21,9 @@ describe("createFileTools", () => {
     const readOnlyNames: FileToolName[] = ["read-file", "list-dir", "glob", "grep"];
     const mutatingNames: FileToolName[] = ["write-file", "edit-file", "delete-file", "move-file"];
 
-    for (const name of readOnlyNames) expect(tools[name].readOnly).toBe(true);
+    for (const name of readOnlyNames) {expect(tools[name].readOnly).toBe(true);}
     // 有副作用的一律不得声明 readOnly——误标会让写操作进并行批，打开写冲突口子。
-    for (const name of mutatingNames) expect(tools[name].readOnly).toBeUndefined();
+    for (const name of mutatingNames) {expect(tools[name].readOnly).toBeUndefined();}
   });
 
   it("shares one readState across tools: write-file then edit-file needs no read-file call in between", async () => {

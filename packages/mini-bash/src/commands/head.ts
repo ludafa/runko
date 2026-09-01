@@ -20,14 +20,14 @@ export const head: CommandFn = async (args, ctx) => {
   const showHeader = files.length > 1;
   for (let idx = 0; idx < files.length; idx++) {
     const rawPath = files[idx];
-    if (rawPath === undefined) continue;
+    if (rawPath === undefined) {continue;}
     const outcome = await readFileForCommand(ctx.fs, ctx.cwd, "head", rawPath);
     if (!outcome.ok) {
       stderr += `${outcome.message}\n`;
       exitCode = 1;
       continue;
     }
-    if (showHeader) stdout += `${idx > 0 ? "\n" : ""}==> ${rawPath} <==\n`;
+    if (showHeader) {stdout += `${idx > 0 ? "\n" : ""}==> ${rawPath} <==\n`;}
     stdout += joinLines(splitLines(outcome.text).slice(0, n));
   }
   return { stdout, stderr, exitCode };

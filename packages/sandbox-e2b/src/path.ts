@@ -24,8 +24,8 @@ export function createPathAnchor(root: string): PathAnchor {
       return normalized === "/" ? rootReal : `${childPrefix}${normalized}`;
     },
     toVirtual(realPath: string): string {
-      if (realPath === rootReal) return "/";
-      if (childPrefix.length > 0 && realPath.startsWith(`${childPrefix}/`)) return realPath.slice(childPrefix.length);
+      if (realPath === rootReal) {return "/";}
+      if (childPrefix.length > 0 && realPath.startsWith(`${childPrefix}/`)) {return realPath.slice(childPrefix.length);}
       return realPath;
     },
   };

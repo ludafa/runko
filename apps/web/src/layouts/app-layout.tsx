@@ -40,7 +40,9 @@ export const HeaderLeadingSlot = HeaderLeadingSlotContext;
 export function HeaderSidebarTrigger() {
   const slot = useContext(HeaderLeadingSlotContext);
 
-  if (slot === null) return null;
+  if (slot === null) {
+    return null;
+  }
   return createPortal(
     <SidebarTrigger className="text-muted-foreground hover:text-foreground -ml-1.5" />,
     slot,

@@ -20,7 +20,9 @@ export function DashboardPage() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (!title.trim()) return;
+    if (!title.trim()) {
+      return;
+    }
     const note = await postApiNotes({ title, body });
     setNotes((prev) => [...prev, note]);
     setTitle('');

@@ -21,7 +21,9 @@ const VAPID_VARS = [
 ] as const;
 
 function clearPushEnv(): void {
-  for (const name of VAPID_VARS) delete process.env[name];
+  for (const name of VAPID_VARS) {
+    delete process.env[name];
+  }
   delete process.env.CHAT_PUSH_EVENTS;
 }
 

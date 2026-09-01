@@ -30,15 +30,15 @@ function collectContextLines(text: string, regex: RegExp, context: number): Cont
   const lines = text.length === 0 ? [] : text.split("\n");
   const matchedIdx: number[] = [];
   for (let i = 0; i < lines.length; i++) {
-    if (regex.test(lines[i] ?? "")) matchedIdx.push(i);
+    if (regex.test(lines[i] ?? "")) {matchedIdx.push(i);}
   }
-  if (matchedIdx.length === 0) return undefined;
+  if (matchedIdx.length === 0) {return undefined;}
 
   const included = new Set<number>();
   for (const idx of matchedIdx) {
     const from = Math.max(0, idx - context);
     const to = Math.min(lines.length - 1, idx + context);
-    for (let j = from; j <= to; j++) included.add(j);
+    for (let j = from; j <= to; j++) {included.add(j);}
   }
   const matchedSet = new Set(matchedIdx);
   return [...included].sort((a, b) => a - b).map((i) => ({ line: i + 1, text: lines[i] ?? "", match: matchedSet.has(i) }));
@@ -48,7 +48,7 @@ function collectContextLines(text: string, regex: RegExp, context: number): Cont
 function capResult(groups: ContentSearchGroup[], maxFiles: number, maxLines: number, mode: "files" | "content"): ContentSearchResult {
   const totalFiles = groups.length;
   const cappedGroups = groups.length > maxFiles ? groups.slice(0, maxFiles) : groups;
-  if (mode === "files") return { groups: cappedGroups, totalFiles, lineCapped: false };
+  if (mode === "files") {return { groups: cappedGroups, totalFiles, lineCapped: false };}
 
   const boundedGroups: ContentSearchGroup[] = [];
   let consumed = 0;
@@ -107,8 +107,8 @@ export class NativeSearchFake implements NimboFS {
       const entries = await this.inner.readdir(dir);
       for (const entry of entries) {
         const childPath = dir === "/" ? `/${entry.name}` : `${dir}/${entry.name}`;
-        if (entry.type === "dir") await walk(childPath);
-        else if (entry.type === "file") results.push(childPath);
+        if (entry.type === "dir") {await walk(childPath);}
+        else if (entry.type === "file") {results.push(childPath);}
       }
     };
     await walk("/");
@@ -135,7 +135,7 @@ export class NativeSearchFake implements NimboFS {
     const groups: ContentSearchGroup[] = [];
     for (const path of candidates) {
       const stat = await this.inner.stat(path);
-      if (stat.type !== "file" || !isTextMimeType(stat.mimeType)) continue;
+      if (stat.type !== "file" || !isTextMimeType(stat.mimeType)) {continue;}
       let text: string;
       try {
         text = new TextDecoder().decode(await this.inner.readFile(path));
@@ -143,10 +143,10 @@ export class NativeSearchFake implements NimboFS {
         continue;
       }
       if (query.mode === "files") {
-        if (contentRe.test(text)) groups.push({ path, lines: [] });
+        if (contentRe.test(text)) {groups.push({ path, lines: [] });}
       } else {
         const lines = collectContextLines(text, contentRe, query.context ?? 0);
-        if (lines !== undefined) groups.push({ path, lines });
+        if (lines !== undefined) {groups.push({ path, lines });}
       }
     }
     return capResult(groups, query.maxFiles, query.maxLines, query.mode);

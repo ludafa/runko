@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS events (
 /** Default path: `<repo>/.transcripts/examples-transcript.sqlite` (see header). */
 export function resolveTranscriptDbPath(): string {
   const override = process.env.NIMBO_TRANSCRIPT_DB?.trim();
-  if (override !== undefined && override.length > 0) return override;
+  if (override !== undefined && override.length > 0) {return override;}
   // src/shared/ -> src/ -> examples/ -> repo root
   const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
   return join(repoRoot, ".transcripts", "examples-transcript.sqlite");

@@ -19,7 +19,7 @@ export function createMapReadStateStore(): ReadStateStore {
 /** Narrows FileStat.mtime (number|undefined) to number by runtime check — no `as` needed. */
 export async function readMtime(fs: NimboFS, path: string): Promise<number> {
   const stat = await fs.stat(path);
-  if (stat.mtime === undefined) throw new Error(`expected "${path}" to have an mtime, got undefined`);
+  if (stat.mtime === undefined) {throw new Error(`expected "${path}" to have an mtime, got undefined`);}
   return stat.mtime;
 }
 
@@ -46,7 +46,7 @@ export function isErrorResult(result: ToolReturn): result is JsonValue & ErrorRe
 /** 断言结果是 isError:true 的错误结果，并返回其 content 字符串供进一步断言。 */
 export function expectError(result: ToolReturn): string {
   expect(isErrorResult(result)).toBe(true);
-  if (!isErrorResult(result)) throw new Error("unreachable: expect above already asserted isErrorResult");
+  if (!isErrorResult(result)) {throw new Error("unreachable: expect above already asserted isErrorResult");}
   return result.content;
 }
 

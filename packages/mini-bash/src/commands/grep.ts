@@ -61,7 +61,7 @@ function parseArgs(args: string[]): GrepArgs | { error: string } {
     break;
   }
   const pattern = args[i];
-  if (pattern === undefined) return { error: "grep: missing pattern operand" };
+  if (pattern === undefined) {return { error: "grep: missing pattern operand" };}
   return { options, pattern, files: args.slice(i + 1) };
 }
 
@@ -110,15 +110,15 @@ export const grep: CommandFn = async (args, ctx) => {
     const lines = splitLines(source.text);
     const matchedLineNumbers: number[] = [];
     for (let idx = 0; idx < lines.length; idx++) {
-      if (regex.test(lines[idx] ?? "")) matchedLineNumbers.push(idx + 1);
+      if (regex.test(lines[idx] ?? "")) {matchedLineNumbers.push(idx + 1);}
     }
-    if (matchedLineNumbers.length > 0) anyMatch = true;
+    if (matchedLineNumbers.length > 0) {anyMatch = true;}
 
     if (options.count) {
       outputLines.push(showLabel ? `${source.label}:${matchedLineNumbers.length}` : String(matchedLineNumbers.length));
       continue;
     }
-    if (matchedLineNumbers.length === 0) continue;
+    if (matchedLineNumbers.length === 0) {continue;}
     if (options.listFilesOnly) {
       outputLines.push(source.label);
       continue;
@@ -126,8 +126,8 @@ export const grep: CommandFn = async (args, ctx) => {
     for (const lineNo of matchedLineNumbers) {
       const content = lines[lineNo - 1] ?? "";
       const parts: string[] = [];
-      if (showLabel) parts.push(source.label);
-      if (options.showLineNumber) parts.push(String(lineNo));
+      if (showLabel) {parts.push(source.label);}
+      if (options.showLineNumber) {parts.push(String(lineNo));}
       parts.push(content);
       outputLines.push(parts.join(":"));
     }

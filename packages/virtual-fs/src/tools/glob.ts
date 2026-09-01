@@ -33,7 +33,7 @@ async function resolveFileSearch(fs: NimboFS, query: FileSearchQuery): Promise<F
     try {
       return await fs.searchFiles(query);
     } catch (error) {
-      if (!(error instanceof SearchUnsupportedError)) throw error;
+      if (!(error instanceof SearchUnsupportedError)) {throw error;}
       // 落空则回退到下面的 JS 扫描——不是错误路径。
     }
   }

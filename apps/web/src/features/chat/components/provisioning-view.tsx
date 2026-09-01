@@ -42,7 +42,9 @@ function activePhaseIndex(elapsedMs: number): number {
   let index = 0;
   for (let i = 0; i < PHASES.length; i++) {
     const phase = PHASES[i];
-    if (phase !== undefined && elapsedMs >= phase.startsAtMs) index = i;
+    if (phase !== undefined && elapsedMs >= phase.startsAtMs) {
+      index = i;
+    }
   }
   return index;
 }

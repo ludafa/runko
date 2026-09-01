@@ -11,9 +11,9 @@ export function normalizePath(input: string): string {
   const segments = input.split("/");
   const stack: string[] = [];
   for (const segment of segments) {
-    if (segment === "" || segment === ".") continue;
+    if (segment === "" || segment === ".") {continue;}
     if (segment === "..") {
-      if (stack.length > 0) stack.pop();
+      if (stack.length > 0) {stack.pop();}
       continue;
     }
     stack.push(segment);
@@ -23,14 +23,14 @@ export function normalizePath(input: string): string {
 
 /** 绝对路径直接规范化；相对路径先拼上 base 再规范化——与 `IFileSystem.resolvePath(base, path)` 签名同形。 */
 export function resolvePath(base: string, input: string): string {
-  if (input.startsWith("/")) return normalizePath(input);
+  if (input.startsWith("/")) {return normalizePath(input);}
   return normalizePath(`${base}/${input}`);
 }
 
 /** 假定 path 已规范化。用于 `getAllPaths()` 从文件路径合成祖先目录集合（§4.5b）。 */
 export function dirnameOf(path: string): string {
-  if (path === "/") return "/";
+  if (path === "/") {return "/";}
   const idx = path.lastIndexOf("/");
-  if (idx <= 0) return "/";
+  if (idx <= 0) {return "/";}
   return path.slice(0, idx);
 }

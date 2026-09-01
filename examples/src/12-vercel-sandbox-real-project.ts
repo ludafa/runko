@@ -280,7 +280,7 @@ function createFakeSandboxWithSkill(): VercelSandboxLike {
   const fs: VercelFileSystemLike = {
     async readFile(path) {
       const data = files.get(path);
-      if (data === undefined) throw notFound(path);
+      if (data === undefined) {throw notFound(path);}
       return data;
     },
     async writeFile(path, data) {
@@ -302,7 +302,7 @@ function createFakeSandboxWithSkill(): VercelSandboxLike {
     },
     async stat(path) {
       const data = files.get(path);
-      if (data === undefined && !dirs.has(path)) throw notFound(path);
+      if (data === undefined && !dirs.has(path)) {throw notFound(path);}
       const isDir = data === undefined;
       const result: VercelStatsLike = { isDirectory: () => isDir, isFile: () => !isDir, size: data?.byteLength ?? 0, mtimeMs: Date.now() };
       return result;
@@ -377,7 +377,7 @@ function loadRootDotEnv(): void {
   try {
     process.loadEnvFile(dotEnvPath);
   } catch (error) {
-    if (!isEnoentError(error)) throw error;
+    if (!isEnoentError(error)) {throw error;}
   }
 }
 
@@ -385,7 +385,7 @@ function loadRootDotEnv(): void {
 function resolveDesignModel(): LanguageModel | undefined {
   const baseURL = process.env.DEEPSEEK_API_BASE_URL?.trim();
   const apiKey = process.env.DEEPSEEK_API_TOKEN?.trim();
-  if (baseURL === undefined || baseURL.length === 0 || apiKey === undefined || apiKey.length === 0) return undefined;
+  if (baseURL === undefined || baseURL.length === 0 || apiKey === undefined || apiKey.length === 0) {return undefined;}
 
   const deepseek = createDeepSeek({ baseURL, apiKey });
   const modelId = process.env.NIMBO_MODEL?.trim();
@@ -401,7 +401,7 @@ function generateBranchName(): string {
 function parseDefaultBranch(symbolicRefStdout: string): string | undefined {
   const trimmed = symbolicRefStdout.trim();
   const idx = trimmed.lastIndexOf("/");
-  if (idx === -1 || idx === trimmed.length - 1) return undefined;
+  if (idx === -1 || idx === trimmed.length - 1) {return undefined;}
   return trimmed.slice(idx + 1);
 }
 
@@ -414,7 +414,7 @@ async function runHostCommand(sandbox: Sandbox, step: InitStep, opts?: { timeout
     ...(opts?.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
   });
   const output = await finished.output("both");
-  if (output.length > 0) console.log(output);
+  if (output.length > 0) {console.log(output);}
   console.log(`exit ${String(finished.exitCode)}`);
   return { exitCode: finished.exitCode, output };
 }
@@ -426,7 +426,7 @@ async function initializeSandbox(sandbox: Sandbox, owner: string, repo: string):
   const plan = buildInitPlan(owner, repo);
 
   const installResult = await runHostCommand(sandbox, plan.installSkill, { timeoutMs: 5 * 60_000 });
-  if (installResult.exitCode !== 0) console.log("(npx skills didn't succeed — trying the git-clone fallback next)");
+  if (installResult.exitCode !== 0) {console.log("(npx skills didn't succeed — trying the git-clone fallback next)");}
 
   const fallbackResult = await runHostCommand(sandbox, plan.cloneFallback, { timeoutMs: 2 * 60_000 });
   if (fallbackResult.exitCode !== 0) {
@@ -434,10 +434,10 @@ async function initializeSandbox(sandbox: Sandbox, owner: string, repo: string):
   }
 
   const identityResult = await runHostCommand(sandbox, plan.gitIdentity);
-  if (identityResult.exitCode !== 0) throw new Error(`git identity setup failed (exit ${String(identityResult.exitCode)}).`);
+  if (identityResult.exitCode !== 0) {throw new Error(`git identity setup failed (exit ${String(identityResult.exitCode)}).`);}
 
   const remoteResult = await runHostCommand(sandbox, plan.remoteAuth);
-  if (remoteResult.exitCode !== 0) throw new Error(`git remote set-url failed (exit ${String(remoteResult.exitCode)}).`);
+  if (remoteResult.exitCode !== 0) {throw new Error(`git remote set-url failed (exit ${String(remoteResult.exitCode)}).`);}
 
   // Best-effort, not fatal: worst case the install artifacts show up in `git status` and the agent has to work around it.
   await runHostCommand(sandbox, plan.gitExclude);

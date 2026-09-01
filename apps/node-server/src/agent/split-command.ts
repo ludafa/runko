@@ -118,7 +118,9 @@ function readWord(input: string, start: number): ScanResult {
 
     if (ch === "'") {
       const end = input.indexOf("'", i + 1);
-      if (end === -1) bail('未闭合的单引号');
+      if (end === -1) {
+        bail('未闭合的单引号');
+      }
       text += input.slice(i + 1, end);
       i = end + 1;
       continue;
@@ -131,11 +133,19 @@ function readWord(input: string, start: number): ScanResult {
       continue;
     }
 
-    if (ch === '\\') bail('引号外的反斜杠转义/续行');
-    if (ch === '`') bail('命令替换（反引号）');
-    if (ch === '$' && input.charAt(i + 1) === '(') bail('命令替换 $(...)');
+    if (ch === '\\') {
+      bail('引号外的反斜杠转义/续行');
+    }
+    if (ch === '`') {
+      bail('命令替换（反引号）');
+    }
+    if (ch === '$' && input.charAt(i + 1) === '(') {
+      bail('命令替换 $(...)');
+    }
 
-    if (isWordBoundary(ch)) break;
+    if (isWordBoundary(ch)) {
+      break;
+    }
 
     text += ch;
     i += 1;
@@ -152,7 +162,9 @@ function readDoubleQuoted(input: string, start: number): ScanResult {
   while (i < input.length) {
     const ch = input.charAt(i);
 
-    if (ch === '"') return { text, end: i + 1 };
+    if (ch === '"') {
+      return { text, end: i + 1 };
+    }
 
     if (ch === '\\') {
       const next = input.charAt(i + 1);
@@ -167,8 +179,12 @@ function readDoubleQuoted(input: string, start: number): ScanResult {
       continue;
     }
 
-    if (ch === '`') bail('命令替换（反引号）');
-    if (ch === '$' && input.charAt(i + 1) === '(') bail('命令替换 $(...)');
+    if (ch === '`') {
+      bail('命令替换（反引号）');
+    }
+    if (ch === '$' && input.charAt(i + 1) === '(') {
+      bail('命令替换 $(...)');
+    }
 
     text += ch;
     i += 1;
@@ -179,15 +195,21 @@ function readDoubleQuoted(input: string, start: number): ScanResult {
 
 /** `&1` / `&-` 这类 fd 复制目标（`2>&1` 的后半截）。不是则返回 `undefined`。 */
 function readFdDupTarget(input: string, start: number): ScanResult | undefined {
-  if (input.charAt(start) !== '&') return undefined;
+  if (input.charAt(start) !== '&') {
+    return undefined;
+  }
   let i = start + 1;
-  if (input.charAt(i) === '-') return { text: '&-', end: i + 1 };
+  if (input.charAt(i) === '-') {
+    return { text: '&-', end: i + 1 };
+  }
   let digits = '';
   while (i < input.length && /[0-9]/.test(input.charAt(i))) {
     digits += input.charAt(i);
     i += 1;
   }
-  if (digits === '') return undefined;
+  if (digits === '') {
+    return undefined;
+  }
   return { text: `&${digits}`, end: i };
 }
 
@@ -210,11 +232,15 @@ function readRedirect(
 
   if (input.charAt(i) === '&') {
     // `&>` / `&>>`：bash 的「stdout+stderr 一起重定向」
-    if (input.charAt(i + 1) !== '>') bail('后台执行 &');
+    if (input.charAt(i + 1) !== '>') {
+      bail('后台执行 &');
+    }
     op = input.charAt(i + 2) === '>' ? '&>>' : '&>';
     i += op.length;
   } else if (input.charAt(i) === '<') {
-    if (input.charAt(i + 1) === '<') bail('heredoc / herestring');
+    if (input.charAt(i + 1) === '<') {
+      bail('heredoc / herestring');
+    }
     op = '<';
     i += 1;
   } else {
@@ -223,17 +249,26 @@ function readRedirect(
   }
 
   const dup = readFdDupTarget(input, i);
-  if (dup !== undefined)
+  if (dup !== undefined) {
     return { redirect: `${fd}${op}${dup.text}`, end: dup.end };
+  }
 
-  while (input.charAt(i) === ' ' || input.charAt(i) === '\t') i += 1;
+  while (input.charAt(i) === ' ' || input.charAt(i) === '\t') {
+    i += 1;
+  }
 
   const ch = input.charAt(i);
-  if (isWordBoundary(ch)) bail('重定向缺少目标');
-  if (ch === '#') bail('注释');
+  if (isWordBoundary(ch)) {
+    bail('重定向缺少目标');
+  }
+  if (ch === '#') {
+    bail('注释');
+  }
 
   const target = readWord(input, i);
-  if (target.text === '') bail('重定向缺少目标');
+  if (target.text === '') {
+    bail('重定向缺少目标');
+  }
   return { redirect: `${fd}${op}${target.text}`, end: target.end };
 }
 
@@ -243,12 +278,18 @@ function finishSegment(
   redirects: string[],
   segments: CommandSegment[],
 ): void {
-  if (argv.length === 0) bail('空命令段');
+  if (argv.length === 0) {
+    bail('空命令段');
+  }
 
   const head = argv[0] ?? '';
-  if (KEYWORDS_AS_COMMAND.has(head)) bail(`shell 关键字作为命令词：${head}`);
+  if (KEYWORDS_AS_COMMAND.has(head)) {
+    bail(`shell 关键字作为命令词：${head}`);
+  }
   for (const word of argv) {
-    if (FORBIDDEN_WORDS.has(word)) bail(`禁用词：${word}`);
+    if (FORBIDDEN_WORDS.has(word)) {
+      bail(`禁用词：${word}`);
+    }
   }
 
   segments.push({ argv, redirects });
@@ -267,7 +308,9 @@ export function splitCommand(command: string): CommandSegment[] | undefined {
   try {
     return scan(command);
   } catch (error) {
-    if (error instanceof BailOut) return undefined;
+    if (error instanceof BailOut) {
+      return undefined;
+    }
     throw error;
   }
 }
@@ -294,11 +337,21 @@ function scan(command: string): CommandSegment[] {
     }
 
     // ---- 拒绝清单里「一眼就能判」的那批（§3.4） ----
-    if (ch === '\n' || ch === '\r') bail('引号外的换行（多行脚本）');
-    if (ch === '\\') bail('引号外的反斜杠转义/续行');
-    if (ch === '#') bail('注释'); // 已跳过空白，此处必是词首 → 真注释
-    if (ch === '(' || ch === ')') bail('子 shell / 进程替换');
-    if (ch === '`') bail('命令替换（反引号）');
+    if (ch === '\n' || ch === '\r') {
+      bail('引号外的换行（多行脚本）');
+    }
+    if (ch === '\\') {
+      bail('引号外的反斜杠转义/续行');
+    }
+    if (ch === '#') {
+      bail('注释');
+    } // 已跳过空白，此处必是词首 → 真注释
+    if (ch === '(' || ch === ')') {
+      bail('子 shell / 进程替换');
+    }
+    if (ch === '`') {
+      bail('命令替换（反引号）');
+    }
 
     // ---- 分隔符 ----
     if (ch === ';') {
@@ -347,7 +400,9 @@ function scan(command: string): CommandSegment[] {
 
     // ---- 普通词 ----
     const word = readWord(command, i);
-    if (word.end === i) bail(`无法识别的字符：${ch}`); // 防御：不推进即死循环
+    if (word.end === i) {
+      bail(`无法识别的字符：${ch}`);
+    } // 防御：不推进即死循环
     argv.push(word.text);
     sawTrailingSeparator = false;
     i = word.end;
@@ -355,8 +410,12 @@ function scan(command: string): CommandSegment[] {
 
   // 收尾：`a; ` 这种结尾分号是合法的、不补空段；`a && ` 则是残缺命令，拒绝。
   if (argv.length === 0 && redirects.length === 0) {
-    if (segments.length === 0) bail('空命令');
-    if (!sawTrailingSeparator) bail('以分隔符结尾的残缺命令');
+    if (segments.length === 0) {
+      bail('空命令');
+    }
+    if (!sawTrailingSeparator) {
+      bail('以分隔符结尾的残缺命令');
+    }
     return segments;
   }
   cut();

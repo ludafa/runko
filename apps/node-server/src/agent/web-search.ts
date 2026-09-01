@@ -120,7 +120,9 @@ export function resolveWebSearchConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): WebSearchConfig | undefined {
   const apiKey = env.EXA_API_KEY?.trim();
-  if (apiKey === undefined || apiKey.length === 0) return undefined;
+  if (apiKey === undefined || apiKey.length === 0) {
+    return undefined;
+  }
   return { apiKey };
 }
 
@@ -178,7 +180,9 @@ async function runSearch(
     });
   } catch (error) {
     // 用户停止本轮：原样上抛，让 loop 按 aborted 收尾，不伪装成搜索失败。
-    if (ctx.abortSignal.aborted) throw error;
+    if (ctx.abortSignal.aborted) {
+      throw error;
+    }
     if (timeoutSignal.aborted) {
       throw new Error(`Exa search timed out after ${timeoutMs / 1000}s.`, {
         cause: error,
@@ -189,7 +193,9 @@ async function runSearch(
     });
   }
 
-  if (!response.ok) throw await httpError(response);
+  if (!response.ok) {
+    throw await httpError(response);
+  }
 
   // `unknown` 在这里不可避免——`Response.json()` 就是序列化边界，形状由下一行的
   // zod `safeParse` 收窄，不外泄（全局 CLAUDE.md 的类型纪律：隔离在最小范围）。
@@ -200,7 +206,9 @@ async function runSearch(
     throw new Error(UNEXPECTED_SHAPE_MESSAGE);
   }
   const parsed = exaSearchResponseSchema.safeParse(payload);
-  if (!parsed.success) throw new Error(UNEXPECTED_SHAPE_MESSAGE);
+  if (!parsed.success) {
+    throw new Error(UNEXPECTED_SHAPE_MESSAGE);
+  }
 
   const results = parsed.data.results ?? [];
   return formatResults(input.query, results);
@@ -256,7 +264,9 @@ async function readBodyPreview(response: Response): Promise<string> {
 }
 
 function formatResults(query: string, results: ExaResult[]): string {
-  if (results.length === 0) return `No results found for "${query}".`;
+  if (results.length === 0) {
+    return `No results found for "${query}".`;
+  }
   const blocks = results.map((result, index) =>
     formatResult(result, index + 1),
   );
@@ -274,7 +284,9 @@ function formatResult(result: ExaResult, position: number): string {
   ];
 
   const url = result.url?.trim();
-  if (url !== undefined && url.length > 0) lines.push(`    ${url}`);
+  if (url !== undefined && url.length > 0) {
+    lines.push(`    ${url}`);
+  }
 
   const meta: string[] = [];
   const published = result.publishedDate?.trim();
@@ -282,8 +294,12 @@ function formatResult(result: ExaResult, position: number): string {
     meta.push(`Published: ${published}`);
   }
   const author = collapseWhitespace(result.author ?? '');
-  if (author.length > 0) meta.push(`Author: ${author}`);
-  if (meta.length > 0) lines.push(`    ${meta.join(' · ')}`);
+  if (author.length > 0) {
+    meta.push(`Author: ${author}`);
+  }
+  if (meta.length > 0) {
+    lines.push(`    ${meta.join(' · ')}`);
+  }
 
   lines.push(...excerptLines(result));
   return lines.join('\n');
@@ -300,7 +316,9 @@ function excerptLines(result: ExaResult): string[] {
   }
 
   const text = collapseWhitespace(result.text ?? '');
-  if (text.length === 0) return [];
+  if (text.length === 0) {
+    return [];
+  }
   return [
     `    ${
       text.length > TEXT_EXCERPT_MAX_CHARACTERS ?

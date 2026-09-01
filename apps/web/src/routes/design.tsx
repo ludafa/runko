@@ -15,6 +15,8 @@ import { DesignPreviewPage } from '@/pages/design-preview';
 export const Route = createFileRoute('/design')({
   component: DesignPreviewPage,
   beforeLoad: () => {
-    if (!import.meta.env.DEV) throw notFound();
+    if (!import.meta.env.DEV) {
+      throw notFound();
+    }
   },
 });

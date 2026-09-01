@@ -40,13 +40,17 @@ export const SkillSuggestionList = forwardRef<
 
   function pick(index: number): void {
     const item = items[index];
-    if (item === undefined) return;
+    if (item === undefined) {
+      return;
+    }
     command({ id: item.name, label: item.name });
   }
 
   useImperativeHandle(ref, () => ({
     onKeyDown: ({ event }: SuggestionKeyDownProps): boolean => {
-      if (items.length === 0) return false;
+      if (items.length === 0) {
+        return false;
+      }
       if (event.key === 'ArrowUp') {
         setSelected((prev) => (prev + items.length - 1) % items.length);
         return true;
@@ -65,7 +69,9 @@ export const SkillSuggestionList = forwardRef<
 
   // 一个都没匹配上时整个菜单不渲染——用户多半只是在打一条普通路径，
   // 别拿一个「无结果」的空框挡住他。
-  if (items.length === 0) return null;
+  if (items.length === 0) {
+    return null;
+  }
 
   return (
     <div

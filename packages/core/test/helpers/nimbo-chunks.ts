@@ -41,7 +41,7 @@ export function chunksOfType<T extends NimboChunk["type"]>(
 /** 手写 `findLastIndex`——本仓 tsconfig 的 `lib` 锁定 ES2022，`Array.prototype.findLastIndex` 是 ES2023,不能直接用。 */
 export function lastIndexOfChunkType(chunks: NimboChunk[], type: NimboChunk["type"]): number {
   for (let i = chunks.length - 1; i >= 0; i--) {
-    if (chunks[i]?.type === type) return i;
+    if (chunks[i]?.type === type) {return i;}
   }
   return -1;
 }
@@ -55,7 +55,7 @@ export function userTextMessage(id: string, text: string): NimboUIMessage {
 export function toolParts(message: NimboUIMessage): ToolUIPart<UITools>[] {
   const result: ToolUIPart<UITools>[] = [];
   for (const part of message.parts) {
-    if (isToolUIPart<UITools>(part) && part.type !== "dynamic-tool") result.push(part);
+    if (isToolUIPart<UITools>(part) && part.type !== "dynamic-tool") {result.push(part);}
   }
   return result;
 }
@@ -106,7 +106,7 @@ export function toolTimingParts(message: NimboUIMessage): DataUIPart<{ "tool-tim
 export function toolTimingPartFor(messages: NimboUIMessage[], toolCallId: string): ToolTimingData | undefined {
   for (const message of messages) {
     for (const part of toolTimingParts(message)) {
-      if (part.id === toolCallId) return part.data;
+      if (part.id === toolCallId) {return part.data;}
     }
   }
   return undefined;
@@ -124,9 +124,9 @@ export function lastAssistantMessage(messages: NimboUIMessage[]): NimboUIMessage
  */
 export function collectText(message: NimboUIMessage | undefined): string {
   let text = "";
-  if (message === undefined) return text;
+  if (message === undefined) {return text;}
   for (const part of message.parts) {
-    if (part.type === "text") text += part.text;
+    if (part.type === "text") {text += part.text;}
   }
   return text;
 }
@@ -134,9 +134,9 @@ export function collectText(message: NimboUIMessage | undefined): string {
 /** 一条消息里全部 `reasoning` 部件拼接，同上接受 `undefined`。 */
 export function collectReasoning(message: NimboUIMessage | undefined): string {
   let text = "";
-  if (message === undefined) return text;
+  if (message === undefined) {return text;}
   for (const part of message.parts) {
-    if (part.type === "reasoning") text += part.text;
+    if (part.type === "reasoning") {text += part.text;}
   }
   return text;
 }
@@ -236,12 +236,12 @@ export function fingerprintChunk(chunk: NimboChunk): string {
  * 这一形状信息，不落到下面 `JSON.stringify(part.data)` 的通用分支。
  */
 function fingerprintPart(part: NimboUIMessage["parts"][number]): string {
-  if (part.type === "text") return `text:${part.text}`;
-  if (part.type === "reasoning") return `reasoning:${part.text}`;
-  if (part.type === "step-start") return "step-start";
-  if (part.type === "file") return `file:${part.mediaType}`;
-  if (part.type === "data-tool-timing") return `data-tool-timing:settled=${String(part.data.completedAt !== undefined)}`;
-  if (part.type.startsWith("data-") && "data" in part) return `${part.type}:${JSON.stringify(part.data)}`;
+  if (part.type === "text") {return `text:${part.text}`;}
+  if (part.type === "reasoning") {return `reasoning:${part.text}`;}
+  if (part.type === "step-start") {return "step-start";}
+  if (part.type === "file") {return `file:${part.mediaType}`;}
+  if (part.type === "data-tool-timing") {return `data-tool-timing:settled=${String(part.data.completedAt !== undefined)}`;}
+  if (part.type.startsWith("data-") && "data" in part) {return `${part.type}:${JSON.stringify(part.data)}`;}
   if ((part.type.startsWith("tool-") || part.type === "dynamic-tool") && "state" in part) {
     return `${part.type}:${part.state}`;
   }

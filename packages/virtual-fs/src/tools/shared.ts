@@ -113,9 +113,9 @@ const BINARY_MIME_PREFIXES = ["image/", "audio/", "video/"];
  * 真实代码库的常见情况，也是 Claude Code 的 Read 工具的实际行为。
  */
 export function isTextMimeType(mimeType: string | undefined): boolean {
-  if (mimeType === undefined || mimeType === DEFAULT_MIME_TYPE) return true;
-  if (mimeType.startsWith("text/")) return true;
-  if (BINARY_MIME_TYPES.has(mimeType)) return false;
+  if (mimeType === undefined || mimeType === DEFAULT_MIME_TYPE) {return true;}
+  if (mimeType.startsWith("text/")) {return true;}
+  if (BINARY_MIME_TYPES.has(mimeType)) {return false;}
   return !BINARY_MIME_PREFIXES.some((prefix) => mimeType.startsWith(prefix));
 }
 
@@ -126,7 +126,7 @@ export function isTextMimeType(mimeType: string | undefined): boolean {
  */
 export async function registerWrite(fs: NimboFS, path: string, readState: ReadStateStore): Promise<void> {
   const stat = await fs.stat(path);
-  if (stat.mtime !== undefined) readState.set(path, stat.mtime);
+  if (stat.mtime !== undefined) {readState.set(path, stat.mtime);}
 }
 
 /**

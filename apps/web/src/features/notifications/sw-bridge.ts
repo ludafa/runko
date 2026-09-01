@@ -14,11 +14,19 @@ const MESSAGE_TYPE = 'push-navigate';
  * ——不写断言，也不信任对面一定发对了形状。
  */
 function readNavigateUrl(data: unknown): string | undefined {
-  if (typeof data !== 'object' || data === null) return undefined;
-  if (!('type' in data) || data.type !== MESSAGE_TYPE) return undefined;
-  if (!('url' in data)) return undefined;
+  if (typeof data !== 'object' || data === null) {
+    return undefined;
+  }
+  if (!('type' in data) || data.type !== MESSAGE_TYPE) {
+    return undefined;
+  }
+  if (!('url' in data)) {
+    return undefined;
+  }
   const { url } = data;
-  if (typeof url !== 'string') return undefined;
+  if (typeof url !== 'string') {
+    return undefined;
+  }
   // 只接受站内相对路径（SW 那侧已经挡过一次，这里是第二道——两侧各自成立，
   // 不依赖对面做过检查）。
   return url.startsWith('/') && !url.startsWith('//') ? url : undefined;
@@ -40,7 +48,9 @@ export function installPushNavigationBridge(
   }
   const onMessage = (event: MessageEvent): void => {
     const url = readNavigateUrl(event.data);
-    if (url !== undefined) navigate(url);
+    if (url !== undefined) {
+      navigate(url);
+    }
   };
   navigator.serviceWorker.addEventListener('message', onMessage);
   return () => {

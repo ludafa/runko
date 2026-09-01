@@ -44,7 +44,9 @@ export const DEFAULT_E2B_TEMPLATE_CPU_COUNT = 2;
  */
 function resolvePositiveIntEnv(name: string, fallback: number): number {
   const raw = process.env[name]?.trim();
-  if (raw === undefined || raw.length === 0) return fallback;
+  if (raw === undefined || raw.length === 0) {
+    return fallback;
+  }
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new Error(

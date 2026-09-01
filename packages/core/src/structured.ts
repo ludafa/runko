@@ -114,16 +114,16 @@ export async function generateStructuredOutput<T>(opts: GenerateStructuredOutput
         maxOutputTokens: opts.maxOutputTokens,
         abortSignal: opts.signal,
       });
-      if (result.finishReason === "stop") return result.output;
+      if (result.finishReason === "stop") {return result.output;}
       lastRawText = result.text;
       lastValidationMessage = `model did not finish with "stop" (got "${result.finishReason}") — no structured output was produced`;
     } catch (error) {
-      if (!NoObjectGeneratedError.isInstance(error)) throw error;
+      if (!NoObjectGeneratedError.isInstance(error)) {throw error;}
       lastRawText = error.text;
       lastValidationMessage = error.message;
     }
 
-    if (attempt === MAX_RETRIES) break;
+    if (attempt === MAX_RETRIES) {break;}
     conversation = [...conversation, ...correctionMessages(lastRawText, lastValidationMessage)];
   }
 

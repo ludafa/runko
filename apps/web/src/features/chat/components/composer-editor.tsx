@@ -246,12 +246,16 @@ export function ComposerEditor({
           return {
             // 菜单开着时让路（此时 Enter 是「选中这个 skill」，绝不能发消息）。
             Enter: () => {
-              if (liveRef.current.suggestionOpen) return false;
+              if (liveRef.current.suggestionOpen) {
+                return false;
+              }
               liveRef.current.onSubmit('queue');
               return true;
             },
             'Alt-Enter': () => {
-              if (liveRef.current.suggestionOpen) return false;
+              if (liveRef.current.suggestionOpen) {
+                return false;
+              }
               liveRef.current.onSubmit('steer');
               return true;
             },
@@ -289,9 +293,15 @@ export function ComposerEditor({
   // 方向（发送成功后的清空）。不做每次按键的反向灌入——那会在每个字符上重建文档、
   // 丢掉光标位置。
   useEffect(() => {
-    if (editor === null) return;
-    if (value !== '') return;
-    if (editor.getText({ blockSeparator: '\n' }) === '') return;
+    if (editor === null) {
+      return;
+    }
+    if (value !== '') {
+      return;
+    }
+    if (editor.getText({ blockSeparator: '\n' }) === '') {
+      return;
+    }
     editor.commands.clearContent();
   }, [editor, value]);
 

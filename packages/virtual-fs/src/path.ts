@@ -25,9 +25,9 @@ export function normalizePath(input: string): string {
   const segments = input.split("/");
   const stack: string[] = [];
   for (const segment of segments) {
-    if (segment === "" || segment === ".") continue;
+    if (segment === "" || segment === ".") {continue;}
     if (segment === "..") {
-      if (stack.length === 0) throw new PathEscapesRootError(input);
+      if (stack.length === 0) {throw new PathEscapesRootError(input);}
       stack.pop();
       continue;
     }
@@ -38,15 +38,15 @@ export function normalizePath(input: string): string {
 
 /** 假定 path 已由 normalizePath 规范化。 */
 export function dirname(path: string): string {
-  if (path === "/") return "/";
+  if (path === "/") {return "/";}
   const idx = path.lastIndexOf("/");
-  if (idx <= 0) return "/";
+  if (idx <= 0) {return "/";}
   return path.slice(0, idx);
 }
 
 /** 假定 path 已由 normalizePath 规范化。 */
 export function basename(path: string): string {
-  if (path === "/") return "/";
+  if (path === "/") {return "/";}
   const idx = path.lastIndexOf("/");
   return path.slice(idx + 1);
 }
@@ -108,12 +108,12 @@ export function matchesGlob(pattern: string, path: string): boolean {
  * （`.git`/`node_modules`）复用，避免重复维护同一段前缀扫描逻辑。
  */
 export function isIgnoredPath(path: string, patterns: RegExp[]): boolean {
-  if (patterns.length === 0) return false;
+  if (patterns.length === 0) {return false;}
   const segments = path.split("/").filter((s) => s.length > 0);
   let prefix = "";
   for (const segment of segments) {
     prefix += `/${segment}`;
-    if (patterns.some((re) => re.test(prefix))) return true;
+    if (patterns.some((re) => re.test(prefix))) {return true;}
   }
   return false;
 }

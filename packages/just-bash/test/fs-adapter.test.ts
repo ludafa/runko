@@ -256,7 +256,7 @@ describe("createFsAdapter: optional members (readFileBytes / readdirWithFileType
     expect(adapter.readFileBytes).toBeDefined();
     const bytes = await adapter.readFileBytes?.("/a.bin");
     expect(bytes).toBeDefined();
-    if (bytes === undefined) throw new Error("unreachable");
+    if (bytes === undefined) {throw new Error("unreachable");}
     const roundTripped = [...latin1FromBytes(bytes)].map((ch) => ch.charCodeAt(0));
     expect(roundTripped).toEqual([0, 1, 2, 253, 254, 255]);
   });
@@ -268,7 +268,7 @@ describe("createFsAdapter: optional members (readFileBytes / readdirWithFileType
     expect(adapter.readdirWithFileTypes).toBeDefined();
     const entries = await adapter.readdirWithFileTypes?.("/dir");
     expect(entries).toBeDefined();
-    if (entries === undefined) throw new Error("unreachable");
+    if (entries === undefined) {throw new Error("unreachable");}
     const byName = new Map(entries.map((e) => [e.name, e]));
     expect(byName.get("a.txt")).toEqual({ name: "a.txt", isFile: true, isDirectory: false, isSymbolicLink: false });
     expect(byName.get("sub")).toEqual({ name: "sub", isFile: false, isDirectory: true, isSymbolicLink: false });

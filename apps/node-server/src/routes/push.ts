@@ -107,7 +107,9 @@ export function createPushApp(deps: PushRouteDeps): OpenAPIHono<PushEnv> {
   });
 
   app.openapi(subscribeRoute, (c) => {
-    if (!isPushEnabled()) return c.json({ error: DISABLED_MESSAGE }, 503);
+    if (!isPushEnabled()) {
+      return c.json({ error: DISABLED_MESSAGE }, 503);
+    }
     const userId = c.get('userId');
     const { endpoint, keys, userAgent } = c.req.valid('json');
 
@@ -182,7 +184,9 @@ export function createPushApp(deps: PushRouteDeps): OpenAPIHono<PushEnv> {
   });
 
   app.openapi(testRoute, async (c) => {
-    if (!isPushEnabled()) return c.json({ error: DISABLED_MESSAGE }, 503);
+    if (!isPushEnabled()) {
+      return c.json({ error: DISABLED_MESSAGE }, 503);
+    }
     const userId = c.get('userId');
     const payload: PushPayload = {
       v: 1,

@@ -82,8 +82,9 @@ export const DEFAULT_SANDBOX_IDLE_TIMEOUT_MS = 300_000;
 
 export function resolveIdleTimeoutMs(): number {
   const raw = process.env.SANDBOX_IDLE_TIMEOUT_MS?.trim();
-  if (raw === undefined || raw.length === 0)
+  if (raw === undefined || raw.length === 0) {
     return DEFAULT_SANDBOX_IDLE_TIMEOUT_MS;
+  }
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ?
       parsed
@@ -262,7 +263,9 @@ export function createVercelProvider(): SandboxProvider {
         });
         return { kind: 'ok', sandbox: vercelProvisioned(sandbox, keepAlive) };
       } catch (error) {
-        if (isRecoverableGetFailure(error)) return { kind: 'unavailable' };
+        if (isRecoverableGetFailure(error)) {
+          return { kind: 'unavailable' };
+        }
         throw error;
       }
     },
@@ -284,9 +287,12 @@ const E2B_WORKSPACE_ROOT = '/home/user/repo';
 
 /** An E2B sandbox is gone (deleted / snapshot unrecoverable) → treat as `unavailable` and re-create, mirroring Vercel's 404/410. Structural check (host and package hold different `e2b` copies, so no `instanceof`): e2b's own `SandboxNotFoundError`/`NotFoundError` by name (`this.name` set in their constructors), plus a message net for the plain-`Error("Sandbox … not found")` path e2b also has (dist/index.js ~L4347). "Invalid sandbox ID" (a 400, malformed token) is deliberately NOT matched — that signals a real bug worth surfacing, not a recreate. */
 function isE2bSandboxGone(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  if (error.name === 'SandboxNotFoundError' || error.name === 'NotFoundError')
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  if (error.name === 'SandboxNotFoundError' || error.name === 'NotFoundError') {
     return true;
+  }
   return /sandbox\b.*\bnot found/i.test(error.message);
 }
 
@@ -367,11 +373,14 @@ export function createE2bProvider(): SandboxProvider {
           return { kind: 'ok', sandbox: e2bProvisioned(sandbox, keepAlive) };
         } catch (error) {
           lastError = error;
-          if (attempt < E2B_RESUME_ATTEMPTS)
+          if (attempt < E2B_RESUME_ATTEMPTS) {
             await delay(E2B_RESUME_BACKOFF_MS * attempt);
+          }
         }
       }
-      if (isE2bSandboxGone(lastError)) return { kind: 'unavailable' };
+      if (isE2bSandboxGone(lastError)) {
+        return { kind: 'unavailable' };
+      }
       throw lastError;
     },
     isGone: isE2bSandboxGone,
@@ -439,16 +448,18 @@ async function installSkillAndConfigureGit(
   }
 
   const identity = await runScript(workspace, scripts.gitIdentity);
-  if (identity.exitCode !== 0)
+  if (identity.exitCode !== 0) {
     throw new Error(
       `git identity setup failed (exit ${String(identity.exitCode)}).`,
     );
+  }
 
   const remoteAuth = await runScript(workspace, scripts.remoteAuth);
-  if (remoteAuth.exitCode !== 0)
+  if (remoteAuth.exitCode !== 0) {
     throw new Error(
       `git remote set-url failed (exit ${String(remoteAuth.exitCode)}).`,
     );
+  }
 
   await runScript(workspace, scripts.gitExclude); // best-effort, not fatal
 }
@@ -481,7 +492,9 @@ const DEFAULT_BRANCH_FALLBACK = 'main';
 function parseDefaultBranchRef(stdout: string): string | undefined {
   const trimmed = stdout.trim();
   const idx = trimmed.lastIndexOf('/');
-  if (idx === -1 || idx === trimmed.length - 1) return undefined;
+  if (idx === -1 || idx === trimmed.length - 1) {
+    return undefined;
+  }
   return trimmed.slice(idx + 1);
 }
 
@@ -492,7 +505,9 @@ async function detectDefaultBranch(
     workspace,
     'git symbolic-ref refs/remotes/origin/HEAD',
   );
-  if (result.exitCode !== 0) return DEFAULT_BRANCH_FALLBACK;
+  if (result.exitCode !== 0) {
+    return DEFAULT_BRANCH_FALLBACK;
+  }
   return parseDefaultBranchRef(result.stdout) ?? DEFAULT_BRANCH_FALLBACK;
 }
 
@@ -622,8 +637,9 @@ export function createSandboxManager(
 
         lastRenewAt = now;
         const entry = active.get(conversationId);
-        if (entry !== undefined && info.expiresAt !== undefined)
+        if (entry !== undefined && info.expiresAt !== undefined) {
           entry.expiresAt = info.expiresAt;
+        }
 
         /**
          * 保活的**唯一**可观测出口（docs/features/sandbox-keepalive.md §3.5）：
@@ -678,8 +694,12 @@ export function createSandboxManager(
   /** Cache entry that is still within its platform deadline, else `undefined` (and evicted). */
   function liveEntry(conversationId: string): ActiveSandbox | undefined {
     const entry = active.get(conversationId);
-    if (entry === undefined) return undefined;
-    if (Date.now() < entry.expiresAt) return entry;
+    if (entry === undefined) {
+      return undefined;
+    }
+    if (Date.now() < entry.expiresAt) {
+      return entry;
+    }
     // Presumed paused/expired platform-side. Dropping it here is what makes the
     // next acquire() reconnect instead of handing out a handle whose every call
     // 404s (docs/plans/sandbox-provider.md SP-7 层 2).
@@ -747,7 +767,9 @@ export function createSandboxManager(
     // `liveEntry` (not `active.get`) is the fix for "the process happily reused
     // a handle whose sandbox the platform had already paused".
     const cached = liveEntry(input.conversationId);
-    if (cached !== undefined) return toAcquired(cached, 'cache');
+    if (cached !== undefined) {
+      return toAcquired(cached, 'cache');
+    }
 
     const provider = resolveProvider(input.provider);
 
@@ -768,7 +790,9 @@ export function createSandboxManager(
         } catch (error) {
           // Raced with the platform tearing it down between connect and
           // extend → fall through to create rather than hand back a dead handle.
-          if (!provider.isGone(error)) throw error;
+          if (!provider.isGone(error)) {
+            throw error;
+          }
           log.warn(LOG_SCOPE, 'resumed sandbox vanished before keepalive', {
             conversationId: input.conversationId,
           });
@@ -826,7 +850,9 @@ export function createSandboxManager(
   return {
     acquire(input: AcquireInput): Promise<AcquiredSandbox> {
       const existing = inflight.get(input.conversationId);
-      if (existing !== undefined) return existing;
+      if (existing !== undefined) {
+        return existing;
+      }
 
       const promise = doAcquire(input).finally(() =>
         inflight.delete(input.conversationId),

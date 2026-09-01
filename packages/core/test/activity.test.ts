@@ -273,7 +273,7 @@ describe("KA-1 活动信号：两条消费路径都覆盖", () => {
   it("session.stream() 有信号", async () => {
     const workspace = recordingWorkspace();
     const session = createSession(agent(), { workspace });
-    for await (const _ of session.stream("hi")) void _;
+    for await (const _ of session.stream("hi")) {void _;}
     expect(workspace.signals.length).toBeGreaterThan(0);
   });
 });

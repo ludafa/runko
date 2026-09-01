@@ -37,8 +37,8 @@ export type ReadFileOutcome = { ok: true; text: string } | { ok: false; message:
 export async function readFileForCommand(fs: NimboFS, cwd: string, cmdName: string, rawPath: string): Promise<ReadFileOutcome> {
   const path = resolvePath(cwd, rawPath);
   const stat = await statSafe(fs, path);
-  if (stat === undefined) return { ok: false, message: `${cmdName}: ${rawPath}: No such file or directory` };
-  if (stat.type === "dir") return { ok: false, message: `${cmdName}: ${rawPath}: Is a directory` };
+  if (stat === undefined) {return { ok: false, message: `${cmdName}: ${rawPath}: No such file or directory` };}
+  if (stat.type === "dir") {return { ok: false, message: `${cmdName}: ${rawPath}: Is a directory` };}
   try {
     return { ok: true, text: decodeText(await fs.readFile(path)) };
   } catch (error) {
@@ -48,7 +48,7 @@ export async function readFileForCommand(fs: NimboFS, cwd: string, cmdName: stri
 
 /** 按行切分：空字符串 → 0 行；结尾是否有换行不影响行内容，只影响是否存在"半行"。 */
 export function splitLines(text: string): string[] {
-  if (text === "") return [];
+  if (text === "") {return [];}
   const body = text.endsWith("\n") ? text.slice(0, -1) : text;
   return body.split("\n");
 }

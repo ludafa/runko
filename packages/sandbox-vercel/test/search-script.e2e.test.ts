@@ -74,7 +74,7 @@ class RealNodeSandbox implements VercelSandboxLike {
 }
 
 function pipeInto(source: Readable, dest: VercelRunCommandParams["stdout"]): void {
-  if (dest === undefined) return;
+  if (dest === undefined) {return;}
   source.on("data", (chunk: Buffer) => {
     dest.write(chunk);
   });

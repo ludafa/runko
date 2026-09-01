@@ -188,12 +188,16 @@ export function formatClockTime(epochMs: number): string {
 /** `<1s` → ms, `<60s` → one decimal place of seconds, longer → `Xm Ys` — the one humanization ladder `tool-call-card.tsx` uses for both a settled duration and a still-running elapsed tick. Negative input (clock skew between `Date.now()` calls) clamps to zero rather than rendering a nonsensical negative duration. */
 export function formatDuration(ms: number): string {
   const clamped = Math.max(0, ms);
-  if (clamped < 1000) return `${String(Math.round(clamped))}ms`;
+  if (clamped < 1000) {
+    return `${String(Math.round(clamped))}ms`;
+  }
   // Rounds to the same one-decimal precision the render below uses before
   // comparing against the 60s boundary — otherwise e.g. 59999ms would
   // display as the nonsensical "60.0s" instead of rolling over to "1m 0s".
   const roundedSeconds = Math.round(clamped / 100) / 10;
-  if (roundedSeconds < 60) return `${roundedSeconds.toFixed(1)}s`;
+  if (roundedSeconds < 60) {
+    return `${roundedSeconds.toFixed(1)}s`;
+  }
   const totalSeconds = Math.round(clamped / 1000);
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;

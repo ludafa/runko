@@ -28,7 +28,9 @@ export function NotificationBell() {
 
   // `loading` = 还在问服务端；`disabled` = 服务端没配 VAPID。两种情况都什么都不
   // 显示——尤其是后者：用户不该看到一个点了也没用的按钮（产品文档 §3.8）。
-  if (state === 'loading' || state === 'disabled') return null;
+  if (state === 'loading' || state === 'disabled') {
+    return null;
+  }
 
   const interactive = state === 'off' || state === 'on';
   const label = LABEL[state];

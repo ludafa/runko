@@ -48,23 +48,23 @@ export class DirFS implements NimboFS {
 
   /** 命中忽略规则的路径本身，或其任一祖先目录命中，都视为不存在——子树整体隐藏。 */
   private isIgnored(virtualPath: string): boolean {
-    if (this.ignorePatterns.length === 0) return false;
+    if (this.ignorePatterns.length === 0) {return false;}
     const segments = virtualPath.split("/").filter((s) => s.length > 0);
     let prefix = "";
     for (const segment of segments) {
       prefix += `/${segment}`;
-      if (this.ignorePatterns.some((re) => re.test(prefix))) return true;
+      if (this.ignorePatterns.some((re) => re.test(prefix))) {return true;}
     }
     return false;
   }
 
   async readFile(path: string): Promise<Uint8Array> {
     const p = normalizePath(path);
-    if (this.isIgnored(p)) throw new NotFoundError(p);
+    if (this.isIgnored(p)) {throw new NotFoundError(p);}
     try {
       return await nodeFs.readFile(this.toRealPath(p));
     } catch (error) {
-      if (isErrnoException(error) && error.code === "ENOENT") throw new NotFoundError(p);
+      if (isErrnoException(error) && error.code === "ENOENT") {throw new NotFoundError(p);}
       throw error;
     }
   }
@@ -83,18 +83,18 @@ export class DirFS implements NimboFS {
 
   async readdir(path: string): Promise<DirEntry[]> {
     const p = normalizePath(path);
-    if (this.isIgnored(p)) throw new NotFoundError(p);
+    if (this.isIgnored(p)) {throw new NotFoundError(p);}
     let dirents;
     try {
       dirents = await nodeFs.readdir(this.toRealPath(p), { withFileTypes: true });
     } catch (error) {
-      if (isErrnoException(error) && error.code === "ENOENT") throw new NotFoundError(p);
+      if (isErrnoException(error) && error.code === "ENOENT") {throw new NotFoundError(p);}
       throw error;
     }
     const entries: DirEntry[] = [];
     for (const dirent of dirents) {
       const childPath = p === "/" ? `/${dirent.name}` : `${p}/${dirent.name}`;
-      if (this.isIgnored(childPath)) continue;
+      if (this.isIgnored(childPath)) {continue;}
       if (dirent.isDirectory()) {
         entries.push({ name: dirent.name, type: "dir" });
       } else if (dirent.isFile()) {
@@ -108,15 +108,15 @@ export class DirFS implements NimboFS {
 
   async stat(path: string): Promise<FileStat> {
     const p = normalizePath(path);
-    if (this.isIgnored(p)) throw new NotFoundError(p);
+    if (this.isIgnored(p)) {throw new NotFoundError(p);}
     let info;
     try {
       info = await nodeFs.stat(this.toRealPath(p));
     } catch (error) {
-      if (isErrnoException(error) && error.code === "ENOENT") throw new NotFoundError(p);
+      if (isErrnoException(error) && error.code === "ENOENT") {throw new NotFoundError(p);}
       throw error;
     }
-    if (info.isDirectory()) return { type: "dir", mtime: info.mtimeMs };
+    if (info.isDirectory()) {return { type: "dir", mtime: info.mtimeMs };}
     return { type: "file", size: info.size, mtime: info.mtimeMs, mimeType: inferMimeType(p) };
   }
 
@@ -127,7 +127,7 @@ export class DirFS implements NimboFS {
   }
 
   private async walkFiles(virtualDir: string): Promise<string[]> {
-    if (this.isIgnored(virtualDir)) return [];
+    if (this.isIgnored(virtualDir)) {return [];}
     let dirents;
     try {
       dirents = await nodeFs.readdir(this.toRealPath(virtualDir), { withFileTypes: true });
@@ -137,7 +137,7 @@ export class DirFS implements NimboFS {
     const results: string[] = [];
     for (const dirent of dirents) {
       const childPath = virtualDir === "/" ? `/${dirent.name}` : `${virtualDir}/${dirent.name}`;
-      if (this.isIgnored(childPath)) continue;
+      if (this.isIgnored(childPath)) {continue;}
       if (dirent.isDirectory()) {
         results.push(...(await this.walkFiles(childPath)));
       } else if (dirent.isFile()) {

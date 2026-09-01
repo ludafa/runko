@@ -127,7 +127,9 @@ describe('push/sender —— 投递', () => {
     addSubscription('https://gone.example/1');
     addSubscription('https://ok.example/2');
     const { transport } = recordingTransport((endpoint) => {
-      if (endpoint.includes('gone')) throw httpError(410);
+      if (endpoint.includes('gone')) {
+        throw httpError(410);
+      }
     });
 
     await sendToUser(db, 'user-1', payload(), {
@@ -187,7 +189,9 @@ describe('push/sender —— 投递', () => {
     addSubscription('https://boom.example/1');
     addSubscription('https://ok.example/2');
     const { calls, transport } = recordingTransport((endpoint) => {
-      if (endpoint.includes('boom')) throw new Error('boom');
+      if (endpoint.includes('boom')) {
+        throw new Error('boom');
+      }
     });
 
     await expect(

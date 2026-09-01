@@ -174,7 +174,7 @@ export function createVercelExec(sandbox: VercelSandboxLike, root: string, keepA
           durationMs: Date.now() - start,
         };
       } finally {
-        if (timer !== undefined) clearTimeout(timer);
+        if (timer !== undefined) {clearTimeout(timer);}
         stopKeepAlive?.();
       }
     },

@@ -138,7 +138,7 @@ function toJsonValue(input: unknown): JsonValue {
 }
 
 function sumOptional(a: number | undefined, b: number | undefined): number | undefined {
-  if (a === undefined && b === undefined) return undefined;
+  if (a === undefined && b === undefined) {return undefined;}
   return (a ?? 0) + (b ?? 0);
 }
 
@@ -154,7 +154,7 @@ function mergeUsage(acc: Usage, next: LanguageModelUsage): Usage {
 /** "字符数/4"起步估算：system + 全部账本消息的 JSON 字符长度之和除以 4，向上取整。 */
 function estimateMessagesTokens(messages: NimboUIMessage[], system: string | undefined): number {
   let charCount = system?.length ?? 0;
-  for (const message of messages) charCount += JSON.stringify(message).length;
+  for (const message of messages) {charCount += JSON.stringify(message).length;}
   return Math.ceil(charCount / 4);
 }
 
@@ -162,7 +162,7 @@ function estimateMessagesTokens(messages: NimboUIMessage[], system: string | und
 function collectMessageText(message: NimboUIMessage): string {
   let text = "";
   for (const part of message.parts) {
-    if (part.type === "text") text += part.text;
+    if (part.type === "text") {text += part.text;}
   }
   return text;
 }
@@ -188,7 +188,7 @@ function statusForError(error: NimboError): "failed" | "interrupted" {
  */
 function abortMessage(signal: AbortSignal, fallback: string): string {
   const { reason } = signal;
-  if (typeof reason === "string" && reason.length > 0) return reason;
+  if (typeof reason === "string" && reason.length > 0) {return reason;}
   if (reason instanceof Error && reason.name !== "AbortError" && reason.message.length > 0) {
     return reason.message;
   }
@@ -212,9 +212,9 @@ function toolExecutionWallMs(messages: NimboUIMessage[]): number {
   const intervals: { start: number; end: number }[] = [];
   for (const message of messages) {
     for (const part of message.parts) {
-      if (part.type !== "data-tool-timing") continue;
+      if (part.type !== "data-tool-timing") {continue;}
       const { executionStartedAt, completedAt } = part.data;
-      if (executionStartedAt === undefined || completedAt === undefined) continue;
+      if (executionStartedAt === undefined || completedAt === undefined) {continue;}
       intervals.push({ start: executionStartedAt, end: completedAt });
     }
   }
@@ -222,7 +222,7 @@ function toolExecutionWallMs(messages: NimboUIMessage[]): number {
   let total = 0;
   let currentEnd = Number.NEGATIVE_INFINITY;
   for (const { start, end } of intervals) {
-    if (end <= currentEnd) continue;
+    if (end <= currentEnd) {continue;}
     total += end - Math.max(start, currentEnd);
     currentEnd = end;
   }
@@ -281,7 +281,7 @@ async function* drainSteerMessages(
   drainSteers: (() => NimboUIMessage[]) | undefined,
   messages: NimboUIMessage[],
 ): AsyncGenerator<NimboChunk, NimboUIMessage[]> {
-  if (drainSteers === undefined) return [];
+  if (drainSteers === undefined) {return [];}
   const drained = drainSteers();
   for (const message of drained) {
     messages.push(message);
@@ -388,8 +388,8 @@ const PLAN_UPDATE_ID = "plan-update";
 function upsertPlanUpdatePart(message: NimboUIMessage, data: PlanUpdateData): DataUIPart<{ "plan-update": PlanUpdateData }> {
   const part: DataUIPart<{ "plan-update": PlanUpdateData }> = { type: "data-plan-update", id: PLAN_UPDATE_ID, data };
   const index = message.parts.findIndex((p) => p.type === "data-plan-update" && "id" in p && p.id === PLAN_UPDATE_ID);
-  if (index === -1) message.parts.push(part);
-  else message.parts[index] = part;
+  if (index === -1) {message.parts.push(part);}
+  else {message.parts[index] = part;}
   return part;
 }
 
@@ -401,8 +401,8 @@ function upsertPlanUpdatePart(message: NimboUIMessage, data: PlanUpdateData): Da
 function upsertToolTimingPart(message: NimboUIMessage, data: ToolTimingData): DataUIPart<{ "tool-timing": ToolTimingData }> {
   const part: DataUIPart<{ "tool-timing": ToolTimingData }> = { type: "data-tool-timing", id: data.toolCallId, data };
   const index = message.parts.findIndex((p) => p.type === "data-tool-timing" && "id" in p && p.id === data.toolCallId);
-  if (index === -1) message.parts.push(part);
-  else message.parts[index] = part;
+  if (index === -1) {message.parts.push(part);}
+  else {message.parts[index] = part;}
   return part;
 }
 
@@ -498,7 +498,7 @@ async function* mergeSettleStreams(streams: AsyncGenerator<NimboChunk, void>[]):
       wake = resolve;
     });
   }
-  if (failure !== undefined) throw failure.error;
+  if (failure !== undefined) {throw failure.error;}
 }
 
 // ---- 单个工具调用的结算（审批→执行→部件/chunk 编码，见文件头"审批：三值 + 阻塞前显式产出"） ----
@@ -542,7 +542,7 @@ function notifyIntegrations<E>(telemetry: SessionTelemetry, callback: (integrati
     try {
       const handler = callback(integration);
       const result = handler?.(event);
-      if (result !== undefined) void Promise.resolve(result).catch(() => {});
+      if (result !== undefined) {void Promise.resolve(result).catch(() => {});}
     } catch {
       // 遥测永不影响 turn。
     }
@@ -550,7 +550,7 @@ function notifyIntegrations<E>(telemetry: SessionTelemetry, callback: (integrati
 }
 
 function notifyToolExecutionStart(opts: SettleToolCallOptions, input: JsonValue): void {
-  if (opts.telemetry === undefined) return;
+  if (opts.telemetry === undefined) {return;}
   const event: ToolExecutionStartEvent & { functionId: string } = {
     callId: opts.call.toolCallId,
     messages: [],
@@ -562,7 +562,7 @@ function notifyToolExecutionStart(opts: SettleToolCallOptions, input: JsonValue)
 }
 
 function notifyToolExecutionEnd(opts: SettleToolCallOptions, input: JsonValue, outcome: { status: "completed"; output: unknown } | { status: "failed"; errorText: string }, toolExecutionMs: number): void {
-  if (opts.telemetry === undefined) return;
+  if (opts.telemetry === undefined) {return;}
   const base = { toolCallId: opts.call.toolCallId, toolName: opts.call.toolName, input };
   const event: ToolExecutionEndEvent & { functionId: string } = {
     callId: opts.call.toolCallId,
@@ -732,7 +732,7 @@ async function* settleToolCall(opts: SettleToolCallOptions): AsyncGenerator<Nimb
     return;
   }
 
-  if (approval.markOnceOnApprove) opts.onceMemory.markApproved(call.toolName);
+  if (approval.markOnceOnApprove) {opts.onceMemory.markApproved(call.toolName);}
 
   assistantMessage.parts[call.partIndex] = approvalRespondedPart(call.toolName, call.toolCallId, approval.input, call.toolCallId, true);
   yield { type: "tool-approval-response", approvalId: call.toolCallId, approved: true };
@@ -832,13 +832,13 @@ async function* runOneStep(opts: RunOneStepOptions): AsyncGenerator<NimboChunk, 
       }
       case "text-delta": {
         const textPart = openText.get(part.id);
-        if (textPart !== undefined) textPart.text += part.text;
+        if (textPart !== undefined) {textPart.text += part.text;}
         yield { type: "text-delta", id: part.id, delta: part.text };
         break;
       }
       case "text-end": {
         const textPart = openText.get(part.id);
-        if (textPart !== undefined) textPart.state = "done";
+        if (textPart !== undefined) {textPart.state = "done";}
         yield { type: "text-end", id: part.id };
         break;
       }
@@ -851,13 +851,13 @@ async function* runOneStep(opts: RunOneStepOptions): AsyncGenerator<NimboChunk, 
       }
       case "reasoning-delta": {
         const reasoningPart = openReasoning.get(part.id);
-        if (reasoningPart !== undefined) reasoningPart.text += part.text;
+        if (reasoningPart !== undefined) {reasoningPart.text += part.text;}
         yield { type: "reasoning-delta", id: part.id, delta: part.text };
         break;
       }
       case "reasoning-end": {
         const reasoningPart = openReasoning.get(part.id);
-        if (reasoningPart !== undefined) reasoningPart.state = "done";
+        if (reasoningPart !== undefined) {reasoningPart.state = "done";}
         yield { type: "reasoning-end", id: part.id };
         break;
       }
@@ -1071,7 +1071,7 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<NimboChunk,
     lastAssistantMessage = stepOutcome.assistantMessage;
     usage = mergeUsage(usage, stepOutcome.usage);
     const stepText = collectMessageText(stepOutcome.assistantMessage);
-    if (stepText !== "") finalResponse = stepText;
+    if (stepText !== "") {finalResponse = stepText;}
 
     if (opts.maxContextTokens !== undefined) {
       const rawEstimate = estimateMessagesTokens(opts.messages, opts.system);

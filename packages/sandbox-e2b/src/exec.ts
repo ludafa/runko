@@ -146,7 +146,7 @@ export function createE2bExec(sandbox: E2bSandboxLike, anchor: PathAnchor, keepA
           durationMs: Date.now() - start,
         };
       } finally {
-        if (timer !== undefined) clearTimeout(timer);
+        if (timer !== undefined) {clearTimeout(timer);}
         stopKeepAlive?.();
       }
     },

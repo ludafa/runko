@@ -23,7 +23,7 @@ const FIXTURE_DIR = join(import.meta.dirname, "..", "fixtures", "agent-dir");
  * capability the *real*, non-vitest `loadAgent()` caller might not have. */
 function nodeSupportsNativeTypeScript(): boolean {
   const [major, minor] = process.versions.node.split(".").map((part) => Number(part));
-  if (major === undefined || minor === undefined) return false;
+  if (major === undefined || minor === undefined) {return false;}
   return major > 22 || (major === 22 && minor >= 18);
 }
 

@@ -12,9 +12,9 @@ export function normalizePath(input: string): string {
   const segments = input.split("/");
   const stack: string[] = [];
   for (const segment of segments) {
-    if (segment === "" || segment === ".") continue;
+    if (segment === "" || segment === ".") {continue;}
     if (segment === "..") {
-      if (stack.length > 0) stack.pop();
+      if (stack.length > 0) {stack.pop();}
       continue;
     }
     stack.push(segment);
@@ -24,6 +24,6 @@ export function normalizePath(input: string): string {
 
 /** 绝对路径直接规范化；相对路径先拼上 cwd 再规范化。 */
 export function resolvePath(cwd: string, input: string): string {
-  if (input.startsWith("/")) return normalizePath(input);
+  if (input.startsWith("/")) {return normalizePath(input);}
   return normalizePath(`${cwd}/${input}`);
 }

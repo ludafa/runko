@@ -59,14 +59,14 @@ const OUTPUT_BYTE_LIMIT = 64 * 1024; // docs/tech/builtin-tools.md §1.10：stdo
  */
 function truncateToBytes(text: string, maxBytes: number): { text: string; truncated: boolean } {
   const encoder = new TextEncoder();
-  if (encoder.encode(text).length <= maxBytes) return { text, truncated: false };
+  if (encoder.encode(text).length <= maxBytes) {return { text, truncated: false };}
 
   const chars = Array.from(text);
   let bytes = 0;
   let end = 0;
   for (; end < chars.length; end++) {
     const charBytes = encoder.encode(chars[end] ?? "").length;
-    if (bytes + charBytes > maxBytes) break;
+    if (bytes + charBytes > maxBytes) {break;}
     bytes += charBytes;
   }
   return { text: chars.slice(0, end).join(""), truncated: true };
@@ -74,7 +74,7 @@ function truncateToBytes(text: string, maxBytes: number): { text: string; trunca
 
 /** 每路输出各自截断并标注 `[truncated: ...]`（工单原文"截断标注 [truncated]"，与既有工具 `truncationNotice` 同风格）。 */
 function formatStream(label: "stdout" | "stderr", raw: string): string | undefined {
-  if (raw.length === 0) return undefined;
+  if (raw.length === 0) {return undefined;}
   const { text, truncated } = truncateToBytes(raw, OUTPUT_BYTE_LIMIT);
   const budgetKB = OUTPUT_BYTE_LIMIT / 1024;
   const body = truncated
@@ -88,7 +88,7 @@ function formatBashOutput(result: ExecResult): string {
   const parts = [formatStream("stdout", result.stdout), formatStream("stderr", result.stderr)].filter(
     (part): part is string => part !== undefined,
   );
-  if (parts.length === 0) parts.push("(no output)");
+  if (parts.length === 0) {parts.push("(no output)");}
   parts.push(`exit code: ${result.exitCode}`);
   return parts.join("\n\n");
 }
@@ -105,7 +105,7 @@ const BASE_DESCRIPTION =
 /** exec 实现的 `describe()`（§1.10"环境自描述"）拼进基础描述之后，未提供/空串时只用基础描述。 */
 function buildDescription(exec: NimboExec): string {
   const env = exec.describe?.();
-  if (env === undefined || env.trim() === "") return BASE_DESCRIPTION;
+  if (env === undefined || env.trim() === "") {return BASE_DESCRIPTION;}
   return `${BASE_DESCRIPTION}\n\n---\nExecution environment:\n${env}`;
 }
 

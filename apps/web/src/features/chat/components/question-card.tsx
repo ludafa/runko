@@ -66,7 +66,9 @@ export function QuestionCard({
   function submitFreeText(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = freeText.trim();
-    if (trimmed.length === 0) return;
+    if (trimmed.length === 0) {
+      return;
+    }
     onAnswer(trimmed);
     setFreeText('');
   }

@@ -88,7 +88,7 @@ const RENEW_BELOW_RATIO = 0.75;
 
 /** 别为了一个保活定时器把进程的事件循环吊着不让退出。浏览器端的 `setInterval` 返回 number、没有 `unref`，故先探测。 */
 function unrefTimer(timer: ReturnType<typeof setInterval>): void {
-  if (typeof timer === "object" && timer !== null && "unref" in timer) timer.unref();
+  if (typeof timer === "object" && timer !== null && "unref" in timer) {timer.unref();}
 }
 
 export function createKeepAlive(driver: KeepAliveDriver, opts: KeepAliveOptions): KeepAlive {
@@ -135,7 +135,7 @@ export function createKeepAlive(driver: KeepAliveDriver, opts: KeepAliveOptions)
      */
     const local = expectedExpiryAt === 0 ? Number.NEGATIVE_INFINITY : expectedExpiryAt - now;
     const effective = remaining ?? local;
-    if (effective >= targetMs * RENEW_BELOW_RATIO) return; // 水位够，什么都不做——这就是「补足」
+    if (effective >= targetMs * RENEW_BELOW_RATIO) {return;} // 水位够，什么都不做——这就是「补足」
 
     try {
       await driver.renew(targetMs, remaining);
@@ -148,14 +148,14 @@ export function createKeepAlive(driver: KeepAliveDriver, opts: KeepAliveOptions)
   }
 
   function ensureLifetime(targetMs: number, trigger: RenewInfo["trigger"]): Promise<void> {
-    if (inflight !== undefined && inflightTarget === targetMs) return inflight;
+    if (inflight !== undefined && inflightTarget === targetMs) {return inflight;}
     const previous = inflight ?? Promise.resolve();
     inflightTarget = targetMs;
     const run = previous.then(() => doEnsure(targetMs, trigger));
     inflight = run;
     // `doEnsure` 自己吞掉所有错误，所以这里不会有未处理拒绝。
     void run.then(() => {
-      if (inflight === run) inflight = undefined;
+      if (inflight === run) {inflight = undefined;}
     });
     return run;
   }
@@ -180,8 +180,8 @@ export function createKeepAlive(driver: KeepAliveDriver, opts: KeepAliveOptions)
   }
 
   function startApproval(): void {
-    if (approvalTimer !== undefined) return; // 已在审批模式（并行工具可能连发多个请求）
-    if (approvalBudgetMs <= 0) return; // 配 0：一次都不为等人续期
+    if (approvalTimer !== undefined) {return;} // 已在审批模式（并行工具可能连发多个请求）
+    if (approvalBudgetMs <= 0) {return;} // 配 0：一次都不为等人续期
     approvalStartedAt = Date.now();
     void ensureLifetime(idleTimeoutMs, "approval");
     const timer = setInterval(() => {
@@ -199,12 +199,12 @@ export function createKeepAlive(driver: KeepAliveDriver, opts: KeepAliveOptions)
     onActivity(signal: ActivitySignal): void {
       const within = withinTurnCap(signal);
       if (signal.reason === "awaiting-approval") {
-        if (within) startApproval();
+        if (within) {startApproval();}
         return;
       }
       // 任何 `progress` 都意味着离开了等人状态——这是实现方停掉审批保活的唯一依据。
       stopApproval();
-      if (within) void ensureLifetime(idleTimeoutMs, "activity");
+      if (within) {void ensureLifetime(idleTimeoutMs, "activity");}
     },
 
     keepAlive(targetMs: number): Promise<void> {
@@ -217,7 +217,7 @@ export function createKeepAlive(driver: KeepAliveDriver, opts: KeepAliveOptions)
         const timer = setInterval(() => {
           // 长命令也受单轮上限约束；`turnStartedAt === 0` 表示没有活动信号源
           // （宿主直接用 workspace、没走 core 的会话），此时不设上限。
-          if (turnStartedAt !== 0 && Date.now() - turnStartedAt >= maxTurnMs) return;
+          if (turnStartedAt !== 0 && Date.now() - turnStartedAt >= maxTurnMs) {return;}
           void ensureLifetime(idleTimeoutMs, "exec");
         }, tickMs);
         unrefTimer(timer);
@@ -225,7 +225,7 @@ export function createKeepAlive(driver: KeepAliveDriver, opts: KeepAliveOptions)
       }
       let stopped = false;
       return () => {
-        if (stopped) return; // 幂等
+        if (stopped) {return;} // 幂等
         stopped = true;
         execDepth -= 1;
         if (execDepth === 0 && execTimer !== undefined) {

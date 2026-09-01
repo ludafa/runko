@@ -40,9 +40,9 @@ function fakeExec(opts: {
     defaultApproval: opts.defaultApproval,
     exec: async (req: ExecRequest, execOpts?: ExecOptions): Promise<ExecResult> => {
       opts.captureRequest?.(req);
-      if (opts.rejectWith !== undefined) throw opts.rejectWith;
-      for (const chunk of opts.onOutputChunks ?? []) execOpts?.onOutput?.(chunk);
-      if (typeof opts.result === "function") return opts.result();
+      if (opts.rejectWith !== undefined) {throw opts.rejectWith;}
+      for (const chunk of opts.onOutputChunks ?? []) {execOpts?.onOutput?.(chunk);}
+      if (typeof opts.result === "function") {return opts.result();}
       return opts.result ?? resultOf(0, "", "");
     },
   };

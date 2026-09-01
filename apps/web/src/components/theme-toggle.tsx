@@ -4,7 +4,9 @@ import { useState } from 'react';
 type Theme = 'light' | 'dark';
 
 function readInitialTheme(): Theme {
-  if (typeof document === 'undefined') return 'light';
+  if (typeof document === 'undefined') {
+    return 'light';
+  }
   return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
 }
 

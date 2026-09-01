@@ -77,7 +77,7 @@ describe("grep", () => {
 
   it("truncates files-mode at the 100-file cap with guidance", async () => {
     const files: Record<string, string> = {};
-    for (let i = 0; i < 150; i++) files[`f${i}.ts`] = "TODO";
+    for (let i = 0; i < 150; i++) {files[`f${i}.ts`] = "TODO";}
     const fs = fromMemory(files);
     const tool = createGrepTool();
 
@@ -100,7 +100,7 @@ describe("grep", () => {
 
   it("does not truncate files-mode when the match count lands exactly on the 100-file cap", async () => {
     const files: Record<string, string> = {};
-    for (let i = 0; i < 100; i++) files[`f${i}.ts`] = "TODO";
+    for (let i = 0; i < 100; i++) {files[`f${i}.ts`] = "TODO";}
     const fs = fromMemory(files);
     const tool = createGrepTool();
 
@@ -121,7 +121,7 @@ describe("grep", () => {
 
   it("file-count cap and line cap are independent: file count exceeds 100 but total selected lines stay under 500 reports the file-count reason", async () => {
     const files: Record<string, string> = {};
-    for (let i = 0; i < 150; i++) files[`f${i}.ts`] = `TODO-${i}`; // 1 matching line per file
+    for (let i = 0; i < 150; i++) {files[`f${i}.ts`] = `TODO-${i}`;} // 1 matching line per file
     const fs = fromMemory(files);
     const tool = createGrepTool();
 
@@ -275,7 +275,7 @@ describe("grep: native search path (ctx.fs.searchContent)", () => {
 
   it("native and JS-fallback paths produce byte-identical truncation notices: files-mode 100/150 cap", async () => {
     const files: Record<string, string> = {};
-    for (let i = 0; i < 150; i++) files[`f${i}.ts`] = "TODO";
+    for (let i = 0; i < 150; i++) {files[`f${i}.ts`] = "TODO";}
     const tool = createGrepTool();
 
     const nativeResult = expectText(await tool.execute({ pattern: "TODO" }, makeCtx(new NativeSearchFake(fromMemory(files)))));

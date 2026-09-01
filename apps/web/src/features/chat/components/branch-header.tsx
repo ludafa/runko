@@ -48,7 +48,9 @@ const BRANCH_TAIL_CHARS = 4;
  * 条 nimbo 会话分支。复制的始终是完整名字，不是这里显示的缩写。
  */
 export function abbreviateBranchName(name: string): string {
-  if (name.length <= BRANCH_ABBREVIATE_THRESHOLD) return name;
+  if (name.length <= BRANCH_ABBREVIATE_THRESHOLD) {
+    return name;
+  }
   return `${name.slice(0, BRANCH_HEAD_CHARS)}…${name.slice(-BRANCH_TAIL_CHARS)}`;
 }
 
@@ -63,7 +65,9 @@ export function BranchHeader({
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    if (!copied) return undefined;
+    if (!copied) {
+      return undefined;
+    }
     const timer = setTimeout(() => {
       setCopied(false);
     }, COPIED_RESET_MS);

@@ -16,7 +16,7 @@ const inputSchema = z.object({
 });
 
 function countOccurrences(text: string, needle: string): number {
-  if (needle.length === 0) return 0;
+  if (needle.length === 0) {return 0;}
   let count = 0;
   let idx = text.indexOf(needle);
   while (idx !== -1) {
@@ -61,7 +61,7 @@ export function createEditFileTool(opts: CreateFileToolsOptions): Tool {
       }
 
       const failure = checkReadBeforeWrite(input.path, stat.mtime, opts.readState);
-      if (failure !== undefined) return errorResult(failure);
+      if (failure !== undefined) {return errorResult(failure);}
 
       let text: string;
       try {

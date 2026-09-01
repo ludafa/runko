@@ -41,7 +41,7 @@ export function createE2bFs(sandbox: E2bSandboxLike, anchor: PathAnchor): NimboF
       try {
         return await sandbox.files.read(real, { format: "bytes" });
       } catch (error) {
-        if (isE2bErrorNamed(error, ...NOT_FOUND_NAMES)) throw new NotFoundError(path);
+        if (isE2bErrorNamed(error, ...NOT_FOUND_NAMES)) {throw new NotFoundError(path);}
         throw error;
       }
     },
@@ -59,7 +59,7 @@ export function createE2bFs(sandbox: E2bSandboxLike, anchor: PathAnchor): NimboF
       try {
         info = await sandbox.files.getInfo(real);
       } catch (error) {
-        if (isE2bErrorNamed(error, ...NOT_FOUND_NAMES)) throw new NotFoundError(path);
+        if (isE2bErrorNamed(error, ...NOT_FOUND_NAMES)) {throw new NotFoundError(path);}
         throw error;
       }
       // e2b 的 remove() 恒递归（没有"非递归删非空目录就报错"的选项）——非
@@ -67,7 +67,7 @@ export function createE2bFs(sandbox: E2bSandboxLike, anchor: PathAnchor): NimboF
       // 的 DirectoryNotEmptyError 语义（docs/tech/sandbox.md §8.2）。
       if (opts?.recursive !== true && info.type !== "file") {
         const children = await sandbox.files.list(real, { depth: 1 });
-        if (children.length > 0) throw new DirectoryNotEmptyError(path);
+        if (children.length > 0) {throw new DirectoryNotEmptyError(path);}
       }
       await sandbox.files.remove(real);
     },
@@ -83,7 +83,7 @@ export function createE2bFs(sandbox: E2bSandboxLike, anchor: PathAnchor): NimboF
       try {
         entries = await sandbox.files.list(real, { depth: 1 });
       } catch (error) {
-        if (isE2bErrorNamed(error, ...NOT_FOUND_NAMES)) throw new NotFoundError(path);
+        if (isE2bErrorNamed(error, ...NOT_FOUND_NAMES)) {throw new NotFoundError(path);}
         throw error;
       }
       return entries.map((entry) => ({ name: entry.name, ...toFileStat(entry) })).sort((a, b) => a.name.localeCompare(b.name));
@@ -95,7 +95,7 @@ export function createE2bFs(sandbox: E2bSandboxLike, anchor: PathAnchor): NimboF
         const info = await sandbox.files.getInfo(real);
         return toFileStat(info);
       } catch (error) {
-        if (isE2bErrorNamed(error, ...NOT_FOUND_NAMES)) throw new NotFoundError(path);
+        if (isE2bErrorNamed(error, ...NOT_FOUND_NAMES)) {throw new NotFoundError(path);}
         throw error;
       }
     },
@@ -107,14 +107,14 @@ export function createE2bFs(sandbox: E2bSandboxLike, anchor: PathAnchor): NimboF
       try {
         entries = await sandbox.files.list(anchor.rootReal, { depth: GLOB_LIST_DEPTH });
       } catch (error) {
-        if (isE2bErrorNamed(error, ...NOT_FOUND_NAMES)) throw new NotFoundError("/");
+        if (isE2bErrorNamed(error, ...NOT_FOUND_NAMES)) {throw new NotFoundError("/");}
         throw error;
       }
       const matches: string[] = [];
       for (const entry of entries) {
-        if (entry.type !== "file") continue; // 只返回文件，目录不算匹配结果
+        if (entry.type !== "file") {continue;} // 只返回文件，目录不算匹配结果
         const virtual = anchor.toVirtual(entry.path);
-        if (matchesGlob(pattern, virtual)) matches.push(virtual);
+        if (matchesGlob(pattern, virtual)) {matches.push(virtual);}
       }
       return matches.sort();
     },

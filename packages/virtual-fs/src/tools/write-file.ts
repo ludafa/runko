@@ -42,7 +42,7 @@ export function createWriteFileTool(opts: CreateFileToolsOptions): Tool {
 
       if (existing !== undefined) {
         const failure = checkReadBeforeWrite(input.path, existing.mtime, opts.readState);
-        if (failure !== undefined) return errorResult(failure);
+        if (failure !== undefined) {return errorResult(failure);}
       }
 
       await ctx.fs.writeFile(input.path, input.content);

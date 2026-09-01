@@ -39,7 +39,9 @@ export function usePresence(conversationId: string): void {
 
     function reportIfChanged(): void {
       const focused = isFocused();
-      if (focused !== lastReported) report(focused);
+      if (focused !== lastReported) {
+        report(focused);
+      }
     }
 
     // 进来先报一次当前状态（通常是 true）。
@@ -48,7 +50,9 @@ export function usePresence(conversationId: string): void {
     // 在场期间持续续期。不在场时不发——服务端那条记录会自己过期，没必要每 20 秒
     // 告诉它一遍"我还是没在看"。
     const timer = window.setInterval(() => {
-      if (isFocused()) report(true);
+      if (isFocused()) {
+        report(true);
+      }
     }, HEARTBEAT_MS);
 
     document.addEventListener('visibilitychange', reportIfChanged);

@@ -62,7 +62,9 @@ export function MessageComposer({
 
   function submit(intent: SendIntent) {
     const trimmed = text.trim();
-    if (trimmed.length === 0) return;
+    if (trimmed.length === 0) {
+      return;
+    }
     onSend(trimmed, intent);
     setText('');
   }

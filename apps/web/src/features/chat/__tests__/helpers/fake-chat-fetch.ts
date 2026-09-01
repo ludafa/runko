@@ -178,7 +178,9 @@ export class FakeChatFetch {
 
   private parseBody(init: RequestInit | undefined): unknown {
     const body = init?.body;
-    if (typeof body !== 'string') return undefined;
+    if (typeof body !== 'string') {
+      return undefined;
+    }
     return JSON.parse(body) as unknown;
   }
 

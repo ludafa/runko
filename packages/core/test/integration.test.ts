@@ -72,9 +72,9 @@ function stopChunk(text: string) {
  * assertion.
  */
 function errorResultContent(output: unknown): string {
-  if (typeof output !== "object" || output === null || Array.isArray(output)) return "";
-  if (!("isError" in output) || output.isError !== true) return "";
-  if (!("content" in output)) return "";
+  if (typeof output !== "object" || output === null || Array.isArray(output)) {return "";}
+  if (!("isError" in output) || output.isError !== true) {return "";}
+  if (!("content" in output)) {return "";}
   return typeof output.content === "string" ? output.content : "";
 }
 

@@ -142,7 +142,9 @@ const QUEUED_META: { label: string; icon: ReactNode } = {
 function useElapsedTicker(active: boolean, startedAt: number): number {
   const [elapsedMs, setElapsedMs] = useState(0);
   useEffect(() => {
-    if (!active) return undefined;
+    if (!active) {
+      return undefined;
+    }
     function tick(): void {
       setElapsedMs(Date.now() - startedAt);
     }

@@ -40,7 +40,7 @@ export function createDeleteFileTool(opts: CreateFileToolsOptions): Tool {
         const files = await ctx.fs.glob(input.path === "/" ? "/**" : `${input.path}/**`);
         await ctx.fs.rm(input.path, { recursive: true });
         const changes: FileChange[] = files.map((path) => ({ path, kind: "delete" }));
-        if (changes.length > 0) opts.onFileChange?.(changes);
+        if (changes.length > 0) {opts.onFileChange?.(changes);}
         return `Deleted directory "${input.path}" and ${files.length} file${files.length === 1 ? "" : "s"} under it.`;
       }
 

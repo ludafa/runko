@@ -76,7 +76,7 @@ import type { VercelSandboxLike } from "./types.js";
 const SEARCH_TIMEOUT_MS = 60_000;
 
 function toFileStat(stats: { isDirectory(): boolean; size: number; mtimeMs: number }, virtualPath: string): FileStat {
-  if (stats.isDirectory()) return { type: "dir", mtime: Math.round(stats.mtimeMs) };
+  if (stats.isDirectory()) {return { type: "dir", mtime: Math.round(stats.mtimeMs) };}
   return { type: "file", size: stats.size, mtime: Math.round(stats.mtimeMs), mimeType: inferMimeType(virtualPath) };
 }
 
@@ -151,7 +151,7 @@ function parseContentSearchScriptOutput(raw: unknown): ContentSearchResult {
  * 底层的"可直接从真实路径切掉的前缀字符串"，`path.ts` 只对外暴露组合好的
  * `toRealPath`/`resolveCwd`，为这一处用途扩大它的导出面不划算。 */
 function rootPrefixOf(root: string): string {
-  if (root === "/") return "";
+  if (root === "/") {return "";}
   return root.endsWith("/") ? root.slice(0, -1) : root;
 }
 
@@ -181,7 +181,7 @@ function staticPrefixDir(pattern: string): string {
     }
     prefix.push(segment);
   }
-  if (!hasWildcardSegment) prefix.pop();
+  if (!hasWildcardSegment) {prefix.pop();}
   return prefix.length === 0 ? "/" : `/${prefix.join("/")}`;
 }
 
@@ -268,7 +268,7 @@ async function runSearchScript(sandbox: VercelSandboxLike, state: SearchScriptSt
       SEARCH_TIMEOUT_MS,
     );
   } catch (error) {
-    if (error instanceof SearchScriptTimeoutError) throw error; // 真超时不是"没有 node"的证据，原样上浮，不缓存。
+    if (error instanceof SearchScriptTimeoutError) {throw error;} // 真超时不是"没有 node"的证据，原样上浮，不缓存。
     state.nodeUnsupported = true;
     throw new SearchUnsupportedError(
       `vercel sandbox: could not invoke "node" for native search (${describeError(error)}) — falling back to per-file scanning.`,
@@ -341,7 +341,7 @@ export function createVercelFs(sandbox: VercelSandboxLike, root: string): NimboF
     try {
       return await sandbox.fs.stat(realPath);
     } catch (error) {
-      if (isErrnoException(error) && error.code === "ENOENT") return undefined;
+      if (isErrnoException(error) && error.code === "ENOENT") {return undefined;}
       throw error;
     }
   }
@@ -401,7 +401,7 @@ export function createVercelFs(sandbox: VercelSandboxLike, root: string): NimboF
           return;
         }
         const stats = await statOrUndefined(realPath);
-        if (stats === undefined) throw new NoSuchEntryError(realPath);
+        if (stats === undefined) {throw new NoSuchEntryError(realPath);}
         if (stats.isDirectory()) {
           await sandbox.fs.rmdir(realPath); // 空目录成功；非空抛 ENOTEMPTY（见头注释）。
         } else {
@@ -459,7 +459,7 @@ export function createVercelFs(sandbox: VercelSandboxLike, root: string): NimboF
         const result = parseFileSearchScriptOutput(await runSearchScript(sandbox, searchState, payload));
         return result.paths;
       } catch (error) {
-        if (!(error instanceof SearchUnsupportedError)) throw error;
+        if (!(error instanceof SearchUnsupportedError)) {throw error;}
         const files = await walkFiles("/");
         return files.filter((p) => matchesGlob(pattern, p)).sort();
       }

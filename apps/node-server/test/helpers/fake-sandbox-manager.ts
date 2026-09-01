@@ -84,7 +84,9 @@ export function createFakeSandboxManager(
       acquireCalls.push(input);
       const gate = manager.nextAcquireGate;
       manager.nextAcquireGate = undefined;
-      if (gate !== undefined) await gate; // 撑开起轮装配窗口——见 `nextAcquireGate`
+      if (gate !== undefined) {
+        await gate;
+      } // 撑开起轮装配窗口——见 `nextAcquireGate`
       const resumeToken =
         manager.nextResumeToken ?? input.resumeToken ?? input.sandboxName;
       manager.nextResumeToken = undefined;

@@ -77,8 +77,8 @@ function scanDoubleQuoted(input: string, start: number): { text: string; end: nu
       i += 2;
       continue;
     }
-    if (ch === "$") unsupported("变量展开", "$var");
-    if (ch === "`") unsupported("子 shell（命令替换）", "`...`");
+    if (ch === "$") {unsupported("变量展开", "$var");}
+    if (ch === "`") {unsupported("子 shell（命令替换）", "`...`");}
     text += ch;
     i += 1;
   }
@@ -153,7 +153,7 @@ export function parse(command: string): ParsedScript {
 
     if (ch === "'") {
       const end = command.indexOf("'", i + 1);
-      if (end === -1) throw new MiniBashParseError("mini-bash: 未闭合的单引号");
+      if (end === -1) {throw new MiniBashParseError("mini-bash: 未闭合的单引号");}
       currentToken = (currentToken ?? "") + command.slice(i + 1, end);
       i = end + 1;
       continue;

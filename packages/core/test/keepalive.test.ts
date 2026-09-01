@@ -147,7 +147,7 @@ describe("KA-2 闸门：补足语义", () => {
   it("连调 10 次只续第一次——这是 Vercel「每条消息盲加 5 分钟」的回归测试", async () => {
     const driver = addDriver(IDLE);
     const { keepAlive } = make(driver);
-    for (let i = 0; i < 10; i++) await keepAlive.keepAlive(IDLE);
+    for (let i = 0; i < 10; i++) {await keepAlive.keepAlive(IDLE);}
     expect(driver.calls).toHaveLength(0); // driver 一直报满水位，一次都不该放行
     expect(driver.remaining).toBe(IDLE);
   });
@@ -279,7 +279,7 @@ describe("KA-2 闸门：活动信号", () => {
   it("密集的 progress 信号被补足语义挡掉，不会每条都打网络", async () => {
     const driver = resetDriver();
     const { keepAlive } = make(driver);
-    for (let i = 0; i < 20; i++) keepAlive.onActivity(signal("progress"));
+    for (let i = 0; i < 20; i++) {keepAlive.onActivity(signal("progress"));}
     await vi.advanceTimersByTimeAsync(0);
     expect(driver.calls).toHaveLength(1);
   });

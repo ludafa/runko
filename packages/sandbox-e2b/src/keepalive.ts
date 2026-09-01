@@ -25,7 +25,7 @@ function createDriver(sandbox: E2bSandboxLike): KeepAliveDriver {
     // E2B 没有「还剩多少」的查询面——本地记账即可，见文件头。
     remainingMs: async () => undefined,
     renew: async (targetMs) => {
-      if (sandbox.setTimeout === undefined) throw new Error(KEEPALIVE_UNSUPPORTED_MESSAGE);
+      if (sandbox.setTimeout === undefined) {throw new Error(KEEPALIVE_UNSUPPORTED_MESSAGE);}
       await sandbox.setTimeout(targetMs);
     },
   };
@@ -39,8 +39,8 @@ export function createE2bKeepAlive(
   sandbox: E2bSandboxLike,
   opts: KeepAliveOptions | undefined,
 ): KeepAlive | undefined {
-  if (opts === undefined) return undefined;
+  if (opts === undefined) {return undefined;}
   // 提前失败：等到第一次续期才发现补不了期，那时错误会被闸门吞进 onRenew，很难查。
-  if (sandbox.setTimeout === undefined) throw new Error(KEEPALIVE_UNSUPPORTED_MESSAGE);
+  if (sandbox.setTimeout === undefined) {throw new Error(KEEPALIVE_UNSUPPORTED_MESSAGE);}
   return createKeepAlive(createDriver(sandbox), opts);
 }

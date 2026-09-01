@@ -32,14 +32,14 @@ function parseArgs(args: string[]): FindOptions | { error: string } {
     const arg = args[i];
     if (arg === "-name") {
       const value = args[i + 1];
-      if (value === undefined) return { error: "find: -name requires an argument" };
+      if (value === undefined) {return { error: "find: -name requires an argument" };}
       namePattern = value;
       i += 2;
       continue;
     }
     if (arg === "-type") {
       const value = args[i + 1];
-      if (value !== "f" && value !== "d") return { error: "find: -type requires 'f' or 'd'" };
+      if (value !== "f" && value !== "d") {return { error: "find: -type requires 'f' or 'd'" };}
       type = value;
       i += 2;
       continue;
@@ -55,9 +55,9 @@ const GLOB_SPECIAL_CHARS = new Set([".", "+", "^", "$", "{", "}", "(", ")", "|",
 function nameGlobToRegExp(pattern: string): RegExp {
   let source = "^";
   for (const ch of pattern) {
-    if (ch === "*") source += ".*";
-    else if (ch === "?") source += ".";
-    else source += GLOB_SPECIAL_CHARS.has(ch) ? `\\${ch}` : ch;
+    if (ch === "*") {source += ".*";}
+    else if (ch === "?") {source += ".";}
+    else {source += GLOB_SPECIAL_CHARS.has(ch) ? `\\${ch}` : ch;}
   }
   source += "$";
   return new RegExp(source);
@@ -71,7 +71,7 @@ interface FoundEntry {
 async function walk(fs: NimboFS, dir: string, out: FoundEntry[], signal: AbortSignal): Promise<void> {
   const entries: DirEntry[] = await fs.readdir(dir);
   for (const entry of entries) {
-    if (signal.aborted) return;
+    if (signal.aborted) {return;}
     const childPath = dir === "/" ? `/${entry.name}` : `${dir}/${entry.name}`;
     out.push({ path: childPath, stat: entry });
     if (entry.type === "dir") {
@@ -105,10 +105,10 @@ export const find: CommandFn = async (args, ctx) => {
   const nameRe = parsed.namePattern !== undefined ? nameGlobToRegExp(parsed.namePattern) : undefined;
   const wantType = parsed.type === "f" ? "file" : parsed.type === "d" ? "dir" : undefined;
   const matched = results.filter((entry) => {
-    if (wantType !== undefined && entry.stat.type !== wantType) return false;
+    if (wantType !== undefined && entry.stat.type !== wantType) {return false;}
     if (nameRe !== undefined) {
       const name = entry.path === "/" ? "/" : (entry.path.split("/").pop() ?? "");
-      if (!nameRe.test(name)) return false;
+      if (!nameRe.test(name)) {return false;}
     }
     return true;
   });

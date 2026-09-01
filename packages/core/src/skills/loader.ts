@@ -39,18 +39,18 @@ function stripQuotes(value: string): string {
 /** frontmatter 只在文本最开头才生效（标准约定），不允许前导空行/空白。 */
 function parseFrontmatter(text: string): ParsedFrontmatter {
   const match = text.match(FRONTMATTER_PATTERN);
-  if (match === null) return { data: {}, body: text };
+  if (match === null) {return { data: {}, body: text };}
 
   const rawBlock = match[1] ?? "";
   const body = text.slice(match[0].length);
   const data: Record<string, string> = {};
   for (const line of rawBlock.split(/\r?\n/)) {
-    if (line.trim() === "") continue;
+    if (line.trim() === "") {continue;}
     const separatorIndex = line.indexOf(":");
-    if (separatorIndex === -1) continue; // 不识别的行（如嵌套列表）直接忽略，够用即止
+    if (separatorIndex === -1) {continue;} // 不识别的行（如嵌套列表）直接忽略，够用即止
     const key = line.slice(0, separatorIndex).trim();
     const value = stripQuotes(line.slice(separatorIndex + 1).trim());
-    if (key !== "") data[key] = value;
+    if (key !== "") {data[key] = value;}
   }
   return { data, body };
 }
@@ -69,8 +69,8 @@ function deriveDescriptionFromFirstLine(markdown: string): string {
       inFencedBlock = !inFencedBlock;
       continue;
     }
-    if (inFencedBlock) continue;
-    if (line === "") continue;
+    if (inFencedBlock) {continue;}
+    if (line === "") {continue;}
     return line;
   }
   return "";
@@ -111,7 +111,7 @@ async function collectRealDirectoryFiles(rootDir: string, exclude: string): Prom
   async function walk(dir: string, relDir: string): Promise<void> {
     const entries = (await nodeFs.readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of entries) {
-      if (relDir === "" && entry.name === exclude) continue;
+      if (relDir === "" && entry.name === exclude) {continue;}
       const relPath = relDir === "" ? entry.name : `${relDir}/${entry.name}`;
       const fullPath = nodePath.join(dir, entry.name);
       if (entry.isDirectory()) {
@@ -165,7 +165,7 @@ async function collectFSFiles(fs: NimboFS, rootPath: string, exclude: string): P
   async function walk(dirPath: string, relDir: string): Promise<void> {
     const entries = [...(await fs.readdir(dirPath))].sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of entries) {
-      if (relDir === "" && entry.name === exclude) continue;
+      if (relDir === "" && entry.name === exclude) {continue;}
       const relPath = relDir === "" ? entry.name : `${relDir}/${entry.name}`;
       const fullPath = joinVirtualPath(dirPath, entry.name);
       if (entry.type === "dir") {

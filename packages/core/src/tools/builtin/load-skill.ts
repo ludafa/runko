@@ -42,7 +42,7 @@ export interface CreateLoadSkillToolOptions {
 
 function formatAttachedFiles(skill: Skill): string {
   const relPaths = Object.keys(skill.files ?? {});
-  if (relPaths.length === 0) return "";
+  if (relPaths.length === 0) {return "";}
   const list = relPaths.map((relPath) => `- ${skillMountPath(skill.name, relPath)}`).join("\n");
   return `\n\n---\nAttached files (read them with read-file):\n${list}`;
 }

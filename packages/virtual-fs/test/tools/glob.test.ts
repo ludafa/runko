@@ -33,7 +33,7 @@ describe("glob", () => {
 
   it("truncates at the 1000-match cap with guidance to narrow the pattern", async () => {
     const files: Record<string, string> = {};
-    for (let i = 0; i < 1200; i++) files[`f${i}.ts`] = "x";
+    for (let i = 0; i < 1200; i++) {files[`f${i}.ts`] = "x";}
     const fs = fromMemory(files);
     const tool = createGlobTool();
 
@@ -46,7 +46,7 @@ describe("glob", () => {
 
   it("does not truncate when the match count lands exactly on the 1000 cap (boundary: <= is not truncated)", async () => {
     const files: Record<string, string> = {};
-    for (let i = 0; i < 1000; i++) files[`f${i}.ts`] = "x";
+    for (let i = 0; i < 1000; i++) {files[`f${i}.ts`] = "x";}
     const fs = fromMemory(files);
     const tool = createGlobTool();
 
@@ -160,7 +160,7 @@ describe("glob: native search path (ctx.fs.searchFiles)", () => {
 
   it("native and JS-fallback paths produce byte-identical truncation notices at the 1000/1200 cap", async () => {
     const files: Record<string, string> = {};
-    for (let i = 0; i < 1200; i++) files[`f${i}.ts`] = "x";
+    for (let i = 0; i < 1200; i++) {files[`f${i}.ts`] = "x";}
     const tool = createGlobTool();
 
     const nativeResult = expectText(await tool.execute({ pattern: "*.ts" }, makeCtx(new NativeSearchFake(fromMemory(files)))));

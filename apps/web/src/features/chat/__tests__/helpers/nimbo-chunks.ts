@@ -221,7 +221,9 @@ export function toChunkEnvelopes(
 ): ChunkEnvelope[] {
   let seq = startSeq;
   return chunks.map((chunk) => {
-    if (!isDurableChunk(chunk)) return chunkFrame(chunk);
+    if (!isDurableChunk(chunk)) {
+      return chunkFrame(chunk);
+    }
     seq += 1;
     return chunkFrame(chunk, seq);
   });
@@ -384,8 +386,9 @@ export function toReplayFrames(
 export function toolPartsOf(message: NimboUIMessage): ToolUIPart<UITools>[] {
   const result: ToolUIPart<UITools>[] = [];
   for (const part of message.parts) {
-    if (isToolUIPart<UITools>(part) && part.type !== 'dynamic-tool')
+    if (isToolUIPart<UITools>(part) && part.type !== 'dynamic-tool') {
       result.push(part);
+    }
   }
   return result;
 }
@@ -401,9 +404,13 @@ export function toolPartById(
 /** Concatenates every `text` part on a message. */
 export function collectText(message: NimboUIMessage | undefined): string {
   let text = '';
-  if (message === undefined) return text;
+  if (message === undefined) {
+    return text;
+  }
   for (const part of message.parts) {
-    if (part.type === 'text') text += part.text;
+    if (part.type === 'text') {
+      text += part.text;
+    }
   }
   return text;
 }

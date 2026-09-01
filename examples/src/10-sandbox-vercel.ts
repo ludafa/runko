@@ -91,7 +91,7 @@ function createFakeSandbox(): VercelSandboxLike {
   const fs: VercelFileSystemLike = {
     async readFile(path) {
       const data = files.get(path);
-      if (data === undefined) throw notFound(path);
+      if (data === undefined) {throw notFound(path);}
       return data;
     },
     async writeFile(path, data) {
@@ -113,7 +113,7 @@ function createFakeSandbox(): VercelSandboxLike {
     },
     async stat(path) {
       const data = files.get(path);
-      if (data === undefined && !dirs.has(path)) throw notFound(path);
+      if (data === undefined && !dirs.has(path)) {throw notFound(path);}
       const isDir = data === undefined;
       const result: VercelStatsLike = { isDirectory: () => isDir, isFile: () => !isDir, size: data?.byteLength ?? 0, mtimeMs: Date.now() };
       return result;

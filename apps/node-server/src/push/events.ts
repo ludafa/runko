@@ -22,15 +22,22 @@ const LOG_SCOPE = 'push';
  */
 export function resolveEnabledEvents(log?: Logger): ReadonlySet<PushKind> {
   const raw = process.env.CHAT_PUSH_EVENTS?.trim();
-  if (raw === undefined || raw.length === 0) return new Set(PUSH_KINDS);
+  if (raw === undefined || raw.length === 0) {
+    return new Set(PUSH_KINDS);
+  }
 
   const enabled = new Set<PushKind>();
   const unknown: string[] = [];
   for (const part of raw.split(',')) {
     const value = part.trim();
-    if (value.length === 0) continue;
-    if (isPushKind(value)) enabled.add(value);
-    else unknown.push(value);
+    if (value.length === 0) {
+      continue;
+    }
+    if (isPushKind(value)) {
+      enabled.add(value);
+    } else {
+      unknown.push(value);
+    }
   }
   if (unknown.length > 0) {
     log?.warn(LOG_SCOPE, 'CHAT_PUSH_EVENTS 里有认不出的值，已忽略', {

@@ -99,7 +99,7 @@ function createFakeSandbox(): E2bSandboxLike {
     files: {
       async read(path) {
         const file = files.get(path);
-        if (file === undefined) throw notFound(path);
+        if (file === undefined) {throw notFound(path);}
         return file.data;
       },
       async write(path, data) {
@@ -111,8 +111,8 @@ function createFakeSandbox(): E2bSandboxLike {
       async list(path, opts) {
         void opts; // demo fake always lists one level, matching the default depth
         const entries: E2bEntryInfo[] = [];
-        for (const [p, f] of files) if (dirnameOf(p) === path) entries.push({ name: basenameOf(p), type: "file", path: p, size: f.data.byteLength, modifiedTime: f.modifiedTime });
-        for (const d of dirs) if (d !== path && dirnameOf(d) === path) entries.push({ name: basenameOf(d), type: "dir", path: d, size: 0 });
+        for (const [p, f] of files) {if (dirnameOf(p) === path) {entries.push({ name: basenameOf(p), type: "file", path: p, size: f.data.byteLength, modifiedTime: f.modifiedTime });}}
+        for (const d of dirs) {if (d !== path && dirnameOf(d) === path) {entries.push({ name: basenameOf(d), type: "dir", path: d, size: 0 });}}
         return entries;
       },
       async remove(path) {
@@ -126,8 +126,8 @@ function createFakeSandbox(): E2bSandboxLike {
       },
       async getInfo(path) {
         const file = files.get(path);
-        if (file !== undefined) return { name: basenameOf(path), type: "file", path, size: file.data.byteLength, modifiedTime: file.modifiedTime };
-        if (dirs.has(path)) return { name: basenameOf(path), type: "dir", path, size: 0 };
+        if (file !== undefined) {return { name: basenameOf(path), type: "file", path, size: file.data.byteLength, modifiedTime: file.modifiedTime };}
+        if (dirs.has(path)) {return { name: basenameOf(path), type: "dir", path, size: 0 };}
         throw notFound(path);
       },
     },
