@@ -10,7 +10,7 @@ import { sql } from "kysely";
 import type { Flavor } from "./flavor.js";
 import { traitsOf } from "./flavor.js";
 import type { NimboDatabase } from "./schema.js";
-import { DECISIONS_TABLE, LEDGER_TABLE, QUEUE_TABLE } from "./schema.js";
+import { DECISIONS_TABLE, LEASES_TABLE, LEDGER_TABLE, QUEUE_TABLE } from "./schema.js";
 
 export interface MigrateOptions {
   flavor: Flavor;
@@ -68,7 +68,22 @@ export async function migrate(db: Kysely<NimboDatabase>, opts: MigrateOptions): 
     // 幂等插入吞掉，调用方读回来发现自己不在队列里，换个号重来（见 `stores.ts` 的 `enqueue`）。
     .addUniqueConstraint("nimbo_queue_seq_uk", ["conversation_id", "seq"])
     .execute();
-  // ⚠️ **`migrate()` 只做首建，不做 schema 演进。** 三张表全是 `CREATE TABLE IF NOT
+  // [租约表](../../../docs/terms.md)：多进程下的归属仲裁机制。单进程用不上它——内存版
+  // 的归属表跟进程同生共死，根本不落库；这张表建了也只是空着，没有代价。
+  await db.schema
+    .createTable(LEASES_TABLE)
+    .ifNotExists()
+    .addColumn("conversation_id", key, (c) => c.notNull())
+    .addColumn("holder", "varchar(255)")
+    // 令牌也要显式排序规则：MySQL 默认大小写不敏感，两个只差大小写的令牌会被当成同一个。
+    .addColumn("lease_token", sql.raw(t.keyColumnType))
+    .addColumn("seq_watermark", t.intColumnType, (c) => c.notNull())
+    .addColumn("heartbeat_at", t.intColumnType, (c) => c.notNull())
+    .addColumn("acquired_at", t.intColumnType, (c) => c.notNull())
+    .addPrimaryKeyConstraint("nimbo_leases_pk", ["conversation_id"])
+    .execute();
+
+  // ⚠️ **`migrate()` 只做首建，不做 schema 演进。** 四张表全是 `CREATE TABLE IF NOT
   // EXISTS`：表已经存在时它是彻底的 no-op，**不会**改列、加列或改排序规则。所以后续版本
   // 若动了 schema（哪怕只是给某列换排序规则），老库必须由宿主自己出一次迁移——本包不
   // 带版本表、不记 migration 历史。README 与 `schema.sql` 里写的是同一句承诺。

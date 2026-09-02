@@ -4,7 +4,7 @@ slug: arbitration-impl
 view: 技术
 layer: 逻辑层
 module: 归属仲裁
-packages: ["@nimbo/agent", "@nimbo/persist-sql", "@nimbo/durable-object"]
+packages: ["@nimbo/agent", "@nimbo/persist-kysely", "@nimbo/durable-object"]
 tags: ["归属仲裁机制", "租约", "租期标识", "CAS", "心跳"]
 related: ["logic/arbitration/features/arbitration-impl.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -16,7 +16,8 @@ related: ["logic/arbitration/features/arbitration-impl.md", "architecture/tech/a
 > 宿主层那三样可替换能力：[沙盒](../../../host/contract/tech/sandbox.md) · [持久化](../../../host/contract/tech/persistence.md) · [流分发](../../../host/contract/tech/stream-fanout.md)。
 > 依赖/延续：[优雅关闭与崩溃恢复](../../orchestration/tech/graceful-shutdown.md)（[交权](../../../terms.md)与收尾）· [排队与插话](../../orchestration/tech/steer-and-queue.md)（释放归属时的竞态）。
 >
-> **状态：接口未定稿。** 三种实现的边界与硬约束已定，方法签名待定。
+> **状态：接口已定稿、租约版已落地**（2026-09-01）。方法签名见 §8.1，三个时间参数的
+> 定案见 §8.3/§8.4，施工进展见[施工计划](../plans/arbitration-impl.md)。
 
 ## 1. 一句话
 
@@ -116,9 +117,45 @@ flowchart LR
 - **多节点下行为集合变大**：会出现「一轮跑到一半被告知你已经不是主人了」。**测试要专门覆盖这条路。**
 - **崩溃仍然不恢复**：进程被强杀走老路（补一条「已停止」），因为它没停在干净边界上。
 
-## 8. TODO（未定）
+## 8. 四个待定项：**全部定案**
 
-- [ ] 接口方法签名（授予 / 回收 / 续期 / 执法这四件事怎么表达）。
-- [ ] 心跳间隔与超时接管阈值的默认值、可配范围。
-- [ ] 交权宽限期的默认值（正在干活时收到交权，等多久降级成停止）。
-- [ ] 「失去独占权」怎么通知到正在跑的轮编排——回调、信号，还是每次写入的返回值。
+原来这里列了四条「未定」。前两条在 `@nimbo/agent` 落地时（K2）就由代码答了，后两条
+2026-09-01 由构建者拍板。**施工前请以本节为准，别再照着旧的 TODO 重新设计一遍。**
+
+### 8.1 接口方法签名 —— ✅ 已答（K2）
+
+`Arbitration`：`acquire` / `inspect` / `listStale` / `clearStale`；
+`Grant`：`holder` / `signal` / `valid` / `nextSeq()` / `release()`。
+见 [`packages/agent/src/arbitration.ts`](../../../../packages/agent/src/arbitration.ts)。
+
+**注意没有显式的「续期」方法**——心跳是租约版实现内部的事，接口上看不见。这是对的：
+按 §2 的约束一，轮编排不该知道「租期标识」这个词，自然也不该知道有心跳这回事。
+
+### 8.2 「失去独占权」怎么通知 —— ✅ 已答（K2）
+
+**两条路并行，缺一不可**：
+
+| 路 | 形态 | 管什么 |
+|---|---|---|
+| **推** | `grant.signal` abort | 正在跑的那一轮立刻走既有的中断收尾（不需要任何新形状） |
+| **拉** | `nextSeq()` 返回 `lost_ownership` | 保证**写入**不会漏过——信号可能来不及传播，但取号一定会撞上 |
+
+### 8.3 心跳间隔与超时接管阈值 —— ✅ 定案 2026-09-01
+
+**心跳 5 秒 / 判死 60 秒**（12 拍）。**这是两头都往保守挪的组合，不是折中**：
+
+- **心跳快 → 老持有者更快知道自己出局**。它的心跳 CAS 打不中就说明令牌被换了，5 秒内
+  就能 abort 掉正在跑的那一轮。这是 §4.2 的 **safety** 那一半。
+- **阈值长 → 别人几乎不可能误接管**。要连丢 12 拍。这是**故意牺牲 liveness**：宁可崩溃
+  后让用户多转一分钟圈，也不要出现两个写入方。
+
+**两个代价，实现时不要偷偷抹掉**：① 崩溃后的接管延迟是 60 秒——想让用户早点知道，应该
+在[接入层](../../../terms.md)提示「这一轮所在的节点失联了」，**而不是把阈值调小**；
+② 写库频率是一个会话一条 UPDATE / 5s，1000 个并发会话约 200 QPS。
+
+**校验**：阈值必须 ≥ 3× 心跳，`leaseArbitration()` 入参里**配错当场抛**。当前是 12×。
+
+### 8.4 交权宽限期 —— ✅ 定案 2026-09-01
+
+**15 秒**，直接复用 `@nimbo/agent` 的 `DEFAULT_SHUTDOWN_GRACE_MS`。两处用同一个数才不会
+互相打架（k8s 的 `terminationGracePeriodSeconds` 默认 30 秒，留一半余量给连接关闭与进程退出）。

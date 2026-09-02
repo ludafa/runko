@@ -1,5 +1,5 @@
 /**
- * 三张表的 Kysely 类型。**这是本包唯一的「表长什么样」的事实来源**——DDL 与全部查询
+ * 四张表的 Kysely 类型。**这是本包唯一的「表长什么样」的事实来源**——DDL 与全部查询
  * 都从它推类型，改一个字段编译器会把所有该改的地方指出来。
  *
  * 字段语义见[架构总纲 §3](../../../docs/architecture/tech/agent-kernel.md)，不在这里复述。
@@ -14,6 +14,7 @@
 export const LEDGER_TABLE = "nimbo_ledger";
 export const DECISIONS_TABLE = "nimbo_decisions";
 export const QUEUE_TABLE = "nimbo_queue";
+export const LEASES_TABLE = "nimbo_leases";
 
 /** [账本](../../../docs/terms.md)：一个会话的全部成品消息。 */
 export interface LedgerTable {
@@ -51,6 +52,33 @@ export interface QueueTable {
 }
 
 /**
+ * [租约表](../../../docs/terms.md)：**多进程下的[归属仲裁机制](../../../docs/terms.md)**。
+ *
+ * 一个会话一行，长期存在——`release()` 只把 `holder`/`lease_token` 置空，**不删行**，
+ * 这样 `seq_watermark` 跨释放保留，下次抢占不用回账本重新问一次水位。
+ */
+export interface LeasesTable {
+  conversation_id: string;
+  /** 不透明字符串（pod 地址 / machine id / 随便什么），框架存它、传它，**不解释它**。空 = 当前没人持有。 */
+  holder: string | null;
+  /**
+   * [租期标识](../../../docs/terms.md)：调用方生成的唯一串（实现用 `crypto.randomUUID()`），
+   * **只需唯一、不需递增**——技术方案原文写的是 ULID，但它的可排序性在这里一次都没用到，
+   * 所以不为它加一个依赖。
+   *
+   * 粒度是「一次租期」而不是「一个进程」——同一个进程两次抢占拿到两个不同的令牌，
+   * 旧的那个此后一律被拒。拿 `holder` 当令牌会在「A 失联 → B 接管 → B 挂 → A 重新
+   * 抢占」时放行 A 滞留在网络里的旧写入。
+   */
+  lease_token: string | null;
+  /** [账本](../../../docs/terms.md)的 seq 水位。取号与「校验我还持有」是同一条 UPDATE。 */
+  seq_watermark: number;
+  /** 最后一次心跳的时刻。**判死靠它**：`now - heartbeat_at > 阈值` 即可被接管。 */
+  heartbeat_at: number;
+  acquired_at: number;
+}
+
+/**
  * 本包要求的库形状。宿主自己带 Kysely 实例时，把它并进自己的 `Database` 类型：
  *
  * ```ts
@@ -63,4 +91,5 @@ export interface NimboDatabase {
   nimbo_ledger: LedgerTable;
   nimbo_decisions: DecisionsTable;
   nimbo_queue: QueueTable;
+  nimbo_leases: LeasesTable;
 }

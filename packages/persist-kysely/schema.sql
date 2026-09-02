@@ -1,10 +1,10 @@
--- nimbo 持久化的参考 DDL —— 三张表，三个方言各一份。
+-- nimbo 持久化的参考 DDL —— 四张表，三个方言各一份。
 --
 -- 两条路都留（见 docs/host/contract/tech/persistence.md §7）：
 --   ① 直接调包导出的 `migrate(db, { flavor })`，它跑的就是下面这些；
 --   ② 想并进自己的迁移体系（drizzle / prisma / flyway / 手写），照抄本文件。
 --
--- ⚠️ **`migrate()` 只做首建，不做 schema 演进**：三张表都是 `IF NOT EXISTS`，表已经
+-- ⚠️ **`migrate()` 只做首建，不做 schema 演进**：四张表都是 `IF NOT EXISTS`，表已经
 -- 存在时它是彻底的 no-op，不会改列、加列或改排序规则。后续版本若动了 schema，老库
 -- 必须由宿主自己出一次迁移——本包不带版本表、不记 migration 历史。
 --
@@ -48,6 +48,16 @@ CREATE TABLE IF NOT EXISTS nimbo_queue (
   CONSTRAINT nimbo_queue_seq_uk UNIQUE (conversation_id, seq)
 );
 
+CREATE TABLE IF NOT EXISTS nimbo_leases (
+  conversation_id varchar(255) NOT NULL,
+  holder          varchar(255),
+  lease_token     varchar(255),
+  seq_watermark   integer       NOT NULL,
+  heartbeat_at    integer       NOT NULL,
+  acquired_at     integer       NOT NULL,
+  CONSTRAINT nimbo_leases_pk PRIMARY KEY (conversation_id)
+);
+
 -- ===========================================================================
 -- PostgreSQL
 -- ===========================================================================
@@ -82,6 +92,16 @@ CREATE TABLE IF NOT EXISTS nimbo_queue (
   created_at      bigint       NOT NULL,
   CONSTRAINT nimbo_queue_pk PRIMARY KEY (conversation_id, id),
   CONSTRAINT nimbo_queue_seq_uk UNIQUE (conversation_id, seq)
+);
+
+CREATE TABLE IF NOT EXISTS nimbo_leases (
+  conversation_id varchar(255) NOT NULL,
+  holder          varchar(255),
+  lease_token     varchar(255),
+  seq_watermark   bigint       NOT NULL,
+  heartbeat_at    bigint       NOT NULL,
+  acquired_at     bigint       NOT NULL,
+  CONSTRAINT nimbo_leases_pk PRIMARY KEY (conversation_id)
 );
 
 -- ===========================================================================
@@ -122,4 +142,14 @@ CREATE TABLE IF NOT EXISTS nimbo_queue (
   created_at      bigint       NOT NULL,
   CONSTRAINT nimbo_queue_pk PRIMARY KEY (conversation_id, id),
   CONSTRAINT nimbo_queue_seq_uk UNIQUE (conversation_id, seq)
+);
+
+CREATE TABLE IF NOT EXISTS nimbo_leases (
+  conversation_id varchar(255) COLLATE utf8mb4_bin NOT NULL,
+  holder          varchar(255),
+  lease_token     varchar(255) COLLATE utf8mb4_bin,
+  seq_watermark   bigint       NOT NULL,
+  heartbeat_at    bigint       NOT NULL,
+  acquired_at     bigint       NOT NULL,
+  CONSTRAINT nimbo_leases_pk PRIMARY KEY (conversation_id)
 );

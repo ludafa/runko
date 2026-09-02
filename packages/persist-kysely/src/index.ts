@@ -33,6 +33,8 @@ import { createDecisionStore, createLedgerStore, createQueueStore } from "./stor
 export const NIMBO_PERSIST_KYSELY_VERSION = "0.0.0" as const;
 
 export type { Flavor, FlavorTraits } from "./flavor.js";
+export type { LeaseArbitrationOptions } from "./arbitration.js";
+export { leaseArbitration, DEFAULT_HEARTBEAT_MS, DEFAULT_TAKEOVER_MS } from "./arbitration.js";
 export type { MigrateOptions } from "./migrate.js";
 export { migrate } from "./migrate.js";
 export type { DecisionsTable, LedgerTable, NimboDatabase, QueueTable } from "./schema.js";
@@ -50,15 +52,15 @@ export interface KyselyPersistenceOptions {
 /**
  * 把一个 Kysely 实例装成 `Persistence`。
  *
- * 库的类型只要**包含** `NimboDatabase` 那三张表就行——你自己的表照常在同一个实例里，
+ * 库的类型只要**包含** `NimboDatabase` 那四张表就行——你自己的表照常在同一个实例里，
  * 两边互不干扰。
  */
 export function kyselyPersistence<DB extends NimboDatabase>(
   db: Kysely<DB>,
   opts: KyselyPersistenceOptions,
 ): Persistence {
-  // 收窄到本包认识的那三张表。`DB extends NimboDatabase` 已经保证宿主的库类型是
-  // `NimboDatabase` 的超集，而本包的查询只碰这三张表——所以这个收窄是安全的。
+  // 收窄到本包认识的那四张表。`DB extends NimboDatabase` 已经保证宿主的库类型是
+  // `NimboDatabase` 的超集，而本包的查询只碰这四张表——所以这个收窄是安全的。
   // 之所以要写出来，是 Kysely 的 `Kysely<DB>` 在 DB 上不变（invariant），泛型子类型
   // 关系传不过去；这是对接三方泛型容器的边界，隔离在这一行里。
   const scoped = db as unknown as Kysely<NimboDatabase>;

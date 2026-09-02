@@ -4,7 +4,7 @@ slug: arbitration-impl
 view: 功能
 layer: 逻辑层
 module: 归属仲裁
-packages: ["@nimbo/agent", "@nimbo/persist-sql", "@nimbo/durable-object"]
+packages: ["@nimbo/agent", "@nimbo/persist-kysely", "@nimbo/durable-object"]
 tags: ["归属仲裁机制", "租约", "租期标识", "CAS", "心跳"]
 related: ["logic/arbitration/tech/arbitration-impl.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -15,8 +15,6 @@ related: ["logic/arbitration/tech/arbitration-impl.md", "architecture/tech/agent
 > 宿主层那三样可替换能力：[沙盒](../../../host/contract/features/sandbox.md) · [持久化](../../../host/contract/features/persistence.md) · [流分发](../../../host/contract/features/stream-fanout.md)。
 > 依赖/延续：[优雅关闭与崩溃恢复](../../orchestration/features/graceful-shutdown.md)（[交权](../../../terms.md)的落地）。
 > 术语：[归属仲裁](../../../terms.md) · [归属仲裁机制](../../../terms.md) · [独占](../../../terms.md) · [租期标识](../../../terms.md)。
->
-> **状态：接口未定稿。** 三种实现的形态与边界已定，方法签名待定。
 
 ## 0. 一句话
 
@@ -87,11 +85,13 @@ related: ["logic/arbitration/tech/arbitration-impl.md", "architecture/tech/agent
 - **不替你转发**。框架给 `holder`，转发是[接入层](../../../terms.md)的活。
 - **崩溃不恢复**。进程被强杀时走的是老路（补一条「已停止」），因为它没停在干净边界上。
 
-**TODO（未定）**：
+**已定案**（2026-09-01，逐条理由见[技术方案 §8](../tech/arbitration-impl.md)）：
 
-- 接口方法签名。
-- 心跳间隔、超时接管阈值的默认值与可配范围。
-- 宽限期（正在干活时收到交权，等多久降级成停止）的默认值。
+- **接口方法签名** —— `acquire` / `inspect` / `listStale` / `clearStale` + `Grant` 的
+  `nextSeq` / `release`。注意**没有显式的「续期」方法**：心跳是实现内部的事，接口上看不见。
+- **心跳 5 秒 / 判死 60 秒**（12 拍）。两头都往保守挪：心跳快让老持有者更快知道自己出局，
+  阈值长让别人几乎不可能误接管。代价是崩溃后的接管延迟是 60 秒。
+- **交权宽限期 15 秒**，与 `shutdown()` 复用同一个默认值。
 
 ## 5. 成功标准
 

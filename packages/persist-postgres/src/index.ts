@@ -14,7 +14,7 @@
  * ```
  *
  * **已经在用 Kysely 了？** 别用这个包——直接装 `@nimbo/persist-kysely`，把你自己的
- * 实例给它，nimbo 的三张表和你的表就在同一个实例、同一套迁移之下。
+ * 实例给它，nimbo 的四张表和你的表就在同一个实例、同一套迁移之下。
  */
 import type { Persistence } from "@nimbo/agent";
 import type { NimboDatabase } from "@nimbo/persist-kysely";

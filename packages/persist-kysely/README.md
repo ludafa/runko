@@ -2,11 +2,11 @@
 
 nimbo 持久化的**核心实现**，底下是 [Kysely](https://kysely.dev)。
 
-三张表的读写与建表都在这儿；SQLite / PostgreSQL / MySQL 三个薄壳共用它。
+四张表的读写与建表都在这儿；SQLite / PostgreSQL / MySQL 三个薄壳共用它。
 
 ## 什么时候装它
 
-**你已经在用 Kysely。** 把你自己的实例给它，nimbo 的三张表和你的表就在同一个实例、
+**你已经在用 Kysely。** 把你自己的实例给它，nimbo 的四张表和你的表就在同一个实例、
 同一套迁移之下：
 
 ```ts
@@ -14,7 +14,7 @@ import { Kysely, PostgresDialect } from "kysely";
 import { kyselyPersistence, migrate } from "@nimbo/persist-kysely";
 import type { NimboDatabase } from "@nimbo/persist-kysely";
 
-// 把 nimbo 的三张表并进你自己的库类型
+// 把 nimbo 的四张表并进你自己的库类型
 interface MyDatabase extends NimboDatabase {
   my_users: MyUsersTable;
 }
@@ -29,7 +29,7 @@ createAgentRuntime(agent, {
 
 ### `migrate()` 的承诺范围
 
-**它只做首建，不做 schema 演进。** 三张表都是 `CREATE TABLE IF NOT EXISTS`——表已经
+**它只做首建，不做 schema 演进。** 四张表都是 `CREATE TABLE IF NOT EXISTS`——表已经
 存在时它是彻底的 no-op，**不会**改列、加列或改排序规则。所以：
 
 - 本包后续版本若动了 schema，**老库必须由你自己出一次迁移**。本包不带版本表、不记
@@ -95,21 +95,27 @@ createAgentRuntime(agent, {
 
 ## 不是只有这一条路
 
-**你的 schema 跟这三张表对不上？那就自己实现那三个接口**——那是[头等路径，不是降级方案](../../docs/host/contract/features/persistence.md)。
+**你的 schema 跟这四张表对不上？那就自己实现那三个接口**——那是[头等路径，不是降级方案](../../docs/host/contract/features/persistence.md)。
 一共十来个方法，架在你**已有的表**上通常比迁就本包的表更省事。
 
-自己实现的话，用一致性套件自测：
+自己实现的话，装上 [`@nimbo/conformance`](../conformance/README.md) 自测：
 
 ```ts
-import { runPersistenceConformance } from "@nimbo/agent/conformance";
+import { persistenceCases } from "@nimbo/conformance";
 
-runPersistenceConformance("我自己的实现", async () => ({
-  persistence: myPersistence(),
-  cleanup: async () => { /* … */ },
-}));
+describe("我自己的实现", () => {
+  for (const testCase of persistenceCases) {
+    it(testCase.name, async () => {
+      await testCase.run({ persistence: myPersistence() });
+    });
+  }
+});
 ```
 
-27 条不变量，接口注释里那些「写死了但容易漏」的边角它都替你验了。
+套件**不依赖任何测试框架**——它只导出 `{ name, run }` 这样的用例数据，`describe`/`it`
+由你来接，vitest / jest / node:test / Workers 上都能跑。
+
+31 条不变量，接口注释里那些「写死了但容易漏」的边角它都替你验了。
 
 ## 测试
 

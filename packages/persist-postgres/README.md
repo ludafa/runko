@@ -32,14 +32,14 @@ persist-mysql  ─┘
 ```
 
 **已经在用 Kysely 了？** 别用这个包——直接装 `@nimbo/persist-kysely`，把你自己的实例
-给它，nimbo 的三张表和你的表就在同一个实例、同一套迁移之下。
+给它，nimbo 的四张表和你的表就在同一个实例、同一套迁移之下。
 
 **一种库一个包**，所以本包只 `peerDependencies` `pg`——不会把别家的驱动拖进你的
 依赖树。
 
 ## 它存什么
 
-三张表：`nimbo_ledger`（账本）· `nimbo_decisions`（人工裁决留底）· `nimbo_queue`（待发队列）。
+四张表：`nimbo_ledger`（账本）· `nimbo_decisions`（人工裁决留底）· `nimbo_queue`（待发队列）· `nimbo_leases`（租约表）。
 表名固定，不提供前缀开关——要隔离请用 schema/database。
 
 **它不存你的东西。** nimbo 只认一个不透明的 `conversationId`，会话叫什么、属于谁，
