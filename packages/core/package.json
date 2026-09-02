@@ -54,8 +54,8 @@
     "ai": "^7"
   },
   "devDependencies": {
-    "@runko/mini-bash": "workspace:*",
-    "@runko/virtual-fs": "workspace:*",
+    "@runko/mini-bash": "workspace:^",
+    "@runko/virtual-fs": "workspace:^",
     "@types/node": "catalog:",
     "ai": "catalog:",
     "tsdown": "catalog:",

@@ -38,15 +38,15 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@runko/core": "workspace:*",
-    "@runko/virtual-fs": "workspace:*",
+    "@runko/core": "workspace:^",
+    "@runko/virtual-fs": "workspace:^",
     "zod": "catalog:"
   },
   "peerDependencies": {
     "ai": "^7"
   },
   "devDependencies": {
-    "@runko/conformance": "workspace:*",
+    "@runko/conformance": "workspace:^",
     "@types/node": "catalog:",
     "ai": "catalog:",
     "tsdown": "catalog:",

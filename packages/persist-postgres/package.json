@@ -38,15 +38,15 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@runko/agent": "workspace:*",
-    "@runko/persist-kysely": "workspace:*",
+    "@runko/agent": "workspace:^",
+    "@runko/persist-kysely": "workspace:^",
     "kysely": "catalog:"
   },
   "peerDependencies": {
     "pg": "^8"
   },
   "devDependencies": {
-    "@runko/conformance": "workspace:*",
+    "@runko/conformance": "workspace:^",
     "@types/node": "catalog:",
     "@types/pg": "catalog:",
     "kysely": "catalog:",

@@ -38,15 +38,15 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@runko/agent": "workspace:*",
-    "@runko/persist-kysely": "workspace:*",
+    "@runko/agent": "workspace:^",
+    "@runko/persist-kysely": "workspace:^",
     "kysely": "catalog:"
   },
   "peerDependencies": {
     "mysql2": "^3"
   },
   "devDependencies": {
-    "@runko/conformance": "workspace:*",
+    "@runko/conformance": "workspace:^",
     "@types/node": "catalog:",
     "kysely": "catalog:",
     "mysql2": "catalog:",

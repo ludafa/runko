@@ -38,14 +38,14 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@runko/agent": "workspace:*",
-    "@runko/core": "workspace:*"
+    "@runko/agent": "workspace:^",
+    "@runko/core": "workspace:^"
   },
   "peerDependencies": {
     "mongodb": "^7"
   },
   "devDependencies": {
-    "@runko/conformance": "workspace:*",
+    "@runko/conformance": "workspace:^",
     "@types/node": "catalog:",
     "mongodb": "catalog:",
     "tsdown": "catalog:",

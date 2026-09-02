@@ -38,11 +38,11 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@runko/core": "workspace:*",
+    "@runko/core": "workspace:^",
     "just-bash": "catalog:"
   },
   "devDependencies": {
-    "@runko/virtual-fs": "workspace:*",
+    "@runko/virtual-fs": "workspace:^",
     "@types/node": "catalog:",
     "ai": "catalog:",
     "tsdown": "catalog:",

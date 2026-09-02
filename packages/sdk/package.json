@@ -38,9 +38,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@runko/core": "workspace:*",
-    "@runko/mini-bash": "workspace:*",
-    "@runko/virtual-fs": "workspace:*"
+    "@runko/core": "workspace:^",
+    "@runko/mini-bash": "workspace:^",
+    "@runko/virtual-fs": "workspace:^"
   },
   "peerDependencies": {
     "ai": "^7"

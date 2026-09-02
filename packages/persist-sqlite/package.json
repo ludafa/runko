@@ -38,8 +38,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@runko/agent": "workspace:*",
-    "@runko/persist-kysely": "workspace:*",
+    "@runko/agent": "workspace:^",
+    "@runko/persist-kysely": "workspace:^",
     "kysely": "catalog:"
   },
   "peerDependencies": {
@@ -47,7 +47,7 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "catalog:",
-    "@runko/conformance": "workspace:*",
+    "@runko/conformance": "workspace:^",
     "@types/better-sqlite3": "catalog:",
     "@types/node": "catalog:",
     "better-sqlite3": "catalog:",
