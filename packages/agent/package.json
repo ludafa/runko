@@ -5,6 +5,7 @@
   "type": "module",
   "license": "ISC",
   "publishConfig": {
+    "access": "public",
     "registry": "https://registry.npmjs.org/"
   },
   "engines": {
