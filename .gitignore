@@ -29,3 +29,6 @@ apps/node-server/data.db
 # VitePress 文档站产物与缓存
 docs/.vitepress/cache/
 docs/.vitepress/dist/
+
+# npm pack 产物
+*.tgz
