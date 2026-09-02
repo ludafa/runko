@@ -1,6 +1,6 @@
 {
   "name": "@nimbo/mini-bash",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "NimboExec 实现：纯 TS 解释器（cat/grep/find/tail/head/echo），跑在任意 NimboFS 上",
   "type": "module",
   "license": "ISC",

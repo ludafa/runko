@@ -1,6 +1,6 @@
 {
   "name": "@nimbo/sandbox-vercel",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "NimboFS & NimboExec 同源工作区：适配 Vercel Sandbox（@vercel/sandbox 仅类型依赖，BYO sandbox 实例）",
   "type": "module",
   "license": "ISC",

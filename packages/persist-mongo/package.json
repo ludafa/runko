@@ -1,6 +1,6 @@
 {
   "name": "@nimbo/persist-mongo",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "持久化实现：MongoDB —— 第一个非关系型实现，直接落在三个领域接口上",
   "type": "module",
   "license": "ISC",

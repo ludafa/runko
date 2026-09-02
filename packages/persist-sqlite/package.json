@@ -1,6 +1,6 @@
 {
   "name": "@nimbo/persist-sqlite",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "持久化实现：SQLite（better-sqlite3）—— 你只有一个驱动实例时装这个",
   "type": "module",
   "license": "ISC",

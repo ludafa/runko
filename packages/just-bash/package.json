@@ -1,6 +1,6 @@
 {
   "name": "@nimbo/just-bash",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "NimboExec 实现：适配 vercel-labs/just-bash 的全语法档 bash（if/for/while/case/函数），跑在任意 NimboFS 上",
   "type": "module",
   "license": "ISC",
