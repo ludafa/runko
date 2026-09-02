@@ -4,6 +4,9 @@
   "description": "持久化实现：PostgreSQL（pg）—— 你只有一个连接池时装这个",
   "type": "module",
   "license": "ISC",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
+  },
   "engines": {
     "node": ">=24"
   },

@@ -4,6 +4,9 @@
   "description": "nimbo 主包（门面）：re-export core + virtual-fs（+ mini-bash），batteries-included",
   "type": "module",
   "license": "ISC",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
+  },
   "engines": {
     "node": ">=24"
   },

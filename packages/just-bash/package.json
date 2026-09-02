@@ -4,6 +4,9 @@
   "description": "NimboExec 实现：适配 vercel-labs/just-bash 的全语法档 bash（if/for/while/case/函数），跑在任意 NimboFS 上",
   "type": "module",
   "license": "ISC",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
+  },
   "engines": {
     "node": ">=24"
   },
