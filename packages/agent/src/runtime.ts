@@ -399,12 +399,15 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
           try {
           const allocated = await acquired.grant.nextSeq();
           if (allocated.ok) {
-            // 一条**空 parts 的 assistant 消息**承载收尾 metadata——形状与 core 自己在
-            // 「首步之前就失败」时造的占位消息同源，界面据 `status` 显示「已停止」。
+            // 一条**只有 `step-start` 的 assistant 消息**承载收尾 metadata——形状与 core
+            // 自己在「首步之前就失败」时造的占位消息同源（`loop.ts` 的 `placeholder`），
+            // 界面据 `status` 显示「已停止」。
+            // **不能写空 parts**：ai 的 `validateUIMessages()` 拒绝它，而每一轮起轮都要拿
+            // 整个账本过一次校验——写进去一条空的，这个会话此后永远起不了新轮。
             const message: NimboUIMessage = {
               id: `turn-interrupted-${String(allocated.seq)}`,
               role: "assistant",
-              parts: [],
+              parts: [{ type: "step-start" }],
               metadata: {
                 usage: {},
                 status: "interrupted",

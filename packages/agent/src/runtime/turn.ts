@@ -67,8 +67,16 @@ function isVisibleChunk(chunk: NimboChunk): boolean {
  * 会话 id 本来就稳定且唯一，直接拿它当 session id。
  */
 export function buildResumeState(conversationId: string, entries: readonly LedgerEntry[]): SessionState {
-  const messages = entries.map((entry) => entry.message);
-  const turn = messages.reduce((max, message) => Math.max(max, message.metadata?.turn ?? 0), 0);
+  // **滤掉 parts 为空的行**。ai 的 `validateUIMessages()` 拒绝空 parts，而这一步的结果
+  // 每一轮都要过它一次——账本里只要有一条这样的行，这个会话就**永远起不了新轮**。
+  //
+  // 本包不再产出这种行（收尾标记改成了 `[{ type: "step-start" }]`），但 0.0.x 早期版本
+  // 写下的存量行还在别人库里躺着，滤掉它们才能让那些会话自愈。丢掉也不损失什么：
+  // 空 parts 的那条只承载 metadata，模型上下文里本来就看不到它。
+  const messages = entries
+    .map((entry) => entry.message)
+    .filter((message) => message.parts.length > 0);
+  const turn = entries.reduce((max, entry) => Math.max(max, entry.message.metadata?.turn ?? 0), 0);
   const createdAt = entries[0]?.ts ?? Date.now();
   // 复用 core 自己导出的 schema——这是反序列化边界（行可能来自 DB 的 JSON 列），
   // 与 core 内部 `createSession({resume})` 那次校验是纵深防御，不是冗余。
@@ -218,8 +226,9 @@ async function finishAborted(
 const userMessageWritten = new WeakSet<ActiveTurn>();
 
 /**
- * 把一条**收尾标记**写进账本：空 parts 的 assistant 消息，只承载 metadata。形状与
- * `recover()` 补的那条、以及 core 在「首步之前就失败」时造的占位消息同源。
+ * 把一条**收尾标记**写进账本：只有一个 `step-start` 的 assistant 消息，不带内容、
+ * 只承载 metadata。形状与 `recover()` 补的那条、以及 core 在「首步之前就失败」时造的
+ * 占位消息同源。
  *
  * **为什么必须落账本、光发一帧不够**：chunk 一律不落库，只发帧的话重连的客户端
  * （以及此后任何一次回放）都看不到「已停止 / 失败」，界面上那一轮永远悬在半空。
@@ -238,7 +247,12 @@ async function appendSettleMessage(
   const message: NimboUIMessage = {
     id: `turn-${metadata.status ?? "settled"}-${String(allocated.seq)}`,
     role: "assistant",
-    parts: [],
+    // **必须至少有一个 part**：ai 的 `validateUIMessages()` 拒绝空 parts
+    // （`Message must contain at least one part`），而每一轮起轮都要拿整个账本过一次
+    // 校验——写进去一条空的，这个会话此后**永远起不了新轮**。
+    // `step-start` 是 core 自己在「首步之前就失败」时用的同一个占位（`loop.ts` 的
+    // `placeholder`）：结构帧、不带内容、不会污染下一轮的模型上下文。
+    parts: [{ type: "step-start" }],
     metadata,
   };
   const written = await ctx.persistence.ledger.append({

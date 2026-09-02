@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { AgentRuntime, Frame, TurnInput, TurnPreparation } from "../src/index.js";
 import { createAgentRuntime, memoryPersistence } from "../src/index.js";
+import { buildResumeState } from "../src/runtime/turn.js";
 import type { FakeSession } from "./helpers/fake-session.js";
 import { assistantMessage, createFakeSessionFactory, endTurnChunk } from "./helpers/fake-session.js";
 
@@ -435,9 +436,12 @@ describe("停止", () => {
     const ledger14 = await ledgerMessages(runtime, "conv-14");
     expect(ledger14.map((m) => m.role)).toEqual(["user", "assistant"]);
     expect(ledger14.at(-1)).toMatchObject({
-      parts: [],
+      parts: [{ type: "step-start" }],
       metadata: { status: "interrupted", error: { code: "aborted" } },
     });
+    // **账本里不能有 parts 为空的消息**：ai 的 `validateUIMessages()` 拒绝它，而每一轮
+    // 起轮都要拿整个账本过一次校验——写进去一条空的，这个会话就永远起不了新轮。
+    expect(ledger14.every((m) => m.parts.length > 0)).toBe(true);
     // 假 session 从没被造出来过。
     expect(sessions.sessions).toHaveLength(0);
   });
@@ -730,12 +734,15 @@ describe("驱动器的失败路径", () => {
       expect((await runtime.getActivity("conv-24")).active).toBe(false);
     });
     const messages = await ledgerMessages(runtime, "conv-24");
-    // 成品消息 + 一条承载「失败」的收尾标记（空 parts）。标记落账本才能让重连的客户端看到。
+    // 成品消息 + 一条承载「失败」的收尾标记（只有一个 `step-start`）。标记落账本才能让重连的客户端看到。
     expect(messages.map((m) => m.role)).toEqual(["user", "assistant", "assistant"]);
-    expect(messages.at(-1)).toMatchObject({ parts: [], metadata: { status: "failed" } });
+    expect(messages.at(-1)).toMatchObject({ parts: [{ type: "step-start" }], metadata: { status: "failed" } });
+    expect(messages.every((m) => m.parts.length > 0)).toBe(true);
     // 成品消息只写一次：`finalize` 自己抛的时候不能被 catch 分支重跑（重跑会重新取号，
     // 账本的 (conversationId, seq) 幂等挡不住，同一条回复写出两行）。
-    expect(messages.filter((m) => m.parts.length > 0)).toHaveLength(2);
+    // **按「带正文」判**，不按「parts 非空」——收尾标记也有一个 `step-start`。
+    const withText = messages.filter((m) => m.parts.some((p) => p.type === "text"));
+    expect(withText).toHaveLength(2);
   });
 
   it("finalize 抛错时不会把成品消息写两遍", async () => {
@@ -762,7 +769,8 @@ describe("驱动器的失败路径", () => {
     });
     const messages = await ledgerMessages(runtime, "conv-25");
     // 那条成品消息一行都没写进去（第一次就炸了、不重试），但**绝不能出现两行**。
-    expect(messages.filter((m) => m.role === "assistant" && m.parts.length > 0)).toHaveLength(0);
+    // 同上，按「带正文」判——收尾标记的 `step-start` 不算成品。
+    expect(messages.filter((m) => m.role === "assistant" && m.parts.some((p) => p.type === "text"))).toHaveLength(0);
   });
 });
 
@@ -858,7 +866,8 @@ describe("收尾路径的健壮性", () => {
     // 账本里必须还有这句话，否则它就是凭空消失了。
     expect(messages.map((m) => m.role)).toEqual(["user", "assistant"]);
     expect(messages[0]?.parts).toEqual([{ type: "text", text: "帮我改一下 README" }]);
-    expect(messages.at(-1)).toMatchObject({ parts: [], metadata: { status: "failed" } });
+    expect(messages.at(-1)).toMatchObject({ parts: [{ type: "step-start" }], metadata: { status: "failed" } });
+    expect(messages.every((m) => m.parts.length > 0)).toBe(true);
     // 会话没被这次失败卡死。
     expect(await runtime.enqueue("conv-32", { text: "再试一次" })).toMatchObject({ mode: "started" });
   });
@@ -933,5 +942,28 @@ describe("停止的竞态", () => {
 
     // 修复前：拿的是 await 之前那个 turn，abortTurn 什么都没停却返回 true。
     expect(await runtime.abort("conv-35")).toBe(false);
+  });
+});
+
+/**
+ * `buildResumeState` 的自愈能力。
+ *
+ * 0.0.x 早期版本把收尾标记写成了 `parts: []`，而 ai 的 `validateUIMessages()` 拒绝空
+ * parts——那些行还躺在别人库里，不滤掉的话那些会话**永远起不了新轮**。
+ */
+describe("buildResumeState 滤掉存量的空 parts 行", () => {
+  it("空 parts 的行不进 resume，其余原样保留", () => {
+    const now = Date.now();
+    const state = buildResumeState("conv-legacy", [
+      { conversationId: "conv-legacy", seq: 1, ts: now, message: { id: "m1", role: "user", parts: [{ type: "text", text: "你好" }] } },
+      // 早期版本写下的坏行
+      { conversationId: "conv-legacy", seq: 2, ts: now, message: { id: "m2", role: "assistant", parts: [], metadata: { turn: 1, usage: {}, status: "interrupted" } } },
+      { conversationId: "conv-legacy", seq: 3, ts: now, message: { id: "m3", role: "user", parts: [{ type: "text", text: "再来" }] } },
+    ]);
+
+    expect(state.messages.map((m) => m.id)).toEqual(["m1", "m3"]);
+    // 轮号仍然从**全部**行里推——被滤掉那条身上的 metadata 不该丢。
+    expect(state.turn).toBe(1);
+    expect(state.id).toBe("conv-legacy");
   });
 });
