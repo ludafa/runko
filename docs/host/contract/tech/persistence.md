@@ -129,7 +129,7 @@ persist-mysql  ─┘      三个 Store + migrate
 每个薄壳约 40 行，`peerDependencies` 只有自己那个驱动。
 
 **核心 `@nimbo/persist-kysely` 自己就能用**——已经在用 Kysely 的宿主直接装它，把自己的
-实例给它，nimbo 的三张表和宿主的表进同一个实例、同一套迁移。这跟 `persist-drizzle`
+实例给它，nimbo 的四张表和宿主的表进同一个实例、同一套迁移。这跟 `persist-drizzle`
 「吃你已有的 drizzle 实例」是同一个姿态。
 
 ### 8.2 用了 Kysely 之后，三方言的差异只剩五处
@@ -160,7 +160,7 @@ persist-mysql  ─┘      三个 Store + migrate
 > 读回来就是个 JS string，跟「还没解析的 JSON 文本」在类型上完全一样，猜不出来。
 > 手搓那版就是栽在这，被一致性套件在 pglite 上抓出来的。
 
-### 8.3 三张表
+### 8.3 四张表
 
 字段照[架构总纲 §3](../../../architecture/tech/agent-kernel.md)，不在这里复述。三点落地决定：
 
@@ -185,13 +185,19 @@ persist-mysql  ─┘      三个 Store + migrate
 比包本身更重要的是这个——**一套用例，喂给多个实现，逐个断言行为一致**：
 
 ```ts
-import { runPersistenceConformance } from "@nimbo/agent/conformance";
+import { persistenceCases } from "@nimbo/conformance";
 
-runPersistenceConformance("我自己的实现", async () => ({
-  persistence: myPersistence(),
-  cleanup: async () => { /* … */ },
-}));
+describe("我自己的实现", () => {
+  for (const testCase of persistenceCases) {
+    it(testCase.name, async () => {
+      await testCase.run({ persistence: myPersistence() });
+    });
+  }
+});
 ```
+
+套件单独发在 `@nimbo/conformance`，**不依赖任何测试框架**——它只导出 `{ name, run }`
+这样的用例数据，`describe`/`it` 由消费方来接。
 
 跑在哪几档：
 

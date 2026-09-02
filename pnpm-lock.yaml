@@ -647,12 +647,36 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3
     devDependencies:
+      '@nimbo/conformance':
+        specifier: workspace:*
+        version: link:../conformance
       '@types/node':
         specifier: ^24.13.3
         version: 24.13.3
       ai:
         specifier: 'catalog:'
         version: 7.0.20(zod@4.4.3)
+      tsdown:
+        specifier: 'catalog:'
+        version: 0.22.4(tsx@4.23.0)(typescript@7.0.2)
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.10(@types/node@24.13.3)(@vitest/coverage-v8@4.1.10)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
+
+  packages/conformance:
+    devDependencies:
+      '@nimbo/agent':
+        specifier: workspace:*
+        version: link:../agent
+      '@nimbo/core':
+        specifier: workspace:*
+        version: link:../core
+      '@types/node':
+        specifier: ^24.13.3
+        version: 24.13.3
       tsdown:
         specifier: 'catalog:'
         version: 0.22.4(tsx@4.23.0)(typescript@7.0.2)
@@ -753,6 +777,9 @@ importers:
       '@electric-sql/pglite':
         specifier: 'catalog:'
         version: 0.5.6
+      '@nimbo/conformance':
+        specifier: workspace:*
+        version: link:../conformance
       '@types/better-sqlite3':
         specifier: 'catalog:'
         version: 9.6.0
@@ -793,6 +820,9 @@ importers:
         specifier: workspace:*
         version: link:../core
     devDependencies:
+      '@nimbo/conformance':
+        specifier: workspace:*
+        version: link:../conformance
       '@types/node':
         specifier: ^24.13.3
         version: 24.13.3
@@ -821,6 +851,9 @@ importers:
         specifier: 'catalog:'
         version: 0.29.5
     devDependencies:
+      '@nimbo/conformance':
+        specifier: workspace:*
+        version: link:../conformance
       '@types/node':
         specifier: ^24.13.3
         version: 24.13.3
@@ -849,6 +882,9 @@ importers:
         specifier: 'catalog:'
         version: 0.29.5
     devDependencies:
+      '@nimbo/conformance':
+        specifier: workspace:*
+        version: link:../conformance
       '@types/node':
         specifier: ^24.13.3
         version: 24.13.3
@@ -883,6 +919,9 @@ importers:
       '@electric-sql/pglite':
         specifier: 'catalog:'
         version: 0.5.6
+      '@nimbo/conformance':
+        specifier: workspace:*
+        version: link:../conformance
       '@types/better-sqlite3':
         specifier: 'catalog:'
         version: 9.6.0

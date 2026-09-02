@@ -41,6 +41,7 @@
     "mongodb": "^7"
   },
   "devDependencies": {
+    "@nimbo/conformance": "workspace:*",
     "@types/node": "catalog:",
     "mongodb": "catalog:",
     "tsdown": "catalog:",

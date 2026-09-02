@@ -89,12 +89,22 @@ Mongo 没有 pglite 那样的进程内替身（`mongodb-memory-server` 是下载
 ## 不是只有这一条路
 
 **你的数据模型跟这三个集合对不上？那就自己实现那三个接口**——那是[头等路径，不是降级方案](../../docs/host/contract/features/persistence.md)。
-一共十来个方法。自己实现的话用一致性套件自测：
+一共十来个方法。自己实现的话，装上 [`@nimbo/conformance`](../conformance/README.md) 自测：
 
 ```ts
-import { runPersistenceConformance } from "@nimbo/agent/conformance";
-runPersistenceConformance("我自己的实现", async () => ({ persistence: myPersistence() }));
+import { persistenceCases } from "@nimbo/conformance";
+
+describe("我自己的实现", () => {
+  for (const testCase of persistenceCases) {
+    it(testCase.name, async () => {
+      await testCase.run({ persistence: myPersistence() });
+    });
+  }
+});
 ```
+
+套件**不依赖任何测试框架**——它只导出 `{ name, run }` 这样的用例数据，`describe`/`it`
+由你来接，vitest / jest / node:test / Workers 上都能跑。
 
 ## 文档
 

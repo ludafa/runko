@@ -5,13 +5,37 @@
  *
  * SQLite 这一档零外部依赖，所以顺便把整套一致性用例也跑一遍——白捡的覆盖。
  */
-import { runPersistenceConformance } from "@nimbo/agent/conformance";
+import type { ConformanceCase } from "@nimbo/conformance";
+import { persistenceCases } from "@nimbo/conformance";
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
 import { sqlitePersistence, migrate } from "../src/index.js";
 
-runPersistenceConformance("persist-sqlite", async () => {
+/**
+ * 把一致性用例接进 vitest。**套件本身不依赖任何测试框架**（它只导出 `{ name, run }`），
+ * 这十几行就是「接上去」的全部成本——换 jest / node:test 也是同样的形状。
+ */
+function runCases<S extends { cleanup?: () => Promise<void> | void }>(
+  title: string,
+  cases: readonly ConformanceCase<S>[],
+  makeSetup: () => Promise<S> | S,
+): void {
+  describe(title, () => {
+    for (const testCase of cases) {
+      it(testCase.name, async () => {
+        const setup = await makeSetup();
+        try {
+          await testCase.run(setup);
+        } finally {
+          await setup.cleanup?.();
+        }
+      });
+    }
+  });
+}
+
+runCases("persist-sqlite", persistenceCases, async () => {
   const db = new Database(":memory:");
   await migrate(db);
   return {

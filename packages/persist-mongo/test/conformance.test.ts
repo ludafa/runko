@@ -1,5 +1,5 @@
 /**
- * 跟其余三个持久化包**跑同一套用例**（`@nimbo/agent/conformance`）——这正是重点：
+ * 跟其余三个持久化包**跑同一套用例**（`@nimbo/conformance`）——这正是重点：
  * 一个非关系型实现能不能满足同一份契约，是这个包最值得回答的问题。
  *
  * **只能对真库跑。** Mongo 没有 pglite 那样的进程内替身（`mongodb-memory-server`
@@ -10,11 +10,35 @@
  * NIMBO_TEST_MONGO_URL=mongodb://127.0.0.1:27018 pnpm --filter @nimbo/persist-mongo test
  * ```
  */
-import { runPersistenceConformance } from "@nimbo/agent/conformance";
+import type { ConformanceCase } from "@nimbo/conformance";
+import { persistenceCases } from "@nimbo/conformance";
 import { MongoClient } from "mongodb";
 import { describe, expect, it } from "vitest";
 
 import { migrate, mongoPersistence } from "../src/index.js";
+
+/**
+ * 把一致性用例接进 vitest。**套件本身不依赖任何测试框架**（它只导出 `{ name, run }`），
+ * 这十几行就是「接上去」的全部成本——换 jest / node:test 也是同样的形状。
+ */
+function runCases<S extends { cleanup?: () => Promise<void> | void }>(
+  title: string,
+  cases: readonly ConformanceCase<S>[],
+  makeSetup: () => Promise<S> | S,
+): void {
+  describe(title, () => {
+    for (const testCase of cases) {
+      it(testCase.name, async () => {
+        const setup = await makeSetup();
+        try {
+          await testCase.run(setup);
+        } finally {
+          await setup.cleanup?.();
+        }
+      });
+    }
+  });
+}
 
 const MONGO_URL = process.env["NIMBO_TEST_MONGO_URL"];
 
@@ -33,7 +57,7 @@ if (MONGO_URL === undefined) {
    * 顺带证明了「换个 database 就是换一套隔离」这条建议（我们不做集合名前缀，理由见 README）。
    */
   let counter = 0;
-  runPersistenceConformance("persist-mongo", async () => {
+  runCases("persist-mongo", persistenceCases, async () => {
     const client = new MongoClient(url);
     await client.connect();
     counter += 1;

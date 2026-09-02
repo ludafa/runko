@@ -1,5 +1,5 @@
 /**
- * 一致性套件跑在**三个方言**上——同一套用例，`@nimbo/agent/conformance` 导出。
+ * 一致性套件跑在**三个方言**上——同一套用例，`@nimbo/conformance` 导出。
  *
  * | 方言 | 跑在哪 | 要不要外部服务 |
  * |---|---|---|
@@ -15,7 +15,8 @@
  * MySQL 目前不跑，得靠本地或带 service container 的流水线。
  */
 import { PGlite } from "@electric-sql/pglite";
-import { runPersistenceConformance } from "@nimbo/agent/conformance";
+import type { ConformanceCase } from "@nimbo/conformance";
+import { persistenceCases } from "@nimbo/conformance";
 import Database from "better-sqlite3";
 import { Kysely, MysqlDialect, PostgresDialect, SqliteDialect } from "kysely";
 import { describe, expect, it } from "vitest";
@@ -24,11 +25,34 @@ import { kyselyPersistence, migrate } from "../src/index.js";
 import type { NimboDatabase } from "../src/index.js";
 import { pgliteDialect } from "./helpers/pglite-dialect.js";
 
+/**
+ * 把一致性用例接进 vitest。**套件本身不依赖任何测试框架**（它只导出 `{ name, run }`），
+ * 这十几行就是「接上去」的全部成本——换 jest / node:test 也是同样的形状。
+ */
+function runCases<S extends { cleanup?: () => Promise<void> | void }>(
+  title: string,
+  cases: readonly ConformanceCase<S>[],
+  makeSetup: () => Promise<S> | S,
+): void {
+  describe(title, () => {
+    for (const testCase of cases) {
+      it(testCase.name, async () => {
+        const setup = await makeSetup();
+        try {
+          await testCase.run(setup);
+        } finally {
+          await setup.cleanup?.();
+        }
+      });
+    }
+  });
+}
+
 // ---------------------------------------------------------------------------
 // 永远跑的两档
 // ---------------------------------------------------------------------------
 
-runPersistenceConformance("persist-kysely · sqlite", async () => {
+runCases("persist-kysely · sqlite", persistenceCases, async () => {
   const sqlite = new Database(":memory:");
   const db = new Kysely<NimboDatabase>({ dialect: new SqliteDialect({ database: sqlite }) });
   await migrate(db, { flavor: "sqlite" });
@@ -40,7 +64,7 @@ runPersistenceConformance("persist-kysely · sqlite", async () => {
   };
 });
 
-runPersistenceConformance("persist-kysely · postgres (pglite)", async () => {
+runCases("persist-kysely · postgres (pglite)", persistenceCases, async () => {
   const pglite = new PGlite();
   const db = new Kysely<NimboDatabase>({ dialect: pgliteDialect(pglite) });
   await migrate(db, { flavor: "postgres" });
@@ -67,7 +91,7 @@ async function truncate(db: Kysely<NimboDatabase>): Promise<void> {
 }
 
 if (POSTGRES_URL !== undefined) {
-  runPersistenceConformance("persist-kysely · postgres (真库)", async () => {
+  runCases("persist-kysely · postgres (真库)", persistenceCases, async () => {
     const { Pool } = await import("pg");
     const pool = new Pool({ connectionString: POSTGRES_URL });
     const db = new Kysely<NimboDatabase>({ dialect: new PostgresDialect({ pool }) });
@@ -87,7 +111,7 @@ if (POSTGRES_URL !== undefined) {
 }
 
 if (MYSQL_URL !== undefined) {
-  runPersistenceConformance("persist-kysely · mysql (真库)", async () => {
+  runCases("persist-kysely · mysql (真库)", persistenceCases, async () => {
     const { createPool } = await import("mysql2");
     const pool = createPool(MYSQL_URL);
     const db = new Kysely<NimboDatabase>({ dialect: new MysqlDialect({ pool }) });

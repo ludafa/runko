@@ -42,6 +42,7 @@
     "pg": "^8"
   },
   "devDependencies": {
+    "@nimbo/conformance": "workspace:*",
     "@types/node": "catalog:",
     "@types/pg": "catalog:",
     "kysely": "catalog:",

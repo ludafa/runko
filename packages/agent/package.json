@@ -21,17 +21,7 @@
         "default": "./dist/index.cjs"
       }
     },
-    "./package.json": "./package.json",
-    "./conformance": {
-      "import": {
-        "types": "./dist/conformance.d.ts",
-        "default": "./dist/conformance.js"
-      },
-      "require": {
-        "types": "./dist/conformance.d.cts",
-        "default": "./dist/conformance.cjs"
-      }
-    }
+    "./package.json": "./package.json"
   },
   "files": [
     "dist"
@@ -49,20 +39,15 @@
     "zod": "catalog:"
   },
   "peerDependencies": {
-    "ai": "^7",
-    "vitest": "^4"
+    "ai": "^7"
   },
   "devDependencies": {
+    "@nimbo/conformance": "workspace:*",
     "@types/node": "catalog:",
     "ai": "catalog:",
     "tsdown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:",
     "zod": "catalog:"
-  },
-  "peerDependenciesMeta": {
-    "vitest": {
-      "optional": true
-    }
   }
 }

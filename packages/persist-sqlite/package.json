@@ -43,6 +43,7 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "catalog:",
+    "@nimbo/conformance": "workspace:*",
     "@types/better-sqlite3": "catalog:",
     "@types/node": "catalog:",
     "better-sqlite3": "catalog:",

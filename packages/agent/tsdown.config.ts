@@ -1,10 +1,10 @@
 import { defineConfig } from "tsdown";
 
 export default defineConfig({
-  // 两个入口：主门面，以及给各持久化实现自测用的一致性套件（`@nimbo/agent/conformance`）。
-  // 套件断言的是**接口的承诺**，所以住在定义接口的包里——persist-sql / 将来的
-  // persist-drizzle / 第三方实现都引它自测。它 import vitest，故列为可选 peer。
-  entry: ["src/index.ts", "src/conformance.ts"],
+  // 一个入口。一致性套件曾经是这里的第二个入口（`@nimbo/agent/conformance`），后来
+  // 拆成了独立包 `@nimbo/conformance`——它需要一套断言，而断言不该把测试框架拖进一个
+  // **运行时**包的依赖里。
+  entry: ["src/index.ts"],
   format: ["esm", "cjs"],
   platform: "node",
   dts: true,

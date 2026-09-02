@@ -42,6 +42,7 @@
     "mysql2": "^3"
   },
   "devDependencies": {
+    "@nimbo/conformance": "workspace:*",
     "@types/node": "catalog:",
     "kysely": "catalog:",
     "mysql2": "catalog:",

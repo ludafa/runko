@@ -129,14 +129,18 @@ Kysely 的宿主装它，把自己的实例给它，两套表进同一个实例�
 ### P3 · 一致性测试套件 ✅（本批的主产出）
 
 - **目标**：一套用例喂给多个实现，逐个断言行为一致。
-- **涉及文件**：`packages/agent/src/conformance.ts`（`@nimbo/agent/conformance` 子路径导出）、
+- **涉及文件**：[`packages/conformance/src/persistence.ts`](../../../../packages/conformance/src/persistence.ts)、
   `packages/agent/test/builtin.test.ts`（内存实现接上）、各实现包的 `test/`。
-- **产出物**：`runPersistenceConformance(name, setup)`，**27 条不变量**。
+- **产出物**：`persistenceCases`，**31 条不变量**。
 - **验收**：所有实现**同一套用例全绿**。任一条在任一实现上不成立，都算本批失败。
 
-> **为什么套件放在 `@nimbo/agent`**：它断言的是**接口的承诺**，不是某个实现的行为。放在
-> 定义接口的包里，将来 `persist-drizzle` / `persist-prisma` / 第三方实现都能直接引来自测。
-> 代价是 `@nimbo/agent` 多一个子路径导出，`vitest` 成为它的**可选 peer**。
+> **套件独立成包 `@nimbo/conformance`。** 它断言的是**接口的承诺**，不是某个实现的行为，
+> 所以 `persist-drizzle` / `persist-prisma` / 第三方实现都能直接引来自测。
+>
+> 第一版曾把它做成 `@nimbo/agent` 的子路径导出（`@nimbo/agent/conformance`），代价是
+> `vitest` 成了那个**运行时**包的可选 peer——测试框架不该出现在运行时包的依赖里。拆包
+> 之后套件自带一套手写断言（连 `node:assert` 都不用），只导出 `{ name, run }` 这样的
+> 用例数据，`describe`/`it` 由消费方接，任何测试框架都能跑。
 
 ### P4 · demo 应用：零 ORM 的真实宿主 ✅
 
