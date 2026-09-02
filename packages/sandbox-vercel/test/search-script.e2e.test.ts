@@ -13,9 +13,9 @@ import * as nodeFs from "node:fs/promises";
 import * as nodePath from "node:path";
 import * as os from "node:os";
 import type { Readable } from "node:stream";
-import type { ContentSearchQuery, FileSearchQuery, NimboFS, ToolContext } from "@nimbo/core";
-import { createFileTools, fromMemory } from "@nimbo/virtual-fs";
-import type { ReadStateStore } from "@nimbo/virtual-fs";
+import type { ContentSearchQuery, FileSearchQuery, RunkoFS, ToolContext } from "@runko/core";
+import { createFileTools, fromMemory } from "@runko/virtual-fs";
+import type { ReadStateStore } from "@runko/virtual-fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { vercelWorkspace } from "../src/index.js";
 import type { VercelDirentLike, VercelFileSystemLike, VercelRunCommandParams, VercelSandboxLike, VercelStatsLike } from "../src/types.js";
@@ -80,13 +80,13 @@ function pipeInto(source: Readable, dest: VercelRunCommandParams["stdout"]): voi
   });
 }
 
-/** 供 JS 回退路径的文件工具用——测试端只需要一个 Map 实现（同 `@nimbo/virtual-fs` 测试的先例）。 */
+/** 供 JS 回退路径的文件工具用——测试端只需要一个 Map 实现（同 `@runko/virtual-fs` 测试的先例）。 */
 function createMapReadStateStore(): ReadStateStore {
   const map = new Map<string, number>();
   return { get: (path) => map.get(path), set: (path, version) => void map.set(path, version) };
 }
 
-function makeToolCtx(fs: NimboFS): ToolContext {
+function makeToolCtx(fs: RunkoFS): ToolContext {
   return {
     fs,
     abortSignal: new AbortController().signal,
@@ -101,7 +101,7 @@ describe("SEARCH_SCRIPT real end-to-end (real node subprocess, real hermetic tem
   let tmpDir: string;
 
   beforeEach(async () => {
-    tmpDir = await nodeFs.mkdtemp(nodePath.join(os.tmpdir(), "nimbo-search-e2e-"));
+    tmpDir = await nodeFs.mkdtemp(nodePath.join(os.tmpdir(), "runko-search-e2e-"));
     await nodeFs.mkdir(nodePath.join(tmpDir, "src", "nested"), { recursive: true });
     await nodeFs.mkdir(nodePath.join(tmpDir, ".git"), { recursive: true });
     await nodeFs.mkdir(nodePath.join(tmpDir, "node_modules", "pkg"), { recursive: true });

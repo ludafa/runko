@@ -4,7 +4,7 @@ import { createOnceApprovalMemory } from "../src/approval.js";
 import { createDerivedDataCollector, executeToolCall, resolveToolCallApproval } from "../src/runtime.js";
 import type { ExecuteToolCallOptions, ResolveToolCallApprovalOptions } from "../src/runtime.js";
 import { createPlanStore, createUpdatePlanTool } from "../src/tools/builtin/update-plan.js";
-import type { ApprovalOutcome, JsonValue, NimboFS, Tool, ToolContext, ToolReturn } from "../src/types.js";
+import type { ApprovalOutcome, JsonValue, RunkoFS, Tool, ToolContext, ToolReturn } from "../src/types.js";
 
 /**
  * `ToolCallResult.output` is `ToolReturn` (`string | JsonValue`); several assertions here need
@@ -17,7 +17,7 @@ function expectStringOutput(output: ToolReturn): string {
   return typeof output === "string" ? output : "";
 }
 
-function fakeFs(): NimboFS {
+function fakeFs(): RunkoFS {
   return {
     readFile: async () => new Uint8Array(),
     writeFile: async () => {},

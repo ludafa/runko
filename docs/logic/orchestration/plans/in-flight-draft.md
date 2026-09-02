@@ -4,7 +4,7 @@ slug: in-flight-draft
 view: 施工
 layer: 逻辑层
 module: 轮编排
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["进行中草稿", "内存态", "账本写入时机", "崩溃恢复"]
 related: ["logic/orchestration/tech/in-flight-draft.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -17,7 +17,7 @@ related: ["logic/orchestration/tech/in-flight-draft.md", "architecture/tech/agen
 
 ## 状态
 
-**✅ 已交付**（2026-08-16），随 [`@nimbo/agent`](./agent-runtime.md) 一并上线——草稿放进框架的
+**✅ 已交付**（2026-08-16），随 [`@runko/agent`](./agent-runtime.md) 一并上线——草稿放进框架的
 `ActiveTurn.draft`（内存数组），[账本](../../../terms.md)从此只写成品消息，[孤儿轮](../../../terms.md)
 判据换成[起轮标记](../../../terms.md)（`conversations.turn_holder` 列）。
 
@@ -64,5 +64,5 @@ related: ["logic/orchestration/tech/in-flight-draft.md", "architecture/tech/agen
 
 | 时间 | 变更 |
 |---|---|
-| 2026-08-16 | 随 `@nimbo/agent` 一并交付。三项与原计划有偏差并已在上表标注：历史垃圾行改为读时过滤（第 2 项）、`events → messages` 改名没做（第 4 项）、`MessageFrame.seq` 保留（第 6 项——断线续传游标依赖它，去掉等于把续传也拆了） |
-| 2026-08-15 | 建档。按 [issue #2](https://github.com/ludafa/nimbo/issues/2) 的分层重划文档时补齐——此前技术方案里链的施工进展文件一直不存在。同时按 issue #2 补上 1b（起轮标记）这项，原清单缺它。 |
+| 2026-08-16 | 随 `@runko/agent` 一并交付。三项与原计划有偏差并已在上表标注：历史垃圾行改为读时过滤（第 2 项）、`events → messages` 改名没做（第 4 项）、`MessageFrame.seq` 保留（第 6 项——断线续传游标依赖它，去掉等于把续传也拆了） |
+| 2026-08-15 | 建档。按 [issue #2](https://github.com/ludafa/runko/issues/2) 的分层重划文档时补齐——此前技术方案里链的施工进展文件一直不存在。同时按 issue #2 补上 1b（起轮标记）这项，原清单缺它。 |

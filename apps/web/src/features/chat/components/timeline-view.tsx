@@ -1,4 +1,4 @@
-import type { NimboUIMessage } from '@nimbo/core';
+import type { RunkoUIMessage } from '@runko/core';
 import { MessageSquareIcon } from 'lucide-react';
 import { useMemo } from 'react';
 
@@ -80,7 +80,7 @@ export function TimelineView({
   onSubmitAnswer = noopDecision,
   conversationId,
 }: {
-  messages: readonly NimboUIMessage[];
+  messages: readonly RunkoUIMessage[];
   /** Short-lived — popped once the real turn-start `MessageFrame` arrives (see `use-chat-messages.ts`'s file header) — interleaved with `messages` at their sent-at position in the meantime. */
   pendingUserEchoes?: readonly PendingUserEcho[];
   /** `useChatMessages`'s own submitting/expired state (docs/tech/single-ledger.md §6) — threaded straight through to the approval/question cards, see that hook's doc comments. */

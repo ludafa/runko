@@ -1,7 +1,7 @@
 {
-  "name": "@nimbo/sdk",
+  "name": "@runko/sdk",
   "version": "0.1.0",
-  "description": "nimbo 主包（门面）：re-export core + virtual-fs（+ mini-bash），batteries-included",
+  "description": "runko 主包（门面）：re-export core + virtual-fs（+ mini-bash），batteries-included",
   "type": "module",
   "license": "ISC",
   "publishConfig": {
@@ -37,9 +37,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@nimbo/core": "workspace:*",
-    "@nimbo/mini-bash": "workspace:*",
-    "@nimbo/virtual-fs": "workspace:*"
+    "@runko/core": "workspace:*",
+    "@runko/mini-bash": "workspace:*",
+    "@runko/virtual-fs": "workspace:*"
   },
   "peerDependencies": {
     "ai": "^7"

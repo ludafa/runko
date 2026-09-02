@@ -4,7 +4,7 @@ slug: push-notification
 view: 技术
 layer: 接入层
 module: —
-packages: ["@nimbo-chat/node-server", "@nimbo-chat/web"]
+packages: ["@runko-chat/node-server", "@runko-chat/web"]
 tags: ["推送通知", "Web Push", "等人提醒"]
 related: ["ingress/features/push-notification.md", "ingress/plans/push-notification.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -116,7 +116,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Core as nimbo loop
+    participant Core as runko loop
     participant TL as turn-launcher（onReview）
     participant TR as turn-runner（requestReview）
     participant N as push/notifier
@@ -404,7 +404,7 @@ Chrome（桌面与 Android）是 **2**。所以排序把「少了就残废」的
 | 值 | 现在是多少 | 谁定的 |
 |---|---|---|
 | 审批超时 | 240 秒（4 分钟） | `turn-runner/human-bridge.ts` 的 `DEFAULT_APPROVAL_TIMEOUT_MS` |
-| 审批保活预算 | 300 秒（5 分钟） | `@nimbo/core` `keepalive.ts` 的 `DEFAULT_APPROVAL_BUDGET_MS`——chat 侧没显式传，吃的是这个默认 |
+| 审批保活预算 | 300 秒（5 分钟） | `@runko/core` `keepalive.ts` 的 `DEFAULT_APPROVAL_BUDGET_MS`——chat 侧没显式传，吃的是这个默认 |
 
 两者现在是**自洽**的：人 4 分钟不点就自动拒绝，而沙盒在这 4 分钟里一直被续着。所以今天不存在"人还没点、沙盒先睡了"。
 
@@ -441,7 +441,7 @@ Chrome（桌面与 Android）是 **2**。所以排序把「少了就残废」的
 | 推送服务 5xx | 这次投不到 | 记 `last_error`，不重试，不删行 |
 | 服务端重启 | 在场信息全丢 | 全部视为"不在看"→ 多弹通知，45 秒内心跳自动恢复 |
 | 用户同时开了 5 台设备 | 5 台一起响 | 有意为之。设备级开关就是各自的订阅在不在 |
-| SW 收到解不开/字段缺失的载荷 | — | 兜底文案「nimbo chat 有新动静」+ 跳到 `/chat` |
+| SW 收到解不开/字段缺失的载荷 | — | 兜底文案「runko chat 有新动静」+ 跳到 `/chat` |
 
 ## 10. 已知限制
 

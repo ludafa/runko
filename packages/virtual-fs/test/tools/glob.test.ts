@@ -1,4 +1,4 @@
-import { SearchUnsupportedError } from "@nimbo/core";
+import { SearchUnsupportedError } from "@runko/core";
 import { describe, expect, it, vi } from "vitest";
 import { fromMemory } from "../../src/memory.js";
 import { createGlobTool } from "../../src/tools/glob.js";

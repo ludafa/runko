@@ -2,8 +2,8 @@
  * [人在回路桥](../src/runtime/human.ts)与内置 `ask-user` 工具的用例——两条通道的
  * 挂起、结清、超时、以及「一轮结束时把还挂着的就地结掉」。
  */
-import type { AgentDefinition, Tool, ToolContext } from "@nimbo/core";
-import { MemoryFS } from "@nimbo/virtual-fs";
+import type { AgentDefinition, Tool, ToolContext } from "@runko/core";
+import { MemoryFS } from "@runko/virtual-fs";
 import { describe, expect, it, vi } from "vitest";
 
 import { ASK_USER_TIMEOUT_MESSAGE, createAgentRuntime, defaultSessionFactory, memoryPersistence } from "../src/index.js";
@@ -206,7 +206,7 @@ describe("人审通道", () => {
 });
 
 describe("默认 session 工厂", () => {
-  it("默认把文件工具八件套装上（与 `@nimbo/sdk` 的门面版同款装配）", async () => {
+  it("默认把文件工具八件套装上（与 `@runko/sdk` 的门面版同款装配）", async () => {
     const session = await defaultSessionFactory({ model: "test/model" }, { fs: new MemoryFS() });
     expect(session.toJSON().turn).toBe(0);
   });

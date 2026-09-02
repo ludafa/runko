@@ -5,7 +5,7 @@
  *
  * 全程零模型、零沙盒——靠 `helpers/fake-session.ts` 那对假的 `stream()`/`toJSON()`。
  */
-import type { AgentDefinition, NimboUIMessage } from "@nimbo/core";
+import type { AgentDefinition, RunkoUIMessage } from "@runko/core";
 import { describe, expect, it, vi } from "vitest";
 
 import type { AgentRuntime, Frame, TurnInput, TurnPreparation } from "../src/index.js";
@@ -44,7 +44,7 @@ function collect(runtime: AgentRuntime, conversationId: string, opts?: { after?:
   return { frames, done };
 }
 
-async function ledgerMessages(runtime: AgentRuntime, conversationId: string): Promise<NimboUIMessage[]> {
+async function ledgerMessages(runtime: AgentRuntime, conversationId: string): Promise<RunkoUIMessage[]> {
   const rows = await runtime.readLedger(conversationId);
   return rows.map((row) => row.message);
 }

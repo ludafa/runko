@@ -11,7 +11,7 @@
  * - **持久化接口完全不认识「租约」。** 正因如此 Durable Object 的 KV 存储也接得进来
  *   ——它根本没有租约表。
  *
- * 三种实现（本包只带第一种，另两种在 `@nimbo/persist-*` / `@nimbo/durable-object`）：
+ * 三种实现（本包只带第一种，另两种在 `@runko/persist-*` / `@runko/durable-object`）：
  *
  * |            | 单进程 | 多进程共享 DB | Cloudflare DO |
  * |---|---|---|---|

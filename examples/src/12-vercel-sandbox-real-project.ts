@@ -1,10 +1,10 @@
 /**
  * 12-vercel-sandbox-real-project — a real-project, real-Git-workflow e2e demo
  * (docs/tech/sandbox.md §1/§2, docs/plans/core-sdk.md
- * P11): a nimbo agent, connected to a real Vercel Sandbox, clones the user's
+ * P11): a runko agent, connected to a real Vercel Sandbox, clones the user's
  * own GitHub repo (a plain frontend project), installs the official
  * `anthropics/skills` "frontend-design" skill straight from the sandbox's
- * filesystem (`Skill.fromFS` — nimbo's own, non-standard capability), makes
+ * filesystem (`Skill.fromFS` — runko's own, non-standard capability), makes
  * one focused design improvement, then runs the full Git workflow itself:
  * branch, commit, push, open a PR. Vercel's Git integration (assumed already
  * connected for the target project) picks up the push/PR and builds a
@@ -57,7 +57,7 @@
  * benefits from a stronger tier than the other examples' plain
  * "deepseek-chat" default) and this script constructs `createDeepSeek(...)`
  * itself with a different default model id — see `DEEPSEEK_DESIGN_MODEL_ID`
- * below. `NIMBO_MODEL` still overrides the id (not a gateway string here,
+ * below. `RUNKO_MODEL` still overrides the id (not a gateway string here,
  * same overload note as shared/model.ts's own header comment).
  *
  * The default id, `"deepseek-v4-pro"`, was confirmed the only way this task
@@ -85,7 +85,7 @@
  * false })` clones the repo; then a handful of `sandbox.runCommand()` calls
  * (never touching the model) install the frontend-design skill (`npx skills`
  * primary path, plain `git clone` fallback), set the commit identity to
- * "nimbo-agent", rewrite `origin`'s URL to embed the PAT for pushing, hide
+ * "runko-agent", rewrite `origin`'s URL to embed the PAT for pushing, hide
  * `.agents/`/`.skills/` from `git status` via `.git/info/exclude` (not the
  * repo's own `.gitignore`), and detect the repo's default branch. Only then
  * does the agent get involved: `Skill.fromFS(workspace,
@@ -134,9 +134,9 @@ import { fileURLToPath } from "node:url";
 import type { LanguageModel } from "ai";
 import { createDeepSeek } from "@ai-sdk/deepseek";
 import { Sandbox } from "@vercel/sandbox";
-import { createSession, defineAgent, Skill } from "@nimbo/sdk";
-import type { NimboChunk, TurnResult } from "@nimbo/sdk";
-import { vercelWorkspace } from "@nimbo/sandbox-vercel";
+import { createSession, defineAgent, Skill } from "@runko/sdk";
+import type { RunkoChunk, TurnResult } from "@runko/sdk";
+import { vercelWorkspace } from "@runko/sandbox-vercel";
 import { TranscriptStore } from "./shared/transcript-store.ts";
 import type {
   VercelCommandResultLike,
@@ -145,7 +145,7 @@ import type {
   VercelRunCommandParams,
   VercelSandboxLike,
   VercelStatsLike,
-} from "@nimbo/sandbox-vercel";
+} from "@runko/sandbox-vercel";
 
 const ROOT = "/vercel/sandbox";
 
@@ -225,12 +225,12 @@ function buildInitPlan(owner: string, repo: string): InitPlan {
       label: "fallback if npx skills didn't produce the skill file: a plain git clone (always available)",
       script:
         "test -f .agents/skills/frontend-design/SKILL.md || " +
-        "(git clone --depth 1 https://github.com/anthropics/skills /tmp/nimbo-skills-src && " +
-        "mkdir -p .agents/skills && cp -r /tmp/nimbo-skills-src/skills/frontend-design .agents/skills/)",
+        "(git clone --depth 1 https://github.com/anthropics/skills /tmp/runko-skills-src && " +
+        "mkdir -p .agents/skills && cp -r /tmp/runko-skills-src/skills/frontend-design .agents/skills/)",
     },
     gitIdentity: {
       label: "set the commit identity the agent's commits will carry",
-      script: 'git config user.name "nimbo-agent" && git config user.email "nimbo-agent@users.noreply.github.com"',
+      script: 'git config user.name "runko-agent" && git config user.email "runko-agent@users.noreply.github.com"',
     },
     remoteAuth: {
       label: "rewrite origin's URL to embed the PAT for pushing (PAT read from the sandbox's own $GH_TOKEN, never interpolated here)",
@@ -388,13 +388,13 @@ function resolveDesignModel(): LanguageModel | undefined {
   if (baseURL === undefined || baseURL.length === 0 || apiKey === undefined || apiKey.length === 0) {return undefined;}
 
   const deepseek = createDeepSeek({ baseURL, apiKey });
-  const modelId = process.env.NIMBO_MODEL?.trim();
+  const modelId = process.env.RUNKO_MODEL?.trim();
   return deepseek(modelId === undefined || modelId.length === 0 ? DEEPSEEK_DESIGN_MODEL_ID : modelId);
 }
 
 function generateBranchName(): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  return `nimbo/design-${stamp}`;
+  return `runko/design-${stamp}`;
 }
 
 /** Parses `git symbolic-ref refs/remotes/origin/HEAD`'s stdout (e.g. "refs/remotes/origin/main\n") down to "main". */
@@ -475,7 +475,7 @@ function buildInstructions(opts: { owner: string; repo: string; defaultBranch: s
 8. 任何一步失败（例如构建失败、push 被拒绝、创建 PR 失败）都必须在最终回复里如实说明具体失败原因，不要反复重试硬撑，也不要编造一个并未真正发生的成功结果。`;
 }
 
-function formatChunk(chunk: NimboChunk): string {
+function formatChunk(chunk: RunkoChunk): string {
   switch (chunk.type) {
     case "tool-input-available":
       return `[tool-input-available] ${chunk.toolName}  input=${JSON.stringify(chunk.input).slice(0, 160)}`;
@@ -493,14 +493,14 @@ function formatChunk(chunk: NimboChunk): string {
  * both borrowed from 07:
  *   - `text-delta` / `reasoning-delta` are typewritten with
  *     `process.stdout.write` (only the new slice per chunk, never a reprint);
- *   - every other `NimboChunk` gets one `formatChunk` timeline line — for a
+ *   - every other `RunkoChunk` gets one `formatChunk` timeline line — for a
  *     long design session that's the `tool-input-available` /
  *     `tool-output-available` walk (`git push`/`curl` style bash calls) you
  *     actually want to watch scroll by here.
  */
 async function streamLive(
-  stream: AsyncGenerator<NimboChunk, TurnResult>,
-  onChunk?: (chunk: NimboChunk) => void,
+  stream: AsyncGenerator<RunkoChunk, TurnResult>,
+  onChunk?: (chunk: RunkoChunk) => void,
 ): Promise<TurnResult> {
   let midLine = false;
 
@@ -538,12 +538,12 @@ async function realProjectSection(): Promise<void> {
   const model = resolveDesignModel();
   if (model === undefined) {
     console.log(
-      "[nimbo example] DeepSeek is not configured — skipping the real-project section.\n" +
+      "[runko example] DeepSeek is not configured — skipping the real-project section.\n" +
         "This example is DeepSeek-only (docs/tech/sandbox.md §8.4 pins a stronger tier for the design task), unlike other\n" +
         "examples' resolveModel() dual path. Set in the repo-root .env:\n" +
         "  DEEPSEEK_API_BASE_URL=...\n" +
         "  DEEPSEEK_API_TOKEN=...\n" +
-        `Optionally: NIMBO_MODEL=... to override the default "${DEEPSEEK_DESIGN_MODEL_ID}".`,
+        `Optionally: RUNKO_MODEL=... to override the default "${DEEPSEEK_DESIGN_MODEL_ID}".`,
     );
     return;
   }
@@ -552,7 +552,7 @@ async function realProjectSection(): Promise<void> {
   const rawRepo = process.env.GITHUB_REPO?.trim();
   if (rawRepo === undefined || rawRepo.length === 0) {
     console.log(
-      "[nimbo example] GITHUB_REPO is not set — skipping the real-project section.\n" +
+      "[runko example] GITHUB_REPO is not set — skipping the real-project section.\n" +
         'See .env.template\'s "Real-project design-optimize e2e" section: either the SSH form\n' +
         '("git@github.com:owner/repo.git") or the HTTPS form ("https://github.com/owner/repo") is accepted.\n' +
         "No sandbox is created and no model call is made while this is missing.",
@@ -564,7 +564,7 @@ async function realProjectSection(): Promise<void> {
   const ghToken = process.env.GITHUB_PAT?.trim();
   if (ghToken === undefined || ghToken.length === 0) {
     console.log(
-      "[nimbo example] GITHUB_PAT is not set — skipping the real-project section.\n" +
+      "[runko example] GITHUB_PAT is not set — skipping the real-project section.\n" +
         "A fine-grained PAT scoped to ONLY the target repo, with exactly Contents: Read and write +\n" +
         'Pull requests: Read and write (see .env.template). No sandbox is created and no model\n' +
         "call is made while this is missing.",
@@ -585,7 +585,7 @@ async function realProjectSection(): Promise<void> {
     vercelProjectId.length === 0
   ) {
     console.log(
-      "[nimbo example] VERCEL_TOKEN/VERCEL_TEAM_ID/VERCEL_PROJECT_ID are not fully set — skipping the real-project section.\n" +
+      "[runko example] VERCEL_TOKEN/VERCEL_TEAM_ID/VERCEL_PROJECT_ID are not fully set — skipping the real-project section.\n" +
         'See the "Vercel Sandbox" section of .env.template for where to get each value. No sandbox is ' +
         "created and no model call is made while any of the three is missing.",
     );
@@ -596,7 +596,7 @@ async function realProjectSection(): Promise<void> {
   try {
     repoRef = normalizeGitHubRepo(rawRepo);
   } catch (error) {
-    console.log(`[nimbo example] ${error instanceof Error ? error.message : String(error)}`);
+    console.log(`[runko example] ${error instanceof Error ? error.message : String(error)}`);
     return;
   }
 
@@ -629,10 +629,10 @@ async function realProjectSection(): Promise<void> {
     });
     const session = createSession(agent, { workspace });
 
-    // Every run's full transcript (all NimboChunks + finalResponse + the
+    // Every run's full transcript (all RunkoChunks + finalResponse + the
     // serialized SessionState) is persisted to a local SQLite DB — default
     // `<repo>/.transcripts/examples-transcript.sqlite`, override with
-    // NIMBO_TRANSCRIPT_DB. Query it later with e.g.
+    // RUNKO_TRANSCRIPT_DB. Query it later with e.g.
     //   sqlite3 .transcripts/examples-transcript.sqlite "SELECT id, status, started_at FROM runs"
     const store = new TranscriptStore();
     const runId = store.startRun({

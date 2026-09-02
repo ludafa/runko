@@ -4,7 +4,7 @@ slug: persistence
 view: 技术
 layer: 宿主层
 module: 持久化
-packages: ["@nimbo/persist-sql", "@nimbo/persist-drizzle", "@nimbo/persist-prisma"]
+packages: ["@runko/persist-sql", "@runko/persist-drizzle", "@runko/persist-prisma"]
 tags: ["持久化", "存储适配", "SQLite", "Postgres", "drizzle", "prisma"]
 related: ["host/contract/features/persistence.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -15,7 +15,7 @@ related: ["host/contract/features/persistence.md", "architecture/tech/agent-kern
 > 宿主层的另两样能力：[沙盒](./sandbox.md) · [流分发](./stream-fanout.md)。第四样[归属仲裁机制](../../../logic/arbitration/tech/arbitration-impl.md)的实现文档跟它的语义并排放在逻辑层。
 > 依赖/延续：[单一账本](../../../logic/orchestration/tech/single-ledger.md)（账本的现行形态）· [进行中草稿放内存](../../../logic/orchestration/tech/in-flight-draft.md)（哪些东西**不**该落库）。
 >
-> **状态：领域接口已定稿**（2026-08-16 随 `@nimbo/agent` 交付）。本文 §8 起是 `@nimbo/persist-sql` 的实现方案，施工见[施工进展](../plans/persistence.md)。
+> **状态：领域接口已定稿**（2026-08-16 随 `@runko/agent` 交付）。本文 §8 起是 `@runko/persist-sql` 的实现方案，施工见[施工进展](../plans/persistence.md)。
 
 ## 1. 一句话
 
@@ -47,14 +47,14 @@ flowchart TB
     style DOMAIN fill:#e8f0ff,stroke:#3b6fd4
 ```
 
-**nimbo 内部只认领域接口这一层。** 绝大多数人只碰下层——`drizzleAdapter(db)` 一行接上，体感同 better-auth。少数人可以整层换掉上层：账本接 Kafka、接 Durable Object storage、接内部存储微服务。
+**runko 内部只认领域接口这一层。** 绝大多数人只碰下层——`drizzleAdapter(db)` 一行接上，体感同 better-auth。少数人可以整层换掉上层：账本接 Kafka、接 Durable Object storage、接内部存储微服务。
 
-**为什么要留这个逃生口**：账本的写入量和访问模式跟「四张认证表」不是一回事。better-auth 没有这一层，nimbo 应该有。
+**为什么要留这个逃生口**：账本的写入量和访问模式跟「四张认证表」不是一回事。better-auth 没有这一层，runko 应该有。
 
 ## 4. 接口设计的四条准则
 
 1. **暴露「agent 运行需要什么」，不暴露「表长什么样」。** 账本是「按会话追加消息 / 从某点之后读」，不是「一张 seq 做主键的表」。
-2. **nimbo 不拥有用户实体。** 只认不透明 `ownerId`，不做外键。
+2. **runko 不拥有用户实体。** 只认不透明 `ownerId`，不做外键。
 3. **迁移不是契约的一部分。** 给参考 DDL、官方实现自带迁移，接口层不假设「有迁移这回事」。
 4. **不假设事务能跨接口。** 需要原子的地方收进**一个**方法里；绝不要求宿主传跨接口的事务对象——那等于宣布只支持关系型。
 
@@ -68,21 +68,21 @@ flowchart TB
 
 **打包原则：接口按模块分；实现按「一次装什么」打包。**
 
-持久化和[租约版归属仲裁机制](../../../logic/arbitration/tech/arbitration-impl.md)**总是一起用**——都要落库、共享同一个连接、共用同一套 CRUD + CAS 原语。所以**同一个包**：装 `@nimbo/persist-sql` 就同时拿到存储和租约版仲裁。
+持久化和[租约版归属仲裁机制](../../../logic/arbitration/tech/arbitration-impl.md)**总是一起用**——都要落库、共享同一个连接、共用同一套 CRUD + CAS 原语。所以**同一个包**：装 `@runko/persist-sql` 就同时拿到存储和租约版仲裁。
 
 三条腿的分法：
 
 | 包 | 吃什么 | 定位 |
 |---|---|---|
-| `@nimbo/persist-kysely` | 用户已有的 **Kysely** 实例 | 核心。三个 Store + 建表都在这儿 |
-| `@nimbo/persist-sqlite` | 一个 `better-sqlite3` 实例 | 薄壳 → 核心 |
-| `@nimbo/persist-postgres` | 一个 `pg.Pool` | 薄壳 → 核心 |
-| `@nimbo/persist-mysql` | 一个 `mysql2` 连接池 | 薄壳 → 核心 |
-| `@nimbo/persist-mongo` | 一个 MongoDB `Db` | **不走 Kysely**，直接实现三个领域接口 |
-| `@nimbo/persist-drizzle` | 用户已有的 drizzle 实例 | 已在用 drizzle 的应用 |
-| `@nimbo/persist-prisma` | 用户已有的 Prisma client | 已在用 Prisma 的应用 |
+| `@runko/persist-kysely` | 用户已有的 **Kysely** 实例 | 核心。三个 Store + 建表都在这儿 |
+| `@runko/persist-sqlite` | 一个 `better-sqlite3` 实例 | 薄壳 → 核心 |
+| `@runko/persist-postgres` | 一个 `pg.Pool` | 薄壳 → 核心 |
+| `@runko/persist-mysql` | 一个 `mysql2` 连接池 | 薄壳 → 核心 |
+| `@runko/persist-mongo` | 一个 MongoDB `Db` | **不走 Kysely**，直接实现三个领域接口 |
+| `@runko/persist-drizzle` | 用户已有的 drizzle 实例 | 已在用 drizzle 的应用 |
+| `@runko/persist-prisma` | 用户已有的 Prisma client | 已在用 Prisma 的应用 |
 
-> **2026-08-23 推翻了「方言不是包」。** 原方案是一个 `@nimbo/persist-sql` 同时支持两种
+> **2026-08-23 推翻了「方言不是包」。** 原方案是一个 `@runko/persist-sql` 同时支持两种
 > 方言、方言作参数。改成**一种库一个包**：① 依赖关系一眼看得明白，每个包只 peer-dep
 > 自己那个驱动；② 加 MySQL 时才发现「方言是参数」掩盖了真实成本——三家的差异要么进
 > 一个越长越大的 `if`，要么进包名，进包名更诚实。
@@ -92,7 +92,7 @@ flowchart TB
 
 **为什么出 ORM 腿，而不是多支持几个 SQL 方言**——两个理由：
 
-- **产品上**：drizzle / prisma 对业务应用开发有实实在在的加持（有抽象、有领域模型）。构建者的应用里本来就有自己的 ORM 和领域模型，让 nimbo 的表跟它们同处一套 schema 管理之下才顺；只给裸 SQL 太单薄。
+- **产品上**：drizzle / prisma 对业务应用开发有实实在在的加持（有抽象、有领域模型）。构建者的应用里本来就有自己的 ORM 和领域模型，让 runko 的表跟它们同处一套 schema 管理之下才顺；只给裸 SQL 太单薄。
 - **技术上（顺带收益）**：**裸驱动腿和 ORM 腿的形状差异，比两个 SQL 方言大得多**——一个拿到原始连接自己拼 SQL，一个拿到别人的 schema 对象、要按人家的模型名映射。**两条腿能真检验出接口有没有漏假设，两个方言不能。**
 
 **为什么叫 `persist-` 不叫 `store-`**：这类包里既有账本/裁决/队列的存储、也有租约表，而「store」在读者脑子里默认只指账本，盖不住租约。「持久化」两样都能盖住。
@@ -102,7 +102,7 @@ flowchart TB
 - **CAS 不是持久化的要求**，是租约版仲裁机制的要求。用 Durable Object 的人根本不碰它。
 - **不支持跨会话查询**。「列出这个用户的所有会话」这类需求归构建者自建索引——在 Durable Object 那档尤其明显，每个 DO 有自己独立的存储。
 - ~~**MySQL 有坑**：`affectedRows` 默认返回「真正变了的行」而不是「匹配到的行」，值没变时返回 0，会让 CAS 误判成失败，要靠 `CLIENT_FOUND_ROWS` flag。~~ **2026-08-23 实测推翻**：在 **mysql2 + Kysely** 这条路上不成立——Kysely 的 `numUpdatedRows` 报的就是**匹配行数**（`UPDATE` 匹配到但值没变时仍是 1），「真变了几行」另有 `numChangedRows`。原描述对**裸 MySQL 协议**成立，对我们实际走的这条路不成立。
-- **官方支持 SQLite / PostgreSQL / MySQL 三种**。其余方言：自己配一个 Kysely dialect 接 `@nimbo/persist-kysely`，或者走「自己实现领域接口」这条逃生口。
+- **官方支持 SQLite / PostgreSQL / MySQL 三种**。其余方言：自己配一个 Kysely dialect 接 `@runko/persist-kysely`，或者走「自己实现领域接口」这条逃生口。
 - **MySQL 不支持 `CREATE INDEX IF NOT EXISTS`**，也不支持 `RETURNING`。前者的影响是队列表不建二级索引（本来也用不上，主键前导列已够）；后者的影响是判断「改没改」一律用 `numUpdatedRows` / `numDeletedRows`。
 - **MySQL 与 MongoDB 都没有进程内替身**（SQLite 有 `:memory:`，Postgres 有 pglite；`mongodb-memory-server` 是下载一个真 mongod 二进制来跑，不是进程内）。所以这两档**只能对真库跑**——CI 上目前不跑，这是个已知的覆盖缺口。
 
@@ -112,7 +112,7 @@ flowchart TB
 |---|---|
 | 领域接口的方法名与签名 | **已定稿**，见 `packages/agent/src/persistence.ts`：`LedgerStore` / `DecisionStore` / `QueueStore` 三个接口 + `Persistence` 聚合。`LeaseStore` **没有**——租约不走持久化接口，它是 `Arbitration` 的实现细节（见 §8.4） |
 | 「通用适配器」层的 model 声明形式 | **暂不做**。三条腿各写各的；等真出到第三条腿、发现在抄同一段逻辑时再抽。提前抽一层抽象去伺候两个实现，是拿确定的复杂度换不确定的复用 |
-| 参考 DDL 的发布形式 | **随包发 `schema.sql`**，同时导出一个幂等的 `migrate()`。两条路都留：想让 nimbo 自己建表就调 `migrate()`，想并进自己的迁移体系就照抄 `schema.sql` |
+| 参考 DDL 的发布形式 | **随包发 `schema.sql`**，同时导出一个幂等的 `migrate()`。两条路都留：想让 runko 自己建表就调 `migrate()`，想并进自己的迁移体系就照抄 `schema.sql` |
 | 分页/游标读账本的形状 | **已定**：`read(conversationId, { afterSeq })`，不含自身、按 seq 升序、不分页。不分页是因为账本天然按会话切分且有上限（compaction 会压缩），一次读全比让调用方处理游标简单 |
 
 ## 8. 实现方案：一个核心 + 三个薄壳
@@ -128,8 +128,8 @@ persist-mysql  ─┘      三个 Store + migrate
 **薄壳只做一件事**：把驱动包成 `new Kysely({ dialect: new XxxDialect({...}) })`，转交核心。
 每个薄壳约 40 行，`peerDependencies` 只有自己那个驱动。
 
-**核心 `@nimbo/persist-kysely` 自己就能用**——已经在用 Kysely 的宿主直接装它，把自己的
-实例给它，nimbo 的四张表和宿主的表进同一个实例、同一套迁移。这跟 `persist-drizzle`
+**核心 `@runko/persist-kysely` 自己就能用**——已经在用 Kysely 的宿主直接装它，把自己的
+实例给它，runko 的四张表和宿主的表进同一个实例、同一套迁移。这跟 `persist-drizzle`
 「吃你已有的 drizzle 实例」是同一个姿态。
 
 ### 8.2 用了 Kysely 之后，三方言的差异只剩五处
@@ -175,7 +175,7 @@ persist-mysql  ─┘      三个 Store + migrate
 ### 8.4 这一版不含租约版仲裁
 
 契约 §5 说「装了就同时拿到存储和租约版仲裁」——**那是终态，不是这一版**。本批只出
-持久化三个 Store；仲裁仍用 `@nimbo/agent` 内置的单进程实现。
+持久化三个 Store；仲裁仍用 `@runko/agent` 内置的单进程实现。
 
 **为什么分两次发**：租约版引入心跳、[租期标识](../../../terms.md)与 CAS 三样新东西，
 而持久化本身是「行为零变化」的搬运工。混在一批里发，之后每个诡异现象都要先分辨是谁的锅。
@@ -185,7 +185,7 @@ persist-mysql  ─┘      三个 Store + migrate
 比包本身更重要的是这个——**一套用例，喂给多个实现，逐个断言行为一致**：
 
 ```ts
-import { persistenceCases } from "@nimbo/conformance";
+import { persistenceCases } from "@runko/conformance";
 
 describe("我自己的实现", () => {
   for (const testCase of persistenceCases) {
@@ -196,7 +196,7 @@ describe("我自己的实现", () => {
 });
 ```
 
-套件单独发在 `@nimbo/conformance`，**不依赖任何测试框架**——它只导出 `{ name, run }`
+套件单独发在 `@runko/conformance`，**不依赖任何测试框架**——它只导出 `{ name, run }`
 这样的用例数据，`describe`/`it` 由消费方来接。
 
 跑在哪几档：
@@ -206,9 +206,9 @@ describe("我自己的实现", () => {
 | 内置内存实现 | 否 |
 | SQLite（`:memory:`） | 否 |
 | Postgres（**pglite**，WASM 进程内） | 否 |
-| Postgres（真库） | 是，`NIMBO_TEST_POSTGRES_URL` |
-| MySQL（真库） | 是，`NIMBO_TEST_MYSQL_URL` |
-| **MongoDB（真库）** | 是，`NIMBO_TEST_MONGO_URL` |
+| Postgres（真库） | 是，`RUNKO_TEST_POSTGRES_URL` |
+| MySQL（真库） | 是，`RUNKO_TEST_MYSQL_URL` |
+| **MongoDB（真库）** | 是，`RUNKO_TEST_MONGO_URL` |
 
 **前三档永远跑**，CI 不用配 service container。后两档给了连接串才跑，没给就
 `describe.skip` 并说明原因——不是静默跳过。

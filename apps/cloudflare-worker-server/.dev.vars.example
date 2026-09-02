@@ -11,10 +11,10 @@
 DEEPSEEK_API_BASE_URL=https://api.deepseek.com
 DEEPSEEK_API_TOKEN=
 # 可选，默认 deepseek-chat
-NIMBO_MODEL=
+RUNKO_MODEL=
 
 # ---- 角色 ②：对外 BYO 网关端点（ALL /gateway/* 需要） ----
 # 一个强随机值；外部 Node 客户端 cloudflareWorkspace({ token }) 要用同一个值。
 # 不填则 /gateway/* 返回 503（刻意不退化成无鉴权）。线上用：
-#   wrangler secret put NIMBO_GATEWAY_TOKEN
-NIMBO_GATEWAY_TOKEN=
+#   wrangler secret put RUNKO_GATEWAY_TOKEN
+RUNKO_GATEWAY_TOKEN=

@@ -1,7 +1,7 @@
 /**
- * Integration test with `@nimbo/virtual-fs` (devDependency, not a runtime dependency of
- * `@nimbo/core` — see `session.ts`'s header for why core can't construct file tools itself).
- * This file plays the "host" role that `@nimbo/sdk` will formalize in P7: it pre-constructs
+ * Integration test with `@runko/virtual-fs` (devDependency, not a runtime dependency of
+ * `@runko/core` — see `session.ts`'s header for why core can't construct file tools itself).
+ * This file plays the "host" role that `@runko/sdk` will formalize in P7: it pre-constructs
  * `session.readState`/`session.derivedData`-equivalent stores via the exported factories
  * (`createSessionReadState`/`createDerivedDataCollector`), wires them into
  * `createFileTools({ readState, onFileChange })`, puts the resulting tools on
@@ -18,11 +18,11 @@
 import { describe, expect, it } from "vitest";
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
-import { createFileTools, fromMemory } from "@nimbo/virtual-fs";
-import type { FileChange } from "@nimbo/virtual-fs";
+import { createFileTools, fromMemory } from "@runko/virtual-fs";
+import type { FileChange } from "@runko/virtual-fs";
 import { createDerivedDataCollector, createSession, createSessionReadState, defineAgent } from "../src/index.js";
 import type { AgentDefinition, DerivedDataCollector, SessionReadState } from "../src/index.js";
-import { allToolParts, drainTurn, fileChangeParts, planUpdateParts } from "./helpers/nimbo-chunks.js";
+import { allToolParts, drainTurn, fileChangeParts, planUpdateParts } from "./helpers/runko-chunks.js";
 
 function mockModel(buildOptions: () => ConstructorParameters<typeof MockLanguageModelV4>[0]): MockLanguageModelV4 {
   return new MockLanguageModelV4(buildOptions());
@@ -68,7 +68,7 @@ function stopChunk(text: string) {
  * `{ isError: true, content }` return value (docs/tech/builtin-tools.md §0.5), not by throwing —
  * so the tool part still settles to `state: "output-available"`; the failure shows up in
  * `output`. Narrows the tool part's `output` (`unknown` — TOOLS type param default, see
- * `state.ts`'s `NimboUIMessage` header) down to that shape's `content` string without a type
+ * `state.ts`'s `RunkoUIMessage` header) down to that shape's `content` string without a type
  * assertion.
  */
 function errorResultContent(output: unknown): string {
@@ -102,7 +102,7 @@ function assembleFileToolsSession(
   return { session, recordedChanges, readState, derivedData };
 }
 
-describe("core session + @nimbo/virtual-fs file tools (host-assembled, P4-2 seam)", () => {
+describe("core session + @runko/virtual-fs file tools (host-assembled, P4-2 seam)", () => {
   it("write-file: the data-file-change part reaches the ledger, the fs is actually written, and readState is updated", async () => {
     const fs = fromMemory({});
     const model = mockModel(() => ({
@@ -130,7 +130,7 @@ describe("core session + @nimbo/virtual-fs file tools (host-assembled, P4-2 seam
     const model = mockModel(() => ({
       doStream: [
         toolCallChunk("call_1", "read-file", { path: "/a.txt" }),
-        toolCallChunk("call_2", "edit-file", { path: "/a.txt", old_string: "world", new_string: "nimbo" }),
+        toolCallChunk("call_2", "edit-file", { path: "/a.txt", old_string: "world", new_string: "runko" }),
         stopChunk("edited"),
       ],
     }));
@@ -140,7 +140,7 @@ describe("core session + @nimbo/virtual-fs file tools (host-assembled, P4-2 seam
 
     const toolCalls = allToolParts(session.toJSON().messages);
     expect(toolCalls.map((part) => part.state)).toEqual(["output-available", "output-available"]);
-    expect(new TextDecoder().decode(await fs.readFile("/a.txt"))).toBe("hello nimbo");
+    expect(new TextDecoder().decode(await fs.readFile("/a.txt"))).toBe("hello runko");
 
     // second turn on the SAME session: edit-file on a file that was never read in this session
     // (its readState entry is untouched) must still be rejected — proves readState enforcement

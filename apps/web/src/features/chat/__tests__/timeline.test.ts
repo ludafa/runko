@@ -1,4 +1,4 @@
-import type { NimboUIMessage } from '@nimbo/core';
+import type { RunkoUIMessage } from '@runko/core';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -17,7 +17,7 @@ import {
   findToolTiming,
   formatClockTime,
   formatDuration,
-  isNimboToolPart,
+  isRunkoToolPart,
   prettyJson,
   summarizeJson,
   toolPartName,
@@ -43,15 +43,15 @@ import {
   toolOutputAvailableChunk,
   toolPartById,
   userMessage,
-} from './helpers/nimbo-chunks';
+} from './helpers/runko-chunks';
 
 function collectLedger(): {
   ledger: MessageLedger;
-  latest: () => NimboUIMessage[];
+  latest: () => RunkoUIMessage[];
   turnEndCount: () => number;
   userMessageCount: () => number;
 } {
-  let latest: NimboUIMessage[] = [];
+  let latest: RunkoUIMessage[] = [];
   let turnEndCount = 0;
   let userMessageCount = 0;
   const ledger = new MessageLedger(
@@ -117,7 +117,7 @@ describe('MessageLedger (materialize.ts)', () => {
     expect(first?.id).not.toBe(second?.id);
 
     expect(collectText(first)).toBe('我需要先跑一下测试。');
-    const toolPart = toolPartById(first as NimboUIMessage, 'call-bash-1');
+    const toolPart = toolPartById(first as RunkoUIMessage, 'call-bash-1');
     expect(toolPart?.state).toBe('output-available');
     expect(collectText(second)).toBe('测试全部通过。');
 
@@ -133,7 +133,7 @@ describe('MessageLedger (materialize.ts)', () => {
     } // up through tool-approval-request only
     await flushLedger();
 
-    const pending = toolPartById(latest()[0] as NimboUIMessage, 'call-bash-1');
+    const pending = toolPartById(latest()[0] as RunkoUIMessage, 'call-bash-1');
     expect(pending?.state).toBe('approval-requested');
     expect(pending?.state === 'approval-requested' && pending.approval.id).toBe(
       'call-bash-1',
@@ -144,7 +144,7 @@ describe('MessageLedger (materialize.ts)', () => {
     }
     await flushLedger();
 
-    const resolved = toolPartById(latest()[0] as NimboUIMessage, 'call-bash-1');
+    const resolved = toolPartById(latest()[0] as RunkoUIMessage, 'call-bash-1');
     expect(resolved?.state).toBe('output-available');
   });
 
@@ -185,7 +185,7 @@ describe('MessageLedger (materialize.ts)', () => {
     }
     await flushLedger();
 
-    const part = toolPartById(latest()[0] as NimboUIMessage, 'call-x');
+    const part = toolPartById(latest()[0] as RunkoUIMessage, 'call-x');
     expect(part?.state).toBe('output-denied');
     expect(part?.state === 'output-denied' && part.approval.reason).toBe(
       '太危险了',
@@ -202,7 +202,7 @@ describe('MessageLedger (materialize.ts)', () => {
     const pendingMessages = latest();
     expect(pendingMessages).toHaveLength(1);
     const pendingPart = toolPartById(
-      pendingMessages[0] as NimboUIMessage,
+      pendingMessages[0] as RunkoUIMessage,
       'call-ask-1',
     );
     expect(pendingPart?.state).toBe('input-available');
@@ -213,7 +213,7 @@ describe('MessageLedger (materialize.ts)', () => {
     await flushLedger();
 
     const answeredPart = toolPartById(
-      latest()[0] as NimboUIMessage,
+      latest()[0] as RunkoUIMessage,
       'call-ask-1',
     );
     expect(answeredPart?.state).toBe('output-available');
@@ -312,7 +312,7 @@ describe('MessageLedger (materialize.ts)', () => {
     }
     await flushLedger();
 
-    const message = latest()[0] as NimboUIMessage;
+    const message = latest()[0] as RunkoUIMessage;
     const progressParts = message.parts.filter(
       (part) => part.type === 'data-tool-progress',
     );
@@ -339,7 +339,7 @@ describe('MessageLedger (materialize.ts)', () => {
     }
     await flushLedger();
 
-    const message = latest()[0] as NimboUIMessage;
+    const message = latest()[0] as RunkoUIMessage;
     const fileChangeParts = message.parts.filter(
       (part) => part.type === 'data-file-change',
     );
@@ -363,7 +363,7 @@ describe('MessageLedger (materialize.ts)', () => {
     }
     await flushLedger();
 
-    const message = latest()[0] as NimboUIMessage;
+    const message = latest()[0] as RunkoUIMessage;
     const timingParts = message.parts.filter(
       (part) => part.type === 'data-tool-timing',
     );
@@ -376,7 +376,7 @@ describe('MessageLedger (materialize.ts)', () => {
     });
   });
 
-  it('BUG (see report): bulk/synchronous frame application ("回放") and one-at-a-time frame application with awaits between ("直播") must materialize the same final NimboUIMessage[] for the same crashed-turn frame sequence', async () => {
+  it('BUG (see report): bulk/synchronous frame application ("回放") and one-at-a-time frame application with awaits between ("直播") must materialize the same final RunkoUIMessage[] for the same crashed-turn frame sequence', async () => {
     const crashedTurnFrames = toChunkEnvelopes([
       startChunk('crashed-1'),
       startStepChunk(),
@@ -451,7 +451,7 @@ describe('MessageLedger onUserMessage (this ticket’s fix — the FIFO-pop sign
 });
 
 describe('buildRenderEntries', () => {
-  const messages: NimboUIMessage[] = [
+  const messages: RunkoUIMessage[] = [
     { id: 'm1', role: 'user', parts: [{ type: 'text', text: 'hi' }] },
     { id: 'm2', role: 'assistant', parts: [{ type: 'text', text: 'hello' }] },
   ];
@@ -525,17 +525,17 @@ describe('buildRenderEntries', () => {
 });
 
 describe('tool-part narrowing helpers (timeline.ts)', () => {
-  it('isNimboToolPart accepts a tool-<name> part and rejects step-start/data-* parts', async () => {
+  it('isRunkoToolPart accepts a tool-<name> part and rejects step-start/data-* parts', async () => {
     const { ledger, latest } = collectLedger();
     await applyAllLive(ledger, approvalTurnFrames);
     await flushLedger();
 
-    const message = latest()[0] as NimboUIMessage;
-    const toolParts = message.parts.filter(isNimboToolPart);
+    const message = latest()[0] as RunkoUIMessage;
+    const toolParts = message.parts.filter(isRunkoToolPart);
     expect(toolParts).toHaveLength(1);
     expect(message.parts.some((p) => p.type === 'step-start')).toBe(true);
-    expect(toolParts.some((p) => isNimboToolPart(p))).toBe(true);
-    const nonToolParts = message.parts.filter((p) => !isNimboToolPart(p));
+    expect(toolParts.some((p) => isRunkoToolPart(p))).toBe(true);
+    const nonToolParts = message.parts.filter((p) => !isRunkoToolPart(p));
     expect(nonToolParts.every((p) => !p.type.startsWith('tool-'))).toBe(true);
   });
 
@@ -543,7 +543,7 @@ describe('tool-part narrowing helpers (timeline.ts)', () => {
     const { ledger, latest } = collectLedger();
     await applyAllLive(ledger, approvalTurnFrames);
     await flushLedger();
-    const part = toolPartById(latest()[0] as NimboUIMessage, 'call-bash-1');
+    const part = toolPartById(latest()[0] as RunkoUIMessage, 'call-bash-1');
     expect(part).toBeDefined();
     if (part === undefined) {
       return;
@@ -608,7 +608,7 @@ describe('tool-part narrowing helpers (timeline.ts)', () => {
 describe('tool timing helpers (timeline.ts) — chat 可观测性：工具起止时间戳', () => {
   describe('findToolTiming', () => {
     it('finds the data-tool-timing part matching toolCallId (by id)', () => {
-      const message: NimboUIMessage = {
+      const message: RunkoUIMessage = {
         id: 'm1',
         role: 'assistant',
         parts: [
@@ -628,7 +628,7 @@ describe('tool timing helpers (timeline.ts) — chat 可观测性：工具起止
     });
 
     it('returns undefined when no data-tool-timing part exists at all (input still streaming, or a pre-existing message)', () => {
-      const message: NimboUIMessage = {
+      const message: RunkoUIMessage = {
         id: 'm1',
         role: 'assistant',
         parts: [{ type: 'step-start' }],
@@ -637,7 +637,7 @@ describe('tool timing helpers (timeline.ts) — chat 可观测性：工具起止
     });
 
     it('returns undefined for a non-matching toolCallId — does not cross-wire timing across different tool calls in the same message', () => {
-      const message: NimboUIMessage = {
+      const message: RunkoUIMessage = {
         id: 'm1',
         role: 'assistant',
         parts: [
@@ -652,7 +652,7 @@ describe('tool timing helpers (timeline.ts) — chat 可观测性：工具起止
     });
 
     it('picks the right one out of several data-tool-timing parts for different calls on the same message', () => {
-      const message: NimboUIMessage = {
+      const message: RunkoUIMessage = {
         id: 'm1',
         role: 'assistant',
         parts: [
@@ -715,7 +715,7 @@ describe('tool timing helpers (timeline.ts) — chat 可观测性：工具起止
   });
 });
 
-describe('BUG (see report): replay ("回放", bulk/synchronous applyFrame) vs live ("直播", one frame at a time) must materialize the same NimboUIMessage[] — currently they do not for any turn that ends in the standalone message-metadata chunk', () => {
+describe('BUG (see report): replay ("回放", bulk/synchronous applyFrame) vs live ("直播", one frame at a time) must materialize the same RunkoUIMessage[] — currently they do not for any turn that ends in the standalone message-metadata chunk', () => {
   it('a plain completed turn materializes the same way whether applied all-at-once or one frame at a time', async () => {
     const replay = collectLedger();
     for (const frame of plainTextTurnFrames) {

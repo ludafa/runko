@@ -1,13 +1,13 @@
 /**
- * chat 应用这一档的**宿主能力实现**：`@nimbo/agent` 的三个领域接口
+ * chat 应用这一档的**宿主能力实现**：`@runko/agent` 的三个领域接口
  * （[账本](../../../../docs/terms.md) · [裁决表](../../../../docs/terms.md) ·
  * [待发队列](../../../../docs/terms.md)）+ [归属仲裁机制](../../../../docs/terms.md)，
  * 全部架在既有的 drizzle schema 上。
  *
- * **为什么不装 `@nimbo/persist-sql`**：这个应用本来就有自己的 ORM 和领域模型，再引一个
+ * **为什么不装 `@runko/persist-sql`**：这个应用本来就有自己的 ORM 和领域模型，再引一个
  * 持久化包等于在同一个进程里出现第二套数据访问方式。框架的设计正是「逻辑层定义模型、
  * 宿主负责存」——宿主自己实现这四个接口是**头等路径**，不是降级方案。顺带这也是对
- * 接口最真实的检验：它必须能架在别人已有的表上，而不是逼别人跑 nimbo 的迁移。
+ * 接口最真实的检验：它必须能架在别人已有的表上，而不是逼别人跑 runko 的迁移。
  *
  * 三处与框架契约对齐的要点：
  *
@@ -33,9 +33,9 @@ import type {
   StaleOwnership,
   TurnInput,
   WriteResult,
-} from '@nimbo/agent';
-import type { JsonValue, NimboUIMessage } from '@nimbo/core';
-import { jsonValueSchema } from '@nimbo/core';
+} from '@runko/agent';
+import type { JsonValue, RunkoUIMessage } from '@runko/core';
+import { jsonValueSchema } from '@runko/core';
 import { and, asc, eq, isNotNull, max } from 'drizzle-orm';
 import { z } from 'zod';
 
@@ -67,11 +67,11 @@ const uiMessageEnvelopeSchema = z.object({
   parts: z.array(z.unknown()),
 });
 
-/** JSON 列 → `NimboUIMessage`；坏行返回 `undefined`（记一行 warn，跳过，不让整段回放 500）。 */
+/** JSON 列 → `RunkoUIMessage`；坏行返回 `undefined`（记一行 warn，跳过，不让整段回放 500）。 */
 function parseMessage(
   payloadJson: string,
   log: Logger,
-): NimboUIMessage | undefined {
+): RunkoUIMessage | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(payloadJson);
@@ -88,9 +88,9 @@ function parseMessage(
     });
     return undefined;
   }
-  // 信封校验通过即视为 `NimboUIMessage`——深层校验归 core（见 schema 注释）。这是
+  // 信封校验通过即视为 `RunkoUIMessage`——深层校验归 core（见 schema 注释）。这是
   // 本文件唯一一处「运行时校验后收窄」的信任声明，隔离在这个函数里。
-  return parsed as NimboUIMessage;
+  return parsed as RunkoUIMessage;
 }
 
 function createLedgerStore(db: Db, log: Logger): LedgerStore {
@@ -457,7 +457,7 @@ export interface ChatArbitrationOptions {
  *
  * 这一档**不需要 CAS**：better-sqlite3 全同步，单进程内「读-判断-写」中间插不进别的
  * 东西。上多进程时这里要换成带心跳与[租期标识](../../../../docs/terms.md)的租约版
- * （`@nimbo/persist-sql`），轮编排一行不用改。
+ * （`@runko/persist-sql`），轮编排一行不用改。
  */
 export function createChatArbitration(
   db: Db,

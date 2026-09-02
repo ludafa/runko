@@ -4,7 +4,7 @@ slug: arbitration-impl
 view: 施工
 layer: 逻辑层
 module: 归属仲裁
-packages: ["@nimbo/persist-kysely", "@nimbo/persist-mongo", "@nimbo/agent"]
+packages: ["@runko/persist-kysely", "@runko/persist-mongo", "@runko/agent"]
 tags: ["租约", "心跳", "租期标识", "多进程", "CAS"]
 related: ["logic/arbitration/features/arbitration-impl.md", "logic/arbitration/tech/arbitration-impl.md", "architecture/plans/agent-kernel.md"]
 ---
@@ -91,12 +91,12 @@ related: ["logic/arbitration/features/arbitration-impl.md", "logic/arbitration/t
 | 阶段 | 目标 | 状态 |
 |---|---|---|
 | **L0** | 定案三个值；更新技术方案 §8 | ✅ 已交付（2026-09-01） |
-| **L1** | 租约表 + CAS 原语 | ✅ `nimbo_leases` 四档 DDL + `schema.sql` |
+| **L1** | 租约表 + CAS 原语 | ✅ `agent_leases` 四档 DDL + `schema.sql` |
 | **L2** | `acquire` / `release` / `inspect` | ✅ `persist-kysely/src/arbitration.ts` |
 | **L3** | 心跳 + 超时接管 | ✅ 同上 |
 | **L4** | `nextSeq` 的 CAS + 失效通知 | ✅ 同上（推 `signal` + 拉 `lost_ownership` 两条路） |
 | **L5** | `listStale` / `clearStale` 的租约语义 | ✅ 同上 |
-| **L6** | **仲裁一致性套件** | ✅ `@nimbo/conformance` 的 `arbitrationCases` / `arbitrationMultiNodeCases` / `arbitrationTakeoverCases` |
+| **L6** | **仲裁一致性套件** | ✅ `@runko/conformance` 的 `arbitrationCases` / `arbitrationMultiNodeCases` / `arbitrationTakeoverCases` |
 | **L9 场景 3** | **被误判的老持有者写入被拒** | ✅ 四个方言全过（含真 Postgres / 真 MySQL） |
 | **L7** | 三个薄壳导出 `*Arbitration()` | ⬜ 未开工（本批范围外） |
 | **L8** | Mongo 版 | ⬜ 未开工 |
@@ -142,14 +142,14 @@ UPDATE` 不支持 WHERE 子句，一条语句做不到跨三方言一致，这�
 **L1 · 租约表**
 
 ```sql
-CREATE TABLE nimbo_leases (
+CREATE TABLE agent_leases (
   conversation_id varchar(255) NOT NULL,   -- MySQL 上要 COLLATE utf8mb4_bin
   holder          varchar(255) NOT NULL,   -- 不透明字符串，框架不解释
   lease_token     varchar(64)  NOT NULL,   -- ULID，调用方生成
   seq_watermark   bigint       NOT NULL,   -- 账本水位（租约版从这儿取号）
   heartbeat_at    bigint       NOT NULL,
   acquired_at     bigint       NOT NULL,
-  CONSTRAINT nimbo_leases_pk PRIMARY KEY (conversation_id)
+  CONSTRAINT agent_leases_pk PRIMARY KEY (conversation_id)
 );
 ```
 
@@ -159,7 +159,7 @@ UPDATE**，不需要两次往返，也不可能出现「校验通过但取号用
 CAS 原语只有一条：
 
 ```sql
-UPDATE nimbo_leases
+UPDATE agent_leases
    SET seq_watermark = seq_watermark + 1, heartbeat_at = ?
  WHERE conversation_id = ? AND lease_token = ?
 ```
@@ -176,10 +176,10 @@ UPDATE nimbo_leases
 
 ```sql
 -- 没人持有 → 插入；持有者已超时 → 抢过来。两种都是一条语句。
-INSERT INTO nimbo_leases (...) VALUES (...)
+INSERT INTO agent_leases (...) VALUES (...)
 ON CONFLICT (conversation_id) DO UPDATE
    SET holder = ?, lease_token = ?, heartbeat_at = ?, acquired_at = ?
- WHERE nimbo_leases.heartbeat_at < ?   -- 只有超时的才让抢
+ WHERE agent_leases.heartbeat_at < ?   -- 只有超时的才让抢
 ```
 
 写完**读回来比对 `lease_token`**——`ON CONFLICT DO UPDATE ... WHERE` 不满足条件时是
@@ -240,7 +240,7 @@ A 重新抢占」时，A 滞留在网络里的旧写入会被放行。**粒度�
 | 1 | 单进程下不装任何东西，行为与今天完全一致 | 现有 2118 个用例照跑，一个不改 |
 | 2 | 两个进程同时起轮只有一个成功，另一个拿到 `holder` 能转发 | L9 场景 1 + L10 |
 | 3 | 杀掉持有者能被接管；**被误判的老持有者写入一律被拒** | L9 场景 2、3 —— **这条是核心** |
-| 4 | Durable Object 那档能干净绕过 | 不在本计划（那是 K9 的 `@nimbo/durable-object`），但仲裁一致性套件要保证「什么都不做」的平凡实现也能过 |
+| 4 | Durable Object 那档能干净绕过 | 不在本计划（那是 K9 的 `@runko/durable-object`），但仲裁一致性套件要保证「什么都不做」的平凡实现也能过 |
 
 另加两条工程标准：
 
@@ -252,7 +252,7 @@ A 重新抢占」时，A 滞留在网络里的旧写入会被放行。**粒度�
 - **不做跨会话的资源冲突**（本机 CLI 多个会话共用一个项目目录那种）。
 - **不替宿主转发**——框架只给 `holder`。L10 做的是 chat 应用自己的转发，是示范不是框架能力。
 - **不改崩溃恢复的语义**：进程被强杀仍走老路（补一条「已停止」），因为它没停在干净边界上。
-- **不做 `@nimbo/durable-object`**（K9）与 `@nimbo/stream-redis`。多节点要完整可用还需要它们，
+- **不做 `@runko/durable-object`**（K9）与 `@runko/stream-redis`。多节点要完整可用还需要它们，
   但那是另外两条独立的线——**本计划做完，多进程共享一个 Postgres 的部署就成立了**
   （流分发在同机多进程下可以先用「谁持有谁推流 + 接入层转发」兜住）。
 
@@ -269,7 +269,7 @@ L9 的多进程 e2e 最花时间但也最不可省——**没有它，这个功�
 | 日期 | 变更 |
 |---|---|
 | 2026-09-01 | L0–L6 + L9 场景 3 交付：租约表 DDL 四档、`leaseArbitration`、心跳与超时接管、仲裁一致性套件、SQLite/pglite/真 Postgres/真 MySQL 四档全绿 |
-| 2026-09-02 | **一致性套件拆成独立包 [`@nimbo/conformance`](../../../../packages/conformance/README.md)**。此前它是 `@nimbo/agent` 的子路径导出，代价是 `vitest` 成了那个**运行时**包的可选 peer——测试框架不该出现在运行时包的依赖里。拆包后套件自带手写断言，只导出 `{ name, run }` 用例数据，任何测试框架都能接 |
+| 2026-09-02 | **一致性套件拆成独立包 [`@runko/conformance`](../../../../packages/conformance/README.md)**。此前它是 `@runko/agent` 的子路径导出，代价是 `vitest` 成了那个**运行时**包的可选 peer——测试框架不该出现在运行时包的依赖里。拆包后套件自带手写断言，只导出 `{ name, run }` 用例数据，任何测试框架都能接 |
 | 2026-09-02 | **心跳自我围栏改成「每拍开头先判」**。此前围栏判断只写在 `catch` 里，只覆盖「库抛错」；库**挂住不返回**（TCP 黑洞 / 连接池耗尽）时防重入标志永久为真，后面每一拍都提前 return，老持有者永不停手。同批把围栏的时间基准从「往返回来之后的 `now()`」改成「写进 `heartbeat_at` 的那个时刻」——别的节点判死看的就是后者，用前者会在往返接近心跳间隔时把余量吃光 |
 | 2026-09-02 | **`nextSeq` 一律不抛**。接口注释写死了「不抛错」，三个调用点也都没有 try，但库抖动时异常会从 `appendSettleMessage` 里逃出去——那是收尾的最后一段。现在库出错归到 `lost_ownership`（含义是「你现在不许写」），是否真的失去归属仍由心跳的自我围栏判定 |
 | 2026-09-02 | **`expire` 测试钩子改成冻结持有者那一侧的时钟**。只改 `heartbeat_at` 会被持有者的下一拍心跳刷回来，接管随机失败（真库上尤其明显）；一致性套件里 `listStale` / `clearStale` 那条也改成从**另一个节点**扫——那才是这个接口的真实场景 |

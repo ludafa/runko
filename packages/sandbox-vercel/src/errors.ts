@@ -4,11 +4,11 @@
  * 抛出物——`APIError`/`StreamError`——也都只是"带 `.code`/`.message` 字段的
  * `Error` 子类"，结构判别足够识别）。
  */
-import { DirectoryNotEmptyError, NotFoundError } from "@nimbo/virtual-fs";
+import { DirectoryNotEmptyError, NotFoundError } from "@runko/virtual-fs";
 
 /**
  * catch 绑定是 `unknown`（strict 模式）——从中安全收窄出"带字符串 code 的
- * Error"是标准写法（同 `@nimbo/virtual-fs` DirFS 的 `isErrnoException` 先例），
+ * Error"是标准写法（同 `@runko/virtual-fs` DirFS 的 `isErrnoException` 先例），
  * 不是到处逃逸的 `unknown`。
  */
 export function isErrnoException(error: unknown): error is NodeJS.ErrnoException {

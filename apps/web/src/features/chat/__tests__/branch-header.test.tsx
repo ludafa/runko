@@ -16,7 +16,7 @@ import {
 } from '../components/branch-header';
 import type { Conversation } from '../schema';
 
-const LONG_BRANCH = 'nimbo/chat-84302082-770a-4dd3-aa7f-edcf60125fb1';
+const LONG_BRANCH = 'runko/chat-84302082-770a-4dd3-aa7f-edcf60125fb1';
 
 function conversation(overrides: Partial<Conversation> = {}): Conversation {
   return {
@@ -24,7 +24,7 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
     title: 'test',
     repo: 'ludafa/Schulte-Grid',
     branchName: LONG_BRANCH,
-    sandboxName: 'nimbo-chat-conv-1',
+    sandboxName: 'runko-chat-conv-1',
     provider: 'e2b',
     status: 'active',
     lastActiveAt: '2026-07-25T10:30:00.000Z',
@@ -38,17 +38,17 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
 
 describe('abbreviateBranchName', () => {
   it('长分支名中间省略，头尾都留着', () => {
-    expect(abbreviateBranchName(LONG_BRANCH)).toBe('nimbo/chat-8430…5fb1');
+    expect(abbreviateBranchName(LONG_BRANCH)).toBe('runko/chat-8430…5fb1');
   });
 
   it('保留尾号——那是两条会话分支唯一的区别，截尾等于让它们长得一样', () => {
-    const a = abbreviateBranchName('nimbo/chat-84302082-770a-4dd3-aaaa-1111');
-    const b = abbreviateBranchName('nimbo/chat-84302082-770a-4dd3-aaaa-2222');
+    const a = abbreviateBranchName('runko/chat-84302082-770a-4dd3-aaaa-1111');
+    const b = abbreviateBranchName('runko/chat-84302082-770a-4dd3-aaaa-2222');
 
     expect(a).not.toBe(b);
   });
 
-  it.each(['main', 'feature/login-fix', 'nimbo/chat-abc'])(
+  it.each(['main', 'feature/login-fix', 'runko/chat-abc'])(
     '短名 %s 原样显示，不省略',
     (name) => {
       expect(abbreviateBranchName(name)).toBe(name);
@@ -74,14 +74,14 @@ describe('BranchHeader', () => {
   it('分支名以缩写形式出现在行尾', () => {
     render(<BranchHeader conversation={conversation()} />);
 
-    expect(screen.getByText('nimbo/chat-8430…5fb1')).toBeInTheDocument();
+    expect(screen.getByText('runko/chat-8430…5fb1')).toBeInTheDocument();
   });
 
   it('hover 分支名时先说清「这是 git 分支」，再给全名——光给全名仍看不出它是什么', async () => {
     const user = userEvent.setup();
     render(<BranchHeader conversation={conversation()} />);
 
-    await user.hover(screen.getByText('nimbo/chat-8430…5fb1'));
+    await user.hover(screen.getByText('runko/chat-8430…5fb1'));
 
     // base-ui 的 tooltip popup 不带 `role="tooltip"`，按内容找
     const tip = await screen.findByText('这个会话的 git 分支');

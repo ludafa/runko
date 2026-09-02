@@ -1,19 +1,19 @@
-# @nimbo/core
+# @runko/core
 
-nimbo 的核心包：L0 可注入接口（`NimboFS` / `NimboExec` / `Tool` / `ApprovalPolicy`）、L1 定义层（`defineAgent` / `defineTool` / `defineSkill`）、L2 运行层（`createSession` / loop / 事件 / 审批链）、AI SDK step runner、skills、L3 目录约定层，以及 `load_skill` / `update_plan` / `bash` 三个内置工具本体。
+runko 的核心包：L0 可注入接口（`RunkoFS` / `RunkoExec` / `Tool` / `ApprovalPolicy`）、L1 定义层（`defineAgent` / `defineTool` / `defineSkill`）、L2 运行层（`createSession` / loop / 事件 / 审批链）、AI SDK step runner、skills、L3 目录约定层，以及 `load_skill` / `update_plan` / `bash` 三个内置工具本体。
 
-> 一般用户装 [`@nimbo/sdk`](../sdk/README.md)（batteries-included 门面）即可；直接用本包适合"要无默认装配的原语"的宿主——本包刻意不依赖 `@nimbo/virtual-fs`（避免循环），`fs` 缺省时是抛指导性错误的占位实现，文件工具八件套也不自动拼装。
+> 一般用户装 [`@runko/sdk`](../sdk/README.md)（batteries-included 门面）即可；直接用本包适合"要无默认装配的原语"的宿主——本包刻意不依赖 `@runko/virtual-fs`（避免循环），`fs` 缺省时是抛指导性错误的占位实现，文件工具八件套也不自动拼装。
 
 ## 安装
 
 ```sh
-pnpm add @nimbo/core ai        # ai@^7 是 peerDependency
+pnpm add @runko/core ai        # ai@^7 是 peerDependency
 ```
 
 ## 最小用例
 
 ```ts
-import { defineAgent, defineTool, createSession } from "@nimbo/core";
+import { defineAgent, defineTool, createSession } from "@runko/core";
 import { z } from "zod";
 
 const agent = defineAgent({
@@ -52,21 +52,21 @@ console.log(result.finalResponse);
 
 | 导出 | 说明 |
 |---|---|
-| `createSession(agent, opts?): Session` | `SessionOptions`：`fs?`、`exec?`（注入即激活 `bash` 工具）、`workspace?`（`NimboFS & NimboExec` 同源一次注入，与前两者互斥、同传同步抛错）、`onApproval?`、`instructions?: { append }`、`resume?: SessionState`、`readState?`/`derivedData?`（外部工具装配接缝） |
-| `Session.send(input, opts?)` | Promise 完整 `TurnResult`（`items` / `finalResponse` / `usage`）；`turn.failed` 时抛 `NimboSessionError`（带 `code`） |
-| `Session.send<T>(input, { outputSchema })` | 结构化输出重载：正常 turn 收尾后独立一轮折叠成 zod 校验的 `T`（`structuredOutput` 字段叠加），校验失败重试 ≤2 次，耗尽抛 `NimboStructuredOutputError` |
+| `createSession(agent, opts?): Session` | `SessionOptions`：`fs?`、`exec?`（注入即激活 `bash` 工具）、`workspace?`（`RunkoFS & RunkoExec` 同源一次注入，与前两者互斥、同传同步抛错）、`onApproval?`、`instructions?: { append }`、`resume?: SessionState`、`readState?`/`derivedData?`（外部工具装配接缝） |
+| `Session.send(input, opts?)` | Promise 完整 `TurnResult`（`items` / `finalResponse` / `usage`）；`turn.failed` 时抛 `RunkoSessionError`（带 `code`） |
+| `Session.send<T>(input, { outputSchema })` | 结构化输出重载：正常 turn 收尾后独立一轮折叠成 zod 校验的 `T`（`structuredOutput` 字段叠加），校验失败重试 ≤2 次，耗尽抛 `RunkoStructuredOutputError` |
 | `Session.stream(input, opts?)` | AsyncGenerator 事件流：`session.started` / `turn.started` / `item.started` / `item.updated` / `item.completed` / `turn.completed` / `turn.failed`；item 类型 `agent_message` / `reasoning` / `tool_call` / `file_change` / `plan_update` / `error` |
 | `Session.toJSON({ includeFs? })` | 可序列化 `SessionState`（messages 即 AI SDK `ModelMessage`）；`includeFs: true` 内联 fs 快照（需 fs 支持 `snapshot()`）；经 `SessionOptions.resume` 恢复 |
 | `Input` / `InputBlock` | 纯字符串或 text / image blocks |
-| `NimboSessionError`、`NimboError` | `code`: `"max_turns" \| "context_overflow" \| "provider_error" \| "aborted"` |
-| `createSessionReadState()` / `createDerivedDataCollector()` | 预构造 store 供外部文件工具装配（`@nimbo/sdk` 默认装配即走此通路） |
+| `RunkoSessionError`、`RunkoError` | `code`: `"max_turns" \| "context_overflow" \| "provider_error" \| "aborted"` |
+| `createSessionReadState()` / `createDerivedDataCollector()` | 预构造 store 供外部文件工具装配（`@runko/sdk` 默认装配即走此通路） |
 
 ### L0 · 原语接口（§4.4 / §4.5a）
 
 | 导出 | 说明 |
 |---|---|
-| `NimboFS`（类型） | 七方法虚拟文件系统接口：`readFile` / `writeFile` / `rm` / `mkdir` / `readdir` / `stat` / `glob`；实现见 `@nimbo/virtual-fs`。`FileStat` 含 `mimeType?` / `href?`（reference 条目）/ `annotations?` |
-| `NimboExec`（类型） | 命令执行接口：`exec(req, opts?)`（失败也以 resolve 的 `ExecResult` 返回，非零 `exitCode`）+ 可选 `describe()`（环境自描述，拼进 bash 工具描述）+ 可选 `defaultApproval`（未声明兜底 `"always"`） |
+| `RunkoFS`（类型） | 七方法虚拟文件系统接口：`readFile` / `writeFile` / `rm` / `mkdir` / `readdir` / `stat` / `glob`；实现见 `@runko/virtual-fs`。`FileStat` 含 `mimeType?` / `href?`（reference 条目）/ `annotations?` |
+| `RunkoExec`（类型） | 命令执行接口：`exec(req, opts?)`（失败也以 resolve 的 `ExecResult` 返回，非零 `exitCode`）+ 可选 `describe()`（环境自描述，拼进 bash 工具描述）+ 可选 `defaultApproval`（未声明兜底 `"always"`） |
 | `Tool` / `ToolContext` | 类型擦除态工具；`ctx`: `fs` / `abortSignal` / `callId` / `session` / `getSkill(name)` / `update(partial)` |
 | `ApprovalPolicy` / `ApprovalDecision` | `"never" \| "always" \| "once" \|` 回调；两层审批链 per-tool → session `onApproval`；`"always"`/`"once"` 升级后无人裁决即 deny（带指导），`allow` 可携 `updatedInput` 改参 |
 | `JsonValue` / `jsonValueSchema` / `ToolReturn` | JSON 值类型与运行时校验 |
@@ -79,10 +79,10 @@ console.log(result.finalResponse);
 | `createUpdatePlanTool` / `createPlanStore` | `update_plan` 工具（整表替换，产生 `plan_update` item） |
 | `createLoadSkillTool` | `load_skill` 工具（skills 配置时隐式注入；返回 skill markdown + 附属文件清单） |
 | `createBashTool` | `bash` 工具（exec 注入时隐式出现；stdout/stderr 各 64KB 截断、`onOutput` → `item.updated` 流式回报） |
-| `localExec(opts?)` | `NimboExec` 本机参考实现（`node:child_process`）：出厂 `defaultApproval: "always"`；`{ materialize: true, fs }` 为模式 B（执行前物化 VirtualFS 到临时目录、执行后按 mtime 回收），不传 materialize 为模式 C（直跑真实磁盘，完全解耦） |
+| `localExec(opts?)` | `RunkoExec` 本机参考实现（`node:child_process`）：出厂 `defaultApproval: "always"`；`{ materialize: true, fs }` 为模式 B（执行前物化 VirtualFS 到临时目录、执行后按 mtime 回收），不传 materialize 为模式 C（直跑真实磁盘，完全解耦） |
 | `buildAvailableSkillsBlock` / `mountSkillFiles` / `createGetSkill` / `skillMountPath` | skills 注入机制（`<available_skills>` 段、`/.skills/<name>/` 挂载） |
 
-### L3 · 目录约定层（§4.7，`@nimbo/core/load` 子路径或主入口）
+### L3 · 目录约定层（§4.7，`@runko/core/load` 子路径或主入口）
 
 | 导出 | 说明 |
 |---|---|

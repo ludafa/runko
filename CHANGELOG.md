@@ -1,6 +1,6 @@
 # 更新日志（Changelog）
 
-本文件按变更**逐条**记录 nimbo 值得留痕的改动，**最新的在最上方**。每条一个二级标题块，格式为：
+本文件按变更**逐条**记录 runko 值得留痕的改动，**最新的在最上方**。每条一个二级标题块，格式为：
 
 ```
 ## (feature/xxx|fix/xxx|chore/xxx) 变更标题 (YYYY-MM-DD HH:MM) (author)
@@ -12,7 +12,7 @@
 
 ## (feature/examples) examples 实验田化 (2026-07-19 15:58) (ludafa)
 
-`examples/` 收尾为一个打开即用的 pnpm workspace 子项目——源码迁入 `src/`、新增 `pnpm example <编号>` 便捷 runner、`typecheck` 随 `pnpm -r typecheck` 进 CI 质量门；退役手工符号链接脚本 `setup-node-modules.mjs`/`typecheck.mjs`（改由 `pnpm install` 自动搭依赖）；README 重写、`tsconfig`/`workspace` 注释统一。12 号正名为 demo（去 `.e2e.test.ts` 后缀）；唯一的 e2e 测试 13 号迁至 `@nimbo-chat/server`（离线结构断言进 CI，真机段留 git 历史）。见 [docs/misc/features/examples.md](./docs/misc/features/examples.md) · [docs/misc/tech/examples.md](./docs/misc/tech/examples.md) · [docs/misc/plans/examples.md](./docs/misc/plans/examples.md)。
+`examples/` 收尾为一个打开即用的 pnpm workspace 子项目——源码迁入 `src/`、新增 `pnpm example <编号>` 便捷 runner、`typecheck` 随 `pnpm -r typecheck` 进 CI 质量门；退役手工符号链接脚本 `setup-node-modules.mjs`/`typecheck.mjs`（改由 `pnpm install` 自动搭依赖）；README 重写、`tsconfig`/`workspace` 注释统一。12 号正名为 demo（去 `.e2e.test.ts` 后缀）；唯一的 e2e 测试 13 号迁至 `@runko-chat/server`（离线结构断言进 CI，真机段留 git 历史）。见 [docs/misc/features/examples.md](./docs/misc/features/examples.md) · [docs/misc/tech/examples.md](./docs/misc/tech/examples.md) · [docs/misc/plans/examples.md](./docs/misc/plans/examples.md)。
 
 ## (feature/telemetry) 遥测 + 本轮统计弹窗 (2026-07-18 15:23) (ludafa)
 
@@ -36,7 +36,7 @@ server 的 SQLite 遥测集成漏挂 `onToolExecutionStart/End`，导致 core �
 
 ## (feature/single-ledger) 单账本重构 + session→conversation 重命名 (2026-07-18 15:22) (ludafa)
 
-聊天事件模型收敛为单一 UIMessage 账本，退役整套 wire 事件镜像；数据库表 / 列 `session → conversation` 专业化重命名（`chat_sessions → conversations`、`agent_events → conversation_events`，`nimbo_* → agent_session_*`）；工具 part 类型统一 kebab-case。见 [docs/logic/orchestration/features/single-ledger.md](./docs/logic/orchestration/features/single-ledger.md) · [docs/logic/orchestration/tech/single-ledger.md](./docs/logic/orchestration/tech/single-ledger.md) · [docs/logic/orchestration/plans/single-ledger.md](./docs/logic/orchestration/plans/single-ledger.md)。(`77c3270`, `68de8fe`)
+聊天事件模型收敛为单一 UIMessage 账本，退役整套 wire 事件镜像；数据库表 / 列 `session → conversation` 专业化重命名（`chat_sessions → conversations`、`agent_events → conversation_events`，`runko_* → agent_session_*`）；工具 part 类型统一 kebab-case。见 [docs/logic/orchestration/features/single-ledger.md](./docs/logic/orchestration/features/single-ledger.md) · [docs/logic/orchestration/tech/single-ledger.md](./docs/logic/orchestration/tech/single-ledger.md) · [docs/logic/orchestration/plans/single-ledger.md](./docs/logic/orchestration/plans/single-ledger.md)。(`77c3270`, `68de8fe`)
 
 ## (feature/stream-split) 直播流 transient/persistent 分层 (2026-07-14 12:32) (ludafa)
 
@@ -50,6 +50,6 @@ bash 危险命令（`git push`、`rm -r/-f`、`git reset --hard`、改 GitHub �
 
 向进行中的一轮 agent 注入用户消息而不打断当前轮——core 支持 + 经直播流下发。见 [docs/ingress/features/chat-webapp.md](./docs/ingress/features/chat-webapp.md)。(`31fdd1d`, `2b53d6b`)
 
-## (feature/nimbo-sdk) nimbo agent SDK + chat 应用 (2026-07-12 22:13) (ludafa)
+## (feature/runko-sdk) runko agent SDK + chat 应用 (2026-07-12 22:13) (ludafa)
 
 可嵌入的轻量 agent 循环（文件操作 / 命令执行 / skills），几行代码即可在自己的服务里跑起来；配套一个聊天 Web 应用作为参考实现。见 [docs/logic/engine/features/core-sdk.md](./docs/logic/engine/features/core-sdk.md) · [docs/ingress/features/chat-webapp.md](./docs/ingress/features/chat-webapp.md)。(`e061e9d`)

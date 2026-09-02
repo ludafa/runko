@@ -6,17 +6,17 @@
  *
  * | `DEMO_DB` | 装的包 | 你要给它什么 |
  * |---|---|---|
- * | 缺省 / `sqlite` / `memory` | `@nimbo/persist-sqlite` | 一个 `better-sqlite3` 实例 |
- * | `postgres` | `@nimbo/persist-postgres` | 一个 `pg.Pool` |
- * | `mysql` | `@nimbo/persist-mysql` | 一个 `mysql2` 连接池 |
- * | `mongo` | `@nimbo/persist-mongo` | 一个 MongoDB `Db` |
+ * | 缺省 / `sqlite` / `memory` | `@runko/persist-sqlite` | 一个 `better-sqlite3` 实例 |
+ * | `postgres` | `@runko/persist-postgres` | 一个 `pg.Pool` |
+ * | `mysql` | `@runko/persist-mysql` | 一个 `mysql2` 连接池 |
+ * | `mongo` | `@runko/persist-mongo` | 一个 MongoDB `Db` |
  *
  * **Mongo 那一档不是 SQL**，所以它连 demo 自己那张会话表也换了形态（集合而不是表）。
  * 于是 `makeStore()` 由各驱动自己给——见 `store.ts`。
  *
  * 三个 import 都是**动态**的：跑 SQLite 的人不该被迫加载 `pg` 和 `mysql2`。
  */
-import type { Persistence } from "@nimbo/agent";
+import type { Persistence } from "@runko/agent";
 
 import type { DemoStore } from "./store.js";
 import { createMongoStore, createSqlStore } from "./store.js";
@@ -29,7 +29,7 @@ export interface OpenedDriver {
   kind: "sqlite" | "postgres" | "mysql" | "mongo";
   close(): Promise<void>;
   /**
-   * demo **自己那点数据**（会话清单）的存法。由各驱动自己给，因为它跟 nimbo 那三张
+   * demo **自己那点数据**（会话清单）的存法。由各驱动自己给，因为它跟 runko 那三张
    * 表用的是同一个连接——而且 Mongo 那一档形态完全不同（集合，不是表）。
    */
   makeStore: () => DemoStore;
@@ -58,7 +58,7 @@ export async function openDriver(opts: OpenDriverOptions = {}): Promise<OpenedDr
   if (kind === "postgres") {
     const [{ Pool }, { migrate, postgresPersistence }] = await Promise.all([
       import("pg"),
-      import("@nimbo/persist-postgres"),
+      import("@runko/persist-postgres"),
     ]);
     const pool = new Pool({ connectionString: url });
     await migrate(pool);
@@ -82,7 +82,7 @@ export async function openDriver(opts: OpenDriverOptions = {}): Promise<OpenedDr
   if (kind === "mysql") {
     const [{ createPool }, { migrate, mysqlPersistence }] = await Promise.all([
       import("mysql2/promise"),
-      import("@nimbo/persist-mysql"),
+      import("@runko/persist-mysql"),
     ]);
     const pool = createPool(url);
     // `mysql2/promise` 的池跟 `mysql2` 的池是同一个东西，只是包了 Promise；
@@ -111,7 +111,7 @@ export async function openDriver(opts: OpenDriverOptions = {}): Promise<OpenedDr
   if (kind === "mongo") {
     const [{ MongoClient }, { migrate, mongoPersistence }] = await Promise.all([
       import("mongodb"),
-      import("@nimbo/persist-mongo"),
+      import("@runko/persist-mongo"),
     ]);
     const client = new MongoClient(url);
     await client.connect();
@@ -132,7 +132,7 @@ export async function openDriver(opts: OpenDriverOptions = {}): Promise<OpenedDr
 
   const [{ default: Database }, { migrate, sqlitePersistence }] = await Promise.all([
     import("better-sqlite3"),
-    import("@nimbo/persist-sqlite"),
+    import("@runko/persist-sqlite"),
   ]);
   const file = kind === "memory" ? ":memory:" : (opts.path ?? process.env["DEMO_DB_PATH"] ?? "demo.db");
   const db = new Database(file);

@@ -1,23 +1,23 @@
 /**
- * P7-1 acceptance item 5 ("冒烟升级"): the P0 placeholder smoke test (`NIMBO_SDK_VERSION`
+ * P7-1 acceptance item 5 ("冒烟升级"): the P0 placeholder smoke test (`RUNKO_SDK_VERSION`
  * constant) is replaced by real export-surface assertions — every layer's public symbols
- * (`@nimbo/core` L0/L1/L2, `@nimbo/virtual-fs` FS implementations + file tools,
- * `@nimbo/mini-bash`) must be importable from this single `@nimbo/sdk` barrel, plus the
- * two P7-specific additions (`NimboFS` value namespace, the default-assembly `createSession`).
+ * (`@runko/core` L0/L1/L2, `@runko/virtual-fs` FS implementations + file tools,
+ * `@runko/mini-bash`) must be importable from this single `@runko/sdk` barrel, plus the
+ * two P7-specific additions (`RunkoFS` value namespace, the default-assembly `createSession`).
  */
 import { describe, expect, expectTypeOf, it } from "vitest";
 import * as sdk from "../src/index.js";
 import type {
   AgentDefinition,
   FileToolName,
-  NimboFS as NimboFSType,
+  RunkoFS as RunkoFSType,
   Session,
   SessionOptions,
   Skill as SkillType,
   Tool,
 } from "../src/index.js";
 
-describe("@nimbo/sdk re-exports @nimbo/core's L0/L1/L2 surface", () => {
+describe("@runko/sdk re-exports @runko/core's L0/L1/L2 surface", () => {
   it("L1 definition layer: defineAgent/defineTool/defineSkill", () => {
     expect(typeof sdk.defineAgent).toBe("function");
     expect(typeof sdk.defineTool).toBe("function");
@@ -34,20 +34,20 @@ describe("@nimbo/sdk re-exports @nimbo/core's L0/L1/L2 surface", () => {
     expect(sdk.READ_ONLY_TOOLS).toEqual(["read-file", "list-dir", "glob", "grep"]);
   });
 
-  it("L2 runtime helpers: createSessionReadState/createDerivedDataCollector/NimboSessionError", () => {
+  it("L2 runtime helpers: createSessionReadState/createDerivedDataCollector/RunkoSessionError", () => {
     expect(typeof sdk.createSessionReadState).toBe("function");
     expect(typeof sdk.createDerivedDataCollector).toBe("function");
-    expect(typeof sdk.NimboSessionError).toBe("function");
+    expect(typeof sdk.RunkoSessionError).toBe("function");
     const readState = sdk.createSessionReadState();
     expect(readState.get("/a.txt")).toBeUndefined();
   });
 
   it("version marker flows through unchanged", () => {
-    expect(sdk.NIMBO_CORE_VERSION).toBe("0.0.0");
+    expect(sdk.RUNKO_CORE_VERSION).toBe("0.0.0");
   });
 });
 
-describe("@nimbo/sdk re-exports @nimbo/virtual-fs's surface", () => {
+describe("@runko/sdk re-exports @runko/virtual-fs's surface", () => {
   it("FS implementations + factories", () => {
     expect(typeof sdk.MemoryFS).toBe("function");
     expect(typeof sdk.OverlayFS).toBe("function");
@@ -71,7 +71,7 @@ describe("@nimbo/sdk re-exports @nimbo/virtual-fs's surface", () => {
   });
 });
 
-describe("@nimbo/sdk re-exports @nimbo/mini-bash's surface", () => {
+describe("@runko/sdk re-exports @runko/mini-bash's surface", () => {
   it("miniBash factory", () => {
     expect(typeof sdk.miniBash).toBe("function");
     const fs = sdk.fromMemory({ "a.txt": "hello" });
@@ -80,21 +80,21 @@ describe("@nimbo/sdk re-exports @nimbo/mini-bash's surface", () => {
   });
 });
 
-describe("@nimbo/sdk's own additions", () => {
+describe("@runko/sdk's own additions", () => {
   it("createSession is the facade version (a function), distinct in behavior from core's raw one", () => {
     expect(typeof sdk.createSession).toBe("function");
   });
 
-  it("NimboFS value namespace exposes fromMemory/fromDirectory", () => {
-    expect(typeof sdk.NimboFS.fromMemory).toBe("function");
-    expect(typeof sdk.NimboFS.fromDirectory).toBe("function");
+  it("RunkoFS value namespace exposes fromMemory/fromDirectory", () => {
+    expect(typeof sdk.RunkoFS.fromMemory).toBe("function");
+    expect(typeof sdk.RunkoFS.fromDirectory).toBe("function");
   });
 });
 
 describe("type-level export surface (compiles => passes; verified by typecheck, asserted here for documentation)", () => {
   it("core types are importable from the single barrel", () => {
     expectTypeOf<AgentDefinition["model"]>().not.toBeAny();
-    expectTypeOf<SessionOptions["fs"]>().toEqualTypeOf<NimboFSType | undefined>();
+    expectTypeOf<SessionOptions["fs"]>().toEqualTypeOf<RunkoFSType | undefined>();
     expectTypeOf<Tool["description"]>().toEqualTypeOf<string>();
   });
 
@@ -104,7 +104,7 @@ describe("type-level export surface (compiles => passes; verified by typecheck, 
   });
 
   it("Skill (type) and Session<F> (sdk-local generic) both resolve without a cast", () => {
-    expectTypeOf<Session<NimboFSType>["fs"]>().toEqualTypeOf<NimboFSType>();
+    expectTypeOf<Session<RunkoFSType>["fs"]>().toEqualTypeOf<RunkoFSType>();
     expectTypeOf<SkillType["name"]>().toEqualTypeOf<string>();
   });
 });

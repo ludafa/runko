@@ -4,7 +4,7 @@ slug: stream-fanout
 view: 功能
 layer: 宿主层
 module: 流分发
-packages: ["@nimbo/agent", "@nimbo/stream-redis"]
+packages: ["@runko/agent", "@runko/stream-redis"]
 tags: ["流分发", "SSE", "Redis Streams", "断线续传"]
 related: ["host/contract/tech/stream-fanout.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -42,7 +42,7 @@ agent 跑一轮会持续吐内容。产生内容的是**某一个进程**，而�
 | ① 同机多进程 cluster | 应用层转发到本机那个进程 | ❌ |
 | ② Docker · ③ k8s | 应用层转发（`holder` 里存着可达地址） | ❌ |
 | ④a Cloudflare Durable Object | 平台自带，实例内直接出 | ❌ |
-| **④b Vercel** | **Redis Streams 广播** | ✅ `@nimbo/stream-redis` |
+| **④b Vercel** | **Redis Streams 广播** | ✅ `@runko/stream-redis` |
 
 **④b 是唯一需要装流分发包的一档**——因为 Vercel 的实例由平台调度，你**没有办法**找到持有者、也就没法转发。其余要么单进程（内置够用）、要么能转发、要么平台白送。
 
@@ -71,5 +71,5 @@ agent 跑一轮会持续吐内容。产生内容的是**某一个进程**，而�
 ## 5. 成功标准
 
 1. 单进程下不装任何东西，直播和断线续传都正常。
-2. 换成 `@nimbo/stream-redis` 之后，**两个实例**上的两个标签页看同一个会话，内容一致、都能续传。
+2. 换成 `@runko/stream-redis` 之后，**两个实例**上的两个标签页看同一个会话，内容一致、都能续传。
 3. 业务代码在两种情况下**完全一样**。

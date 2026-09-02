@@ -2,7 +2,7 @@ import * as nodeFs from "node:fs/promises";
 import * as nodePath from "node:path";
 import * as os from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { NimboFS } from "@nimbo/core";
+import type { RunkoFS } from "@runko/core";
 import { DirFS, ReadOnlyFileSystemError } from "../src/dir.js";
 import { NotFoundError } from "../src/memory.js";
 
@@ -10,7 +10,7 @@ describe("DirFS", () => {
   let tmpDir: string;
 
   beforeEach(async () => {
-    tmpDir = await nodeFs.mkdtemp(nodePath.join(os.tmpdir(), "nimbo-dirfs-"));
+    tmpDir = await nodeFs.mkdtemp(nodePath.join(os.tmpdir(), "runko-dirfs-"));
     await nodeFs.mkdir(nodePath.join(tmpDir, "src", "nested"), { recursive: true });
     await nodeFs.writeFile(nodePath.join(tmpDir, "a.txt"), "hello");
     await nodeFs.writeFile(nodePath.join(tmpDir, "src", "index.ts"), "export {}");
@@ -87,7 +87,7 @@ describe("DirFS native search seam (docs/tech/sandbox.md §4)", () => {
   it("does not implement searchFiles/searchContent — grep/glob must always fall back to JS scanning against it", () => {
     // no real directory needed — DirFS's constructor doesn't touch disk, and this test only checks
     // the shape of the instance (searchFiles/searchContent absent), never calling any I/O method.
-    const fs: NimboFS = new DirFS("/does-not-need-to-exist");
+    const fs: RunkoFS = new DirFS("/does-not-need-to-exist");
     expect(fs.searchFiles).toBeUndefined();
     expect(fs.searchContent).toBeUndefined();
   });

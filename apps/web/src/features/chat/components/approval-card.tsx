@@ -10,7 +10,7 @@
  * which shows the resolution (including the deny reason) inline.
  *
  * 外壳用 ai-elements 的 `Confirmation`（Alert + 请求/接受/拒绝三态插槽）。三个
- * 按钮是 nimbo 自己的三值裁决（允许 / 会话内都允许 / 拒绝），比官方示例的两值多
+ * 按钮是 runko 自己的三值裁决（允许 / 会话内都允许 / 拒绝），比官方示例的两值多
  * 一档，所以按钮自己列——我们的裁决走 `POST .../approvals/:callId`，不是 useChat
  * 内置的 `addToolApprovalResponse` 通道。
  */
@@ -25,12 +25,12 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
-import type { NimboToolPart } from '../timeline';
+import type { RunkoToolPart } from '../timeline';
 import { bashCommandFromInput, prettyJson, toolPartName } from '../timeline';
 
 /** Only the one state this card ever renders (see file header) — narrowed so `part.input`/`part.approval.id` don't need an `undefined` check that can never actually happen for this state. */
 export type PendingApprovalPart = Extract<
-  NimboToolPart,
+  RunkoToolPart,
   { state: 'approval-requested' }
 >;
 

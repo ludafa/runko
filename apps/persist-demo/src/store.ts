@@ -1,7 +1,7 @@
 /**
  * 本 demo **自己的**那点数据：会话清单。
  *
- * **这一段恰恰是重点**：`@nimbo/persist-*` 不管它。框架的准则是「nimbo 不拥有用户
+ * **这一段恰恰是重点**：`@runko/persist-*` 不管它。框架的准则是「runko 不拥有用户
  * 实体」——它只认一个不透明的 `conversationId` 字符串，不建外键、不存标题、不知道
  * 谁是谁。所以「会话叫什么、什么时候建的」这些**产品数据**归宿主自己存。
  *
@@ -9,13 +9,13 @@
  *
  * | 谁的 | 表 | 谁在写 |
  * |---|---|---|
- * | nimbo 的 | `nimbo_ledger` / `nimbo_decisions` / `nimbo_queue` | `@nimbo/persist-*` |
+ * | runko 的 | `agent_ledger` / `agent_decisions` / `agent_queue` | `@runko/persist-*` |
  * | demo 的 | `demo_conversations` | 本文件 |
  *
  * > 本文件用的是**裸 SQL + 一个三方言的小分支**。这是「demo 要同时支持三种库」的成本，
- * > **不是「当 nimbo 宿主」的成本**——真实应用只挑一个库，直接写那一家的 SQL 就完了。
+ * > **不是「当 runko 宿主」的成本**——真实应用只挑一个库，直接写那一家的 SQL 就完了。
  * > 真嫌烦的话，宿主也可以自己用 Kysely 把这张表一起管起来（那样就该装
- * > `@nimbo/persist-kysely`，nimbo 的表和自己的表进同一个实例、同一套迁移）。
+ * > `@runko/persist-kysely`，runko 的表和自己的表进同一个实例、同一套迁移）。
  */
 import type { Db } from "mongodb";
 
@@ -99,7 +99,7 @@ export function createSqlStore(raw: RawHandle): DemoStore {
  * VARCHAR 的类型差异；这个版本**一样都没有**——`insertOne` / `find` / `findOne` 三句完事。
  *
  * 这恰恰是「持久化归宿主」这条分层的意义：宿主的产品数据用什么形态存，是宿主的事，
- * nimbo 不知道也不该知道。它只认一个不透明的 `conversationId`。
+ * runko 不知道也不该知道。它只认一个不透明的 `conversationId`。
  */
 export function createMongoStore(db: Db): DemoStore {
   interface ConversationDoc {

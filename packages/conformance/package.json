@@ -1,7 +1,7 @@
 {
-  "name": "@nimbo/conformance",
+  "name": "@runko/conformance",
   "version": "0.1.0",
-  "description": "nimbo 宿主能力的契约一致性套件——写了持久化或归属仲裁实现，拿它验合不合契约",
+  "description": "runko 宿主能力的契约一致性套件——写了持久化或归属仲裁实现，拿它验合不合契约",
   "license": "ISC",
   "publishConfig": {
     "registry": "https://registry.npmjs.org/"
@@ -34,15 +34,15 @@
     "test": "vitest run"
   },
   "devDependencies": {
-    "@nimbo/agent": "workspace:*",
-    "@nimbo/core": "workspace:*",
+    "@runko/agent": "workspace:*",
+    "@runko/core": "workspace:*",
     "@types/node": "catalog:",
     "tsdown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },
   "peerDependencies": {
-    "@nimbo/agent": "workspace:^"
+    "@runko/agent": "workspace:^"
   },
   "engines": {
     "node": ">=24"

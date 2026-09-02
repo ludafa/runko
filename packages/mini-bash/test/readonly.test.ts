@@ -3,7 +3,7 @@
  * 完全一致——mini-bash 不实现任何写路径，这里用 MemoryFS.snapshot() 做
  * 端到端证据，而不仅仅是"代码里没调 writeFile"这种静态论证。
  */
-import { fromMemory } from "@nimbo/virtual-fs";
+import { fromMemory } from "@runko/virtual-fs";
 import { describe, expect, it } from "vitest";
 import { run } from "./helpers.js";
 

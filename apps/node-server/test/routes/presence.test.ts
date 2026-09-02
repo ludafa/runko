@@ -27,8 +27,8 @@ describe('routes/chat —— 在场心跳', () => {
       userId: 'user-1',
       title: 'Session',
       repo: 'acme/demo',
-      branchName: `nimbo/chat-${CONVERSATION_ID}`,
-      sandboxName: `nimbo-chat-${CONVERSATION_ID}`,
+      branchName: `runko/chat-${CONVERSATION_ID}`,
+      sandboxName: `runko-chat-${CONVERSATION_ID}`,
     });
   });
 

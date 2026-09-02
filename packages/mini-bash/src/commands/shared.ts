@@ -1,5 +1,5 @@
-/** 六命令共用的读取/格式化辅助——只依赖 NimboFS 七方法，不做任何写入。 */
-import type { FileStat, NimboFS } from "@nimbo/core";
+/** 六命令共用的读取/格式化辅助——只依赖 RunkoFS 七方法，不做任何写入。 */
+import type { FileStat, RunkoFS } from "@runko/core";
 import { resolvePath } from "../path.js";
 
 const decoder = new TextDecoder();
@@ -10,7 +10,7 @@ export function decodeText(data: Uint8Array): string {
 
 /**
  * 受控例外：参数类型是 `unknown` 而非精确类型，因为这里对接的是任意第三方
- * `NimboFS` 实现可能抛出的任意值（`catch` 块的天然边界，不是我们能定义
+ * `RunkoFS` 实现可能抛出的任意值（`catch` 块的天然边界，不是我们能定义
  * 形状的调用方）——用 `instanceof Error` 做类型守卫收窄，不做类型断言，
  * 影响范围隔离在这一个函数内，不向外扩散 `unknown`。
  */
@@ -18,7 +18,7 @@ export function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export async function statSafe(fs: NimboFS, path: string): Promise<FileStat | undefined> {
+export async function statSafe(fs: RunkoFS, path: string): Promise<FileStat | undefined> {
   try {
     return await fs.stat(path);
   } catch {
@@ -30,11 +30,11 @@ export type ReadFileOutcome = { ok: true; text: string } | { ok: false; message:
 
 /**
  * POSIX 风格错误文案（"No such file or directory" / "Is a directory"）只靠
- * `stat()` 的返回值区分，不依赖任何具体 NimboFS 实现抛出的错误类——
- * 第三方 NimboFS（模式 A 沙盒适配器）不一定用 @nimbo/virtual-fs 的
+ * `stat()` 的返回值区分，不依赖任何具体 RunkoFS 实现抛出的错误类——
+ * 第三方 RunkoFS（模式 A 沙盒适配器）不一定用 @runko/virtual-fs 的
  * NotFoundError，这样才能兼容任意实现。
  */
-export async function readFileForCommand(fs: NimboFS, cwd: string, cmdName: string, rawPath: string): Promise<ReadFileOutcome> {
+export async function readFileForCommand(fs: RunkoFS, cwd: string, cmdName: string, rawPath: string): Promise<ReadFileOutcome> {
   const path = resolvePath(cwd, rawPath);
   const stat = await statSafe(fs, path);
   if (stat === undefined) {return { ok: false, message: `${cmdName}: ${rawPath}: No such file or directory` };}

@@ -24,7 +24,7 @@ describe("SearchUnsupportedError", () => {
     expect(error.message).toBe("no usable node in this sandbox");
   });
 
-  it("is re-exported from the package's public entry point (@nimbo/core), not just the internal module", () => {
+  it("is re-exported from the package's public entry point (@runko/core), not just the internal module", () => {
     expect(SearchUnsupportedErrorFromIndex).toBe(SearchUnsupportedError);
   });
 

@@ -1,6 +1,6 @@
 /**
  * `loadAgentFromFS(fs, dir, opts?)`：L3 目录约定层的虚拟 FS 版本（tech-spec
- * §4.7；P7-3 工单任务 3）——nimbo 独有（eve 没有这个形态）："agent 定义本身也
+ * §4.7；P7-3 工单任务 3）——runko 独有（eve 没有这个形态）："agent 定义本身也
  * 可以是虚拟的"。只加载 `instructions.md` 与 `skills/`（复用 `Skill.fromFS`），
  * **刻意不加载 `agent.ts`/`agent.json`/`tools/*.ts`**——§4.7 原文："不引入任意
  * 代码执行面"，`loadAgent`（`load-agent.ts`）的 `import()` 对真实磁盘路径尚且
@@ -36,7 +36,7 @@ import type { LanguageModel } from "ai";
 import type { AgentDefinition, BuiltinToolName } from "../agent.js";
 import { loadSkillFromFS, loadSkillFromMarkdown } from "../skills/loader.js";
 import type { Skill } from "../skill.js";
-import type { DirEntry, NimboFS, Tool } from "../types.js";
+import type { DirEntry, RunkoFS, Tool } from "../types.js";
 
 export interface LoadAgentFromFSOptions {
   /** 必需——见本文件头，永远不从 `dir` 读取。 */
@@ -64,7 +64,7 @@ function joinVirtualPath(parentDir: string, name: string): string {
   return `${trimmed}/${name}`;
 }
 
-async function resolveInstructionsFromFS(fs: NimboFS, dir: string, opts: LoadAgentFromFSOptions): Promise<string> {
+async function resolveInstructionsFromFS(fs: RunkoFS, dir: string, opts: LoadAgentFromFSOptions): Promise<string> {
   const path = joinVirtualPath(dir, INSTRUCTIONS_FILENAME);
   try {
     return new TextDecoder().decode(await fs.readFile(path));
@@ -78,7 +78,7 @@ async function resolveInstructionsFromFS(fs: NimboFS, dir: string, opts: LoadAge
 }
 
 /** `stat()` 用于探测 packaged skill 目录下有没有 SKILL.md；探测失败（不存在/任意错误）一律当"没有"处理，不让探测本身抛错中断加载。 */
-async function hasEntry(fs: NimboFS, path: string): Promise<boolean> {
+async function hasEntry(fs: RunkoFS, path: string): Promise<boolean> {
   try {
     await fs.stat(path);
     return true;
@@ -87,7 +87,7 @@ async function hasEntry(fs: NimboFS, path: string): Promise<boolean> {
   }
 }
 
-async function loadSkillsDirFromFS(fs: NimboFS, dir: string): Promise<Skill[]> {
+async function loadSkillsDirFromFS(fs: RunkoFS, dir: string): Promise<Skill[]> {
   const skillsDir = joinVirtualPath(dir, SKILLS_DIRNAME);
   let entries: DirEntry[];
   try {
@@ -118,7 +118,7 @@ async function loadSkillsDirFromFS(fs: NimboFS, dir: string): Promise<Skill[]> {
  * `skills/`（本文件头）；`opts.model` 必需——本函数从不读取/求值
  * `agent.ts`/`agent.json`/`tools/*.ts`。
  */
-export async function loadAgentFromFS(fs: NimboFS, dir: string, opts: LoadAgentFromFSOptions = {}): Promise<AgentDefinition> {
+export async function loadAgentFromFS(fs: RunkoFS, dir: string, opts: LoadAgentFromFSOptions = {}): Promise<AgentDefinition> {
   const instructions = await resolveInstructionsFromFS(fs, dir, opts);
   const skills = await loadSkillsDirFromFS(fs, dir);
 

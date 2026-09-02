@@ -7,7 +7,7 @@
  * with zero network/credentials (see test/agent/sandbox-manager.test.ts).
  *
  * A [沙盒 provider](docs/terms.md) is "which cloud sandbox this conversation
- * runs on" — `vercel` (`@vercel/sandbox`) or `e2b` (`@nimbo/sandbox-e2b`).
+ * runs on" — `vercel` (`@vercel/sandbox`) or `e2b` (`@runko/sandbox-e2b`).
  * The manager holds a registry keyed by that id and picks per-conversation
  * (`AcquireInput.provider`). All provider-specific differences (clone timing,
  * resume-by-token, keepalive) are sealed inside the `SandboxProvider`
@@ -61,14 +61,14 @@
  */
 import type {
   KeepAliveOptions,
-  NimboActivityAware,
-  NimboExec,
-  NimboFS,
-  NimboKeepAliveCapable,
-} from '@nimbo/core';
-import { e2bWorkspace } from '@nimbo/sandbox-e2b';
-import type { VercelSandboxLike } from '@nimbo/sandbox-vercel';
-import { vercelWorkspace } from '@nimbo/sandbox-vercel';
+  RunkoActivityAware,
+  RunkoExec,
+  RunkoFS,
+  RunkoKeepAliveCapable,
+} from '@runko/core';
+import { e2bWorkspace } from '@runko/sandbox-e2b';
+import type { VercelSandboxLike } from '@runko/sandbox-vercel';
+import { vercelWorkspace } from '@runko/sandbox-vercel';
 import { APIError, Sandbox } from '@vercel/sandbox';
 import { Sandbox as E2bSandbox } from 'e2b';
 
@@ -112,10 +112,10 @@ export interface CreateSandboxParams {
 }
 
 /** 工作区在这里的完整形状：两个功能面 + 两个保活面（适配器在开了 `keepAlive` 时才挂上）。 */
-export type ManagedWorkspace = NimboFS &
-  NimboExec &
-  NimboActivityAware &
-  NimboKeepAliveCapable;
+export type ManagedWorkspace = RunkoFS &
+  RunkoExec &
+  RunkoActivityAware &
+  RunkoKeepAliveCapable;
 
 /**
  * A ready sandbox whose repo is already cloned at the workspace root. The
@@ -404,10 +404,10 @@ function buildInitScripts(owner: string, repo: string): InitScripts {
       'npx -y skills add anthropics/skills --skill frontend-design -a cursor -y',
     cloneFallback:
       'test -f .agents/skills/frontend-design/SKILL.md || ' +
-      '(git clone --depth 1 https://github.com/anthropics/skills /tmp/nimbo-skills-src && ' +
-      'mkdir -p .agents/skills && cp -r /tmp/nimbo-skills-src/skills/frontend-design .agents/skills/)',
+      '(git clone --depth 1 https://github.com/anthropics/skills /tmp/runko-skills-src && ' +
+      'mkdir -p .agents/skills && cp -r /tmp/runko-skills-src/skills/frontend-design .agents/skills/)',
     gitIdentity:
-      'git config user.name "nimbo-agent" && git config user.email "nimbo-agent@users.noreply.github.com"',
+      'git config user.name "runko-agent" && git config user.email "runko-agent@users.noreply.github.com"',
     // PAT read from the sandbox's own $GH_TOKEN env var (set at create time), never interpolated here.
     remoteAuth: `git remote set-url origin "https://x-access-token:$GH_TOKEN@github.com/${owner}/${repo}.git"`,
     gitExclude: "printf '%s\\n' '.agents/' '.skills/' >> .git/info/exclude",
@@ -415,7 +415,7 @@ function buildInitScripts(owner: string, repo: string): InitScripts {
 }
 
 async function runScript(
-  workspace: NimboFS & NimboExec,
+  workspace: RunkoFS & RunkoExec,
   command: string,
   timeoutMs?: number,
 ): Promise<{ exitCode: number; stdout: string }> {
@@ -429,7 +429,7 @@ async function runScript(
 }
 
 async function installSkillAndConfigureGit(
-  workspace: NimboFS & NimboExec,
+  workspace: RunkoFS & RunkoExec,
   owner: string,
   repo: string,
 ): Promise<void> {
@@ -466,7 +466,7 @@ async function installSkillAndConfigureGit(
 
 /** Recovers the conversation's branch: `git fetch && checkout` if it was pushed before, else create it fresh. Covers both the brand-new and the expired-snapshot cases (see file header). */
 async function recoverSessionBranch(
-  workspace: NimboFS & NimboExec,
+  workspace: RunkoFS & RunkoExec,
   branchName: string,
 ): Promise<void> {
   const fetchAndCheckout = await runScript(
@@ -499,7 +499,7 @@ function parseDefaultBranchRef(stdout: string): string | undefined {
 }
 
 async function detectDefaultBranch(
-  workspace: NimboFS & NimboExec,
+  workspace: RunkoFS & RunkoExec,
 ): Promise<string> {
   const result = await runScript(
     workspace,
@@ -536,7 +536,7 @@ export interface AcquireInput {
 export type AcquireMode = 'cache' | 'resume' | 'create';
 
 export interface AcquiredSandbox {
-  workspace: NimboFS & NimboExec;
+  workspace: RunkoFS & RunkoExec;
   defaultBranch: string;
   /** Current resume token — the route persists it (E2B's sandboxId is only known after create; Vercel's equals the name and is a no-op). */
   resumeToken: string;

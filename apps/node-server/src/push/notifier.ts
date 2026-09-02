@@ -4,17 +4,17 @@
  *
  * **这一层是整个功能唯一"想事情"的地方**：`sender.ts` 只管怎么发、SW 只管怎么显示。
  *
- * 三条接口姿态（与 `@nimbo/agent` 的钩子一致，理由也一样）：
+ * 三条接口姿态（与 `@runko/agent` 的钩子一致，理由也一样）：
  *
  * 1. **同步返回 `void`** —— 调用点在一轮的关键路径上（审批卡片正要上线），不能 await。
  * 2. **绝不抛错** —— 每个方法整体 try/catch，异步部分 `void` 掉并自带 catch。
  * 3. **绝不排在用户可见的事情前面** —— 调用方必须先把审批请求挂上（`requestReview`），
  *    再调这里。顺序反了会让一条通知发得慢一点变成"审批卡片来得慢一点"。
  *
- * 依赖方向：`push/` 不认识 `@nimbo/agent`（那是运行内核）。它只从
+ * 依赖方向：`push/` 不认识 `@runko/agent`（那是运行内核）。它只从
  * `agent/store.ts` 取数据——那是数据访问层，`push/store.ts` 也从那里拿 `Db` 类型。
  */
-import type { JsonValue } from '@nimbo/core';
+import type { JsonValue } from '@runko/core';
 
 import { parseQueuedInputs } from '../agent/persistence.js';
 import type { Db } from '../agent/store.js';
@@ -38,7 +38,7 @@ const MAX_QUESTION = 80;
 /**
  * 一轮是怎么结束的。
  *
- * **必须与 `@nimbo/agent` 的 `TurnStatus` 保持一致**——刻意各自声明而不是从那边
+ * **必须与 `@runko/agent` 的 `TurnStatus` 保持一致**——刻意各自声明而不是从那边
  * import：`push/` 不认识运行内核（见文件头的依赖方向）。两者若长歪了，接线处
  * （`agent/runtime.ts`）会立刻编译不过，不会静默漂移。
  */
@@ -57,7 +57,7 @@ export interface ApprovalPendingInput {
   /** 会话属主——通知发给他。 */
   userId: string;
   /**
-   * 这次工具调用的 `callId`（`@nimbo/core` 的 `ApprovalContext.callId`）——通知上的
+   * 这次工具调用的 `callId`（`@runko/core` 的 `ApprovalContext.callId`）——通知上的
    * 裁决按钮靠它拼出 `POST .../approvals/{callId}`。
    */
   callId: string;

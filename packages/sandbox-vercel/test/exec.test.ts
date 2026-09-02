@@ -1,10 +1,10 @@
 /**
- * NimboExec 契约（docs/tech/sandbox.md §3.2 / §8.2 Vercel 列）：`bash -lc` 单 argv 传递
+ * RunkoExec 契约（docs/tech/sandbox.md §3.2 / §8.2 Vercel 列）：`bash -lc` 单 argv 传递
  * （零拼接）、Writable 分片 → onOutput 顺序、超时 124 / 中止 130 的区分、
  * P6-1（全部失败路径 resolve 非零而不 reject——含 SDK 抛出真实异常这条），
  * `defaultApproval`/`describe()` 表面。
  */
-import type { ExecOutputChunk } from "@nimbo/core";
+import type { ExecOutputChunk } from "@runko/core";
 import { describe, expect, it } from "vitest";
 import { vercelWorkspace } from "../src/index.js";
 import { FakeVercelSandbox, writeChunks } from "./helpers.js";
@@ -13,7 +13,7 @@ function newSignal(): AbortSignal {
   return new AbortController().signal;
 }
 
-describe("NimboExec surface", () => {
+describe("RunkoExec surface", () => {
   it("exposes defaultApproval 'allow'", () => {
     const ws = vercelWorkspace(new FakeVercelSandbox());
     expect(ws.defaultApproval).toBe("allow");

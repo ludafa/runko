@@ -1,5 +1,5 @@
 /**
- * Render-shaping helpers for the `NimboUIMessage[]` ledger `materialize.ts`
+ * Render-shaping helpers for the `RunkoUIMessage[]` ledger `materialize.ts`
  * produces (docs/tech/single-ledger.md §5/§6). Two concerns live
  * here:
  *
@@ -8,17 +8,17 @@
  *   only short-lived now, popped as soon as the real turn-start
  *   `MessageFrame` arrives, not permanent) with the materialized messages, in
  *   the position they were sent.
- * - Narrowing a tool part's `input`/`output` (typed `unknown` — `NimboUIMessage`'s
+ * - Narrowing a tool part's `input`/`output` (typed `unknown` — `RunkoUIMessage`'s
  *   `TOOLS` type parameter is necessarily the generic `UITools`, see
- *   `@nimbo/core`'s `state.ts` own `NimboUIMessage` doc comment for why no
+ *   `@runko/core`'s `state.ts` own `RunkoUIMessage` doc comment for why no
  *   compile-time-known tool name union exists to do better) into the shapes
  *   the tool-specific cards need (`bash`'s command, `ask-user`'s question).
  */
 import type {
-  NimboDataParts,
-  NimboUIMessage,
+  RunkoDataParts,
+  RunkoUIMessage,
   ToolTimingData,
-} from '@nimbo/core';
+} from '@runko/core';
 import type { ToolUIPart, UIMessagePart, UITools } from 'ai';
 import { getToolName, isToolUIPart } from 'ai';
 import { z } from 'zod';
@@ -46,7 +46,7 @@ export interface PendingUserEcho {
 }
 
 export type RenderEntry =
-  | { kind: 'message'; message: NimboUIMessage }
+  | { kind: 'message'; message: RunkoUIMessage }
   | { kind: 'pending-echo'; echo: PendingUserEcho };
 
 /**
@@ -73,7 +73,7 @@ export type RenderEntry =
  * always in send order.
  */
 export function buildRenderEntries(
-  messages: readonly NimboUIMessage[],
+  messages: readonly RunkoUIMessage[],
   pendingEchoes: readonly PendingUserEcho[],
 ): RenderEntry[] {
   const entries: RenderEntry[] = messages.map((message) => ({
@@ -95,16 +95,16 @@ export function buildRenderEntries(
 
 // ---- tool part narrowing (`input`/`output: unknown`, see file header) ----
 
-export type NimboToolPart = ToolUIPart<UITools>;
+export type RunkoToolPart = ToolUIPart<UITools>;
 
-/** `ai`'s own `isToolUIPart` also accepts a `DynamicToolUIPart` — nimbo never produces one (every tool part is a static `tool-${name}`, `@nimbo/core`'s `loop.ts`), so this narrows one step further to just the shape this app's cards render. */
-export function isNimboToolPart(
-  part: UIMessagePart<NimboDataParts, UITools>,
-): part is NimboToolPart {
+/** `ai`'s own `isToolUIPart` also accepts a `DynamicToolUIPart` — runko never produces one (every tool part is a static `tool-${name}`, `@runko/core`'s `loop.ts`), so this narrows one step further to just the shape this app's cards render. */
+export function isRunkoToolPart(
+  part: UIMessagePart<RunkoDataParts, UITools>,
+): part is RunkoToolPart {
   return isToolUIPart(part) && part.type.startsWith('tool-');
 }
 
-export function toolPartName(part: NimboToolPart): string {
+export function toolPartName(part: RunkoToolPart): string {
   return getToolName(part);
 }
 
@@ -150,12 +150,12 @@ export function summarizeJson(value: unknown): string {
   return json.length > 120 ? `${json.slice(0, 120)}…` : json;
 }
 
-// ---- tool timing (`data-tool-timing`, `@nimbo/core`'s `state.ts` —
+// ---- tool timing (`data-tool-timing`, `@runko/core`'s `state.ts` —
 // persistent, unlike `data-tool-progress`) ----
 
 /**
  * Finds the `data-tool-timing` part matching `toolCallId` (its `id`, per
- * `@nimbo/core`'s `loop.ts` `upsertToolTimingPart`) — never rendered as its
+ * `@runko/core`'s `loop.ts` `upsertToolTimingPart`) — never rendered as its
  * own card (`message-entry.tsx`'s switch has no case for it, falling through
  * to the generic tool-part guard, which rejects it), only joined into the
  * matching tool-call entry's own card (`tool-call-card.tsx`). Absent for a
@@ -164,7 +164,7 @@ export function summarizeJson(value: unknown): string {
  * before this part existed.
  */
 export function findToolTiming(
-  message: NimboUIMessage,
+  message: RunkoUIMessage,
   toolCallId: string,
 ): ToolTimingData | undefined {
   for (const part of message.parts) {

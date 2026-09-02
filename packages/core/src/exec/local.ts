@@ -1,7 +1,7 @@
 /**
- * `localExec(opts?)`：`NimboExec` 的本机实现（docs/tech/core-sdk.md §4.5a / docs/tech/builtin-tools.md
+ * `localExec(opts?)`：`RunkoExec` 的本机实现（docs/tech/core-sdk.md §4.5a / docs/tech/builtin-tools.md
  * §1.10；P7-3 工单任务 1）。用 `node:child_process` 起一个真实 OS shell 子进程
- * 执行 `command`——与 `@nimbo/mini-bash` 的纯 TS 解释器互为对偶：mini-bash 不
+ * 执行 `command`——与 `@runko/mini-bash` 的纯 TS 解释器互为对偶：mini-bash 不
  * fork 子进程、只读、`defaultApproval: "allow"`（docs/tech/single-ledger.md §6.1 三值重构后的
  * 映射，原 "never"）；`localExec` fork 真实进程、无只读限制、
  * `defaultApproval: "review"`（同一映射，原 "always"；出厂值，docs/tech/builtin-tools.md §1.10——
@@ -31,18 +31,18 @@
  *
  * 选了**构造参数**（`LocalExecOptions.fs`）而非"每次 `exec()` 调用单独传 fs"或
  * "从 `ExecRequest` 里挖 fs"——`ExecRequest` 是 spec §4.5a 钉死的字面签名（不带
- * fs 字段，且 `NimboExec` 要与文件工具同构、不能反过来依赖 `NimboFS` 类型的
+ * fs 字段，且 `RunkoExec` 要与文件工具同构、不能反过来依赖 `RunkoFS` 类型的
  * 运行时实例作为每次调用的入参），只有构造期注入才有地方放。典型用法
  * `createSession({ fs, exec: localExec({ materialize: true, fs }) })`——同一个
  * `fs` 引用传两次（一次给 session 的文件工具，一次给 `localExec` 物化），这正是
- * 模式 B 需要 nimbo 自己维护一致性的体现（不像模式 A 那样只需引用一次同源对象）。
+ * 模式 B 需要 runko 自己维护一致性的体现（不像模式 A 那样只需引用一次同源对象）。
  *
  * ---- v1 不支持符号链接（工单原文"便利实现而非安全边界"） ----
  *
  * `reconcileFS()` 回收阶段只处理 `dirent.isDirectory()`/`dirent.isFile()`，
  * 命令在临时目录里创建的符号链接会被静默跳过（既不报错也不回收）。这不是安全
  * 边界（`localExec` 本来就跑在真实主机上、`defaultApproval: "review"`，信任
- * 边界在审批链而非这里）——只是 v1 图省事没做符号链接的虚拟化语义（`NimboFS`
+ * 边界在审批链而非这里）——只是 v1 图省事没做符号链接的虚拟化语义（`RunkoFS`
  * 接口本身也没有 symlink 概念），因此干脆不支持，而不是花成本做一个语义模糊的
  * 近似。
  */
@@ -51,7 +51,7 @@ import type { Dirent } from "node:fs";
 import * as nodeFs from "node:fs/promises";
 import * as nodeOs from "node:os";
 import * as nodePath from "node:path";
-import type { DirEntry, ExecOptions, ExecRequest, ExecResult, NimboExec, NimboFS } from "../types.js";
+import type { DirEntry, ExecOptions, ExecRequest, ExecResult, RunkoExec, RunkoFS } from "../types.js";
 
 export interface LocalExecOptions {
   /**
@@ -61,13 +61,13 @@ export interface LocalExecOptions {
   materialize?: boolean;
   /** 每次 `exec()` 未显式传 `req.cwd` 时的默认 cwd；语义（真实路径 vs 虚拟路径）取决于 `materialize`，见头注释。 */
   cwd?: string;
-  /** `materialize: true` 时必需——要物化/回收的 `NimboFS`。 */
-  fs?: NimboFS;
+  /** `materialize: true` 时必需——要物化/回收的 `RunkoFS`。 */
+  fs?: RunkoFS;
 }
 
 const MATERIALIZE_REQUIRES_FS_MESSAGE =
-  "localExec({ materialize: true }) requires a NimboFS reference to materialize into the temp dir and " +
-  "reconcile changes back from — pass { fs } (typically the same NimboFS injected as SessionOptions.fs, " +
+  "localExec({ materialize: true }) requires a RunkoFS reference to materialize into the temp dir and " +
+  "reconcile changes back from — pass { fs } (typically the same RunkoFS injected as SessionOptions.fs, " +
   "so bash and the file tools stay consistent, docs/tech/core-sdk.md §4.5a mode B).";
 
 /** ≤150 token 规格（docs/tech/builtin-tools.md §1.10）：OS/架构/node 版本 + 网络可达假设 + 模式 B/C 的 fs 映射说明 + 默认 cwd。 */
@@ -75,9 +75,9 @@ function buildDescribe(opts: LocalExecOptions): string {
   const mode = opts.materialize === true ? "B" : "C";
   const fsNote =
     mode === "B"
-      ? "mode B: the injected NimboFS is materialized into a fresh temp dir before the command and reconciled " +
+      ? "mode B: the injected RunkoFS is materialized into a fresh temp dir before the command and reconciled " +
         "back by mtime after it exits (symlinks are not reconciled — convenience impl, not a security boundary)."
-      : "mode C: runs directly on the real local filesystem, fully decoupled from any injected NimboFS (no reconciliation).";
+      : "mode C: runs directly on the real local filesystem, fully decoupled from any injected RunkoFS (no reconciliation).";
   return (
     `localExec: real OS shell on ${nodeOs.platform()}/${nodeOs.arch()}, Node ${process.version}. ` +
     "Network: assumed reachable — this runs on the host machine directly, not inside a sandbox. " +
@@ -107,7 +107,7 @@ function resolveCwd(opts: LocalExecOptions, req: ExecRequest, tmpDir: string | u
 // ---- 模式 B：物化 fs → 临时目录、执行后按 mtime 回收（头注释） ----
 
 /** 物化整棵 `fs` 树到 `tmpDir`；返回每个已物化文件的基线 mtimeMs（回收阶段据此判断"改过没有"）。reference 条目无本地字节，跳过。 */
-async function materializeFS(fs: NimboFS, tmpDir: string): Promise<Map<string, number>> {
+async function materializeFS(fs: RunkoFS, tmpDir: string): Promise<Map<string, number>> {
   const baseline = new Map<string, number>();
 
   async function walk(virtualDir: string): Promise<void> {
@@ -135,7 +135,7 @@ async function materializeFS(fs: NimboFS, tmpDir: string): Promise<Map<string, n
 }
 
 /** 按 `baseline` 逐一比较 `tmpDir` 现状：新增/mtime 变新的文件写回 `fs`；基线里有但现状没有的路径视为被删除，从 `fs` 移除。符号链接跳过（头注释"v1 不支持符号链接"）。 */
-async function reconcileFS(fs: NimboFS, tmpDir: string, baseline: Map<string, number>): Promise<void> {
+async function reconcileFS(fs: RunkoFS, tmpDir: string, baseline: Map<string, number>): Promise<void> {
   const seen = new Set<string>();
 
   async function walk(virtualDir: string): Promise<void> {
@@ -263,7 +263,7 @@ async function runLocalExec(opts: LocalExecOptions, req: ExecRequest, execOpts: 
 
   try {
     if (materialize && opts.fs !== undefined) {
-      tmpDir = await nodeFs.mkdtemp(nodePath.join(nodeOs.tmpdir(), "nimbo-local-exec-"));
+      tmpDir = await nodeFs.mkdtemp(nodePath.join(nodeOs.tmpdir(), "runko-local-exec-"));
       baseline = await materializeFS(opts.fs, tmpDir);
     }
 
@@ -280,8 +280,8 @@ async function runLocalExec(opts: LocalExecOptions, req: ExecRequest, execOpts: 
   }
 }
 
-/** `NimboExec` 的本机实现（docs/tech/core-sdk.md §4.5a / docs/tech/builtin-tools.md §1.10）。`defaultApproval: "review"` 出厂值（docs/tech/single-ledger.md §6.1 三值重构后的映射，原 "always"）——本机执行没有天然隔离。 */
-export function localExec(opts: LocalExecOptions = {}): NimboExec {
+/** `RunkoExec` 的本机实现（docs/tech/core-sdk.md §4.5a / docs/tech/builtin-tools.md §1.10）。`defaultApproval: "review"` 出厂值（docs/tech/single-ledger.md §6.1 三值重构后的映射，原 "always"）——本机执行没有天然隔离。 */
+export function localExec(opts: LocalExecOptions = {}): RunkoExec {
   if (opts.materialize === true && opts.fs === undefined) {
     throw new Error(MATERIALIZE_REQUIRES_FS_MESSAGE);
   }

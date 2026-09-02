@@ -1,10 +1,10 @@
 /**
- * `@nimbo/persist-kysely`——[持久化](../../../docs/host/contract/features/persistence.md)
+ * `@runko/persist-kysely`——[持久化](../../../docs/host/contract/features/persistence.md)
  * 的 Kysely 实现。**你已经在用 Kysely 时装这个**，把你的实例给它。
  *
  * ```ts
  * import { Kysely, PostgresDialect } from "kysely";
- * import { kyselyPersistence, migrate } from "@nimbo/persist-kysely";
+ * import { kyselyPersistence, migrate } from "@runko/persist-kysely";
  *
  * const db = new Kysely<MyDatabase>({ dialect: new PostgresDialect({ pool }) });
  * await migrate(db, { flavor: "postgres" });
@@ -13,31 +13,31 @@
  * ```
  *
  * **只有一个驱动、没在用 Kysely** 的话别用这个包——用那三个薄壳，它们替你把 Kysely
- * 装配好：`@nimbo/persist-sqlite` / `@nimbo/persist-postgres` / `@nimbo/persist-mysql`。
+ * 装配好：`@runko/persist-sqlite` / `@runko/persist-postgres` / `@runko/persist-mysql`。
  *
  * **为什么是 Kysely**：这跟 better-auth 是同一个答案（它的内置适配器也是 kysely）。
  * 上一版手搓了一个方言层，在「MySQL 不支持 RETURNING」这类差异上已经开始长分支；换成
  * 现成的之后，三个方言真正的差异只剩三处（见 `flavor.ts`）。
  *
  * **这一版只出持久化，不含租约版[归属仲裁](../../../docs/terms.md)**（心跳 + 租期标识 +
- * CAS）——那是下一批，仲裁仍用 `@nimbo/agent` 内置的单进程实现。
+ * CAS）——那是下一批，仲裁仍用 `@runko/agent` 内置的单进程实现。
  */
-import type { Persistence } from "@nimbo/agent";
+import type { Persistence } from "@runko/agent";
 import type { Kysely } from "kysely";
 
 import type { Flavor } from "./flavor.js";
 import { traitsOf } from "./flavor.js";
-import type { NimboDatabase } from "./schema.js";
+import type { RunkoDatabase } from "./schema.js";
 import { createDecisionStore, createLedgerStore, createQueueStore } from "./stores.js";
 
-export const NIMBO_PERSIST_KYSELY_VERSION = "0.0.0" as const;
+export const RUNKO_PERSIST_KYSELY_VERSION = "0.0.0" as const;
 
 export type { Flavor, FlavorTraits } from "./flavor.js";
 export type { LeaseArbitrationOptions } from "./arbitration.js";
 export { leaseArbitration, DEFAULT_HEARTBEAT_MS, DEFAULT_TAKEOVER_MS } from "./arbitration.js";
 export type { MigrateOptions } from "./migrate.js";
 export { migrate } from "./migrate.js";
-export type { DecisionsTable, LedgerTable, NimboDatabase, QueueTable } from "./schema.js";
+export type { DecisionsTable, LedgerTable, RunkoDatabase, QueueTable } from "./schema.js";
 export { DECISIONS_TABLE, LEDGER_TABLE, QUEUE_TABLE } from "./schema.js";
 
 export interface KyselyPersistenceOptions {
@@ -52,18 +52,18 @@ export interface KyselyPersistenceOptions {
 /**
  * 把一个 Kysely 实例装成 `Persistence`。
  *
- * 库的类型只要**包含** `NimboDatabase` 那四张表就行——你自己的表照常在同一个实例里，
+ * 库的类型只要**包含** `RunkoDatabase` 那四张表就行——你自己的表照常在同一个实例里，
  * 两边互不干扰。
  */
-export function kyselyPersistence<DB extends NimboDatabase>(
+export function kyselyPersistence<DB extends RunkoDatabase>(
   db: Kysely<DB>,
   opts: KyselyPersistenceOptions,
 ): Persistence {
-  // 收窄到本包认识的那四张表。`DB extends NimboDatabase` 已经保证宿主的库类型是
-  // `NimboDatabase` 的超集，而本包的查询只碰这四张表——所以这个收窄是安全的。
+  // 收窄到本包认识的那四张表。`DB extends RunkoDatabase` 已经保证宿主的库类型是
+  // `RunkoDatabase` 的超集，而本包的查询只碰这四张表——所以这个收窄是安全的。
   // 之所以要写出来，是 Kysely 的 `Kysely<DB>` 在 DB 上不变（invariant），泛型子类型
   // 关系传不过去；这是对接三方泛型容器的边界，隔离在这一行里。
-  const scoped = db as unknown as Kysely<NimboDatabase>;
+  const scoped = db as unknown as Kysely<RunkoDatabase>;
   const traits = traitsOf(opts.flavor);
   return {
     ledger: createLedgerStore(scoped, traits),

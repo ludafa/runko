@@ -2,13 +2,13 @@
  * Rebuilt for the P13-5-4/P13-5-5 UIMessage-ledger migration (docs/tech/single-ledger.md §5/§6) — this fixture used to record a
  * `ChatStreamEnvelope[]` run against the retired `SessionEvent`/`SessionItem`
  * wire (see git history); it now exports full-conversation `LedgerFrame[]`
- * scenarios built from `../__tests__/helpers/nimbo-chunks`'s factories,
+ * scenarios built from `../__tests__/helpers/runko-chunks`'s factories,
  * covering the two human-in-the-loop interaction shapes docs/tech/single-ledger.md §6 defines
  * (a gated tool call that needs `review`, and an `ask-user` question) plus a
  * plain text-only turn and an already-GC'd replay — `timeline-view.test.tsx`/
  * `timeline.test.ts` compose these into render/materialization assertions
  * instead of each test hand-rolling its own chunk sequence from scratch. Every
- * chunk sequence below follows the exact ordering `@nimbo/core`'s `loop.ts`
+ * chunk sequence below follows the exact ordering `@runko/core`'s `loop.ts`
  * (`runOneStep`/`settleToolCall`/`finalizeTurn`) actually yields — see that
  * file's own doc comments for the rationale of each ordering choice mirrored
  * here (`finish-step` before tool settlement, `finish` only after every
@@ -32,7 +32,7 @@ import {
   toolOutputAvailableChunk,
   turnEndChunk,
   userMessage,
-} from '../__tests__/helpers/nimbo-chunks';
+} from '../__tests__/helpers/runko-chunks';
 import type { LedgerFrame } from '../schema';
 
 function maxSeq(frames: readonly LedgerFrame[]): number {
@@ -127,7 +127,7 @@ export const askUserTurnFrames: LedgerFrame[] = [
  * ends up as finished messages verbatim, `use-chat-messages.ts`'s
  * `lastFrameIsChunk` doc comment). A `MessageFrame` never goes through chunk
  * materialization on replay — these are hand-assembled already-finished
- * `NimboUIMessage`s directly.
+ * `RunkoUIMessage`s directly.
  */
 export const gcdReplayFrames: LedgerFrame[] = [
   messageFrame(1, userMessage('msg-5-user', '现在几点了？')),

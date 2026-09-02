@@ -72,8 +72,8 @@ export const verification = sqliteTable('verification', {
 // conversation（对话线程——2026-07-17 由 `chat_sessions` 更名，解开系统里
 // "session" 的三重超载：better-auth 的登录态 `session` 表、这里的对话、
 // SDK 的 agent 会话），bound 1:1 to a Vercel sandbox (`sandboxName`) and a
-// dedicated git branch (`branchName`). SDK 侧 `SessionState`（`@nimbo/core`）
-// 不整块存 JSON：its `messages` (`NimboUIMessage[]`) live in
+// dedicated git branch (`branchName`). SDK 侧 `SessionState`（`@runko/core`）
+// 不整块存 JSON：its `messages` (`RunkoUIMessage[]`) live in
 // `conversation_events` (the `kind = 'message'` rows, one row per message,
 // seq order = ledger order), and its three scalars (`id`/`createdAt`/`turn`)
 // live in the three `agent_session_*` columns below — a small "agent session
@@ -113,7 +113,7 @@ export const conversations = sqliteTable('conversations', {
   /**
    * 待发队列（[排队](../../../../docs/terms.md)，docs/tech/steer-and-queue.md §2）：
    * `QueuedMessage[]` 的 JSON——一轮进行中用户发的消息若走默认的排队路径就落这里，
-   * 本轮收尾后由 `@nimbo/agent` 的[自动出队](../../../../docs/terms.md)取队首起下一轮。
+   * 本轮收尾后由 `@runko/agent` 的[自动出队](../../../../docs/terms.md)取队首起下一轮。
    *
    * **刻意不进 `conversation_events` 账本**：账本记的是「已发生的事」（`kind='message'`
    * 行永不删除、`seq` 单调且被回放/断线续传/`finalizeTurnPersistence` 的 GC 阈值三处
@@ -143,7 +143,7 @@ export const conversations = sqliteTable('conversations', {
    */
   availableSkillsJson: text('available_skills_json').notNull().default('[]'),
   /**
-   * [起轮标记](../../../../docs/terms.md)（`@nimbo/agent` 的[归属仲裁机制](../../../../docs/terms.md)
+   * [起轮标记](../../../../docs/terms.md)（`@runko/agent` 的[归属仲裁机制](../../../../docs/terms.md)
    * 在这一档的落地）：起轮时写下「这一轮由谁在跑」，收尾时置回 null。
    *
    * **它不是「为多机预留」**，是[进行中草稿](../../../../docs/terms.md)搬进内存的直接
@@ -167,13 +167,13 @@ export const conversations = sqliteTable('conversations', {
 // process restarts — from `MAX(seq)`, see src/agent/persistence.ts's
 // `maxSeq` — not a global autoincrement):
 //
-// - `kind = 'message'`: one *finished* `NimboUIMessage` (`@nimbo/core`),
+// - `kind = 'message'`: one *finished* `RunkoUIMessage` (`@runko/core`),
 //   `payloadJson` holding the message verbatim, byte-for-byte the same shape
 //   `Session.toJSON().messages` would produce — this is what agent-session
 //   resume reads back (src/agent/store.ts's `loadResumeState`), and it's
 //   also permanent history for replay: never deleted, never rewritten.
 // - `kind = 'chunk'`: **不再写入**。[进行中草稿](../../../../docs/terms.md)搬进内存
-//   之后（`@nimbo/agent`），这一档只剩迁移前留下的存量行；`agent/persistence.ts` 的
+//   之后（`@runko/agent`），这一档只剩迁移前留下的存量行；`agent/persistence.ts` 的
 //   `read` 读时把它们过滤掉，`maxSeq` 则仍然数上它们（否则新写的 seq 会跟这些旧行撞
 //   主键）。存量行没有清理计划——读时过滤零成本零风险，真删要跑一次一次性脚本。
 //   历史背景：它们当初存在是为了让「跑到一半刷新页面」能从回放里重建挂起的审批；
@@ -247,7 +247,7 @@ export const pushSubscriptions = sqliteTable(
 );
 
 /**
- * [人工裁决](../../../../docs/terms.md)留底（`@nimbo/agent` 的 `DecisionStore` 在这一档
+ * [人工裁决](../../../../docs/terms.md)留底（`@runko/agent` 的 `DecisionStore` 在这一档
  * 的落地）：agent 每请求一次人审 / 每问用户一个问题就记一行待定，人答复（或超时）时
  * 补上结局。
  *

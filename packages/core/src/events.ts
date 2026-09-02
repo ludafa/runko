@@ -1,11 +1,11 @@
 /**
  * L2 运行层的 usage/error 类型（docs/tech/single-ledger.md §5 单-2：
  * `SessionEvent`/`SessionItem` 联合退役——UIMessage 单账本下，session 的过程
- * 数据改由 `NimboChunk`（ai 的 UIMessageChunk 词汇表，`state.ts`）+
- * `NimboUIMessage` 的部件/metadata 表达，见 `loop.ts`/`session.ts`。`Usage`/
- * `NimboError` 两个类型不属于那个退役的事件联合本身——`Usage` 是
- * `TurnResult`/`NimboMessageMetadata` 引用的聚合值类型，`NimboError` 是
- * `NimboMessageMetadata.error` 与 `NimboSessionError`（`session.ts`）的载荷
+ * 数据改由 `RunkoChunk`（ai 的 UIMessageChunk 词汇表，`state.ts`）+
+ * `RunkoUIMessage` 的部件/metadata 表达，见 `loop.ts`/`session.ts`。`Usage`/
+ * `RunkoError` 两个类型不属于那个退役的事件联合本身——`Usage` 是
+ * `TurnResult`/`RunkoMessageMetadata` 引用的聚合值类型，`RunkoError` 是
+ * `RunkoMessageMetadata.error` 与 `RunkoSessionError`（`session.ts`）的载荷
  * 类型——两者继续导出。
  *
  * 已消失的概念（迁移前 SessionEvent/SessionItem 的完整清单，供 P13-5-3/
@@ -19,7 +19,7 @@
 /**
  * spec 未单列 Usage 的字段，只在 TurnResult / turn.completed 里引用了
  * 类型名。这里按 AI SDK LanguageModelUsage 的顶层三个聚合维度收窄为
- * nimbo 自己的精简版——nimbo 的 Usage 是会话/轮次级别展示给宿主的聚合值，
+ * runko 自己的精简版——runko 的 Usage 是会话/轮次级别展示给宿主的聚合值，
  * 不需要 AI SDK 内部的 cache/reasoning token 明细（那些留在 L0 模型层
  * 内部核算，回填进这里的三个和）。provider 未汇报的维度用 undefined
  * 承接，不用 0 掩盖"未知"。
@@ -37,8 +37,8 @@ export interface Usage {
   cachedInputTokens?: number;
 }
 
-/** 轮失败的 error 载荷（`NimboMessageMetadata.error`/`NimboSessionError`）；code 联合照 §4.2/§4.8 逐字。 */
-export interface NimboError {
+/** 轮失败的 error 载荷（`RunkoMessageMetadata.error`/`RunkoSessionError`）；code 联合照 §4.2/§4.8 逐字。 */
+export interface RunkoError {
   code: "max_turns" | "context_overflow" | "provider_error" | "aborted";
   message: string;
 }

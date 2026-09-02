@@ -8,7 +8,7 @@
  * 3. `extractMentionedSkills` / `buildModelText` —— 纯函数，边界规则逐行钉死
  *    （tech §5.1 那张表就是下面的用例）。
  */
-import { MemoryFS } from '@nimbo/sdk';
+import { MemoryFS } from '@runko/sdk';
 import { describe, expect, it } from 'vitest';
 
 import {

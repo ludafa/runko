@@ -1,7 +1,7 @@
 /**
  * 文件工具测试的共享辅助（不是 *.test.ts，vitest 不会把它当测试文件收集）。
  */
-import type { JsonValue, NimboFS, ToolContext, ToolReturn } from "@nimbo/core";
+import type { JsonValue, RunkoFS, ToolContext, ToolReturn } from "@runko/core";
 import { expect, vi } from "vitest";
 import type { FileChange, ReadStateStore } from "../../src/tools/shared.js";
 
@@ -17,13 +17,13 @@ export function createMapReadStateStore(): ReadStateStore {
 }
 
 /** Narrows FileStat.mtime (number|undefined) to number by runtime check — no `as` needed. */
-export async function readMtime(fs: NimboFS, path: string): Promise<number> {
+export async function readMtime(fs: RunkoFS, path: string): Promise<number> {
   const stat = await fs.stat(path);
   if (stat.mtime === undefined) {throw new Error(`expected "${path}" to have an mtime, got undefined`);}
   return stat.mtime;
 }
 
-export function makeCtx(fs: NimboFS): ToolContext {
+export function makeCtx(fs: RunkoFS): ToolContext {
   return {
     fs,
     abortSignal: new AbortController().signal,

@@ -1,9 +1,9 @@
 /**
- * NimboExec 契约（docs/tech/sandbox.md §3.2 / §8.2；工单验收点）：P6-1 全部失败路径 resolve
+ * RunkoExec 契约（docs/tech/sandbox.md §3.2 / §8.2；工单验收点）：P6-1 全部失败路径 resolve
  * 而非 reject、超时/中止归一 124/130、`onOutput` 分片顺序、cwd 锚定、
  * `describe()`/`defaultApproval`。
  */
-import type { ExecOutputChunk } from "@nimbo/core";
+import type { ExecOutputChunk } from "@runko/core";
 import { describe, expect, it } from "vitest";
 import { e2bWorkspace } from "../src/index.js";
 import { createFakeE2bSandbox } from "./helpers.js";
@@ -12,7 +12,7 @@ function neverAborts(): AbortSignal {
   return new AbortController().signal;
 }
 
-describe("NimboExec surface", () => {
+describe("RunkoExec surface", () => {
   it("defaultApproval is 'allow' (isolation is the boundary, not approval)", () => {
     const workspace = e2bWorkspace(createFakeE2bSandbox());
     expect(workspace.defaultApproval).toBe("allow");

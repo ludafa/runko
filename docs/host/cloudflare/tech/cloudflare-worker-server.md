@@ -4,7 +4,7 @@ slug: cloudflare-worker-server
 view: 技术
 layer: 宿主层
 module: 沙盒
-packages: ["@nimbo/sandbox-cloudflare"]
+packages: ["@runko/sandbox-cloudflare"]
 tags: ["Cloudflare", "Worker", "网关形态", "Durable Object"]
 related: ["host/cloudflare/features/cloudflare-worker-server.md", "host/cloudflare/plans/cloudflare-worker-server.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -18,7 +18,7 @@ related: ["host/cloudflare/features/cloudflare-worker-server.md", "host/cloudfla
 
 ## 1. 它是什么
 
-一个跑在 Cloudflare Worker 里的 nimbo 服务端**示例**（`@nimbo-chat/cloudflare-worker-server`，private，不发布）。它是完整可 `wrangler deploy` 的工程，不是参考片段——但它**不是** `apps/node-server` 的 Workers 版替代品（后者的 D1/better-auth 移植不在范围内，见 §6）。
+一个跑在 Cloudflare Worker 里的 runko 服务端**示例**（`@runko-chat/cloudflare-worker-server`，private，不发布）。它是完整可 `wrangler deploy` 的工程，不是参考片段——但它**不是** `apps/node-server` 的 Workers 版替代品（后者的 D1/better-auth 移植不在范围内，见 §6）。
 
 它同时扮演**两个角色**，这是本方案唯一的结构性决策：
 
@@ -31,7 +31,7 @@ related: ["host/cloudflare/features/cloudflare-worker-server.md", "host/cloudfla
 
 ## 2. 为什么这两件事能合成一个 Worker
 
-`@nimbo/sandbox-cloudflare` 是[网关形态](../../../terms.md)：nimbo 的前提是「agent 跑在任意电脑上」，而 CF [沙盒](../../../terms.md)只能从 Worker 内部经 Durable Object binding 访问，所以需要自部署一个 HTTP 网关把两边接起来（[sandbox §6](../../contract/tech/sandbox.md)）。**角色 ② 就是那个网关**。
+`@runko/sandbox-cloudflare` 是[网关形态](../../../terms.md)：runko 的前提是「agent 跑在任意电脑上」，而 CF [沙盒](../../../terms.md)只能从 Worker 内部经 Durable Object binding 访问，所以需要自部署一个 HTTP 网关把两边接起来（[sandbox §6](../../contract/tech/sandbox.md)）。**角色 ② 就是那个网关**。
 
 而角色 ① 的服务端自己就在 Worker 里，客户端与网关同进程——同一个 `createSandboxGateway` 实例，既可以经 HTTP 服务外部客户端，也可以被本进程直接 `fetch()` 调用，把 TCP 那一跳短路掉：
 
@@ -49,7 +49,7 @@ cloudflareWorkspace       (真 token)   │                          │
 
 **一行新的适配器代码都不用写**——复用的是两端都已有契约测试覆盖的现成实现（客户端 `.` 入口纯 fetch，网关 `./worker` 入口零 `@cloudflare/sandbox` import）。
 
-**否决了「新写一个 CF 直连适配器」**：那要把网关里 `CfSandboxLike` → `NimboFS`/`NimboExec` 的翻译逻辑重抄一遍，多一份没有测试覆盖的代码。代价是进程内路径每次文件操作仍走一遍 JSON+base64 编解码——本示例**刻意保留**这层，因为它让角色 ① 与角色 ② 走的是**完全同构**的代码路径，角色 ① 跑通即等于角色 ② 的协议翻译也跑通。
+**否决了「新写一个 CF 直连适配器」**：那要把网关里 `CfSandboxLike` → `RunkoFS`/`RunkoExec` 的翻译逻辑重抄一遍，多一份没有测试覆盖的代码。代价是进程内路径每次文件操作仍走一遍 JSON+base64 编解码——本示例**刻意保留**这层，因为它让角色 ① 与角色 ② 走的是**完全同构**的代码路径，角色 ① 跑通即等于角色 ② 的协议翻译也跑通。
 
 ## 3. 核心流程
 
@@ -94,8 +94,8 @@ sequenceDiagram
     participant DO as Sandbox (Durable Object)
 
     Note over N: cloudflareWorkspace({url: "https://…/gateway", token})
-    N->>W: POST https://…/gateway/fs/write (Bearer token, x-nimbo-sandbox)
-    W->>W: 校验 NIMBO_GATEWAY_TOKEN 是否配置，未配 → 503
+    N->>W: POST https://…/gateway/fs/write (Bearer token, x-runko-sandbox)
+    W->>W: 校验 RUNKO_GATEWAY_TOKEN 是否配置，未配 → 503
     W->>W: 剥掉 /gateway 前缀：pathname → /fs/write
     W->>GW: gateway.fetch(new Request(重写后的 url, 原请求))
     GW->>GW: 校验 Bearer token（真安全边界），未过 → 401
@@ -127,7 +127,7 @@ return gatewayFor(c.env, token).fetch(new Request(url, c.req.raw));
 | 常量 | 用途 | 是不是边界 |
 |---|---|---|
 | `INTERNAL_TOKEN`（源码里的字面量） | 角色 ① 进程内握手 | **不是**。两端在同一 Worker 进程里，此值永不出进程、从不上网；协议契约要求带 `AUTH_HEADER`，照给即可 |
-| `NIMBO_GATEWAY_TOKEN`（secret） | 角色 ② 对外鉴权 | **是**。未配置时 `/gateway/*` 直接 503——刻意不退化成无鉴权或某个默认值 |
+| `RUNKO_GATEWAY_TOKEN`（secret） | 角色 ② 对外鉴权 | **是**。未配置时 `/gateway/*` 直接 503——刻意不退化成无鉴权或某个默认值 |
 
 ### 4.3 请求作用域构造（不可省的约束）
 
@@ -135,7 +135,7 @@ return gatewayFor(c.env, token).fetch(new Request(url, c.req.raw));
 
 ## 5. 已知缺陷：网关向 DO stub 传 AbortSignal
 
-**`@nimbo/sandbox-cloudflare` 的一个真实缺陷，两个角色都会撞上。**
+**`@runko/sandbox-cloudflare` 的一个真实缺陷，两个角色都会撞上。**
 
 网关的 `handleExec` 把 HTTP 请求的 `request.signal` 传给 `sandbox.exec()`，而这里的 `sandbox` 是 `getSandbox()` 返回的 Durable Object stub。CF 官方文档明确：
 

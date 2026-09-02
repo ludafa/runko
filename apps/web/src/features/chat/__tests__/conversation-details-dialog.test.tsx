@@ -6,7 +6,7 @@
  * 全部来自账本 metadata 现算，不发请求。汇总里最容易写错的是「没有值」与「值是
  * 0」的区别：旧记录不带 `durationMs`，那一行该整行不显示，而不是显示 0ms。
  */
-import type { NimboUIMessage } from '@nimbo/core';
+import type { RunkoUIMessage } from '@runko/core';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
@@ -22,8 +22,8 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
     id: 'conv-1',
     title: 'New chat',
     repo: 'ludafa/Schulte-Grid',
-    branchName: 'nimbo/chat-03b0163c-b8cb-474b-b132-ed82c5b1a6e3',
-    sandboxName: 'nimbo-chat-03b0163c-b8cb-474b-b132-ed82c5b1a6e3',
+    branchName: 'runko/chat-03b0163c-b8cb-474b-b132-ed82c5b1a6e3',
+    sandboxName: 'runko-chat-03b0163c-b8cb-474b-b132-ed82c5b1a6e3',
     provider: 'e2b',
     status: 'sleeping',
     lastActiveAt: '2026-07-25T16:37:00.000Z',
@@ -37,9 +37,9 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
 
 /** 一条收尾的 assistant 消息——会话统计只认带 `metadata.status` 的那些。 */
 function turn(
-  metadata: NonNullable<NimboUIMessage['metadata']>,
+  metadata: NonNullable<RunkoUIMessage['metadata']>,
   id = Math.random().toString(36).slice(2),
-): NimboUIMessage {
+): RunkoUIMessage {
   return { id, role: 'assistant', metadata, parts: [] };
 }
 
@@ -139,7 +139,7 @@ describe('ConversationDetailsDialog — 详情 tab', () => {
 
     expect(
       within(dialog).getByText(
-        'nimbo/chat-03b0163c-b8cb-474b-b132-ed82c5b1a6e3',
+        'runko/chat-03b0163c-b8cb-474b-b132-ed82c5b1a6e3',
       ),
     ).toBeInTheDocument();
     expect(within(dialog).getByText('ludafa/Schulte-Grid')).toBeInTheDocument();
@@ -167,7 +167,7 @@ describe('ConversationDetailsDialog — 详情 tab', () => {
 
     expect(
       within(dialog).queryByText(
-        'nimbo-chat-03b0163c-b8cb-474b-b132-ed82c5b1a6e3',
+        'runko-chat-03b0163c-b8cb-474b-b132-ed82c5b1a6e3',
       ),
     ).not.toBeInTheDocument();
   });

@@ -4,7 +4,7 @@ slug: stream-fanout
 view: 技术
 layer: 宿主层
 module: 流分发
-packages: ["@nimbo/agent", "@nimbo/stream-redis"]
+packages: ["@runko/agent", "@runko/stream-redis"]
 tags: ["流分发", "SSE", "Redis Streams", "断线续传"]
 related: ["host/contract/features/stream-fanout.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -61,7 +61,7 @@ sequenceDiagram
 
 ## 4. 打包：为什么它单独成包
 
-**流分发跟存储无关**——Redis 在这里是用来广播的，不是用来存的。它和持久化没有共享连接、没有共享原语，所以**不合并**，独立成 `@nimbo/stream-redis`。
+**流分发跟存储无关**——Redis 在这里是用来广播的，不是用来存的。它和持久化没有共享连接、没有共享原语，所以**不合并**，独立成 `@runko/stream-redis`。
 
 对比同层的另外两块：
 
@@ -80,7 +80,7 @@ sequenceDiagram
 | ⓪ 本机 CLI · ① cluster | 内置 EventEmitter + 应用层转发 | 同机，转发得到 |
 | ②③ Docker / k8s | 内置 + 应用层转发 | `holder` 里存的是 pod 可达地址，转发得到 |
 | ④a Cloudflare DO | 平台自带 | 一个会话 = 一个 DO，订阅方直接连到那个实例 |
-| **④b Vercel** | **`@nimbo/stream-redis`** | 实例由平台调度，**没有办法**找到持有者 |
+| **④b Vercel** | **`@runko/stream-redis`** | 实例由平台调度，**没有办法**找到持有者 |
 
 **④b 的推导**：拆开看，一个会话里只有一件事真需要「找到持有者」——
 

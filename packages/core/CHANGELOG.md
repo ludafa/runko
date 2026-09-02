@@ -1,4 +1,4 @@
-# @nimbo/core
+# @runko/core
 
 ## 0.1.0
 
@@ -27,8 +27,8 @@
 
   **新增**
 
-  - `@nimbo/core`：`NimboActivityAware`（工作区的可选能力，接收「这一轮还在干活」的信号）、`NimboKeepAliveCapable`（手动补足一次）、以及给适配器用的 `createKeepAlive` 保活引擎。会话在产出 chunk 时通知工作区，节流后推送；工作区没实现就完全不发生任何事——内存/本机工作区零影响。
-  - `@nimbo/sandbox-e2b` / `@nimbo/sandbox-vercel`：`keepAlive` 选项。**不传就完全不保活**，行为与之前一致。
+  - `@runko/core`：`RunkoActivityAware`（工作区的可选能力，接收「这一轮还在干活」的信号）、`RunkoKeepAliveCapable`（手动补足一次）、以及给适配器用的 `createKeepAlive` 保活引擎。会话在产出 chunk 时通知工作区，节流后推送；工作区没实现就完全不发生任何事——内存/本机工作区零影响。
+  - `@runko/sandbox-e2b` / `@runko/sandbox-vercel`：`keepAlive` 选项。**不传就完全不保活**，行为与之前一致。
 
   **行为要点**
 
@@ -41,8 +41,8 @@
 
 - fca6c03: 收尾状态多了第四种：`suspended`（挂起）。
 
-  - `@nimbo/core`：`NimboMessageMetadata.status` 与它的 zod schema 从三值扩到四值。
-  - `@nimbo/agent`：`TurnStatus` 跟着扩（它原样透传 core 的收尾 metadata）。
+  - `@runko/core`：`RunkoMessageMetadata.status` 与它的 zod schema 从三值扩到四值。
+  - `@runko/agent`：`TurnStatus` 跟着扩（它原样透传 core 的收尾 metadata）。
 
   **挂起是主动且可恢复的**——一轮停在「正在等人」这个干净边界上收尾、释放归属，人回来之后由
   **新的一轮**接着跑。它跟 `interrupted`（宿主主动中断）不是一回事，宿主别把它当失败处理：别重试、
@@ -55,7 +55,7 @@
 
 ### Patch Changes
 
-- 847222d: `TurnOptions.signal` 的停止时机变确定：loop 现在在**每个 step 边界**显式检查 abort 信号，看到已中止就直接以 `status: 'interrupted'`（`NimboError.code: 'aborted'`）收尾，绝不开始新的一步。
+- 847222d: `TurnOptions.signal` 的停止时机变确定：loop 现在在**每个 step 边界**显式检查 abort 信号，看到已中止就直接以 `status: 'interrupted'`（`RunkoError.code: 'aborted'`）收尾，绝不开始新的一步。
 
   此前只有「模型调用本身被信号掐断」这一条路径能停——工具执行被中止时工具是正常收尾的（「失败即 ExecResult」，不抛错），于是 loop 会照常进入下一步、白打一次模型调用，直到那次调用因信号已中止而抛错才停下。现在那次多余的模型调用不再发生。
 

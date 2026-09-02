@@ -1,17 +1,17 @@
 ---
-title: "agent 内核包 `@nimbo/agent` —— 技术方案"
+title: "agent 内核包 `@runko/agent` —— 技术方案"
 slug: agent-kernel
 view: 技术
 layer: 总纲
 module: —
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["架构分层", "会话生命周期", "部署形态", "包拆分", "归属仲裁"]
 related: ["architecture/features/agent-kernel.md", "architecture/plans/agent-kernel.md"]
 ---
-# agent 内核包 `@nimbo/agent` —— 技术方案
+# agent 内核包 `@runko/agent` —— 技术方案
 
 > 相关：[功能](../features/agent-kernel.md)，[施工进展](../plans/agent-kernel.md)。
-> 设计讨论的完整记录（含被推翻的路线）在 [issue #2](https://github.com/ludafa/nimbo/issues/2)。
+> 设计讨论的完整记录（含被推翻的路线）在 [issue #2](https://github.com/ludafa/runko/issues/2)。
 > 依赖/延续：[进行中草稿放内存](../../logic/orchestration/tech/in-flight-draft.md)（附录 C 的「五样东西」是本方案的起点）· [优雅关闭](../../logic/orchestration/tech/graceful-shutdown.md) 附录 B · [排队与插话](../../logic/orchestration/tech/steer-and-queue.md) §7 · [沙盒保活](../../logic/orchestration/tech/sandbox-keepalive.md) §4.2 · [单一账本](../../logic/orchestration/tech/single-ledger.md)。
 
 ## 1. 一句话
@@ -55,7 +55,7 @@ flowchart TB
 
 | 模块 | 保证的性质 | 职责 |
 |---|---|---|
-| **[执行引擎](../../terms.md)** | **推进**——给定历史和工具，一直跑到模型说完 | 调模型 → 跑工具 → 喂回去（就是 `@nimbo/core`） |
+| **[执行引擎](../../terms.md)** | **推进**——给定历史和工具，一直跑到模型说完 | 调模型 → 跑工具 → 喂回去（就是 `@runko/core`） |
 | **[轮编排](../../terms.md)** | **连续**——一轮接一轮连成一段连贯的对话 | 起、中断、挂起、恢复、收尾、状态推导；定义账本/裁决/队列的模型；管沙盒生命周期 |
 | **[归属仲裁](../../terms.md)** | **[独占](../../terms.md)**——同一时刻只有一个执行在跑 | 授予、回收、执法 |
 | **[接入](../../terms.md)** | **可达**——外部能触达、能观察 | 路由、SSE、转发、端点（**构建者写，不在本包**） |
@@ -101,8 +101,8 @@ erDiagram
     LEDGER_ENTRY ||--o| DECISION : "同一个 toolCallId"
 
     CONVERSATION {
-        string id PK "会话标识，nimbo 只认它，不做外键"
-        string ownerId "不透明字符串，nimbo 不管它从哪来"
+        string id PK "会话标识，runko 只认它，不做外键"
+        string ownerId "不透明字符串，runko 不管它从哪来"
     }
     LEDGER_ENTRY {
         string conversationId PK "复合主键前半"
@@ -138,7 +138,7 @@ erDiagram
 
 **四条设计约束**：
 
-1. **nimbo 不拥有用户实体**——只认不透明的 `ownerId`，不做外键。
+1. **runko 不拥有用户实体**——只认不透明的 `ownerId`，不做外键。
 2. **seq 由[归属仲裁](../../terms.md)分配，不由 DB 生成**——`MAX(seq)+1` 与 sequence 都是方言特性，通用适配器表达不了；用租约表水位 + CAS 取号则两边都不需要。
 3. **迁移不是契约的一部分**——给参考 DDL，官方实现自带迁移，接口层不假设「有迁移这回事」。
 4. **不假设事务能跨接口**——需要原子的地方收进**一个**方法里；绝不要求宿主传跨接口的事务对象，那等于宣布只支持关系型。
@@ -275,13 +275,13 @@ conversation-drained：「我认为这个会话排空了——我放手的时候
 
 | 模块 / 能力 | 包 | 展开文档 |
 |---|---|---|
-| 执行引擎 | `@nimbo/core`（已有） | [core-sdk](../../logic/engine/tech/core-sdk.md) |
-| **轮编排 + 归属仲裁语义 + 四种能力的接口 + 全套内置实现** | **`@nimbo/agent`** | 本文 |
-| 沙盒 | `@nimbo/virtual-fs` · `mini-bash` / `just-bash` · `sandbox-*`（已有） | [sandbox](../../host/contract/tech/sandbox.md) |
-| 持久化 + 租约版归属仲裁机制 | **`@nimbo/persist-sql`**（裸驱动，方言是参数）/ **`persist-drizzle`** / **`persist-prisma`** | [persistence](../../host/contract/tech/persistence.md) · [arbitration-impl](../../logic/arbitration/tech/arbitration-impl.md) |
-| 流分发 | **`@nimbo/stream-redis`** | [stream-fanout](../../host/contract/tech/stream-fanout.md) |
-| Cloudflare DO 全套 | **`@nimbo/durable-object`** | [arbitration-impl §6](../../logic/arbitration/tech/arbitration-impl.md) |
-| 开箱应用 | **`@nimbo/cli`**（不是框架包，是拿框架搭的成品） | —— |
+| 执行引擎 | `@runko/core`（已有） | [core-sdk](../../logic/engine/tech/core-sdk.md) |
+| **轮编排 + 归属仲裁语义 + 四种能力的接口 + 全套内置实现** | **`@runko/agent`** | 本文 |
+| 沙盒 | `@runko/virtual-fs` · `mini-bash` / `just-bash` · `sandbox-*`（已有） | [sandbox](../../host/contract/tech/sandbox.md) |
+| 持久化 + 租约版归属仲裁机制 | **`@runko/persist-sql`**（裸驱动，方言是参数）/ **`persist-drizzle`** / **`persist-prisma`** | [persistence](../../host/contract/tech/persistence.md) · [arbitration-impl](../../logic/arbitration/tech/arbitration-impl.md) |
+| 流分发 | **`@runko/stream-redis`** | [stream-fanout](../../host/contract/tech/stream-fanout.md) |
+| Cloudflare DO 全套 | **`@runko/durable-object`** | [arbitration-impl §6](../../logic/arbitration/tech/arbitration-impl.md) |
+| 开箱应用 | **`@runko/cli`**（不是框架包，是拿框架搭的成品） | —— |
 
 **打包原则：接口按模块分；实现按「一次装什么」打包。** 持久化和租约版仲裁总是一起用（共享连接与 CRUD+CAS 原语）→ 同包；流分发跟存储无关 → 独立；DO 上三样都是平台自带 → 独立且一次给全。
 

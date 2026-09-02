@@ -18,8 +18,8 @@
  *    标记翻译成给模型的一句明确指令。两个都是**纯函数、零 IO**，边界规则由
  *    单测逐行钉死（tech §5.1 那张表）。
  */
-import type { NimboFS, Skill } from '@nimbo/sdk';
-import { Skill as SkillLoader } from '@nimbo/sdk';
+import type { RunkoFS, Skill } from '@runko/sdk';
+import { Skill as SkillLoader } from '@runko/sdk';
 
 import type { Logger } from '../logger.js';
 
@@ -97,7 +97,7 @@ function describeError(error: unknown): string {
  * `<available_skills>` 段与前端菜单顺序一致、可预期（并发完成顺序不可预期）。
  */
 export async function loadSkillsFromWorkspace(
-  workspace: NimboFS,
+  workspace: RunkoFS,
   log: Logger,
 ): Promise<Skill[]> {
   let dirNames: string[];

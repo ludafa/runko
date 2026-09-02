@@ -1,4 +1,4 @@
-# nimbo
+# runko
 
 **An embeddable, lightweight agent SDK for Node.js.** In a few lines of code you
 can run an agent loop — with file operations, command execution, and skills —
@@ -18,7 +18,7 @@ The gap in existing options (full write-up in
   directory, which is awkward for multi-tenant server use.
 - **Raw API clients** (`@anthropic-ai/sdk`, `openai`): you only get
   messages/tool-use primitives; the loop, tools, files, and skills are all on you.
-- **eve** (excellent API design — nimbo's API layering is modeled on it): but it's
+- **eve** (excellent API design — runko's API layering is modeled on it): but it's
   a **framework** with an HTTP server and durable workflows, not an in-process
   embeddable library, and its file operations run against a real sandbox.
 
@@ -26,7 +26,7 @@ The gap in existing options (full write-up in
 ordinary Node service means either being locked to a vendor's CLI, or hand-rolling
 the whole loop from scratch.
 
-**nimbo's answer** = eve's API ergonomics + codex-sdk's item-level event
+**runko's answer** = eve's API ergonomics + codex-sdk's item-level event
 granularity + the AI SDK's model layer (30+ providers) + its own VirtualFS core
 and loop, delivered as an embeddable library. The key differentiator is the
 **virtual filesystem**: all of the agent's file reads/writes land in an
@@ -38,16 +38,16 @@ Typical use cases: an in-app code assistant in a SaaS (edit code, return a diff,
 zero temp files), a CI/background pipeline node (structured output back into the
 pipeline), a domain-capable agent product (reuse the SKILL.md ecosystem), or a
 custom execution environment (inject the host's own sandbox through the
-`NimboExec` interface, with zero loop changes).
+`RunkoExec` interface, with zero loop changes).
 
 ## Five-line quickstart
 
 ```ts
-import { defineAgent, createSession, NimboFS } from "@nimbo/sdk";
+import { defineAgent, createSession, RunkoFS } from "@runko/sdk";
 // or a provider instance: import { anthropic } from "@ai-sdk/anthropic"; model: anthropic("claude-sonnet-5")
 
 const agent = defineAgent({ model: "anthropic/claude-sonnet-5" });   // an AI SDK Gateway string or any LanguageModel instance
-const session = createSession(agent, { fs: NimboFS.fromDirectory("./project") });
+const session = createSession(agent, { fs: RunkoFS.fromDirectory("./project") });
 const result = await session.send("Change every `var` in src/index.ts to `const`");
 console.log(result.finalResponse, await session.fs.diff());
 ```
@@ -57,11 +57,11 @@ land in an in-memory layer — after the snippet above, the real directory is by
 unchanged and every change lives in `diff()`. Call `session.fs.writeBack()` to persist.
 
 ```sh
-pnpm add @nimbo/sdk ai
+pnpm add @runko/sdk ai
 ```
 
-> TODO: the npm bare name `nimbo` publishing decision is still open (docs/logic/engine/plans/core-sdk.md P7-1
-> leftover) — everything uses `@nimbo/sdk` for now; once decided, the imports in
+> TODO: the npm bare name `runko` publishing decision is still open (docs/logic/engine/plans/core-sdk.md P7-1
+> leftover) — everything uses `@runko/sdk` for now; once decided, the imports in
 > this README and the examples get swapped over.
 
 ## Configuring the agent: model / instructions / tools / skills
@@ -69,7 +69,7 @@ pnpm add @nimbo/sdk ai
 All four live on `defineAgent` — the definition is pure data with no runtime
 state, so one definition can be reused across many sessions.
 
-**Model.** nimbo's model layer is built entirely on the Vercel AI SDK (`ai`) — no
+**Model.** runko's model layer is built entirely on the Vercel AI SDK (`ai`) — no
 in-house provider layer, no model registry. Wiring up a model just means producing
 an AI SDK `LanguageModel` value, and there are three ways:
 
@@ -90,7 +90,7 @@ const agent = defineAgent({ model: deepseek("deepseek-chat") });
 `ai` is a peerDependency (`^7`) — the host installs `ai` and its chosen provider
 package, so versions follow the host. Everything else (loop, tools, approvals,
 sandboxes) is provider-agnostic: swapping models changes this one value and nothing
-else (the examples' `NIMBO_MODEL` env var is exactly this mechanism), and AI SDK
+else (the examples' `RUNKO_MODEL` env var is exactly this mechanism), and AI SDK
 middleware (`wrapLanguageModel`, caching, observability) passes straight through.
 
 **Instructions.** The system prompt body goes in `defineAgent({ instructions })`;
@@ -117,7 +117,7 @@ sources:
 defineSkill({ name, description, markdown, files? })      // programmatic
 Skill.fromMarkdown(name, md)                              // flat markdown
 Skill.fromDirectory("./skills/frontend-design")           // packaged dir (SKILL.md + attachments)
-await Skill.fromFS(fs, "/.agents/skills/frontend-design") // from any NimboFS — including a sandbox workspace
+await Skill.fromFS(fs, "/.agents/skills/frontend-design") // from any RunkoFS — including a sandbox workspace
 ```
 
 At runtime skills are progressively disclosed: instructions carry only the
@@ -128,17 +128,17 @@ loading a skill adds instructions, never a new execution surface.
 
 ```mermaid
 graph TD
-    subgraph bundled["Bundled with @nimbo/sdk (installed together)"]
-        sdk["@nimbo/sdk<br/>facade · batteries-included"]
-        core["@nimbo/core"]
-        vfs["@nimbo/virtual-fs"]
-        mini["@nimbo/mini-bash"]
+    subgraph bundled["Bundled with @runko/sdk (installed together)"]
+        sdk["@runko/sdk<br/>facade · batteries-included"]
+        core["@runko/core"]
+        vfs["@runko/virtual-fs"]
+        mini["@runko/mini-bash"]
     end
     subgraph separate["Install separately (depend only on core, not bundled by sdk)"]
-        just["@nimbo/just-bash<br/>full-syntax bash"]
-        e2b["@nimbo/sandbox-e2b"]
-        vercel["@nimbo/sandbox-vercel"]
-        cf["@nimbo/sandbox-cloudflare"]
+        just["@runko/just-bash<br/>full-syntax bash"]
+        e2b["@runko/sandbox-e2b"]
+        vercel["@runko/sandbox-vercel"]
+        cf["@runko/sandbox-cloudflare"]
     end
     sdk --> vfs
     sdk --> core
@@ -151,45 +151,45 @@ graph TD
     cf --> core
 ```
 
-Arrows mean "depends on". `@nimbo/sdk` bundles `core` + `virtual-fs` + `mini-bash`;
+Arrows mean "depends on". `@runko/sdk` bundles `core` + `virtual-fs` + `mini-bash`;
 `just-bash` and the three sandbox adapters depend only on `core` and are installed
 separately. Per-package details are in the table below.
 
 | Package | One-liner | README |
 |---|---|---|
-| `@nimbo/sdk` | The facade; the only install the five-line quickstart needs | [packages/sdk](./packages/sdk/README.md) |
-| `@nimbo/core` | L0 interfaces / L1 definitions / L2 runtime / L3 directory-convention layer / built-in tools | [packages/core](./packages/core/README.md) |
-| `@nimbo/virtual-fs` | MemoryFS / OverlayFS / DirFS, diff / writeBack, the 8 file tools | [packages/virtual-fs](./packages/virtual-fs/README.md) |
-| `@nimbo/mini-bash` | Read-only command interpreter over any NimboFS (the bash tool's pure in-memory execution env; zero-dep minimal tier, bundled with sdk) | [packages/mini-bash](./packages/mini-bash/README.md) |
-| `@nimbo/just-bash` | Full-syntax bash over any NimboFS (`if`/`for`/`while`/`case`/functions; vercel-labs/just-bash adapter, **not bundled by sdk**, install separately) | [packages/just-bash](./packages/just-bash/README.md) |
-| `@nimbo/sandbox-e2b` | NimboFS & NimboExec over an E2B cloud sandbox (real Firecracker microVM, BYO instance, e2b as a type-only dep, **not bundled by sdk**) | [packages/sandbox-e2b](./packages/sandbox-e2b/README.md) |
-| `@nimbo/sandbox-vercel` | NimboFS & NimboExec over a Vercel Sandbox (real Amazon Linux 2023 Firecracker microVM, BYO instance, `@vercel/sandbox` type-only, **not bundled by sdk**) | [packages/sandbox-vercel](./packages/sandbox-vercel/README.md) |
-| `@nimbo/sandbox-cloudflare` | NimboFS & NimboExec over a Cloudflare Sandbox (gateway form: `.` a plain fetch client for any Node, `./worker` a gateway deployed in the host's wrangler project, **not bundled by sdk**) | [packages/sandbox-cloudflare](./packages/sandbox-cloudflare/README.md) |
+| `@runko/sdk` | The facade; the only install the five-line quickstart needs | [packages/sdk](./packages/sdk/README.md) |
+| `@runko/core` | L0 interfaces / L1 definitions / L2 runtime / L3 directory-convention layer / built-in tools | [packages/core](./packages/core/README.md) |
+| `@runko/virtual-fs` | MemoryFS / OverlayFS / DirFS, diff / writeBack, the 8 file tools | [packages/virtual-fs](./packages/virtual-fs/README.md) |
+| `@runko/mini-bash` | Read-only command interpreter over any RunkoFS (the bash tool's pure in-memory execution env; zero-dep minimal tier, bundled with sdk) | [packages/mini-bash](./packages/mini-bash/README.md) |
+| `@runko/just-bash` | Full-syntax bash over any RunkoFS (`if`/`for`/`while`/`case`/functions; vercel-labs/just-bash adapter, **not bundled by sdk**, install separately) | [packages/just-bash](./packages/just-bash/README.md) |
+| `@runko/sandbox-e2b` | RunkoFS & RunkoExec over an E2B cloud sandbox (real Firecracker microVM, BYO instance, e2b as a type-only dep, **not bundled by sdk**) | [packages/sandbox-e2b](./packages/sandbox-e2b/README.md) |
+| `@runko/sandbox-vercel` | RunkoFS & RunkoExec over a Vercel Sandbox (real Amazon Linux 2023 Firecracker microVM, BYO instance, `@vercel/sandbox` type-only, **not bundled by sdk**) | [packages/sandbox-vercel](./packages/sandbox-vercel/README.md) |
+| `@runko/sandbox-cloudflare` | RunkoFS & RunkoExec over a Cloudflare Sandbox (gateway form: `.` a plain fetch client for any Node, `./worker` a gateway deployed in the host's wrangler project, **not bundled by sdk**) | [packages/sandbox-cloudflare](./packages/sandbox-cloudflare/README.md) |
 
-**bash tiers**: the `bash` tool's execution environment (`NimboExec`) comes in two
+**bash tiers**: the `bash` tool's execution environment (`RunkoExec`) comes in two
 tiers, injected on demand and swappable in one line with zero loop/session changes
 ([tech/core-sdk §4.5b](./docs/logic/engine/tech/core-sdk.md)):
 
-- **`@nimbo/mini-bash` (zero-dep minimal tier)**: six read-only commands
+- **`@runko/mini-bash` (zero-dep minimal tier)**: six read-only commands
   (`cat`/`grep`/`find`/`tail`/`head`/`echo`) + four control operators, bundled with
-  `@nimbo/sdk`, no extra install. The safe default and the test/demo vehicle.
-- **`@nimbo/just-bash` (full-syntax tier)**: reach for this when Claude-family models
+  `@runko/sdk`, no extra install. The safe default and the test/demo vehicle.
+- **`@runko/just-bash` (full-syntax tier)**: reach for this when Claude-family models
   emit `if`/`for`/`while`/`case`/function control-flow scripts beyond mini-bash's
   surface. Because its dependency tree carries wasm-heavy bits (sql.js,
-  quickjs-emscripten), it is **not** a dependency of `@nimbo/sdk` (forcing it on
+  quickjs-emscripten), it is **not** a dependency of `@runko/sdk` (forcing it on
   every consumer would break the lightweight-facade default) — hosts that need it
-  run `pnpm add @nimbo/just-bash` explicitly.
+  run `pnpm add @runko/just-bash` explicitly.
 
-Both are implementations of the `NimboExec` interface, and neither is the only
-option: for real local command execution use `@nimbo/core`'s `localExec`, and a
-host with its own sandbox (Docker/e2b/remote executor) just implements `NimboExec`
+Both are implementations of the `RunkoExec` interface, and neither is the only
+option: for real local command execution use `@runko/core`'s `localExec`, and a
+host with its own sandbox (Docker/e2b/remote executor) just implements `RunkoExec`
 and injects it (see [examples/05-custom-exec.ts](./examples/src/05-custom-exec.ts)).
 
 ## Cloud sandbox adapters
 
 Three adapters put the agent's fs/bash inside a real cloud sandbox while the agent
 itself runs on any Node machine — the same "mode-A same-source workspace" shape
-(one object implementing `NimboFS & NimboExec`, injected via `workspace`). The
+(one object implementing `RunkoFS & RunkoExec`, injected via `workspace`). The
 research and design decisions are in
 [sandbox feature](./docs/host/contract/features/sandbox.md) / [tech](./docs/host/contract/tech/sandbox.md) /
 [plan](./docs/host/contract/plans/sandbox.md); E2B and Vercel are verified against real sandboxes,
@@ -197,7 +197,7 @@ Cloudflare uses a self-hosted gateway.
 
 ## Example application: the chat agent webapp
 
-Under [`apps/`](./apps) is a full chat-agent web application built **on** nimbo — a
+Under [`apps/`](./apps) is a full chat-agent web application built **on** runko — a
 concrete, product-shaped demonstration of the SDK. A user drives an agent through a
 chat UI to modify a real repository inside a Vercel Sandbox, open a PR, and trigger
 a Vercel deployment. Highlights: per-session sandbox lifecycle (kept warm while

@@ -1,17 +1,17 @@
 /**
- * 跟其余三个持久化包**跑同一套用例**（`@nimbo/conformance`）——这正是重点：
+ * 跟其余三个持久化包**跑同一套用例**（`@runko/conformance`）——这正是重点：
  * 一个非关系型实现能不能满足同一份契约，是这个包最值得回答的问题。
  *
  * **只能对真库跑。** Mongo 没有 pglite 那样的进程内替身（`mongodb-memory-server`
- * 是下载一个真 mongod 二进制来跑，不是进程内），所以没给 `NIMBO_TEST_MONGO_URL`
+ * 是下载一个真 mongod 二进制来跑，不是进程内），所以没给 `RUNKO_TEST_MONGO_URL`
  * 时整档跳过并说明原因——不是静默跳过。
  *
  * ```sh
- * NIMBO_TEST_MONGO_URL=mongodb://127.0.0.1:27018 pnpm --filter @nimbo/persist-mongo test
+ * RUNKO_TEST_MONGO_URL=mongodb://127.0.0.1:27018 pnpm --filter @runko/persist-mongo test
  * ```
  */
-import type { ConformanceCase } from "@nimbo/conformance";
-import { persistenceCases } from "@nimbo/conformance";
+import type { ConformanceCase } from "@runko/conformance";
+import { persistenceCases } from "@runko/conformance";
 import { MongoClient } from "mongodb";
 import { describe, expect, it } from "vitest";
 
@@ -40,11 +40,11 @@ function runCases<S extends { cleanup?: () => Promise<void> | void }>(
   });
 }
 
-const MONGO_URL = process.env["NIMBO_TEST_MONGO_URL"];
+const MONGO_URL = process.env["RUNKO_TEST_MONGO_URL"];
 
 if (MONGO_URL === undefined) {
   describe.skip("persist-mongo", () => {
-    it("没给 NIMBO_TEST_MONGO_URL，跳过 —— Mongo 没有进程内替身，只能对真库跑", () => undefined);
+    it("没给 RUNKO_TEST_MONGO_URL，跳过 —— Mongo 没有进程内替身，只能对真库跑", () => undefined);
   });
 } else {
   const url = MONGO_URL;
@@ -61,7 +61,7 @@ if (MONGO_URL === undefined) {
     const client = new MongoClient(url);
     await client.connect();
     counter += 1;
-    const db = client.db(`nimbo_conformance_${String(counter)}_${crypto.randomUUID().slice(0, 8)}`);
+    const db = client.db(`runko_conformance_${String(counter)}_${crypto.randomUUID().slice(0, 8)}`);
     await migrate(db);
     return {
       persistence: mongoPersistence(db),
@@ -82,7 +82,7 @@ if (MONGO_URL === undefined) {
     ): Promise<void> => {
       const client = new MongoClient(url);
       await client.connect();
-      const db = client.db(`nimbo_extra_${crypto.randomUUID().slice(0, 8)}`);
+      const db = client.db(`runko_extra_${crypto.randomUUID().slice(0, 8)}`);
       try {
         await migrate(db);
         await body(db);
@@ -181,7 +181,7 @@ if (MONGO_URL === undefined) {
     });
 
     it("数据跨连接存活——这是「持久化」这三个字的全部意义", async () => {
-      const dbName = `nimbo_persist_${crypto.randomUUID().slice(0, 8)}`;
+      const dbName = `runko_persist_${crypto.randomUUID().slice(0, 8)}`;
       const first = new MongoClient(url);
       await first.connect();
       await migrate(first.db(dbName));

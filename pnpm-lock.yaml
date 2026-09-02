@@ -104,10 +104,10 @@ importers:
       '@cloudflare/sandbox':
         specifier: 'catalog:'
         version: 0.12.3
-      '@nimbo/sandbox-cloudflare':
+      '@runko/sandbox-cloudflare':
         specifier: workspace:*
         version: link:../../packages/sandbox-cloudflare
-      '@nimbo/sdk':
+      '@runko/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
       ai:
@@ -144,19 +144,19 @@ importers:
       '@hono/zod-openapi':
         specifier: ^1.3.0
         version: 1.4.0(hono@4.12.29)(zod@4.4.3)
-      '@nimbo/agent':
+      '@runko/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@nimbo/core':
+      '@runko/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@nimbo/sandbox-e2b':
+      '@runko/sandbox-e2b':
         specifier: workspace:*
         version: link:../../packages/sandbox-e2b
-      '@nimbo/sandbox-vercel':
+      '@runko/sandbox-vercel':
         specifier: workspace:*
         version: link:../../packages/sandbox-vercel
-      '@nimbo/sdk':
+      '@runko/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
       '@vercel/sandbox':
@@ -247,28 +247,28 @@ importers:
       '@hono/node-server':
         specifier: ^2.0.1
         version: 2.0.8(hono@4.12.29)
-      '@nimbo/agent':
+      '@runko/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@nimbo/core':
+      '@runko/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@nimbo/mini-bash':
+      '@runko/mini-bash':
         specifier: workspace:*
         version: link:../../packages/mini-bash
-      '@nimbo/persist-mongo':
+      '@runko/persist-mongo':
         specifier: workspace:*
         version: link:../../packages/persist-mongo
-      '@nimbo/persist-mysql':
+      '@runko/persist-mysql':
         specifier: workspace:*
         version: link:../../packages/persist-mysql
-      '@nimbo/persist-postgres':
+      '@runko/persist-postgres':
         specifier: workspace:*
         version: link:../../packages/persist-postgres
-      '@nimbo/persist-sqlite':
+      '@runko/persist-sqlite':
         specifier: workspace:*
         version: link:../../packages/persist-sqlite
-      '@nimbo/virtual-fs':
+      '@runko/virtual-fs':
         specifier: workspace:*
         version: link:../../packages/virtual-fs
       ai:
@@ -350,7 +350,7 @@ importers:
       '@iconify/react':
         specifier: ^6.0.2
         version: 6.0.2(react@19.2.7)
-      '@nimbo/core':
+      '@runko/core':
         specifier: workspace:*
         version: link:../../packages/core
       '@radix-ui/react-use-controllable-state':
@@ -600,19 +600,19 @@ importers:
       '@ai-sdk/deepseek':
         specifier: ^3.0.7
         version: 3.0.7(zod@4.4.3)
-      '@nimbo/just-bash':
+      '@runko/just-bash':
         specifier: workspace:*
         version: link:../packages/just-bash
-      '@nimbo/sandbox-cloudflare':
+      '@runko/sandbox-cloudflare':
         specifier: workspace:*
         version: link:../packages/sandbox-cloudflare
-      '@nimbo/sandbox-e2b':
+      '@runko/sandbox-e2b':
         specifier: workspace:*
         version: link:../packages/sandbox-e2b
-      '@nimbo/sandbox-vercel':
+      '@runko/sandbox-vercel':
         specifier: workspace:*
         version: link:../packages/sandbox-vercel
-      '@nimbo/sdk':
+      '@runko/sdk':
         specifier: workspace:*
         version: link:../packages/sdk
       '@vercel/sandbox':
@@ -637,17 +637,17 @@ importers:
 
   packages/agent:
     dependencies:
-      '@nimbo/core':
+      '@runko/core':
         specifier: workspace:*
         version: link:../core
-      '@nimbo/virtual-fs':
+      '@runko/virtual-fs':
         specifier: workspace:*
         version: link:../virtual-fs
       zod:
         specifier: 'catalog:'
         version: 4.4.3
     devDependencies:
-      '@nimbo/conformance':
+      '@runko/conformance':
         specifier: workspace:*
         version: link:../conformance
       '@types/node':
@@ -668,10 +668,10 @@ importers:
 
   packages/conformance:
     devDependencies:
-      '@nimbo/agent':
+      '@runko/agent':
         specifier: workspace:*
         version: link:../agent
-      '@nimbo/core':
+      '@runko/core':
         specifier: workspace:*
         version: link:../core
       '@types/node':
@@ -693,10 +693,10 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3
     devDependencies:
-      '@nimbo/mini-bash':
+      '@runko/mini-bash':
         specifier: workspace:*
         version: link:../mini-bash
-      '@nimbo/virtual-fs':
+      '@runko/virtual-fs':
         specifier: workspace:*
         version: link:../virtual-fs
       '@types/node':
@@ -717,14 +717,14 @@ importers:
 
   packages/just-bash:
     dependencies:
-      '@nimbo/core':
+      '@runko/core':
         specifier: workspace:*
         version: link:../core
       just-bash:
         specifier: 'catalog:'
         version: 3.1.0
     devDependencies:
-      '@nimbo/virtual-fs':
+      '@runko/virtual-fs':
         specifier: workspace:*
         version: link:../virtual-fs
       '@types/node':
@@ -745,11 +745,11 @@ importers:
 
   packages/mini-bash:
     dependencies:
-      '@nimbo/core':
+      '@runko/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
-      '@nimbo/virtual-fs':
+      '@runko/virtual-fs':
         specifier: workspace:*
         version: link:../virtual-fs
       '@types/node':
@@ -767,17 +767,17 @@ importers:
 
   packages/persist-kysely:
     dependencies:
-      '@nimbo/agent':
+      '@runko/agent':
         specifier: workspace:*
         version: link:../agent
-      '@nimbo/core':
+      '@runko/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
       '@electric-sql/pglite':
         specifier: 'catalog:'
         version: 0.5.6
-      '@nimbo/conformance':
+      '@runko/conformance':
         specifier: workspace:*
         version: link:../conformance
       '@types/better-sqlite3':
@@ -813,14 +813,14 @@ importers:
 
   packages/persist-mongo:
     dependencies:
-      '@nimbo/agent':
+      '@runko/agent':
         specifier: workspace:*
         version: link:../agent
-      '@nimbo/core':
+      '@runko/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
-      '@nimbo/conformance':
+      '@runko/conformance':
         specifier: workspace:*
         version: link:../conformance
       '@types/node':
@@ -841,17 +841,17 @@ importers:
 
   packages/persist-mysql:
     dependencies:
-      '@nimbo/agent':
+      '@runko/agent':
         specifier: workspace:*
         version: link:../agent
-      '@nimbo/persist-kysely':
+      '@runko/persist-kysely':
         specifier: workspace:*
         version: link:../persist-kysely
       kysely:
         specifier: 'catalog:'
         version: 0.29.5
     devDependencies:
-      '@nimbo/conformance':
+      '@runko/conformance':
         specifier: workspace:*
         version: link:../conformance
       '@types/node':
@@ -872,17 +872,17 @@ importers:
 
   packages/persist-postgres:
     dependencies:
-      '@nimbo/agent':
+      '@runko/agent':
         specifier: workspace:*
         version: link:../agent
-      '@nimbo/persist-kysely':
+      '@runko/persist-kysely':
         specifier: workspace:*
         version: link:../persist-kysely
       kysely:
         specifier: 'catalog:'
         version: 0.29.5
     devDependencies:
-      '@nimbo/conformance':
+      '@runko/conformance':
         specifier: workspace:*
         version: link:../conformance
       '@types/node':
@@ -906,10 +906,10 @@ importers:
 
   packages/persist-sqlite:
     dependencies:
-      '@nimbo/agent':
+      '@runko/agent':
         specifier: workspace:*
         version: link:../agent
-      '@nimbo/persist-kysely':
+      '@runko/persist-kysely':
         specifier: workspace:*
         version: link:../persist-kysely
       kysely:
@@ -919,7 +919,7 @@ importers:
       '@electric-sql/pglite':
         specifier: 'catalog:'
         version: 0.5.6
-      '@nimbo/conformance':
+      '@runko/conformance':
         specifier: workspace:*
         version: link:../conformance
       '@types/better-sqlite3':
@@ -943,10 +943,10 @@ importers:
 
   packages/sandbox-cloudflare:
     dependencies:
-      '@nimbo/core':
+      '@runko/core':
         specifier: workspace:*
         version: link:../core
-      '@nimbo/virtual-fs':
+      '@runko/virtual-fs':
         specifier: workspace:*
         version: link:../virtual-fs
       zod:
@@ -974,10 +974,10 @@ importers:
 
   packages/sandbox-e2b:
     dependencies:
-      '@nimbo/core':
+      '@runko/core':
         specifier: workspace:*
         version: link:../core
-      '@nimbo/virtual-fs':
+      '@runko/virtual-fs':
         specifier: workspace:*
         version: link:../virtual-fs
     devDependencies:
@@ -1002,10 +1002,10 @@ importers:
 
   packages/sandbox-vercel:
     dependencies:
-      '@nimbo/core':
+      '@runko/core':
         specifier: workspace:*
         version: link:../core
-      '@nimbo/virtual-fs':
+      '@runko/virtual-fs':
         specifier: workspace:*
         version: link:../virtual-fs
     devDependencies:
@@ -1030,13 +1030,13 @@ importers:
 
   packages/sdk:
     dependencies:
-      '@nimbo/core':
+      '@runko/core':
         specifier: workspace:*
         version: link:../core
-      '@nimbo/mini-bash':
+      '@runko/mini-bash':
         specifier: workspace:*
         version: link:../mini-bash
-      '@nimbo/virtual-fs':
+      '@runko/virtual-fs':
         specifier: workspace:*
         version: link:../virtual-fs
     devDependencies:
@@ -1064,7 +1064,7 @@ importers:
 
   packages/virtual-fs:
     dependencies:
-      '@nimbo/core':
+      '@runko/core':
         specifier: workspace:*
         version: link:../core
       zod:

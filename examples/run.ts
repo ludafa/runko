@@ -4,8 +4,8 @@
  * 在 `src/` 下按前缀挑出**唯一**一个示例脚本，用当前 node 直跑（Node 24
  * 原生 type stripping，无需编译）。这是 examples 实验田「打开即用」的入口：
  *
- *   pnpm --filter @nimbo/examples example 01        # 按编号
- *   pnpm --filter @nimbo/examples example dir-mount # 按名字片段
+ *   pnpm --filter @runko/examples example 01        # 按编号
+ *   pnpm --filter @runko/examples example dir-mount # 按名字片段
  *   cd examples && pnpm example 07                  # 在包内更短
  *
  * 匹配规则（先命中者胜，避免歧义）：精确名 > 前缀 > 包含子串。命中多个则

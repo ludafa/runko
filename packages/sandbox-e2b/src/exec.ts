@@ -1,5 +1,5 @@
 /**
- * NimboExec → e2b `Commands.run()` 映射（docs/tech/sandbox.md §3.2 / §8.2）。
+ * RunkoExec → e2b `Commands.run()` 映射（docs/tech/sandbox.md §3.2 / §8.2）。
  *
  * ---- P6-1 契约：全部失败路径 resolve，不 reject ----
  *
@@ -13,7 +13,7 @@
  *
  * ---- 取消：不信任远程调用会尊重 signal，独立赛跑兜底 ----
  *
- * 与 `@nimbo/just-bash`/`@nimbo/mini-bash` 的 `raceAbort` 同一处理哲学：这是
+ * 与 `@runko/just-bash`/`@runko/mini-bash` 的 `raceAbort` 同一处理哲学：这是
  * 一次真实网络往返，没有理由假设它一定会及时响应 abort（哪怕 e2b 的
  * `CommandRequestOpts` 确实声明了 `signal` 字段）。这里刻意**不**把
  * `signal`/`timeoutController.signal` 传给 `commands.run()`——取消完全靠
@@ -22,19 +22,19 @@
  * `background:true` + `CommandHandle.kill()` 的另一条调用路径，不在这份
  * 结构接口内，超出本工单范围）。
  */
-import type { ExecOptions, ExecRequest, ExecResult, KeepAlive, NimboExec } from "@nimbo/core";
+import type { ExecOptions, ExecRequest, ExecResult, KeepAlive, RunkoExec } from "@runko/core";
 import { describeError, isCommandExitErrorLike, isE2bErrorNamed } from "./errors.js";
 import type { PathAnchor } from "./path.js";
 import type { E2bSandboxLike } from "./types.js";
 
 const DESCRIBE = [
   "e2b: a real Firecracker microVM sandbox (E2B cloud) — full Linux userspace, not a virtual filesystem.",
-  "Mode A same-source workspace: this NimboFS view and bash commands share the exact same filesystem inside",
+  "Mode A same-source workspace: this RunkoFS view and bash commands share the exact same filesystem inside",
   "the sandbox, so there is nothing to reconcile and no snapshot lag between the two.",
   "The sandbox is a real machine: commands can read, write, and cd anywhere on its disk, not just under this",
   "workspace's root — isolation (the whole VM is disposable) is the security boundary here, not path confinement",
   "the way an in-process VirtualFS enforces it.",
-  "Each NimboFS file-tool call is a network round trip (tens to hundreds of milliseconds). Prefer running",
+  "Each RunkoFS file-tool call is a network round trip (tens to hundreds of milliseconds). Prefer running",
   "scan-heavy work (grep/find over many files, recursive listings) as a single bash command inside the sandbox",
   "rather than many individual file-tool calls.",
 ].join(" ");
@@ -50,7 +50,7 @@ class E2bExecAbortedError extends Error {
  * `signal` 先触发就立刻 reject，不等待 `work`（远程 `commands.run()`）真正
  * 落定——`work` 可能因为网络问题永久悬挂，这正是需要独立赛跑的原因。给
  * `work` 补一个空 catch，避免它在赛跑结束后才 reject 时产生 unhandled
- * rejection（`@nimbo/just-bash`/`@nimbo/mini-bash` 的同款 `raceAbort`）。
+ * rejection（`@runko/just-bash`/`@runko/mini-bash` 的同款 `raceAbort`）。
  */
 function raceAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -77,9 +77,9 @@ function raceAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
-export function createE2bExec(sandbox: E2bSandboxLike, anchor: PathAnchor, keepAlive?: KeepAlive): NimboExec {
+export function createE2bExec(sandbox: E2bSandboxLike, anchor: PathAnchor, keepAlive?: KeepAlive): RunkoExec {
   return {
-    // docs/tech/single-ledger.md §6.1（@nimbo/core 审批三值重构，P13-5-2c）：旧 "never" → "allow"（沙盒实现，隔离即边界）。
+    // docs/tech/single-ledger.md §6.1（@runko/core 审批三值重构，P13-5-2c）：旧 "never" → "allow"（沙盒实现，隔离即边界）。
     defaultApproval: "allow",
     describe(): string {
       return DESCRIBE;
@@ -94,7 +94,7 @@ export function createE2bExec(sandbox: E2bSandboxLike, anchor: PathAnchor, keepA
 
       /**
        * [保活](../../../docs/terms.md)的第二个信号源（docs/tech/sandbox-keepalive.md §3.1）：
-       * 命令跑起来之后 core **一个 chunk 都不会产出**——`@nimbo/core` 的 `loop.ts`
+       * 命令跑起来之后 core **一个 chunk 都不会产出**——`@runko/core` 的 `loop.ts`
        * 把工具进度先缓冲、等命令 resolve 之后才重放。所以一条跑十分钟的命令，这十分钟
        * 里 core 侧的活动信号是零。而这恰恰是最容易把沙盒跑没的场景。
        *

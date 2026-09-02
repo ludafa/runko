@@ -18,7 +18,7 @@
  * });
  * ```
  */
-import type { Arbitration, Persistence } from "@nimbo/agent";
+import type { Arbitration, Persistence } from "@runko/agent";
 
 /** 一条一致性用例。`run` 抛错即失败——所有测试框架都认这个。 */
 export interface ConformanceCase<S> {

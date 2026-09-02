@@ -1,19 +1,19 @@
-# @nimbo/conformance
+# @runko/conformance
 
-**nimbo 宿主能力的契约一致性套件。** 写了一个[持久化](../../docs/host/contract/features/persistence.md)或[归属仲裁机制](../../docs/logic/arbitration/features/arbitration-impl.md)的实现，拿它验合不合契约。
+**runko 宿主能力的契约一致性套件。** 写了一个[持久化](../../docs/host/contract/features/persistence.md)或[归属仲裁机制](../../docs/logic/arbitration/features/arbitration-impl.md)的实现，拿它验合不合契约。
 
-接口注释里写死了一堆承诺——「同一个 seq 重复写入不得写出两行」「`settle` 对已结清的返回 `false` 而不是抛」「取号一律不抛错」——这个包把它们变成**可执行的断言**。nimbo 自己的五个官方实现跑的就是这一份。
+接口注释里写死了一堆承诺——「同一个 seq 重复写入不得写出两行」「`settle` 对已结清的返回 `false` 而不是抛」「取号一律不抛错」——这个包把它们变成**可执行的断言**。runko 自己的五个官方实现跑的就是这一份。
 
 ## 它不依赖任何测试框架
 
 套件只导出**用例数据**（`{ name, run }`），`describe` / `it` 由你来接。所以 vitest / jest / node:test / Workers 上都能跑，装它也不会把某个测试框架拖进你的依赖树。
 
 ```sh
-pnpm add -D @nimbo/conformance
+pnpm add -D @runko/conformance
 ```
 
 ```ts
-import { persistenceCases } from "@nimbo/conformance";
+import { persistenceCases } from "@runko/conformance";
 import { describe, it } from "vitest";
 
 describe("我自己的持久化实现", () => {
@@ -43,7 +43,7 @@ describe("我自己的持久化实现", () => {
 | `arbitrationTakeoverCases` | 能表达超时接管的 | `+ expire` |
 
 ```ts
-import { arbitrationCases, arbitrationTakeoverCases } from "@nimbo/conformance";
+import { arbitrationCases, arbitrationTakeoverCases } from "@runko/conformance";
 ```
 
 跑了哪几组写在你自己的代码里，一眼可查。（三个数组之间没有类型绑定——少接一组编译照过，这条靠代码评审守。）

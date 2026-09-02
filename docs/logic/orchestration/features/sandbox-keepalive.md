@@ -4,7 +4,7 @@ slug: sandbox-keepalive
 view: 功能
 layer: 逻辑层
 module: 轮编排
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["沙盒保活", "活动信号", "保活预算", "等人状态"]
 related: ["logic/orchestration/plans/sandbox-keepalive.md", "logic/orchestration/tech/sandbox-keepalive.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -29,14 +29,14 @@ related: ["logic/orchestration/plans/sandbox-keepalive.md", "logic/orchestration
 
 所以，只要一轮 agent 跑得比这个期限长，沙盒就会在跑到一半时被抽走。这不是小概率事件——一次 `npm install` 加一轮测试就能轻松超过 5 分钟。
 
-这个坑 nimbo 自己的 chat 应用踩过一次线上事故。当时"沙盒超时是绝对时间"这条事实**已经写在文档里了**，但没人推导出它对长轮次意味着什么。
+这个坑 runko 自己的 chat 应用踩过一次线上事故。当时"沙盒超时是绝对时间"这条事实**已经写在文档里了**，但没人推导出它对长轮次意味着什么。
 
 ## 2. 谁会用到
 
 | 用户 | 场景 |
 |---|---|
-| 用 `@nimbo/sdk` + 云沙盒写应用的开发者 | 只要一轮可能跑超过沙盒期限，就需要它 |
-| chat 应用（`@nimbo-chat/node-server`）维护者 | 现有的手写心跳被这套取代 |
+| 用 `@runko/sdk` + 云沙盒写应用的开发者 | 只要一轮可能跑超过沙盒期限，就需要它 |
+| chat 应用（`@runko-chat/node-server`）维护者 | 现有的手写心跳被这套取代 |
 
 **用内存工作区或本机执行的人不需要关心**——那些没有存活期限的概念，这个功能对他们完全不存在。
 
@@ -45,8 +45,8 @@ related: ["logic/orchestration/plans/sandbox-keepalive.md", "logic/orchestration
 ### 3.1 默认行为：接了云沙盒就自动保活
 
 ```ts
-import { createSession, defineAgent } from '@nimbo/sdk';
-import { e2bWorkspace } from '@nimbo/sandbox-e2b';
+import { createSession, defineAgent } from '@runko/sdk';
+import { e2bWorkspace } from '@runko/sandbox-e2b';
 import { Sandbox } from 'e2b';
 
 const sandbox = await Sandbox.create({ timeoutMs: 300_000 });
@@ -65,7 +65,7 @@ await session.send('装依赖，跑测试，把失败的用例修好');   // 跑
 ### 3.2 虚拟工作区自动不参与，不用配置
 
 ```ts
-const workspace = await NimboFS.fromMemory();   // 内存工作区
+const workspace = await RunkoFS.fromMemory();   // 内存工作区
 const session = createSession(agent, { workspace, exec: miniBash() });
 // 什么都不会发生，也不需要关掉什么
 ```

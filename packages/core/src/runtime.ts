@@ -3,7 +3,7 @@
  * §4.5 审批链集成点 / §4.2 file_change/plan_update 派生数据接缝；
  * docs/tech/single-ledger.md §6 P13-5-2c 三值重构）。只处理"一次工具
  * 调用"，不含 loop/session（P4-2）：不发 `SessionEvent`、不维护跨调用的
- * readState（那是文件工具 + session 的职责，见 `@nimbo/virtual-fs` 的
+ * readState（那是文件工具 + session 的职责，见 `@runko/virtual-fs` 的
  * `createFileTools`），不做 abort 特判（execute() 因 abort 抛出时自然落入
  * "failed" 分支，与其他运行时错误同一条路径，不需要单独语义）。
  *
@@ -51,7 +51,7 @@
  * getSkill/update 六个，本工单不允许改 `types.ts`，因此不能在 `ToolContext`
  * 上加一个新字段当通道。
  *
- * 采用的方案与 `@nimbo/virtual-fs` 的 `createFileTools(opts).onFileChange`
+ * 采用的方案与 `@runko/virtual-fs` 的 `createFileTools(opts).onFileChange`
  * 是同一个接缝家族（P2-2 已确立的先例，见该包 `tools/shared.ts` 顶部注释）：
  * 派生数据回调在**工具构造期**（`createUpdatePlanTool(opts)` 之类的工厂
  * 调用时）注入给工具，工具的 `execute()` 内部直接调用它上报——不经过
@@ -66,7 +66,7 @@
  * 该假设成立；未来若引入并发工具调用，需要给收集器加调用范围隔离，不在本
  * 工单范围）。
  */
-import type { ApprovalContext, ApprovalPolicy, JsonValue, NimboFS, SkillHandle, Tool, ToolContext, ToolReturn } from "./types.js";
+import type { ApprovalContext, ApprovalPolicy, JsonValue, RunkoFS, SkillHandle, Tool, ToolContext, ToolReturn } from "./types.js";
 import { evaluateApproval, type OnceApprovalMemory } from "./approval.js";
 
 // ---- 派生数据（docs/tech/core-sdk.md §4.2 SessionItem 的 file_change.changes / plan_update.items 字段对齐） ----
@@ -194,14 +194,14 @@ export interface ExecuteToolCallOptions {
   /** 已经过 `resolveToolCallApproval` 校验/获批的输入——这里不再重复 `safeParse`。 */
   input: JsonValue;
   session: { id: string; turn: number };
-  fs: NimboFS;
+  fs: RunkoFS;
   abortSignal: AbortSignal;
   /** 接到 `ctx.update(partial)`；未提供时 `ctx.update` 是无操作。 */
   onProgress?: (partial: string) => void;
   /** 本次调用期间要收集的派生数据（形状与理由见本文件头）。 */
   derivedData?: DerivedDataCollector;
   /**
-   * `ctx.getSkill` 的真实现（P5，`@nimbo/core/skills/registry.js` 的
+   * `ctx.getSkill` 的真实现（P5，`@runko/core/skills/registry.js` 的
    * `createGetSkill`）：`session.ts` 经 `loop.ts` 把它一路传下来。未提供时退回
    * `createPlaceholderGetSkill()`（P4-1 遗留占位，见下）——这保持了
    * `executeToolCall` 作为独立原语（不经 session/loop 直接调用，如本文件的
@@ -216,7 +216,7 @@ function emptyDerived(): ToolCallDerivedData {
 
 /**
  * `catch` 子句里从 `unknown` 安全窄化出可读消息——受控例外（同款用法见
- * `@nimbo/virtual-fs` 的 `describeError`），只用于这一处收窄，不向外扩散
+ * `@runko/virtual-fs` 的 `describeError`），只用于这一处收窄，不向外扩散
  * `unknown`：`tool.execute()` 按 `Tool` 接口的类型签名只会抛 `unknown`
  * （JS/TS 里 `throw` 的静态类型恒为 `unknown`），这是把它安全转成消息文本的
  * TypeScript 官方推荐写法本身要求的输入类型，不是绕开类型系统的手段。

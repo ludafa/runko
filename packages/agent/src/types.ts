@@ -5,7 +5,7 @@
  * 四种宿主能力各自的接口不在这里（见 `persistence.ts` / `stream.ts` /
  * `arbitration.ts` / `prepare.ts`），这里只放它们都要用到的公共词汇。
  */
-import type { JsonValue, NimboChunk, NimboUIMessage } from "@nimbo/core";
+import type { JsonValue, RunkoChunk, RunkoUIMessage } from "@runko/core";
 
 /**
  * 一条要交给 agent 的输入。
@@ -44,9 +44,9 @@ export interface QueuedInput {
  */
 export type Frame =
   /** 账本里的一条成品消息——回放历史与每一轮新落盘的消息走的都是它。 */
-  | { kind: "message"; seq: number; message: NimboUIMessage }
+  | { kind: "message"; seq: number; message: RunkoUIMessage }
   /** 直播的 [chunk](../../../docs/terms.md)。一律不落盘（[进行中草稿](../../../docs/terms.md)放内存）。 */
-  | { kind: "chunk"; chunk: NimboChunk }
+  | { kind: "chunk"; chunk: RunkoChunk }
   /** [待发队列](../../../docs/terms.md)快照。每条订阅必发一帧，之后变一次发一次。 */
   | { kind: "queue"; queue: QueuedInput[] }
   /** [轮状态快照](../../../docs/terms.md)：这个会话此刻有没有轮在跑，**服务端的权威答案**。 */
@@ -68,7 +68,7 @@ export interface ConversationActivity {
 }
 
 /**
- * 一轮是怎么结束的。前四值原样来自 core 的收尾 metadata（`NimboMessageMetadata.status`）；
+ * 一轮是怎么结束的。前四值原样来自 core 的收尾 metadata（`RunkoMessageMetadata.status`）；
  * `crashed` 是本层加的——驱动器自己抛了，压根没有 `TurnResult` 可报。
  *
  * `suspended` = [挂起](../../../docs/architecture/tech/agent-kernel.md)：停在「正在等人」

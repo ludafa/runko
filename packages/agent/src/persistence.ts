@@ -5,7 +5,7 @@
  *
  * 1. **暴露「agent 运行需要什么」，不暴露「表长什么样」**——账本是「按会话追加消息 /
  *    从某点之后读」，不是「一张 seq 做主键的表」。
- * 2. **nimbo 不拥有用户实体**——只认不透明 `userId`，不做外键。
+ * 2. **runko 不拥有用户实体**——只认不透明 `userId`，不做外键。
  * 3. **迁移不是契约的一部分**——这里没有任何 `migrate()`。
  * 4. **不假设事务能跨接口**——需要原子的地方（出队）收进**一个**方法里。
  *
@@ -13,7 +13,7 @@
  * （所以 `append` 吃一个现成的 `seq`），**写入可能被拒绝而且这是正常路径**
  * （所以 `append` 返回 `WriteResult` 而不是抛错，理由见 `WriteResult`）。
  */
-import type { JsonValue, NimboUIMessage } from "@nimbo/core";
+import type { JsonValue, RunkoUIMessage } from "@runko/core";
 
 import type { QueuedInput, TurnInput } from "./types.js";
 
@@ -38,7 +38,7 @@ export interface LedgerEntry {
   conversationId: string;
   /** 每会话递增，由归属仲裁分配。**允许有空洞**（占了号但插入失败），三个用途都不要求连续。 */
   seq: number;
-  message: NimboUIMessage;
+  message: RunkoUIMessage;
   /** 落盘时刻（毫秒时间戳）。 */
   ts: number;
 }

@@ -1,23 +1,23 @@
 /**
- * `NimboFS` → just-bash `IFileSystem` 适配器（docs/tech/core-sdk.md §4.5b 降级表）。
+ * `RunkoFS` → just-bash `IFileSystem` 适配器（docs/tech/core-sdk.md §4.5b 降级表）。
  *
  * 逐行对应降级表：
- *   - readFile/readFileBuffer/writeFile/mkdir/readdir/rm/stat/exists：NimboFS
+ *   - readFile/readFileBuffer/writeFile/mkdir/readdir/rm/stat/exists：RunkoFS
  *     七方法直译（string 经 TextDecoder/TextEncoder；`exists` 由 `stat` 派生
- *     ——NimboFS 本身没有 exists 原语，"直译"在这里就是"用 stat 的成败判断"）。
+ *     ——RunkoFS 本身没有 exists 原语，"直译"在这里就是"用 stat 的成败判断"）。
  *   - appendFile/cp/mv：组合原语（read+concat+write；read+write[+rm]）。cp/mv
  *     的目标路径解析（"cp file 到已存在目录" 之类的 basename 拼接）已经在
  *     just-bash 自己的 `cp`/`mv` 命令层完成——实测确认（见工单调研）传给
  *     `IFileSystem.cp/mv` 的两个路径已经是最终的绝对源/目的路径，适配器不需要
  *     再猜测"dest 是不是一个目录"。目录场景（`cp -r`/`mv` 目录）用
  *     `fs.glob("<src>/**")` 枚举子树里的全部文件逐个 read+write（+ 对 mv 再
- *     `rm(src, {recursive:true})`）——空子目录不参与（`NimboFS.glob` 只报
+ *     `rm(src, {recursive:true})`）——空子目录不参与（`RunkoFS.glob` 只报
  *     文件，§4.4 已有的限制，这里顺着继承，不额外发明目录物化）。
  *   - resolvePath/realpath：纯路径规范化（`path.ts` 的 `resolvePath`/
  *     `normalizePath`）；没有 symlink，realpath 就是 normalize。
  *   - getAllPaths：`fs.glob("**")` + 从文件路径合成目录集合。**但**
  *     `IFileSystem.getAllPaths()` 的签名是**同步**的（`(): string[]`），而
- *     `NimboFS.glob()` 是异步的——这是一个真实的接口不匹配（sync/async
+ *     `RunkoFS.glob()` 是异步的——这是一个真实的接口不匹配（sync/async
  *     mismatch），不是实现疏忽。解法：适配器维护一个内部同步缓存
  *     `allPathsCache`，`getAllPaths()` 只读它；`refreshAllPaths()`（不在
  *     `IFileSystem` 里，是适配器额外暴露的方法）异步刷新这个缓存，由
@@ -29,7 +29,7 @@
  *   - symlink/link/readlink：抛不支持；lstat = stat，isSymbolicLink 恒 false。
  *   - reference 条目：`stat()` 视为 file（`FileStat.type !== "dir"` 即
  *     `isFile: true`）；`readFile()` 对未注入 resolver 的 reference 条目会让
- *     `NimboFS` 实现自己抛出的 `ReferenceNotResolvable` 原样冒泡——just-bash
+ *     `RunkoFS` 实现自己抛出的 `ReferenceNotResolvable` 原样冒泡——just-bash
  *     的内置命令（cat 等）会把这个 Error 的 `.message` 转成形如
  *     `cat: <path>: <message>` 的命令级错误文本，天然满足"自然浮出为命令
  *     错误文本"，适配器不需要特殊处理。
@@ -40,11 +40,11 @@
  *     实测确认）。改用同样导出的 `unsafeBytesFromLatin1(latin1String)`：把
  *     `Uint8Array` 转成"每字符一字节"的 latin1 字符串再打标签成
  *     `ByteString`——语义等价，只是绕过了一个未导出的内部辅助函数。
- *   - `readdirWithFileTypes`：`NimboFS.readdir()` 的 `DirEntry` 本来就带
+ *   - `readdirWithFileTypes`：`RunkoFS.readdir()` 的 `DirEntry` 本来就带
  *     `type` 字段，直接映射成 `DirentEntry` 是免费的（避免解释器退化到
  *     `readdir` + 逐条 `stat` 的慢路径）。
  */
-import type { DirEntry, FileStat, NimboFS } from "@nimbo/core";
+import type { DirEntry, FileStat, RunkoFS } from "@runko/core";
 import type { CpOptions, FsStat, IFileSystem, RmOptions } from "just-bash";
 import { unsafeBytesFromLatin1 } from "just-bash";
 import { dirnameOf, normalizePath, resolvePath as resolveVirtualPath } from "./path.js";
@@ -68,12 +68,12 @@ function toFsStat(stat: FileStat): FsStat {
   };
 }
 
-async function statImpl(fs: NimboFS, path: string): Promise<FsStat> {
+async function statImpl(fs: RunkoFS, path: string): Promise<FsStat> {
   const stat = await fs.stat(normalizePath(path));
   return toFsStat(stat);
 }
 
-async function existsImpl(fs: NimboFS, path: string): Promise<boolean> {
+async function existsImpl(fs: RunkoFS, path: string): Promise<boolean> {
   try {
     await fs.stat(normalizePath(path));
     return true;
@@ -94,8 +94,8 @@ function relocate(srcRoot: string, destRoot: string, filePath: string): string {
   return destRoot === "/" ? `/${rel}` : `${destRoot}/${rel}`;
 }
 
-/** cp -r / mv 目录场景的共用体：把 src 子树下每个文件 read 出来再 write 到重定位后的 dest 路径。空子目录不参与（NimboFS.glob 只报文件）。 */
-async function copySubtree(fs: NimboFS, src: string, dest: string): Promise<void> {
+/** cp -r / mv 目录场景的共用体：把 src 子树下每个文件 read 出来再 write 到重定位后的 dest 路径。空子目录不参与（RunkoFS.glob 只报文件）。 */
+async function copySubtree(fs: RunkoFS, src: string, dest: string): Promise<void> {
   const files = await fs.glob(subtreeGlobPattern(src));
   for (const filePath of files) {
     const data = await fs.readFile(filePath);
@@ -103,7 +103,7 @@ async function copySubtree(fs: NimboFS, src: string, dest: string): Promise<void
   }
 }
 
-async function cpImpl(fs: NimboFS, src: string, dest: string, options: CpOptions | undefined): Promise<void> {
+async function cpImpl(fs: RunkoFS, src: string, dest: string, options: CpOptions | undefined): Promise<void> {
   const srcPath = normalizePath(src);
   const destPath = normalizePath(dest);
   const stat = await fs.stat(srcPath);
@@ -118,7 +118,7 @@ async function cpImpl(fs: NimboFS, src: string, dest: string, options: CpOptions
   await fs.writeFile(destPath, data);
 }
 
-async function mvImpl(fs: NimboFS, src: string, dest: string): Promise<void> {
+async function mvImpl(fs: RunkoFS, src: string, dest: string): Promise<void> {
   const srcPath = normalizePath(src);
   const destPath = normalizePath(dest);
   const stat = await fs.stat(srcPath);
@@ -132,7 +132,7 @@ async function mvImpl(fs: NimboFS, src: string, dest: string): Promise<void> {
   await fs.rm(srcPath);
 }
 
-async function rmImpl(fs: NimboFS, path: string, options: RmOptions | undefined): Promise<void> {
+async function rmImpl(fs: RunkoFS, path: string, options: RmOptions | undefined): Promise<void> {
   try {
     await fs.rm(normalizePath(path), { recursive: options?.recursive });
   } catch (error) {
@@ -141,7 +141,7 @@ async function rmImpl(fs: NimboFS, path: string, options: RmOptions | undefined)
   }
 }
 
-async function appendFileImpl(fs: NimboFS, path: string, addition: Uint8Array): Promise<void> {
+async function appendFileImpl(fs: RunkoFS, path: string, addition: Uint8Array): Promise<void> {
   const normalized = normalizePath(path);
   let existing: Uint8Array;
   try {
@@ -160,7 +160,7 @@ export interface JustBashFsAdapter extends IFileSystem {
   refreshAllPaths(): Promise<void>;
 }
 
-export function createFsAdapter(fs: NimboFS): JustBashFsAdapter {
+export function createFsAdapter(fs: RunkoFS): JustBashFsAdapter {
   let allPathsCache: string[] = [];
 
   async function refreshAllPaths(): Promise<void> {
@@ -254,15 +254,15 @@ export function createFsAdapter(fs: NimboFS): JustBashFsAdapter {
     },
 
     async symlink(target, linkPath) {
-      throw new Error(`just-bash adapter: symlink is not supported (no symlink concept in NimboFS v1): '${linkPath}' -> '${target}'`);
+      throw new Error(`just-bash adapter: symlink is not supported (no symlink concept in RunkoFS v1): '${linkPath}' -> '${target}'`);
     },
 
     async link(existingPath, newPath) {
-      throw new Error(`just-bash adapter: hard link is not supported (no symlink concept in NimboFS v1): '${newPath}' -> '${existingPath}'`);
+      throw new Error(`just-bash adapter: hard link is not supported (no symlink concept in RunkoFS v1): '${newPath}' -> '${existingPath}'`);
     },
 
     async readlink(path) {
-      throw new Error(`just-bash adapter: readlink is not supported (no symlink concept in NimboFS v1): '${path}'`);
+      throw new Error(`just-bash adapter: readlink is not supported (no symlink concept in RunkoFS v1): '${path}'`);
     },
 
     async lstat(path) {

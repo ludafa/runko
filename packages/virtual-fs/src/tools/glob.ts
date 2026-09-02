@@ -10,8 +10,8 @@
  * 输出逐字符一致。
  */
 import { z } from "zod";
-import { defineTool, SearchUnsupportedError } from "@nimbo/core";
-import type { FileSearchQuery, FileSearchResult, NimboFS, Tool, ToolReturn } from "@nimbo/core";
+import { defineTool, SearchUnsupportedError } from "@runko/core";
+import type { FileSearchQuery, FileSearchResult, RunkoFS, Tool, ToolReturn } from "@runko/core";
 import { globToRegExp, isIgnoredPath } from "../path.js";
 import { GLOB_MAX_MATCHES, describeError, errorResult, joinGlobPattern, resolveDefaultIgnore, truncationNotice } from "./shared.js";
 
@@ -21,14 +21,14 @@ const inputSchema = z.object({
 });
 
 /** JS 逐文件扫描回退：`fs.glob()` 拿候选集，本地应用 ignore 过滤 + 排序 + 源头截断。 */
-async function fallbackSearchFiles(fs: NimboFS, query: FileSearchQuery): Promise<FileSearchResult> {
+async function fallbackSearchFiles(fs: RunkoFS, query: FileSearchQuery): Promise<FileSearchResult> {
   const matches = await fs.glob(query.pattern);
   const ignorePatterns = (query.ignore ?? []).map(globToRegExp);
   const filtered = matches.filter((path) => !isIgnoredPath(path, ignorePatterns)).sort();
   return { paths: filtered.slice(0, query.limit), total: filtered.length };
 }
 
-async function resolveFileSearch(fs: NimboFS, query: FileSearchQuery): Promise<FileSearchResult> {
+async function resolveFileSearch(fs: RunkoFS, query: FileSearchQuery): Promise<FileSearchResult> {
   if (fs.searchFiles) {
     try {
       return await fs.searchFiles(query);

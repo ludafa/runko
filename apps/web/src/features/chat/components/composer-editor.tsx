@@ -7,7 +7,7 @@
  *
  * **不开放任何富文本格式**（tech §2.4）：只装 Document + Paragraph + Text +
  * HardBreak + Placeholder + Mention 六个扩展，不装 starter-kit，粘贴一律走纯文本。
- * 理由是用户消息最终要落成 `NimboUIMessage` 的一条 text part，任何富文本格式都
+ * 理由是用户消息最终要落成 `RunkoUIMessage` 的一条 text part，任何富文本格式都
  * 无处可去，做出来只会是骗人的。
  *
  * ---- 两处结构性的选择 ----

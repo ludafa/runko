@@ -1,11 +1,11 @@
 /**
- * nimbo 服务端跑在 Cloudflare Worker 里 —— 一份完整的参考实现（示例，非产品代码）。
+ * runko 服务端跑在 Cloudflare Worker 里 —— 一份完整的参考实现（示例，非产品代码）。
  *
  * 这个 Worker 同时扮演**两个角色**，它们共用同一套 `getSandbox` 接线、同一个
  * Durable Object binding、同一份 Dockerfile：
  *
  *   ① 服务端自己驱动沙盒（进程内直连）—— `GET /sandbox-check`、`POST /agent`
- *      nimbo 会话就跑在这个 Worker 里，客户端与网关同进程，那层 HTTP 不过网络。
+ *      runko 会话就跑在这个 Worker 里，客户端与网关同进程，那层 HTTP 不过网络。
  *
  *   ② 对外提供 BYO 网关端点 —— `ALL /gateway/*`
  *      供**任意 Node 机器**上的 `cloudflareWorkspace({ url, token })` 连进来，
@@ -13,7 +13,7 @@
  *
  * 为什么这两件事能合成一个 Worker：
  *
- * `@nimbo/sandbox-cloudflare` 原本是**网关形态**——nimbo 的前提是「agent 跑在任意
+ * `@runko/sandbox-cloudflare` 原本是**网关形态**——runko 的前提是「agent 跑在任意
  * 电脑上」，而 CF Sandbox 只能从 Worker 内部经 Durable Object binding 访问，所以
  * 需要自部署一个 HTTP 网关把两边接起来（docs/tech/sandbox.md §6）。角色 ② 就是那个
  * 网关。而角色 ① 的服务端自己就在 Worker 里，客户端与网关同进程——于是同一个
@@ -38,10 +38,10 @@
  */
 import { createDeepSeek } from '@ai-sdk/deepseek';
 import { getSandbox, Sandbox } from '@cloudflare/sandbox';
-import { cloudflareWorkspace } from '@nimbo/sandbox-cloudflare';
-import { createSandboxGateway } from '@nimbo/sandbox-cloudflare/worker';
-import type { CfSandboxLike } from '@nimbo/sandbox-cloudflare/worker';
-import { createSession, defineAgent } from '@nimbo/sdk';
+import { cloudflareWorkspace } from '@runko/sandbox-cloudflare';
+import { createSandboxGateway } from '@runko/sandbox-cloudflare/worker';
+import type { CfSandboxLike } from '@runko/sandbox-cloudflare/worker';
+import { createSession, defineAgent } from '@runko/sdk';
 import type { LanguageModel } from 'ai';
 import { Hono } from 'hono';
 import { z } from 'zod';
@@ -55,22 +55,22 @@ interface Env {
   // 具名类型，也不用写类型断言。
   Sandbox: Parameters<typeof getSandbox>[0];
   /** 角色 ②（对外网关）的 bearer token。未配置时 /gateway/* 直接 503，不退化成弱口令。 */
-  NIMBO_GATEWAY_TOKEN?: string;
+  RUNKO_GATEWAY_TOKEN?: string;
   DEEPSEEK_API_BASE_URL?: string;
   DEEPSEEK_API_TOKEN?: string;
-  NIMBO_MODEL?: string;
+  RUNKO_MODEL?: string;
 }
 
 /**
  * 角色 ① 里客户端与网关之间的握手值。这里**不是**一道安全边界：两端在同一个
  * Worker 进程里，这个值永远不出进程、也从不上网。真正的边界是本 Worker 对外暴露的
- * 路由（其中 `/gateway/*` 用的是 `NIMBO_GATEWAY_TOKEN` 那个真 secret）。
+ * 路由（其中 `/gateway/*` 用的是 `RUNKO_GATEWAY_TOKEN` 那个真 secret）。
  * 之所以还留着它，只是因为网关的协议契约要求带上（AUTH_HEADER），照给即可。
  */
 const INTERNAL_TOKEN = 'in-process-not-a-secret';
 
 /** 角色 ① 固定复用同一个沙盒实例，方便观察跨请求的文件留存行为。 */
-const SERVER_SANDBOX_ID = 'nimbo-cloudflare-worker-server';
+const SERVER_SANDBOX_ID = 'runko-cloudflare-worker-server';
 
 /** 对外网关端点的挂载前缀；转交给网关前会被剥掉（见 `/gateway/*` 路由）。 */
 const GATEWAY_PREFIX = '/gateway';
@@ -90,7 +90,7 @@ const GATEWAY_PREFIX = '/gateway';
  * `sandbox exec failed: AbortSignal serialization is not enabled.`（已实测）。
  * 文件方法不受影响，因为它们只传字符串。
  *
- * 这是 `@nimbo/sandbox-cloudflare` 网关的一个真实缺陷。它之所以长期没被发现，是因为
+ * 这是 `@runko/sandbox-cloudflare` 网关的一个真实缺陷。它之所以长期没被发现，是因为
  * 网关的契约测试用的是 fake sandbox（普通对象、无 RPC 边界，传 signal 自然没事），
  * 而真机路径此前从未真正跑过。**注意这层包装对两个角色都必要**——角色 ② 的外部
  * 客户端走的是同一条 `getSandbox` 接线，同样会撞上 DO RPC 边界。
@@ -135,7 +135,7 @@ function gatewayFor(env: Env, token: string) {
   });
 }
 
-/** 角色 ①：把「真实 CF Sandbox」包装成 nimbo 的 `NimboFS & NimboExec` 视图。 */
+/** 角色 ①：把「真实 CF Sandbox」包装成 runko 的 `RunkoFS & RunkoExec` 视图。 */
 function workspaceFor(env: Env, sandboxId: string) {
   const gateway = gatewayFor(env, INTERNAL_TOKEN);
 
@@ -161,7 +161,7 @@ function resolveModel(env: Env): LanguageModel | undefined {
     return undefined;
   }
   const deepseek = createDeepSeek({ baseURL, apiKey });
-  return deepseek(env.NIMBO_MODEL?.trim() || 'deepseek-chat');
+  return deepseek(env.RUNKO_MODEL?.trim() || 'deepseek-chat');
 }
 
 function describeError(error: unknown): string {
@@ -172,8 +172,8 @@ const app = new Hono<{ Bindings: Env }>();
 
 app.get('/', (c) =>
   c.json({
-    name: 'nimbo-cloudflare-worker-server',
-    what: 'nimbo 服务端跑在 CF Worker 里：进程内直连驱动真实 CF Sandbox，同时对外提供 BYO 网关端点',
+    name: 'runko-cloudflare-worker-server',
+    what: 'runko 服务端跑在 CF Worker 里：进程内直连驱动真实 CF Sandbox，同时对外提供 BYO 网关端点',
     routes: {
       'GET  /health': '存活检查（不碰沙盒）',
       'GET  /sandbox-check':
@@ -183,7 +183,7 @@ app.get('/', (c) =>
       'POST /agent':
         '跑一次真 agent 会话，body: {"prompt":"..."}（需要 DeepSeek 配置）',
       'ALL  /gateway/*':
-        'BYO 网关端点：供任意 Node 机器上的 cloudflareWorkspace({url,token}) 连入（需要 NIMBO_GATEWAY_TOKEN）',
+        'BYO 网关端点：供任意 Node 机器上的 cloudflareWorkspace({url,token}) 连入（需要 RUNKO_GATEWAY_TOKEN）',
     },
   }),
 );
@@ -201,14 +201,14 @@ app.get('/health', (c) => c.json({ ok: true }));
  * `/agent`、以及那个语义完全不同的 `/debug/exec` 调试路由）各据其位、互不遮蔽。
  */
 app.all(`${GATEWAY_PREFIX}/*`, async (c) => {
-  const token = c.env.NIMBO_GATEWAY_TOKEN?.trim();
+  const token = c.env.RUNKO_GATEWAY_TOKEN?.trim();
   if (token === undefined || token.length === 0) {
     // 刻意不退化成「无鉴权」或某个默认值：没配 secret 就是没开这个角色。
     return c.json(
       {
         ok: false,
         error:
-          '未配置 NIMBO_GATEWAY_TOKEN —— 对外网关端点未启用。本地填 .dev.vars，线上用 `wrangler secret put NIMBO_GATEWAY_TOKEN`。',
+          '未配置 RUNKO_GATEWAY_TOKEN —— 对外网关端点未启用。本地填 .dev.vars，线上用 `wrangler secret put RUNKO_GATEWAY_TOKEN`。',
       },
       503,
     );
@@ -235,7 +235,7 @@ app.get('/sandbox-check', async (c) => {
       signal: new AbortController().signal,
     });
 
-    // 2) 文件往返：证明 NimboFS 七个方法经网关翻译后打得通
+    // 2) 文件往返：证明 RunkoFS 七个方法经网关翻译后打得通
     const marker = `worker-server @ ${String(startedAt)}\n`;
     await workspace.writeFile('/worker-server-notes.txt', marker);
     const readBack = new TextDecoder().decode(
@@ -301,7 +301,7 @@ app.get('/debug/exec', async (c) => {
 
 const agentRequestSchema = z.object({ prompt: z.string().min(1) });
 
-/** 角色 ①：Worker 里的 nimbo 会话，工具全部落在真实 CF Sandbox 上。 */
+/** 角色 ①：Worker 里的 runko 会话，工具全部落在真实 CF Sandbox 上。 */
 app.post('/agent', async (c) => {
   const model = resolveModel(c.env);
   if (model === undefined) {

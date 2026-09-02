@@ -2,11 +2,11 @@
  * `find [path] [-name GLOB] [-type f|d]`：从 path（默认 "."）递归；
  * `-name` 只匹配单段 basename（不跨 `/`，`*`/`?` 语义），`-type` 过滤
  * file/dir。只用 readdir()/stat() 遍历，不依赖 fs.glob()——glob() 在
- * @nimbo/virtual-fs 里"只匹配文件、不匹配目录"，那是该实现的选择，
- * find 需要目录也能被 -type d 匹配，不能假设所有 NimboFS 实现都有同样的
+ * @runko/virtual-fs 里"只匹配文件、不匹配目录"，那是该实现的选择，
+ * find 需要目录也能被 -type d 匹配，不能假设所有 RunkoFS 实现都有同样的
  * glob 语义，因此自己走 readdir 递归。
  */
-import type { DirEntry, FileStat, NimboFS } from "@nimbo/core";
+import type { DirEntry, FileStat, RunkoFS } from "@runko/core";
 import { resolvePath } from "../path.js";
 import { statSafe } from "./shared.js";
 import type { CommandFn } from "./types.js";
@@ -68,7 +68,7 @@ interface FoundEntry {
   stat: FileStat;
 }
 
-async function walk(fs: NimboFS, dir: string, out: FoundEntry[], signal: AbortSignal): Promise<void> {
+async function walk(fs: RunkoFS, dir: string, out: FoundEntry[], signal: AbortSignal): Promise<void> {
   const entries: DirEntry[] = await fs.readdir(dir);
   for (const entry of entries) {
     if (signal.aborted) {return;}

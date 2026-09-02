@@ -4,7 +4,7 @@ slug: single-ledger
 view: 功能
 layer: 逻辑层
 module: 轮编排
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["账本", "UIMessage", "seq", "断线续传", "数据模型"]
 related: ["logic/orchestration/plans/single-ledger.md", "logic/orchestration/tech/single-ledger.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -49,10 +49,10 @@ agent 要做敏感操作（跑危险命令等）时会停下来等你点「允�
 
 ## 3. 开发者接口
 
-### 3.1 `@nimbo/core` SDK（产品视角）
+### 3.1 `@runko/core` SDK（产品视角）
 
-- **账本即工作态**：[loop](../../../terms.md) 的工作状态就是 `NimboUIMessage[]`；[`SessionState`（`session.toJSON()`）](../../../terms.md) 的 `messages` 也是 `NimboUIMessage[]`。存档 = 序列化这个数组，恢复 = 读回它 → 官方转换器，没有第二条路径。
-- **标准流协议**：`session.stream()` 吐出的 [chunk（流块）](../../../terms.md) 就是 AI SDK 的「UIMessage 流」协议词汇（`NimboChunk`）——文本增量、工具状态变化、data 部件等。**任意 AI SDK 兼容的客户端都能直接消费**，不需要 nimbo 自定义的 wire 事件。
+- **账本即工作态**：[loop](../../../terms.md) 的工作状态就是 `RunkoUIMessage[]`；[`SessionState`（`session.toJSON()`）](../../../terms.md) 的 `messages` 也是 `RunkoUIMessage[]`。存档 = 序列化这个数组，恢复 = 读回它 → 官方转换器，没有第二条路径。
+- **标准流协议**：`session.stream()` 吐出的 [chunk（流块）](../../../terms.md) 就是 AI SDK 的「UIMessage 流」协议词汇（`RunkoChunk`）——文本增量、工具状态变化、data 部件等。**任意 AI SDK 兼容的客户端都能直接消费**，不需要 runko 自定义的 wire 事件。
 - **三值审批策略**：审批策略是「挂在工具上或注入会话的规则」，对一次工具调用产出[审批结果（三值）](../../../terms.md)之一——`allow`（直接跑）/ `review`（弹卡片停下等人）/ `deny`（直接拒绝）。策略可以是固定值，也可以是一段分类逻辑（回调 `(input, ctx) => ApprovalOutcome`）。会话级注入的[审批分类器](../../../terms.md)就是这个回调，chat 应用把危险命令清单放这里。
 - **两值人工裁决**：`review` 弹给真人的卡片，真人只答两值：`{ behavior: 'allow' }` 或 `{ behavior: 'deny'; message? }`。「改参数」（`updatedInput`）已删除。
 
@@ -71,20 +71,20 @@ agent 要做敏感操作（跑危险命令等）时会停下来等你点「允�
 | `POST /api/chat/conversations/{id}/approvals/{callId}` | 批准/拒绝一个挂起的审批，结果经 stream 的 `tool-approval-response` chunk 送达，本响应只是 ack |
 | `POST /api/chat/conversations/{id}/questions/{callId}` | 回答一个挂起的 `ask-user` 提问，结果经 stream 的 `tool-ask-user` 部件 `output-available` 状态送达，本响应只是 ack |
 
-回放帧有两类：`{ seq, message }`（一条完工的 `NimboUIMessage`）与 `{ seq?, chunk }`（一个 `NimboChunk`）。瞬时 chunk 的帧不带 `seq`（不落盘、不回放）；其余帧都带 `seq`。
+回放帧有两类：`{ seq, message }`（一条完工的 `RunkoUIMessage`）与 `{ seq?, chunk }`（一个 `RunkoChunk`）。瞬时 chunk 的帧不带 `seq`（不落盘、不回放）；其余帧都带 `seq`。
 
 ## 4. 范围与非目标
 
 **范围（P13-5 立项落地后的形态）**：
 
 - core：loop 工作态 = UIMessage 数组；`SessionState` 存档/恢复 = UIMessage 数组的序列化；每步调模型前经官方转换器推导 ModelMessage。
-- core：自有的 `SessionEvent`/`SessionItem` 事件联合退役，宿主改为消费 UIMessage 部件流（nimbo 特有的过程数据用 data 部件表达）。
+- core：自有的 `SessionEvent`/`SessionItem` 事件联合退役，宿主改为消费 UIMessage 部件流（runko 特有的过程数据用 data 部件表达）。
 - chat 应用：`nimbo_state_json` 字段消失；账本只存 UIMessage 及其部件的落盘形态；web 时间线直接渲染部件。
 
 **非目标**：
 
-- **不推翻手动 loop 选型**：loop 仍是 nimbo 自己实现的循环（不外包给 AI SDK 现成的 loop）；换的只是 loop 的**工作格式**（从手拼 ModelMessage 改为 UIMessage 数组 + 官方转换器）。
-- **不处理存量迁移/接口兼容**：nimbo SDK 从未对外发版，不存在存量数据迁移与老接口兼容问题（一次性全局改名、删字段皆可）。
+- **不推翻手动 loop 选型**：loop 仍是 runko 自己实现的循环（不外包给 AI SDK 现成的 loop）；换的只是 loop 的**工作格式**（从手拼 ModelMessage 改为 UIMessage 数组 + 官方转换器）。
+- **不处理存量迁移/接口兼容**：runko SDK 从未对外发版，不存在存量数据迁移与老接口兼容问题（一次性全局改名、删字段皆可）。
 - **不自建审批过程数据部件**：审批链最终采用 AI SDK 原生的审批状态机（`tool-approval-request`/`tool-approval-response`/`output-denied`），不新建 `data-approval` 部件（曾评估过，见 tech 的实验发现 B）。
 - **不保留「改参数」审批口子**：人工裁决纯两值，删除 `updatedInput`。
 

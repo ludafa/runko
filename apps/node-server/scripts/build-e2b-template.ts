@@ -7,7 +7,7 @@
  * with the spec from `.env` (`E2B_TEMPLATE` / `E2B_TEMPLATE_MEMORY_MB` /
  * `E2B_TEMPLATE_CPU_COUNT`, defaults in `src/agent/e2b-template.ts`).
  *
- *     pnpm --filter @nimbo-chat/node-server e2b:template
+ *     pnpm --filter @runko-chat/node-server e2b:template
  *
  * This script is the *only* consumer of the memory/CPU vars — E2B gives no
  * other moment to set them — so editing them in `.env` does nothing until this

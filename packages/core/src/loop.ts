@@ -2,7 +2,7 @@
  * L2 运行层：单个 turn 的 step 循环 `runTurn`（docs/tech/single-ledger.md
  * §5 单-2，"UIMessage 单账本"迁移）。session.ts 拥有跨 turn 的持久状态
  * （messages/turn 计数/readState/onceMemory/planStore），本文件只负责"给定
- * 当前账本，把一个 turn 跑到底"——工作态是 `NimboUIMessage[]`（不再是
+ * 当前账本，把一个 turn 跑到底"——工作态是 `RunkoUIMessage[]`（不再是
  * `ModelMessage[]`），每步调模型前用 ai 官方 `convertToModelMessages()` 现场
  * 推导，loop 自己不再手拼任何 `ModelMessage`（docs/tech/single-ledger.md §0 TL;DR）。
  *
@@ -14,7 +14,7 @@
  * | `turn.started` | 不需要部件/chunk（turn 边界由调用方发起 `stream()` 本身体现） |
  * | `item.started/updated/completed`（`agent_message`） | `text-start`/`text-delta`/`text-end` chunk + `TextUIPart` |
  * | `item.started/updated/completed`（`reasoning`） | `reasoning-start`/`reasoning-delta`/`reasoning-end` chunk + `ReasoningUIPart` |
- * | `item.started/updated/completed`（`user_message`，steer） | `start`/`text-*`/`finish` chunk + 一条 `metadata.steered=true` 的 user `NimboUIMessage`（见 `drainSteerMessages`） |
+ * | `item.started/updated/completed`（`user_message`，steer） | `start`/`text-*`/`finish` chunk + 一条 `metadata.steered=true` 的 user `RunkoUIMessage`（见 `drainSteerMessages`） |
  * | `item.started/updated/completed`（`tool_call`，in_progress/completed/failed） | `tool-input-available` → `tool-output-available`/`tool-output-error` chunk + 工具部件（同一 toolCallId 原地覆盖，只记结算态——docs/tech/single-ledger.md §4.1 实现教训） |
  * | `item.started/updated/completed`（`tool_call`，denied，无 review） | `tool-input-available` → `tool-output-denied` chunk：`deny` 结果直接拒绝，不经审批请求/响应（docs/tech/single-ledger.md §6.1"deny：直接拒绝，output-denied"，P13-5-2c） |
  * | `item.started/updated/completed`（`tool_call`，review） | `tool-input-available` → `tool-approval-request`（先产出，见下）→ `await` 人审通道 → `tool-approval-response`（allow/deny 都发）→ `tool-output-available`/`tool-output-error`/`tool-output-denied` chunk + 工具部件状态迁移（ai 原生审批状态机字段形状，P13-5-2c 重构） |
@@ -24,9 +24,9 @@
  * | `ctx.update()` 进度 | `data-tool-progress` chunk，**transient：只出流不物化**（docs/tech/single-ledger.md §4.1 发现 A，见 `settleToolCall`） |
  * | （新增，无旧对应）工具时间戳 | `data-tool-timing` chunk + **持久**部件（id = toolCallId，同 id 覆盖，见 `upsertToolTimingPart`）：`tool-input-available` 后立刻打 `startedAt`（入队），`executeToolCall` 前一刻打 `executionStartedAt`（真实执行起点；deny 路径恒缺席），每个结算 chunk（output-available/output-error/output-denied，含审批 deny）后立刻补 `completedAt`——三个时刻的语义见 `state.ts` 的 `toolTimingDataSchema` |
  * | `turn.completed`（`usage`） | `message-metadata` chunk，`messageMetadata: {turn, usage, status:'completed'}`，写在该轮最后一条 assistant 消息的 `.metadata` 上 |
- * | `turn.failed`（`error`） | 同上，`status: 'failed'`（`NimboError.code !== 'aborted'`）或 `'interrupted'`（`code === 'aborted'`）+ `error` |
+ * | `turn.failed`（`error`） | 同上，`status: 'failed'`（`RunkoError.code !== 'aborted'`）或 `'interrupted'`（`code === 'aborted'`）+ `error` |
  *
- * ---- 一个 nimbo step = 一条 assistant `NimboUIMessage`（裁量，见工单回报） ----
+ * ---- 一个 runko step = 一条 assistant `RunkoUIMessage`（裁量，见工单回报） ----
  *
  * single-ledger 参考实现（原 `examples/13-uimessage-single-ledger.e2e.test.ts`——已随
  * examples 梳理移除：其离线结构断言迁至
@@ -93,17 +93,17 @@ import type {
   ToolUIPart,
   UITools,
 } from "ai";
-import type { NimboError, Usage } from "./events.js";
+import type { RunkoError, Usage } from "./events.js";
 import type {
   FileChangeData,
-  NimboChunk,
-  NimboMessageMetadata,
-  NimboUIMessage,
+  RunkoChunk,
+  RunkoMessageMetadata,
+  RunkoUIMessage,
   PlanUpdateData,
   ToolTimingData,
 } from "./state.js";
 import { jsonValueSchema } from "./types.js";
-import type { ApprovalPolicy, ApprovalReviewer, JsonValue, NimboFS, SkillHandle, Tool, ToolReturn } from "./types.js";
+import type { ApprovalPolicy, ApprovalReviewer, JsonValue, RunkoFS, SkillHandle, Tool, ToolReturn } from "./types.js";
 import { convertTools } from "./model/convert.js";
 import { executeToolCall, resolveToolCallApproval } from "./runtime.js";
 import type { DerivedDataCollector, ToolCallResult } from "./runtime.js";
@@ -113,7 +113,7 @@ import type { TurnResult } from "./session.js";
 
 /**
  * `catch` 子句里从 `unknown` 安全窄化出可读消息——同款受控例外见
- * `runtime.ts`/`@nimbo/virtual-fs` 的 `describeError`：只用于这一处收窄。
+ * `runtime.ts`/`@runko/virtual-fs` 的 `describeError`：只用于这一处收窄。
  */
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -152,14 +152,14 @@ function mergeUsage(acc: Usage, next: LanguageModelUsage): Usage {
 }
 
 /** "字符数/4"起步估算：system + 全部账本消息的 JSON 字符长度之和除以 4，向上取整。 */
-function estimateMessagesTokens(messages: NimboUIMessage[], system: string | undefined): number {
+function estimateMessagesTokens(messages: RunkoUIMessage[], system: string | undefined): number {
   let charCount = system?.length ?? 0;
   for (const message of messages) {charCount += JSON.stringify(message).length;}
   return Math.ceil(charCount / 4);
 }
 
 /** 一条 assistant 消息里全部 `text` 部件拼接（`TurnResult.finalResponse` 的来源，见 `runTurn`）。 */
-function collectMessageText(message: NimboUIMessage): string {
+function collectMessageText(message: RunkoUIMessage): string {
   let text = "";
   for (const part of message.parts) {
     if (part.type === "text") {text += part.text;}
@@ -167,13 +167,13 @@ function collectMessageText(message: NimboUIMessage): string {
   return text;
 }
 
-/** `NimboError.code === "aborted"` 归 `"interrupted"`（宿主主动中断，非失败）；其余三个 code 归 `"failed"`。 */
-function statusForError(error: NimboError): "failed" | "interrupted" {
+/** `RunkoError.code === "aborted"` 归 `"interrupted"`（宿主主动中断，非失败）；其余三个 code 归 `"failed"`。 */
+function statusForError(error: RunkoError): "failed" | "interrupted" {
   return error.code === "aborted" ? "interrupted" : "failed";
 }
 
 /**
- * 宿主中止时 `NimboError.message` 用什么——**优先用宿主自己给的理由**
+ * 宿主中止时 `RunkoError.message` 用什么——**优先用宿主自己给的理由**
  * （`abortController.abort(reason)`），缺席才回落到 `fallback`。
  *
  * 为什么要透传：`code: "aborted"` 只说了「被宿主中止了」，而**为什么**中止是宿主的
@@ -195,20 +195,20 @@ function abortMessage(signal: AbortSignal, fallback: string): string {
   return fallback;
 }
 
-function appendPlaceholderAssistantMessage(messages: NimboUIMessage[]): NimboUIMessage {
-  const placeholder: NimboUIMessage = { id: randomUUID(), role: "assistant", parts: [{ type: "step-start" }] };
+function appendPlaceholderAssistantMessage(messages: RunkoUIMessage[]): RunkoUIMessage {
+  const placeholder: RunkoUIMessage = { id: randomUUID(), role: "assistant", parts: [{ type: "step-start" }] };
   messages.push(placeholder);
   return placeholder;
 }
 
 /**
- * 本轮工具执行的墙钟总耗时（`NimboMessageMetadata.toolDurationMs`，语义见
+ * 本轮工具执行的墙钟总耗时（`RunkoMessageMetadata.toolDurationMs`，语义见
  * state.ts）：收集给定消息里全部已执行完的 `data-tool-timing` 部件的
  * `[executionStartedAt, completedAt]` 区间，按起点排序后合并重叠再求和——
  * 全只读批并行结算时多个调用同时在跑，简单相加会把重叠时段重复计入、
  * 甚至超过整轮墙钟；区间并集才是"这段时间里有工具在执行"的真实时长。
  */
-function toolExecutionWallMs(messages: NimboUIMessage[]): number {
+function toolExecutionWallMs(messages: RunkoUIMessage[]): number {
   const intervals: { start: number; end: number }[] = [];
   for (const message of messages) {
     for (const part of message.parts) {
@@ -235,24 +235,24 @@ function toolExecutionWallMs(messages: NimboUIMessage[]): number {
  * 就 context_overflow——现造一条占位消息承接，保证"assistant 消息 metadata
  * 携带轮结果"这个不变量对每个 turn 恒成立），并返回对应的 `message-metadata`
  * chunk（`send()` 靠这个 chunk 的 `status` 字段判定是否要 throw
- * `NimboSessionError`，见 session.ts）。`durationMs` 在这里由
+ * `RunkoSessionError`，见 session.ts）。`durationMs` 在这里由
  * `turnStartedAt`（`runTurn` 入口的墙钟）现算——收尾路径唯一，全 turn 耗时
  * 因此天然覆盖成功/失败/中断所有出口。
  */
 function finalizeTurn(opts: {
-  messages: NimboUIMessage[];
-  lastAssistantMessage: NimboUIMessage | undefined;
+  messages: RunkoUIMessage[];
+  lastAssistantMessage: RunkoUIMessage | undefined;
   turn: number;
   turnStartedAt: number;
   /** `runTurn` 入口时 `opts.messages` 的长度——本轮新增的消息从这里开始切片，`toolDurationMs` 只统计本轮的 timing 部件。 */
   turnMessagesStart: number;
   usage: Usage;
   status: "completed" | "failed" | "interrupted";
-  error?: NimboError;
-}): NimboChunk {
+  error?: RunkoError;
+}): RunkoChunk {
   const durationMs = Date.now() - opts.turnStartedAt;
   const toolDurationMs = toolExecutionWallMs(opts.messages.slice(opts.turnMessagesStart));
-  const metadata: NimboMessageMetadata =
+  const metadata: RunkoMessageMetadata =
     opts.error === undefined
       ? { turn: opts.turn, usage: opts.usage, status: opts.status, durationMs, toolDurationMs }
       : { turn: opts.turn, usage: opts.usage, status: opts.status, durationMs, toolDurationMs, error: opts.error };
@@ -264,7 +264,7 @@ function finalizeTurn(opts: {
 // ---- steer（STEER-1）：turn 进行中经 `Session.steer()` 排队的 user 消息 ----
 
 /**
- * `opts.drainSteers` 排空到 `messages`，为每条已经构造好的 `NimboUIMessage`
+ * `opts.drainSteers` 排空到 `messages`，为每条已经构造好的 `RunkoUIMessage`
  * （`session.ts` 的 `steer()` 已经把 `Input` 转成带 `metadata.steered=true` 的
  * user 消息）发一遍 `start`/`text-*`/`file`/`finish` chunk——消息本身已经是
  * "完整已知"的（不是逐字流式产出的），这里发的 chunk 序列只是让实时消费方
@@ -278,9 +278,9 @@ function finalizeTurn(opts: {
  * assistant/tool 消息。
  */
 async function* drainSteerMessages(
-  drainSteers: (() => NimboUIMessage[]) | undefined,
-  messages: NimboUIMessage[],
-): AsyncGenerator<NimboChunk, NimboUIMessage[]> {
+  drainSteers: (() => RunkoUIMessage[]) | undefined,
+  messages: RunkoUIMessage[],
+): AsyncGenerator<RunkoChunk, RunkoUIMessage[]> {
   if (drainSteers === undefined) {return [];}
   const drained = drainSteers();
   for (const message of drained) {
@@ -306,13 +306,13 @@ async function* drainSteerMessages(
 /**
  * `type: \`tool-${toolName}\`` 由运行时字符串插值得到——`toolName: string` 的
  * 插值结果本身就是模板字面量类型 `` `tool-${string}` ``（TS 对字符串类型插值
- * 表达式的标准推导，不需要 `as`），与 `ToolUIPart<UITools>`（`NimboUIMessage`
- * 的 TOOLS 类型参数取默认值 `UITools`，理由见 `state.ts` 的 `NimboUIMessage`
+ * 表达式的标准推导，不需要 `as`），与 `ToolUIPart<UITools>`（`RunkoUIMessage`
+ * 的 TOOLS 类型参数取默认值 `UITools`，理由见 `state.ts` 的 `RunkoUIMessage`
  * 头注释）的判别字段精确匹配，因此本节全部构造函数都不需要类型断言。
  */
-type NimboToolPart = ToolUIPart<UITools>;
+type RunkoToolPart = ToolUIPart<UITools>;
 
-function inputAvailablePart(toolName: string, toolCallId: string, input: JsonValue): NimboToolPart {
+function inputAvailablePart(toolName: string, toolCallId: string, input: JsonValue): RunkoToolPart {
   return { type: `tool-${toolName}`, toolCallId, state: "input-available", input };
 }
 
@@ -328,7 +328,7 @@ function outputAvailablePart(
   input: JsonValue,
   output: ToolReturn,
   approval?: { id: string; approved: true },
-): NimboToolPart {
+): RunkoToolPart {
   return { type: `tool-${toolName}`, toolCallId, state: "output-available", input, output, approval };
 }
 
@@ -339,11 +339,11 @@ function outputErrorPart(
   input: JsonValue | undefined,
   errorText: string,
   approval?: { id: string; approved: true },
-): NimboToolPart {
+): RunkoToolPart {
   return { type: `tool-${toolName}`, toolCallId, state: "output-error", input, errorText, approval };
 }
 
-function approvalRequestedPart(toolName: string, toolCallId: string, input: JsonValue, approvalId: string): NimboToolPart {
+function approvalRequestedPart(toolName: string, toolCallId: string, input: JsonValue, approvalId: string): RunkoToolPart {
   return { type: `tool-${toolName}`, toolCallId, state: "approval-requested", input, approval: { id: approvalId } };
 }
 
@@ -355,7 +355,7 @@ function approvalRespondedPart(
   approvalId: string,
   approved: boolean,
   reason?: string,
-): NimboToolPart {
+): RunkoToolPart {
   return { type: `tool-${toolName}`, toolCallId, state: "approval-responded", input, approval: { id: approvalId, approved, reason } };
 }
 
@@ -365,7 +365,7 @@ function outputDeniedPart(
   input: JsonValue,
   approvalId: string,
   reason: string,
-): NimboToolPart {
+): RunkoToolPart {
   return {
     type: `tool-${toolName}`,
     toolCallId,
@@ -377,7 +377,7 @@ function outputDeniedPart(
 
 // ---- data 部件（file-change：每次工具执行各一条；plan-update：同 id 覆盖） ----
 
-function pushFileChangePart(message: NimboUIMessage, id: string, data: FileChangeData): DataUIPart<{ "file-change": FileChangeData }> {
+function pushFileChangePart(message: RunkoUIMessage, id: string, data: FileChangeData): DataUIPart<{ "file-change": FileChangeData }> {
   const part: DataUIPart<{ "file-change": FileChangeData }> = { type: "data-file-change", id, data };
   message.parts.push(part);
   return part;
@@ -385,7 +385,7 @@ function pushFileChangePart(message: NimboUIMessage, id: string, data: FileChang
 
 const PLAN_UPDATE_ID = "plan-update";
 
-function upsertPlanUpdatePart(message: NimboUIMessage, data: PlanUpdateData): DataUIPart<{ "plan-update": PlanUpdateData }> {
+function upsertPlanUpdatePart(message: RunkoUIMessage, data: PlanUpdateData): DataUIPart<{ "plan-update": PlanUpdateData }> {
   const part: DataUIPart<{ "plan-update": PlanUpdateData }> = { type: "data-plan-update", id: PLAN_UPDATE_ID, data };
   const index = message.parts.findIndex((p) => p.type === "data-plan-update" && "id" in p && p.id === PLAN_UPDATE_ID);
   if (index === -1) {message.parts.push(part);}
@@ -398,7 +398,7 @@ function upsertPlanUpdatePart(message: NimboUIMessage, data: PlanUpdateData): Da
 // 同 id 覆盖，物化方式照 `upsertPlanUpdatePart` 先例，唯一差别是每个工具调用
 // 各一个 id（不是单例）。----
 
-function upsertToolTimingPart(message: NimboUIMessage, data: ToolTimingData): DataUIPart<{ "tool-timing": ToolTimingData }> {
+function upsertToolTimingPart(message: RunkoUIMessage, data: ToolTimingData): DataUIPart<{ "tool-timing": ToolTimingData }> {
   const part: DataUIPart<{ "tool-timing": ToolTimingData }> = { type: "data-tool-timing", id: data.toolCallId, data };
   const index = message.parts.findIndex((p) => p.type === "data-tool-timing" && "id" in p && p.id === data.toolCallId);
   if (index === -1) {message.parts.push(part);}
@@ -406,14 +406,14 @@ function upsertToolTimingPart(message: NimboUIMessage, data: ToolTimingData): Da
   return part;
 }
 
-function findToolTimingPart(message: NimboUIMessage, toolCallId: string): DataUIPart<{ "tool-timing": ToolTimingData }> | undefined {
+function findToolTimingPart(message: RunkoUIMessage, toolCallId: string): DataUIPart<{ "tool-timing": ToolTimingData }> | undefined {
   return message.parts.find(
     (part): part is DataUIPart<{ "tool-timing": ToolTimingData }> => part.type === "data-tool-timing" && "id" in part && part.id === toolCallId,
   );
 }
 
 /** `tool-input-available` 之后立刻打点：调用成形、进入排队/审批管线的时刻——不是执行起点（那是 `executionStartedAt`），三个时刻的分工见 state.ts 的 `toolTimingDataSchema` 头注释。 */
-function startToolTiming(message: NimboUIMessage, toolCallId: string): NimboChunk {
+function startToolTiming(message: RunkoUIMessage, toolCallId: string): RunkoChunk {
   const part = upsertToolTimingPart(message, { toolCallId, startedAt: Date.now() });
   return { type: "data-tool-timing", id: part.id, data: part.data };
 }
@@ -423,7 +423,7 @@ function startToolTiming(message: NimboUIMessage, toolCallId: string): NimboChun
  * 永远不经过这里，其部件因此恒无 `executionStartedAt`（"缺席 = 从未执行"，
  * state.ts）。`startedAt` 读回已物化的部件，缺失兜底同 `completeToolTiming`。
  */
-function markToolExecutionStart(message: NimboUIMessage, toolCallId: string): NimboChunk {
+function markToolExecutionStart(message: RunkoUIMessage, toolCallId: string): RunkoChunk {
   const existing = findToolTimingPart(message, toolCallId);
   const startedAt = existing?.data.startedAt ?? Date.now();
   const part = upsertToolTimingPart(message, { toolCallId, startedAt, executionStartedAt: Date.now() });
@@ -438,7 +438,7 @@ function markToolExecutionStart(message: NimboUIMessage, toolCallId: string): Ni
  * `startToolTiming` 之后调用）时退化为 `Date.now()`，不让整条时间线因缺失
  * 而 throw。
  */
-function completeToolTiming(message: NimboUIMessage, toolCallId: string): NimboChunk {
+function completeToolTiming(message: RunkoUIMessage, toolCallId: string): RunkoChunk {
   const existing = findToolTimingPart(message, toolCallId);
   const startedAt = existing?.data.startedAt ?? Date.now();
   const executionStartedAt = existing?.data.executionStartedAt;
@@ -464,8 +464,8 @@ function completeToolTiming(message: NimboUIMessage, toolCallId: string): NimboC
  *   抛出意味着 bug）：先把已产出的 chunk 放完、等全部分支停机，再重抛第一
  *   个错误——与串行路径"错误冒泡中断 turn"同语义，不留未观察的 rejection。
  */
-async function* mergeSettleStreams(streams: AsyncGenerator<NimboChunk, void>[]): AsyncGenerator<NimboChunk, void> {
-  const queue: NimboChunk[] = [];
+async function* mergeSettleStreams(streams: AsyncGenerator<RunkoChunk, void>[]): AsyncGenerator<RunkoChunk, void> {
+  const queue: RunkoChunk[] = [];
   let running = streams.length;
   let failure: { error: unknown } | undefined;
   let wake: (() => void) | undefined;
@@ -513,10 +513,10 @@ interface PendingToolCall {
 
 interface SettleToolCallOptions {
   call: PendingToolCall;
-  assistantMessage: NimboUIMessage;
+  assistantMessage: RunkoUIMessage;
   tools: Record<string, Tool>;
   session: { id: string; turn: number };
-  fs: NimboFS;
+  fs: RunkoFS;
   abortSignal: AbortSignal;
   onApproval: ApprovalPolicy | undefined;
   /** 人审通道（§types.ts `ApprovalReviewer`）——`review` 结果先 yield 请求 chunk 再 `await` 这个；未注入时 `review` 视同无仲裁者 deny，见 `settleToolCall`。 */
@@ -528,7 +528,7 @@ interface SettleToolCallOptions {
   telemetry: SessionTelemetry | undefined;
 }
 
-// ---- 工具执行遥测（补发）：nimbo 的 loop 自己结算工具，AI SDK 没有机会触发
+// ---- 工具执行遥测（补发）：runko 的 loop 自己结算工具，AI SDK 没有机会触发
 // onToolExecutionStart/End——由 settleExecution 在 executeToolCall 前后替它
 // 补发给注入的集成，事件形状用 ai 的 widened 联合（ToolExecutionStart/EndEvent），
 // 并带上与其余事件一致的 functionId 关联键。deny/未知工具/畸形调用从未执行，
@@ -588,7 +588,7 @@ async function* settleExecution(
   tool: Tool,
   input: JsonValue,
   approval: { id: string; approved: true } | undefined,
-): AsyncGenerator<NimboChunk, void> {
+): AsyncGenerator<RunkoChunk, void> {
   const { call, assistantMessage } = opts;
   yield markToolExecutionStart(assistantMessage, call.toolCallId);
   const executionStartedAt = Date.now();
@@ -653,7 +653,7 @@ async function* settleExecution(
  * 单个工具调用的结算——第 1 步（审批解析）+（`review` 时）先产出后阻塞的人工
  * 裁决 + 第 2 步（执行），逐段说明见文件头"审批：三值 + 阻塞前显式产出"一节。
  */
-async function* settleToolCall(opts: SettleToolCallOptions): AsyncGenerator<NimboChunk, void> {
+async function* settleToolCall(opts: SettleToolCallOptions): AsyncGenerator<RunkoChunk, void> {
   const { call, assistantMessage } = opts;
   const tool = opts.tools[call.toolName];
 
@@ -745,7 +745,7 @@ async function* settleToolCall(opts: SettleToolCallOptions): AsyncGenerator<Nimb
 export interface StepOutcome {
   finishReason: FinishReason;
   usage: LanguageModelUsage;
-  assistantMessage: NimboUIMessage;
+  assistantMessage: RunkoUIMessage;
 }
 
 /**
@@ -754,7 +754,7 @@ export interface StepOutcome {
  * 生命周期事件（每步 start/end、每次 model call 的 usage/performance 等）。
  * 关联键不由宿主管——`runOneStep` 恒在 `telemetry.functionId` 注入
  * `"<sessionId>#<turn>"`，每个事件都自带（ai 的 `InferTelemetryEvent` 把
- * TelemetryOptions 字段并进事件），集成端按它归档/查询。注意：nimbo 的工具
+ * TelemetryOptions 字段并进事件），集成端按它归档/查询。注意：runko 的工具
  * 由 loop 自己结算（settleToolCall），AI SDK 的 onToolExecutionStart/End
  * 事件在这里**永远不会触发**——工具维度的数据走 `data-tool-timing` 部件。
  */
@@ -769,11 +769,11 @@ export interface SessionTelemetry {
 interface RunOneStepOptions {
   model: LanguageModel;
   system: string | undefined;
-  ledger: NimboUIMessage[];
+  ledger: RunkoUIMessage[];
   tools: Record<string, Tool>;
   maxOutputTokens: number | undefined;
   session: { id: string; turn: number };
-  fs: NimboFS;
+  fs: RunkoFS;
   abortSignal: AbortSignal;
   onApproval: ApprovalPolicy | undefined;
   onReview: ApprovalReviewer | undefined;
@@ -793,7 +793,7 @@ interface RunOneStepOptions {
  * `streamText()` 的 `result.stream`（同 `runStep` 内部一样是 `fullStream` 的
  * 非弃用别名），按 examples/13 `runOneStep` 的已验证姿态手工翻译。
  */
-async function* runOneStep(opts: RunOneStepOptions): AsyncGenerator<NimboChunk, StepOutcome> {
+async function* runOneStep(opts: RunOneStepOptions): AsyncGenerator<RunkoChunk, StepOutcome> {
   const requestMessages = await convertToModelMessages(opts.ledger);
   const result = streamText({
     model: opts.model,
@@ -812,7 +812,7 @@ async function* runOneStep(opts: RunOneStepOptions): AsyncGenerator<NimboChunk, 
     },
   });
 
-  const assistantMessage: NimboUIMessage = { id: randomUUID(), role: "assistant", parts: [{ type: "step-start" }] };
+  const assistantMessage: RunkoUIMessage = { id: randomUUID(), role: "assistant", parts: [{ type: "step-start" }] };
   opts.ledger.push(assistantMessage);
   yield { type: "start", messageId: assistantMessage.id };
   yield { type: "start-step" };
@@ -933,12 +933,12 @@ export interface RunTurnOptions {
   model: LanguageModel;
   system: string | undefined;
   /** session 的持久账本，原地 push——runTurn 结束时调用方能直接看到更新后的历史。 */
-  messages: NimboUIMessage[];
+  messages: RunkoUIMessage[];
   tools: Record<string, Tool>;
   maxTurnsPerRun: number;
   maxContextTokens: number | undefined;
   maxOutputTokens: number | undefined;
-  fs: NimboFS;
+  fs: RunkoFS;
   session: { id: string; turn: number };
   signal: AbortSignal | undefined;
   onApproval: ApprovalPolicy | undefined;
@@ -947,20 +947,20 @@ export interface RunTurnOptions {
   onceMemory: OnceApprovalMemory;
   derivedData: DerivedDataCollector;
   getSkill?: (name: string) => SkillHandle;
-  /** STEER-1：`session.ts` 持有的 turn 作用域 steer 队列排空器，返回已经构造好的 user `NimboUIMessage[]`。 */
-  drainSteers?: () => NimboUIMessage[];
+  /** STEER-1：`session.ts` 持有的 turn 作用域 steer 队列排空器，返回已经构造好的 user `RunkoUIMessage[]`。 */
+  drainSteers?: () => RunkoUIMessage[];
   /** telemetry 透传（`SessionTelemetry`，见 `runOneStep` 区块注释）——未注入时只剩 functionId 元数据，零行为差异。 */
   telemetry?: SessionTelemetry;
 }
 
-export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<NimboChunk, TurnResult> {
+export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<RunkoChunk, TurnResult> {
   const turnStartedAt = Date.now();
   const turnMessagesStart = opts.messages.length;
   const abortSignal = opts.signal ?? new AbortController().signal;
   let finalResponse = "";
   let usage: Usage = {};
   let contextCalibration = 1;
-  let lastAssistantMessage: NimboUIMessage | undefined;
+  let lastAssistantMessage: RunkoUIMessage | undefined;
 
   for (let stepIndex = 1; stepIndex <= opts.maxTurnsPerRun; stepIndex++) {
     // Checkpoint 0（宿主中止，docs/tech/turn-abort.md §2）：**绝不开始新的一步**。
@@ -970,10 +970,10 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<NimboChunk,
     // `code: "aborted"`；这里补的是 catch 覆盖不到的一种情形：工具执行被中止后
     // 本步是**正常收尾**的（"失败即 ExecResult"，工具不抛），于是循环会照常进入
     // 下一步、白打一次模型调用，直到那次调用因 already-aborted 才抛错停下。有了
-    // 这个检查，停止时机就是 nimbo 自己的确定性行为（"下一步绝不开始"），不再
+    // 这个检查，停止时机就是 runko 自己的确定性行为（"下一步绝不开始"），不再
     // 依赖第三方库对已 abort signal 的处理细节，也不多花那一次调用。
     if (abortSignal.aborted) {
-      const error: NimboError = {
+      const error: RunkoError = {
         code: "aborted",
         // 宿主给了理由就用它（见 `abortMessage`）——它比这句通用文案能解释得多。
         message: abortMessage(abortSignal, "Turn aborted by the host before this step began."),
@@ -988,7 +988,7 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<NimboChunk,
     if (opts.maxContextTokens !== undefined) {
       const estimated = estimateMessagesTokens(opts.messages, opts.system) * contextCalibration;
       if (estimated > opts.maxContextTokens) {
-        const error: NimboError = {
+        const error: RunkoError = {
           code: "context_overflow",
           message: `Estimated context size (~${Math.round(estimated)} tokens) exceeds maxContextTokens (${opts.maxContextTokens}).`,
         };
@@ -1030,7 +1030,7 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<NimboChunk,
       }
       stepOutcome = next.value;
     } catch (error) {
-      const nimboError: NimboError = abortSignal.aborted
+      const runkoError: RunkoError = abortSignal.aborted
         ? // 这条路上 `error` 通常是 AI SDK 自己抛的 `AbortError`（"This operation was
           // aborted"）——宿主给了理由就优先用它，回落才是那句第三方措辞。
           { code: "aborted", message: abortMessage(abortSignal, describeError(error)) }
@@ -1062,8 +1062,8 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<NimboChunk,
         lastAssistantMessage: partiallyBuiltAssistantMessage ?? lastAssistantMessage,
         turn: opts.session.turn, turnStartedAt, turnMessagesStart,
         usage,
-        status: statusForError(nimboError),
-        error: nimboError,
+        status: statusForError(runkoError),
+        error: runkoError,
       });
       return { finalResponse, usage };
     }
@@ -1088,7 +1088,7 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<NimboChunk,
         return { finalResponse, usage };
       }
       if (stepIndex === opts.maxTurnsPerRun) {
-        const error: NimboError = {
+        const error: RunkoError = {
           code: "max_turns",
           message:
             `Reached maxTurnsPerRun (${opts.maxTurnsPerRun}) — steer() queued a message after the model ` +
@@ -1117,7 +1117,7 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<NimboChunk,
       // STEER-1F：预算耗尽、即将失败之前也要 drain 一次——工具执行期间
       // （settleToolCall 运行时）调用的 steer() 不能被这里静默吞掉。
       yield* drainSteerMessages(opts.drainSteers, opts.messages);
-      const error: NimboError = {
+      const error: RunkoError = {
         code: "max_turns",
         message: `Reached maxTurnsPerRun (${opts.maxTurnsPerRun}) — the model still requested tool calls with no steps left.`,
       };
@@ -1135,7 +1135,7 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<NimboChunk,
 
   // 只在 `maxTurnsPerRun <= 0`（零/负预算，连第一步都不允许）时到达此处。
   yield* drainSteerMessages(opts.drainSteers, opts.messages);
-  const error: NimboError = {
+  const error: RunkoError = {
     code: "max_turns",
     message: `maxTurnsPerRun (${opts.maxTurnsPerRun}) leaves no steps to run.`,
   };

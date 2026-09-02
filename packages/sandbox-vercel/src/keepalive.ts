@@ -1,7 +1,7 @@
 /**
  * Vercel 的[保活](../../../docs/terms.md)接线（docs/tech/sandbox-keepalive.md §5.5）。
  *
- * [续期闸门](../../../docs/terms.md)本身是通用的（`@nimbo/core` 的 `createKeepAlive`），
+ * [续期闸门](../../../docs/terms.md)本身是通用的（`@runko/core` 的 `createKeepAlive`），
  * 这里只补上 Vercel 独有的两件事——**两件都与 E2B 相反**：
  *
  * 1. **能查剩余**：`sandbox.expiresAt` 是「当前会话何时到期」的 `Date`，减掉此刻
@@ -15,8 +15,8 @@
  * 每条用户消息都盲加 5 分钟，高频对话十几轮后沙盒多活几十分钟白计费
  * （docs/tech/turn-checkpoint.md §5）。闸门的补足语义 + 这里的差额计算合起来修掉它。
  */
-import type { KeepAlive, KeepAliveDriver, KeepAliveOptions } from "@nimbo/core";
-import { createKeepAlive } from "@nimbo/core";
+import type { KeepAlive, KeepAliveDriver, KeepAliveOptions } from "@runko/core";
+import { createKeepAlive } from "@runko/core";
 import type { VercelSandboxLike } from "./types.js";
 
 /** 沙盒实例没有 `extendTimeout` 时的指引。 */

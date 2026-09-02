@@ -4,19 +4,19 @@ slug: builtin-tools
 view: 技术
 layer: 逻辑层
 module: 执行引擎
-packages: ["@nimbo/core", "@nimbo/virtual-fs"]
+packages: ["@runko/core", "@runko/virtual-fs"]
 tags: ["内置工具", "文件工具", "bash", "update_plan", "grep", "glob"]
 related: ["logic/engine/features/builtin-tools.md", "architecture/tech/agent-kernel.md"]
 ---
 # 内置工具（builtin tools）· 技术方案
 
-> 相关：产品手册见 [功能](../features/builtin-tools.md) · 依赖 [core-sdk 技术方案](./core-sdk.md)（内置工具建在 core SDK 的 `defineTool` / `Tool` / `NimboFS` / `NimboExec` 之上）· `glob`/`grep` 的[原生搜索](../../../terms.md)快路径契约见 [tech/sandbox](../../../host/contract/tech/sandbox.md) §3/§4，拆单见 [plans/native-search](../plans/native-search.md) · 术语以 [terms.md](../../../terms.md) 为准。
+> 相关：产品手册见 [功能](../features/builtin-tools.md) · 依赖 [core-sdk 技术方案](./core-sdk.md)（内置工具建在 core SDK 的 `defineTool` / `Tool` / `RunkoFS` / `RunkoExec` 之上）· `glob`/`grep` 的[原生搜索](../../../terms.md)快路径契约见 [tech/sandbox](../../../host/contract/tech/sandbox.md) §3/§4，拆单见 [plans/native-search](../plans/native-search.md) · 术语以 [terms.md](../../../terms.md) 为准。
 >
 > 状态：草案 v1（2026-07-10 定），随 P2/P4/P6/P7 施工回填。原始规格对应 `docs/logic/engine/tech/core-sdk.md` §4.5、施工计划 P3/P4。本文覆盖：横切设计规则、逐工具技术取舍、关键接口/数据结构、施工期语义澄清、已知限制、验收要点。内置工具无 DB、无必须画时序图的核心流程，故不含 erDiagram / sequenceDiagram。
 
 ## 1. 设计前提
 
-nimbo 默认**没有命令执行**：它要能在完全没有 shell 的环境里驱动一次代码改造。因此凡是「完成一次代码改造」必需的文件系统操作都必须是一等工具，而非甩给 `rm` / `mv`。这条前提决定了 `delete-file` / `move-file` 为什么要独立成工具（见 §3.4 / §3.5），也决定了 `bash` 为什么是可选注入而非默认（见 §3.11）。
+runko 默认**没有命令执行**：它要能在完全没有 shell 的环境里驱动一次代码改造。因此凡是「完成一次代码改造」必需的文件系统操作都必须是一等工具，而非甩给 `rm` / `mv`。这条前提决定了 `delete-file` / `move-file` 为什么要独立成工具（见 §3.4 / §3.5），也决定了 `bash` 为什么是可选注入而非默认（见 §3.11）。
 
 代码落点：
 - 文件工具八件套：`packages/virtual-fs/src/tools/`（`createFileTools(opts)` 工厂）。
@@ -28,9 +28,9 @@ nimbo 默认**没有命令执行**：它要能在完全没有 shell 的环境里
 这六条对**全部**内置工具生效，是逐工具行为的公共底座。
 
 1. **命名 kebab-case（dash 格式）**，与 eve 的「文件名即工具名」约定同风格（P13-5 起统一 dash 格式；`bash`/`glob`/`grep` 无分隔符不受影响）。描述文案**面向模型**写：讲清何时用、何时不用、失败时怎么办。
-2. **一切文件操作经 `ctx.fs`**：工具对真实磁盘无感知；路径越界（`..`）由 [NimboFS](../../../terms.md) 层拒绝，工具层不重复做安全检查（§2 规则不与「delete 目录也要 recursive」冲突——后者是业务规则而非路径安全检查，见 §5）。
+2. **一切文件操作经 `ctx.fs`**：工具对真实磁盘无感知；路径越界（`..`）由 [RunkoFS](../../../terms.md) 层拒绝，工具层不重复做安全检查（§2 规则不与「delete 目录也要 recursive」冲突——后者是业务规则而非路径安全检查，见 §5）。
 3. **输出上限与截断标记**：每个工具都有输出预算（见各工具条目与 `shared.ts` 的预算常量），超限必须显式标注 `[truncated: ...]` 并告诉模型如何缩小范围。静默截断会让模型误以为看到了全部。统一前缀由 `truncationNotice(reason, hint)` 生成，方便模型与测试都能可靠识别。
-4. **read-before-write 强制**：session 维护 `readState: Map<path, version>`，version 以 `stat().mtime`（或 FS 实现提供的版本号）为判据。`edit-file` 必须在本 session 读过该文件且当前 mtime 与读取时一致；`write-file` 覆盖已存在文件时同样要求。**`bash` 旁路修改（同源工作区模式）同样使 readState 失效**——mtime 变了就必须重读。违反返回可行动错误（"先 read-file 该文件"）。这是 Claude Code 验证过的机制，nimbo 硬性沿用，防止模型盲改/盲覆盖。判定逻辑集中在 `shared.ts` 的 `checkReadBeforeWrite()`；写成功后由 `registerWrite()` 把新 mtime 登记回 readState，从而「连续编辑无需重读」成立。
+4. **read-before-write 强制**：session 维护 `readState: Map<path, version>`，version 以 `stat().mtime`（或 FS 实现提供的版本号）为判据。`edit-file` 必须在本 session 读过该文件且当前 mtime 与读取时一致；`write-file` 覆盖已存在文件时同样要求。**`bash` 旁路修改（同源工作区模式）同样使 readState 失效**——mtime 变了就必须重读。违反返回可行动错误（"先 read-file 该文件"）。这是 Claude Code 验证过的机制，runko 硬性沿用，防止模型盲改/盲覆盖。判定逻辑集中在 `shared.ts` 的 `checkReadBeforeWrite()`；写成功后由 `registerWrite()` 把新 mtime 登记回 readState，从而「连续编辑无需重读」成立。
 5. **错误即指导**：失败返回 `{ isError: true, content }`，content 必须包含下一步建议（如 edit 未命中唯一串时提示「old_string 需更长的上下文以唯一定位」）。统一包装是 `errorResult(content)`（core 侧与 virtual-fs 侧各有一份等价实现——core 不依赖 virtual-fs，见 §6）。
 6. **file_change 派生**：写类工具成功后由 ToolRuntime 派生 `file_change` item（kind: `add`/`update`/`delete`），宿主实时可见；工具自身**不负责发事件**——它只经注入的 `onFileChange(changes)` 回调把一份 `FileChange[]` 数据搬出去。
 7. **纯读工具声明 `Tool.readOnly`（2026-07-16）**：`read-file`/`list-dir`/`glob`/`grep` 四个工具带 `readOnly: true`——loop 对同一 step 的一批调用**全部只读时并行结算**、混入任何写操作整批退回串行（[tech/core-sdk](./core-sdk.md) §4.1）。给工具打这个标记即承诺"不写工作区、不产生派生数据"；误标写类工具会把它送进并行批、打开写冲突口子，测试有专门断言防回归（`virtual-fs/test/tools/index.test.ts`）。
@@ -62,7 +62,7 @@ nimbo 默认**没有命令执行**：它要能在完全没有 shell 的环境里
 
 - **存在理由**：重构高频操作，无 `mv` 可替代。
 - **不引入 rename kind**：事件为 `delete(from)` + `add(to)`，保持与 codex 的 changes kind 集合兼容。目录移动逐文件 `readFile`→`writeFile`→登记→最后 `rm(from, recursive)`。
-- **遇 reference 条目整体拒绝**：`NimboFS` 接口只有 `readFile`/`writeFile`，没有「复制一个 reference 条目元信息」的通用原语（`writeReference` 是 `MemoryFS` 的附加能力，不在接口里，工具不能依赖具体实现）。若不做前置检查，目录移动会先搬普通文件、再 `rm(recursive)` 把还没搬走的 reference 一并删掉，造成静默数据丢失。因此目录内含 reference 时**不触碰任何文件**直接拒绝并指引逐个处理；单文件为 reference 同样拒绝。还额外挡了「移动目录到自身子树」。
+- **遇 reference 条目整体拒绝**：`RunkoFS` 接口只有 `readFile`/`writeFile`，没有「复制一个 reference 条目元信息」的通用原语（`writeReference` 是 `MemoryFS` 的附加能力，不在接口里，工具不能依赖具体实现）。若不做前置检查，目录移动会先搬普通文件、再 `rm(recursive)` 把还没搬走的 reference 一并删掉，造成静默数据丢失。因此目录内含 reference 时**不触碰任何文件**直接拒绝并指引逐个处理；单文件为 reference 同样拒绝。还额外挡了「移动目录到自身子树」。
 
 ### 3.6 `list-dir`
 
@@ -90,15 +90,15 @@ nimbo 默认**没有命令执行**：它要能在完全没有 shell 的环境里
 - 整表替换：`store.setItems(items)` + `onPlanUpdate(items)` 派生 `plan_update` item（对应 codex 的 `todo_list`）。纯内存状态、零安全面。
 - 存储经注入（`PlanStore` 接口 get/set + 便利内存实现 `createPlanStore()`），真正的跨轮生命周期归属留给 session（P4）。
 
-### 3.11 `bash`（条件内置，注入 NimboExec 时出现）
+### 3.11 `bash`（条件内置，注入 RunkoExec 时出现）
 
-- **激活机制**：`createSession(agent, { exec })`（或 `{ workspace }` 语法糖）注入了 `NimboExec` 才在工具列表出现——与 `load-skill` 同族的「条件内置」机制，控制条件各自独立（`assembleTools` 里 `exec !== undefined` 的分支）。不注入则默认安全，无命令执行面。
+- **激活机制**：`createSession(agent, { exec })`（或 `{ workspace }` 语法糖）注入了 `RunkoExec` 才在工具列表出现——与 `load-skill` 同族的「条件内置」机制，控制条件各自独立（`assembleTools` 里 `exec !== undefined` 的分支）。不注入则默认安全，无命令执行面。
 - **输出**：stdout/stderr 合并 + 退出码。各路 64KB 上限，`truncateToBytes` 按**字符边界**累加编码字节数截断（不在多字节 UTF-8 中间切断），超限标 `[truncated: ...]`。执行中经 `onOutput` → `ctx.update()` 流式回报。
-- **失败即正常结果**：`NimboExec.exec()` 契约要求所有「正常失败」（解析错误/未知命令/超时/abort/命令级错误）以 **resolve 的 `ExecResult`**（非零 `exitCode` + stderr）返回而非 reject——因此工具对非零退出码/超时不做 try/catch，原样格式化回模型，`status` 仍是 completed。但 `NimboExec` 是宿主可自实现的接口（模式 C），第三方实现可能违约 reject——故仍兜底 catch，转成 `{ isError: true, content }` 结构化结果（说明「这是注入实现的 bug、重试同命令无用」），而不是让裸 throw 冒泡到通用 catch 产出无诊断上下文的泛化文案。
+- **失败即正常结果**：`RunkoExec.exec()` 契约要求所有「正常失败」（解析错误/未知命令/超时/abort/命令级错误）以 **resolve 的 `ExecResult`**（非零 `exitCode` + stderr）返回而非 reject——因此工具对非零退出码/超时不做 try/catch，原样格式化回模型，`status` 仍是 completed。但 `RunkoExec` 是宿主可自实现的接口（模式 C），第三方实现可能违约 reject——故仍兜底 catch，转成 `{ isError: true, content }` 结构化结果（说明「这是注入实现的 bug、重试同命令无用」），而不是让裸 throw 冒泡到通用 catch 产出无诊断上下文的泛化文案。
 - **环境自描述**：`exec.describe?.()` 拼进工具描述（`buildDescription`）。**内容规格**——只给「模型试错成本高、实现零成本可知」的元信息，建议 ≤150 token：OS/架构、shell、**网络是否可达**、工作区路径与 VirtualFS 的映射关系（模式 A/B/C 中的哪种）、环境持久还是临时、关键工具链及版本（node/python/git 等）。**明确不做命令枚举**：清单又长又易陈旧（agent 自装工具后即失效），模型对 `command not found` 一步即可自纠，`command -v` 探测是其固有能力——这也是 Claude Code/codex 的实际做法。`localExec` 的 `describe()` 自动生成（`os.platform()`/node 版本等）。
-- **审批默认值**：`approval: exec.defaultApproval ?? "review"`。`localExec()` 出厂 `review`（本机执行必须把关），沙盒实现通常声明 `allow`（隔离即边界）；注入点与 per-tool 覆盖均可。**实现未声明 `defaultApproval` 时保守兜底 `review`**（P6-2 回填：审批是安全机制，对未知第三方实现不做乐观假设——要放行请显式声明 `allow`。一个没声明的第三方 `NimboExec` 更可能是简单包装、未必经过安全考量）。审批策略枚举 P13-5 已三值化 [allow/review/deny](../../../terms.md)，见 [tech/single-ledger](../../orchestration/tech/single-ledger.md)。
+- **审批默认值**：`approval: exec.defaultApproval ?? "review"`。`localExec()` 出厂 `review`（本机执行必须把关），沙盒实现通常声明 `allow`（隔离即边界）；注入点与 per-tool 覆盖均可。**实现未声明 `defaultApproval` 时保守兜底 `review`**（P6-2 回填：审批是安全机制，对未知第三方实现不做乐观假设——要放行请显式声明 `allow`。一个没声明的第三方 `RunkoExec` 更可能是简单包装、未必经过安全考量）。审批策略枚举 P13-5 已三值化 [allow/review/deny](../../../terms.md)，见 [tech/single-ledger](../../orchestration/tech/single-ledger.md)。
 - **与 VirtualFS 的一致性（三模式，详见 tech-spec §4.5a）**：
-  - **A 同源工作区**：`NimboFS + NimboExec` 同一实现（推荐真沙盒）。bash 写的文件对文件工具立即可见，但 bash 改动不产生 `file_change`、编辑前需重读（mtime 变）。
+  - **A 同源工作区**：`RunkoFS + RunkoExec` 同一实现（推荐真沙盒）。bash 写的文件对文件工具立即可见，但 bash 改动不产生 `file_change`、编辑前需重读（mtime 变）。
   - **B `localExec({ materialize: true })`**：物化/回收。
   - **C 完全解耦**：宿主自己保证语义。
 
@@ -116,12 +116,12 @@ return { ...builtins, ...(agent.tools ?? {}) };
 |---|---|---|
 | `update-plan` | `builtinTools` 未关且未从数组剔除 | `isUpdatePlanEnabled`：`false`→关；`undefined`→开；数组→按成员判断 |
 | `load-skill` | `agent.skills` 非空 | `isLoadSkillEnabled` |
-| `bash` | 注入了 `NimboExec` | `exec !== undefined` |
+| `bash` | 注入了 `RunkoExec` | `exec !== undefined` |
 | 文件八件套 | 见下（P7 接缝） | — |
 
-> **文件八件套的装配是 P7 接缝**：core 当前的 `assembleTools` 只接线 `update-plan`/`load-skill`/`bash`；文件工具由 `@nimbo/virtual-fs` 的 `createFileTools(opts)` 工厂构造、在 P7 接入 session。产品契约（`builtinTools` 裁剪哪些文件工具）已定义在 `BuiltinToolName` 里，运行层接线随 P7 落地。
+> **文件八件套的装配是 P7 接缝**：core 当前的 `assembleTools` 只接线 `update-plan`/`load-skill`/`bash`；文件工具由 `@runko/virtual-fs` 的 `createFileTools(opts)` 工厂构造、在 P7 接入 session。产品契约（`builtinTools` 裁剪哪些文件工具）已定义在 `BuiltinToolName` 里，运行层接线随 P7 落地。
 
-`NimboFS`/`NimboExec`/`workspace` 三者的求解在 `resolveExecutionSurfaces`：`workspace` 与 `fs`/`exec` **互斥**（同时给抛配置错误）；`fs = opts.fs ?? opts.workspace ?? createUnconfiguredFS()`，`exec = opts.exec ?? opts.workspace`。
+`RunkoFS`/`RunkoExec`/`workspace` 三者的求解在 `resolveExecutionSurfaces`：`workspace` 与 `fs`/`exec` **互斥**（同时给抛配置错误）；`fs = opts.fs ?? opts.workspace ?? createUnconfiguredFS()`，`exec = opts.exec ?? opts.workspace`。
 
 ## 5. 关键接口与数据结构
 
@@ -169,14 +169,14 @@ function createPlanStore(): PlanStore;                    // 便利内存实现
 
 ### 5.4 `bash` 依赖的 core 类型
 
-`CreateBashToolOptions { exec: NimboExec }`；`exec.exec(input, { onOutput })` 返回 `ExecResult`（`{ stdout, stderr, exitCode }`）；`approval: ApprovalPolicy`（三值 [allow/review/deny](../../../terms.md)）；`ToolErrorResult { isError: true; content: string; [k]: JsonValue }`。
+`CreateBashToolOptions { exec: RunkoExec }`；`exec.exec(input, { onOutput })` 返回 `ExecResult`（`{ stdout, stderr, exitCode }`）；`approval: ApprovalPolicy`（三值 [allow/review/deny](../../../terms.md)）；`ToolErrorResult { isError: true; content: string; [k]: JsonValue }`。
 
 ## 6. 施工期语义澄清（P2-2 回填，orchitector 验收确认）
 
 - **read-file 二进制判定（§3.1）**：乐观策略——mime 兜底值 `application/octet-stream` 按**文本**处理；仅明确识别的二进制格式返回结构化指引。v1 无内容嗅探，无法区分「未知格式」与「无扩展名文本」，乐观策略更贴合真实代码库。
 - **read-file 预算是硬上限（§3.1）**：2000 行/256KB 对单次调用恒生效，显式 `limit` 不能突破；`offset ≥` 文件行数返回 `isError`。分页永远可达全量。
 - **delete-file 空目录也需 `recursive: true`（§3.4）**：「目录需 recursive」按字面对**全部**目录生效（工具层业务规则；底层 FS 的 `rm` 对空目录无此要求）。与规则 2「不重复做路径安全检查」不冲突——这是业务规则，不是路径安全检查。
-- **move-file 遇 reference 条目整体拒绝（§3.5）**：`NimboFS` 接口没有复制 reference 元信息的原语，静默跳过会造成引用丢失——目录内含 reference 时不触碰任何文件直接拒绝；单文件为 reference 同样拒绝。
+- **move-file 遇 reference 条目整体拒绝（§3.5）**：`RunkoFS` 接口没有复制 reference 元信息的原语，静默跳过会造成引用丢失——目录内含 reference 时不触碰任何文件直接拒绝；单文件为 reference 同样拒绝。
 - **`createFileTools(opts)` 接缝（§5.2）**：八件套经工厂构造，注入 `ReadStateStore` 与 `onFileChange`——readState 与 file_change 派生的所有权在 session/ToolRuntime（P4/P7），工具只消费接口形状。
 - **core 侧不依赖 virtual-fs**：`bash`/`load-skill` 各自独立定义 `ToolErrorResult`/`errorResult`，不从 virtual-fs 导入（core→virtual-fs 是被禁止的反向依赖）。索引签名 `[k: string]: JsonValue` 需显式声明，否则具名 interface 落不进 `ToolReturn` 的 `JsonValue` 对象分支（tsc 报 "Index signature is missing"）。
 
@@ -207,4 +207,4 @@ function createPlanStore(): PlanStore;                    // 便利内存实现
 - **P2-2**：施工期语义澄清（§6），orchitector 验收确认。
 - **P6-2**：`bash` 审批默认值兜底补齐为 `review`（§3.11）。
 - **P4/P7**：readState / file_change / 文件工具装配所有权归 session/ToolRuntime——接缝已在 `createFileTools` 与 `assembleTools` 留出，运行层随施工落地。
-- **2026-07-16**：`glob`/`grep`（§3.7/§3.8）补充双路径自适应设计——[原生搜索](../../../terms.md)接缝（`NimboFS.searchFiles?`/`searchContent?`）可用时优先一次调用，落空回退现有 JS 扫描；两条路径默认忽略 `.git`/`node_modules`。契约与逐接口映射见 [tech/sandbox](../../../host/contract/tech/sandbox.md) §3/§4，拆单见 [plans/native-search](../plans/native-search.md)。
+- **2026-07-16**：`glob`/`grep`（§3.7/§3.8）补充双路径自适应设计——[原生搜索](../../../terms.md)接缝（`RunkoFS.searchFiles?`/`searchContent?`）可用时优先一次调用，落空回退现有 JS 扫描；两条路径默认忽略 `.git`/`node_modules`。契约与逐接口映射见 [tech/sandbox](../../../host/contract/tech/sandbox.md) §3/§4，拆单见 [plans/native-search](../plans/native-search.md)。

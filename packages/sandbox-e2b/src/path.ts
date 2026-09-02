@@ -3,7 +3,7 @@
  * `..` 越界的拒绝完全交给 `normalizePath` 的既有语义（抛 `PathEscapesRootError`）
  * ——沙盒工作区不重复实现这层校验，只负责把规范化后的虚拟路径接到 `root` 之下。
  */
-import { normalizePath } from "@nimbo/virtual-fs";
+import { normalizePath } from "@runko/virtual-fs";
 
 export interface PathAnchor {
   /** 沙盒内 `root` 对应的真实绝对路径（`glob()`/默认 `cwd` 的起点）。 */

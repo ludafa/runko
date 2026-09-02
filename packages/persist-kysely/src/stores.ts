@@ -9,7 +9,7 @@
  *    > 值没变时返回 0）：**在 mysql2 + Kysely 这条路上不成立**——`numUpdatedRows` 报的
  *    > 就是匹配行数，「真变了几行」另有 `numChangedRows`。
  * 2. **占位符、标识符引号**：Kysely 按方言自己拼。
- * 3. **类型安全**：表和列从 `NimboDatabase` 推，写错列名当场编译不过。
+ * 3. **类型安全**：表和列从 `RunkoDatabase` 推，写错列名当场编译不过。
  */
 import type {
   DecisionRecord,
@@ -21,14 +21,14 @@ import type {
   QueueStore,
   TurnInput,
   WriteResult,
-} from "@nimbo/agent";
-import type { JsonValue, NimboUIMessage } from "@nimbo/core";
+} from "@runko/agent";
+import type { JsonValue, RunkoUIMessage } from "@runko/core";
 import type { Kysely } from "kysely";
 
 import type { FlavorTraits } from "./flavor.js";
 import { insertOrIgnore } from "./idempotent-insert.js";
 import { decodeJson, encodeJson, toNumber } from "./flavor.js";
-import type { DecisionsTable, LedgerTable, NimboDatabase, QueueTable } from "./schema.js";
+import type { DecisionsTable, LedgerTable, RunkoDatabase, QueueTable } from "./schema.js";
 import { DECISIONS_TABLE, LEDGER_TABLE, QUEUE_TABLE } from "./schema.js";
 
 const OK: WriteResult = { ok: true };
@@ -36,7 +36,7 @@ const OK: WriteResult = { ok: true };
 /** `enqueue` 撞号时的重试上限——够覆盖真实并发，又不会在病态负载下无限转。 */
 const ENQUEUE_MAX_ATTEMPTS = 5;
 
-type Db = Kysely<NimboDatabase>;
+type Db = Kysely<RunkoDatabase>;
 
 // ---------------------------------------------------------------------------
 // 账本
@@ -46,9 +46,9 @@ export function createLedgerStore(db: Db, traits: FlavorTraits): LedgerStore {
   const toEntry = (row: LedgerTable): LedgerEntry => ({
     conversationId: row.conversation_id,
     seq: toNumber(row.seq),
-    // `payload` 存的就是我们 `append` 时写进去的 `NimboUIMessage`——形状归 core 管，
+    // `payload` 存的就是我们 `append` 时写进去的 `RunkoUIMessage`——形状归 core 管，
     // 这里不重新校验（core 在 `createSession({resume})` 里会跑 `validateUIMessages`）。
-    message: decodeJson(traits, row.payload) as unknown as NimboUIMessage,
+    message: decodeJson(traits, row.payload) as unknown as RunkoUIMessage,
     ts: toNumber(row.ts),
   });
 
@@ -215,7 +215,7 @@ function isTurnInput(value: unknown): value is TurnInput {
 function decodeTurnInput(traits: FlavorTraits, column: unknown, id: string): TurnInput {
   const decoded = decodeJson(traits, column);
   if (!isTurnInput(decoded)) {
-    throw new Error(`nimbo_queue row ${id} has a malformed input column (expected { text: string })`);
+    throw new Error(`agent_queue row ${id} has a malformed input column (expected { text: string })`);
   }
   return decoded;
 }

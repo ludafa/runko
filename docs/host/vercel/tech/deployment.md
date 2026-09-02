@@ -4,7 +4,7 @@ slug: deployment
 view: 技术
 layer: 宿主层
 module: —
-packages: ["@nimbo/sandbox-vercel", "@nimbo/stream-redis", "@nimbo/persist-sql"]
+packages: ["@runko/sandbox-vercel", "@runko/stream-redis", "@runko/persist-sql"]
 tags: ["Vercel", "Fluid", "Redis Streams", "AbortController", "部署形态"]
 related: ["host/vercel/features/deployment.md", "host/contract/tech/stream-fanout.md", "host/contract/tech/sandbox.md"]
 ---
@@ -45,7 +45,7 @@ related: ["host/vercel/features/deployment.md", "host/contract/tech/stream-fanou
 | ⓪ 本机 · ① cluster | 内置 EventEmitter + 应用层转发 | 同机，转发得到 |
 | ②③ Docker / k8s | 内置 + 应用层转发 | `holder` 存的是 pod 可达地址，转发得到 |
 | ④a Cloudflare DO | 平台自带 | 一个会话 = 一个 DO，订阅方直连那个实例 |
-| **④b Vercel** | **`@nimbo/stream-redis`** | **实例由平台调度，没有办法找到持有者** |
+| **④b Vercel** | **`@runko/stream-redis`** | **实例由平台调度，没有办法找到持有者** |
 
 ### 3.2 为什么是 Streams 不是裸 pub/sub
 
@@ -84,7 +84,7 @@ sequenceDiagram
 
 命令跑到一半切不了，因为**不知道它跑完没有**。所以「一轮本身超过函数时长上限」这件事绕不过去，加任何组件都解决不了。
 
-**这也是为什么 nimbo 不是 durable execution**（任意点可暂停），只是「在一个特定的干净边界上允许断开」——工程量因此有界，代价就是这一条限制。
+**这也是为什么 runko 不是 durable execution**（任意点可暂停），只是「在一个特定的干净边界上允许断开」——工程量因此有界，代价就是这一条限制。
 
 ## 5. 沙盒适配的三个实测裁量
 

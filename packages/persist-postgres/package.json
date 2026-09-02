@@ -1,5 +1,5 @@
 {
-  "name": "@nimbo/persist-postgres",
+  "name": "@runko/persist-postgres",
   "version": "0.1.0",
   "description": "持久化实现：PostgreSQL（pg）—— 你只有一个连接池时装这个",
   "type": "module",
@@ -37,15 +37,15 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@nimbo/agent": "workspace:*",
-    "@nimbo/persist-kysely": "workspace:*",
+    "@runko/agent": "workspace:*",
+    "@runko/persist-kysely": "workspace:*",
     "kysely": "catalog:"
   },
   "peerDependencies": {
     "pg": "^8"
   },
   "devDependencies": {
-    "@nimbo/conformance": "workspace:*",
+    "@runko/conformance": "workspace:*",
     "@types/node": "catalog:",
     "@types/pg": "catalog:",
     "kysely": "catalog:",

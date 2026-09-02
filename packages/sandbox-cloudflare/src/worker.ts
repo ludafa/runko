@@ -18,7 +18,7 @@
  * "/" 或 "/a/b.txt"）去掉前导斜杠变成沙盒相对路径（"." 或 "a/b.txt"），从而让
  * 沙盒自己的默认工作目录天然充当虚拟根——不需要任何一侧显式配置真实目录。
  */
-import { basename, dirname, matchesGlob, normalizePath } from "@nimbo/virtual-fs";
+import { basename, dirname, matchesGlob, normalizePath } from "@runko/virtual-fs";
 import { z } from "zod";
 import {
   AUTH_HEADER,
@@ -231,7 +231,7 @@ async function handleRead(sandbox: CfSandboxLike, virtualPath: string): Promise<
 
 async function handleWrite(sandbox: CfSandboxLike, virtualPath: string, dataBase64: string): Promise<Response> {
   try {
-    // NimboFS.writeFile() 隐含 "mkdir -p" 父目录的语义（MemoryFS/OverlayFS 皆如此，见
+    // RunkoFS.writeFile() 隐含 "mkdir -p" 父目录的语义（MemoryFS/OverlayFS 皆如此，见
     // packages/virtual-fs/src/memory.ts 的 ensureParentDirs）——沙盒侧显式补上这一步。
     await sandbox.mkdir(toSandboxPath(dirname(virtualPath)), { recursive: true });
     await sandbox.writeFile(toSandboxPath(virtualPath), dataBase64, { encoding: "base64" });
@@ -275,7 +275,7 @@ async function handleGlob(sandbox: CfSandboxLike, pattern: string): Promise<Resp
     // 不依赖沙盒内 `find` 命令是否存在，行为与 E2B/Vercel 两个适配器一致（docs/tech/sandbox.md §4.4）。
     const listing = await sandbox.listFiles(".", { recursive: true });
     const paths = listing.files
-      .filter((f) => f.type !== "directory") // NimboFS.glob 只匹配文件（MemoryFS 先例）
+      .filter((f) => f.type !== "directory") // RunkoFS.glob 只匹配文件（MemoryFS 先例）
       .map((f) => `/${f.relativePath}`)
       .filter((virtualPath) => matchesGlob(pattern, virtualPath))
       .sort();

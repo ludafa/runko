@@ -4,7 +4,7 @@ slug: cloudflare-worker-server
 view: 施工
 layer: 宿主层
 module: 沙盒
-packages: ["@nimbo/sandbox-cloudflare"]
+packages: ["@runko/sandbox-cloudflare"]
 tags: ["Cloudflare", "Worker", "网关形态", "Durable Object"]
 related: ["host/cloudflare/features/cloudflare-worker-server.md", "host/cloudflare/tech/cloudflare-worker-server.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -19,7 +19,7 @@ related: ["host/cloudflare/features/cloudflare-worker-server.md", "host/cloudfla
 
 本项目**始于一个 spike**（2026-07-20 立项，代号 `chat-worker-spike`），当时只验证一个命题：
 
-> Hono + nimbo 跑在 Cloudflare Worker 里，能经 `getSandbox(env.Sandbox, id)` 直连驱动一个真实的 CF [沙盒](../../../terms.md)，跑完一次 agent 会话。
+> Hono + runko 跑在 Cloudflare Worker 里，能经 `getSandbox(env.Sandbox, id)` 直连驱动一个真实的 CF [沙盒](../../../terms.md)，跑完一次 agent 会话。
 
 命题在同日实测成立（见下方 S2/S3）。**随后（2026-07-20 晚）用户定案**：不把它当一次性探针丢掉，而是转正为一个**完整的示例项目**，并把原 `examples/cloudflare-gateway-ref/`（11 号真机段的 BYO 网关参考料）**并入其中**——两者本就共用同一套 `getSandbox` 接线与几乎相同的 `wrangler.jsonc`/`Dockerfile`。
 
@@ -27,9 +27,9 @@ related: ["host/cloudflare/features/cloudflare-worker-server.md", "host/cloudfla
 
 ## 背景：为什么不能直接跑
 
-`@nimbo/sandbox-cloudflare` 是[网关形态](../../../terms.md)，前提是「agent 跑在任意电脑、Worker 里只放网关」。而本次诉求相反：**把 chat 服务端本身装进 Worker**，于是它与沙盒同进程，网关那层 HTTP 不必过网络。
+`@runko/sandbox-cloudflare` 是[网关形态](../../../terms.md)，前提是「agent 跑在任意电脑、Worker 里只放网关」。而本次诉求相反：**把 chat 服务端本身装进 Worker**，于是它与沙盒同进程，网关那层 HTTP 不必过网络。
 
-需要说明的是，[sandbox 技术方案 §7](../../contract/tech/sandbox.md) 已有实测结论「nimbo 核心零改动可跑 workerd」，但那只覆盖 **core**，不覆盖 **chat 服务端**。
+需要说明的是，[sandbox 技术方案 §7](../../contract/tech/sandbox.md) 已有实测结论「runko 核心零改动可跑 workerd」，但那只覆盖 **core**，不覆盖 **chat 服务端**。
 
 ## 现状盘点：chat 服务端上 workerd 的真实卡点
 
@@ -60,9 +60,9 @@ createSandboxGateway({ getSandbox: id => getSandbox(env.Sandbox, id) })   ← �
 cloudflareWorkspace({ fetch: req => gateway.fetch(req) })                 ← 客户端（. 入口）
 ```
 
-**否决了「新写一个 CF 直连适配器」**：那要把网关里 `CfSandboxLike` → `NimboFS/NimboExec` 的翻译逻辑重抄一遍，徒增一份没有测试覆盖的代码；而进程内直连复用的是两端都已有契约测试的实现。代价是文件操作仍走一遍 JSON+base64 编解码——对「能不能跑通」这个命题无影响。真上生产时可再抽直连适配器省掉这层。
+**否决了「新写一个 CF 直连适配器」**：那要把网关里 `CfSandboxLike` → `RunkoFS/RunkoExec` 的翻译逻辑重抄一遍，徒增一份没有测试覆盖的代码；而进程内直连复用的是两端都已有契约测试的实现。代价是文件操作仍走一遍 JSON+base64 编解码——对「能不能跑通」这个命题无影响。真上生产时可再抽直连适配器省掉这层。
 
-## 发现的缺陷：网关向 DO stub 传 AbortSignal（`@nimbo/sandbox-cloudflare`）
+## 发现的缺陷：网关向 DO stub 传 AbortSignal（`@runko/sandbox-cloudflare`）
 
 **这是 spike 阶段的第一个真实产出**，且不是 spike 特有的问题——它命中的是所有真机路径。
 
@@ -154,9 +154,9 @@ sandbox exec failed: AbortSignal serialization is not enabled.
 
 ### 由此证实
 
-1. **命题成立**：Hono + nimbo 跑在 CF Worker 里，经 `getSandbox(env.Sandbox, id)` 直连驱动真实 CF [沙盒](../../../terms.md)，完整 agent 会话跑通。
+1. **命题成立**：Hono + runko 跑在 CF Worker 里，经 `getSandbox(env.Sandbox, id)` 直连驱动真实 CF [沙盒](../../../terms.md)，完整 agent 会话跑通。
 2. **`ai` SDK 的模型调用在 workerd 上可用**（DeepSeek 直连）。
-3. **nimbo 的 agent loop 在 workerd 上可用**，工具调用落到真沙盒。
+3. **runko 的 agent loop 在 workerd 上可用**，工具调用落到真沙盒。
 4. **[sandbox 技术方案 §7](../../contract/tech/sandbox.md) 关于 CPU 时限的论断在真实 agent loop 下站得住**：6.8s 墙钟里绝大部分是等模型/等沙盒的 I/O，未触及任何限制。
 5. **沙盒实例跨请求留存**：`hello.txt` 由 `/agent` 请求写入、由后续另一次调试路由请求读到——同一 `sandboxId` 命中同一 DO/容器。这是后续做「[沙盒](../../../terms.md)与 [conversation（会话）](../../../terms.md) 1:1 绑定」的基础。
 
@@ -170,5 +170,5 @@ spike 阶段的意义在于**风险转移**：CF 侧的「能不能行」这类�
 
 ## 变更记录
 
-- **2026-07-20（晚）转正为示例项目 + 并入 BYO 网关（✅）**：用户定案——这个 spike 不作为一次性探针丢弃，而是转正为**一个巨大的示例**，并把 `examples/cloudflare-gateway-ref/`（11 号真机段的 BYO 网关参考料，3 个文件、无 package.json、不装依赖不进 CI）**整个并入**。理由：两者本就共用同一套 `getSandbox` 接线，`wrangler.jsonc`/`Dockerfile` 近乎逐字重复，而参考料那侧还带着一个从未被发现的真机缺陷（AbortSignal 跨 DO RPC）——合并后 `stripAbortSignal` 对两条路径一并生效，真机网关路径**因此才第一次是通的**。具体改动：`apps/chat-worker-spike/` → `apps/cloudflare-worker-server/`（包名 `@nimbo-chat/worker-spike` → `@nimbo-chat/cloudflare-worker-server`，wrangler name → `nimbo-cloudflare-worker-server`）；新增 `ALL /gateway/*` 路由（剥掉 `/gateway` 前缀后转交 `createSandboxGateway`，鉴权走 secret `NIMBO_GATEWAY_TOKEN`，未配置返回 503 而非退化为无鉴权）；原调试路由 `/exec` 改挂 `/debug/exec`（避免与网关协议的 `/exec` 端点混淆）；删除 `examples/cloudflare-gateway-ref/`，其全部引用（examples README/11 号脚本/tsconfig 注释、`packages/sandbox-cloudflare/README`、docs features·tech·plans）改指本项目。**接入方式随之改变**：以前是「拷 3 个文件进你自己的 wrangler 项目」，现在是「直接部署这个现成项目」，但仍需自备 CF 账号 + Workers Paid 计划；客户端 `NIMBO_CF_GATEWAY_URL` **必须带 `/gateway` 前缀**（客户端把端点常量直接拼在 url 后，网关按 pathname 精确匹配）。同期完成一次无关重命名：`apps/server` → `apps/node-server`（包名 `@nimbo-chat/server` → `@nimbo-chat/node-server`），与本项目形成 node/worker 两个服务端形态的对称命名。文档按仓库规范补齐三份：[产品视角](../features/cloudflare-worker-server.md) / [技术方案](../tech/cloudflare-worker-server.md) / 本文（由 `chat-on-workers-spike.md` 改名重写）。**验证**：`@nimbo-chat/cloudflare-worker-server` 与 `@nimbo-chat/node-server` typecheck 均 exit 0；node-server 243 用例、`@nimbo/sandbox-cloudflare` 48 用例、examples typecheck 全绿。真机网关端点待用户部署后回填。
+- **2026-07-20（晚）转正为示例项目 + 并入 BYO 网关（✅）**：用户定案——这个 spike 不作为一次性探针丢弃，而是转正为**一个巨大的示例**，并把 `examples/cloudflare-gateway-ref/`（11 号真机段的 BYO 网关参考料，3 个文件、无 package.json、不装依赖不进 CI）**整个并入**。理由：两者本就共用同一套 `getSandbox` 接线，`wrangler.jsonc`/`Dockerfile` 近乎逐字重复，而参考料那侧还带着一个从未被发现的真机缺陷（AbortSignal 跨 DO RPC）——合并后 `stripAbortSignal` 对两条路径一并生效，真机网关路径**因此才第一次是通的**。具体改动：`apps/chat-worker-spike/` → `apps/cloudflare-worker-server/`（包名 `@runko-chat/worker-spike` → `@runko-chat/cloudflare-worker-server`，wrangler name → `runko-cloudflare-worker-server`）；新增 `ALL /gateway/*` 路由（剥掉 `/gateway` 前缀后转交 `createSandboxGateway`，鉴权走 secret `RUNKO_GATEWAY_TOKEN`，未配置返回 503 而非退化为无鉴权）；原调试路由 `/exec` 改挂 `/debug/exec`（避免与网关协议的 `/exec` 端点混淆）；删除 `examples/cloudflare-gateway-ref/`，其全部引用（examples README/11 号脚本/tsconfig 注释、`packages/sandbox-cloudflare/README`、docs features·tech·plans）改指本项目。**接入方式随之改变**：以前是「拷 3 个文件进你自己的 wrangler 项目」，现在是「直接部署这个现成项目」，但仍需自备 CF 账号 + Workers Paid 计划；客户端 `RUNKO_CF_GATEWAY_URL` **必须带 `/gateway` 前缀**（客户端把端点常量直接拼在 url 后，网关按 pathname 精确匹配）。同期完成一次无关重命名：`apps/server` → `apps/node-server`（包名 `@runko-chat/server` → `@runko-chat/node-server`），与本项目形成 node/worker 两个服务端形态的对称命名。文档按仓库规范补齐三份：[产品视角](../features/cloudflare-worker-server.md) / [技术方案](../tech/cloudflare-worker-server.md) / 本文（由 `chat-on-workers-spike.md` 改名重写）。**验证**：`@runko-chat/cloudflare-worker-server` 与 `@runko-chat/node-server` typecheck 均 exit 0；node-server 243 用例、`@runko/sandbox-cloudflare` 48 用例、examples typecheck 全绿。真机网关端点待用户部署后回填。
 - **2026-07-20**：立项。起因是「本地跑 chat + CF worker 当后端沙盒」的诉求，盘点后发现该组合不存在——chat 只支持 `vercel`/`e2b`，且 [沙盒 provider 产品文档](../../contract/features/sandbox-provider.md)明确把 Cloudflare 列为非目标。澄清后诉求实为「把 chat 装进 Worker 再用 CF 沙盒」，遂立本 spike 去风险。经确认交付深度为最小打通 spike，卡点 #4 的语义落差 spike 阶段不处理。

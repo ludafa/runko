@@ -1,8 +1,8 @@
 /**
- * NimboFS 七方法 → e2b `Filesystem` 映射（docs/tech/sandbox.md §3.1 E2B 列 / §8.2）。
+ * RunkoFS 七方法 → e2b `Filesystem` 映射（docs/tech/sandbox.md §3.1 E2B 列 / §8.2）。
  */
-import type { DirEntry, FileStat, NimboFS } from "@nimbo/core";
-import { DirectoryNotEmptyError, matchesGlob, NotFoundError } from "@nimbo/virtual-fs";
+import type { DirEntry, FileStat, RunkoFS } from "@runko/core";
+import { DirectoryNotEmptyError, matchesGlob, NotFoundError } from "@runko/virtual-fs";
 import { isE2bErrorNamed } from "./errors.js";
 import type { PathAnchor } from "./path.js";
 import type { E2bEntryInfo, E2bSandboxLike } from "./types.js";
@@ -10,7 +10,7 @@ import type { E2bEntryInfo, E2bSandboxLike } from "./types.js";
 /**
  * e2b 的"未找到"错误家族：`FileNotFoundError` 是当前版本实测抛出的具体子类，
  * `NotFoundError`（e2b 自家、已废弃）是历史/兼容路径可能出现的旧变体——两者
- * 都翻译成 `@nimbo/virtual-fs` 的 `NotFoundError`（同名不同类，跨包结构判别，
+ * 都翻译成 `@runko/virtual-fs` 的 `NotFoundError`（同名不同类，跨包结构判别，
  * 不是 `instanceof`）。
  */
 const NOT_FOUND_NAMES = ["FileNotFoundError", "NotFoundError"] as const;
@@ -34,7 +34,7 @@ function toArrayBuffer(data: Uint8Array): ArrayBuffer {
   return data.slice().buffer;
 }
 
-export function createE2bFs(sandbox: E2bSandboxLike, anchor: PathAnchor): NimboFS {
+export function createE2bFs(sandbox: E2bSandboxLike, anchor: PathAnchor): RunkoFS {
   return {
     async readFile(path: string): Promise<Uint8Array> {
       const real = anchor.toReal(path);

@@ -1,7 +1,7 @@
 {
-  "name": "@nimbo/core",
+  "name": "@runko/core",
   "version": "0.1.0",
-  "description": "nimbo L0 接口 + L1 定义层 + L2 运行层 + AI SDK step runner + skills + load_skill/update_plan/bash 工具本体",
+  "description": "runko L0 接口 + L1 定义层 + L2 运行层 + AI SDK step runner + skills + load_skill/update_plan/bash 工具本体",
   "type": "module",
   "license": "ISC",
   "publishConfig": {
@@ -53,8 +53,8 @@
     "ai": "^7"
   },
   "devDependencies": {
-    "@nimbo/mini-bash": "workspace:*",
-    "@nimbo/virtual-fs": "workspace:*",
+    "@runko/mini-bash": "workspace:*",
+    "@runko/virtual-fs": "workspace:*",
     "@types/node": "catalog:",
     "ai": "catalog:",
     "tsdown": "catalog:",

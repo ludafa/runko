@@ -14,7 +14,7 @@
  * （请求时记一条待定、结清时补上结局）。当前是纯审计表——人的答复走的是下面这条内存
  * promise 路由，不是读库；落库是为了留底与将来的[挂起](../../../../docs/terms.md)恢复。
  */
-import type { HumanDecision, JsonValue } from "@nimbo/core";
+import type { HumanDecision, JsonValue } from "@runko/core";
 
 import type { Logger } from "../logger.js";
 import { describeError } from "../logger.js";

@@ -1,5 +1,5 @@
 /**
- * 端到端两件套（同 `@nimbo/just-bash`/`@nimbo/core` 的 e2e 先例，一次覆盖
+ * 端到端两件套（同 `@runko/just-bash`/`@runko/core` 的 e2e 先例，一次覆盖
  * `vercelWorkspace()` 真的接进 `createSession` 的两条线）：
  *   a) mock model 调 `bash` 工具跑一条真实脚本，经 `runCommand({cmd:"bash",
  *      args:["-lc", ...]})` 落到 fake sandbox，工具部件正常 output-available；
@@ -7,14 +7,14 @@
  *      失效（模式 A 规则 2），后续 edit-file 被拒绝直到重新 read-file。
  *
  * P13-5-2（docs/tech/single-ledger.md）迁移：断言从 `SessionEvent`/
- * `SessionItem`（`.status`）改为 `NimboChunk`/账本工具部件（`.state`）——同
- * `@nimbo/just-bash`/`@nimbo/sandbox-e2b`/`@nimbo/sandbox-cloudflare` 的
+ * `SessionItem`（`.status`）改为 `RunkoChunk`/账本工具部件（`.state`）——同
+ * `@runko/just-bash`/`@runko/sandbox-e2b`/`@runko/sandbox-cloudflare` 的
  * `test/e2e.test.ts` 迁移，一比一照搬；辅助函数就地内联（不跨包 import 测试
  * 辅助，沿既有"各自 test 文件自包含"的风格）。
  */
-import { createFileTools } from "@nimbo/virtual-fs";
-import { createDerivedDataCollector, createSession, createSessionReadState, defineAgent } from "@nimbo/core";
-import type { AgentDefinition, NimboChunk, NimboUIMessage } from "@nimbo/core";
+import { createFileTools } from "@runko/virtual-fs";
+import { createDerivedDataCollector, createSession, createSessionReadState, defineAgent } from "@runko/core";
+import type { AgentDefinition, RunkoChunk, RunkoUIMessage } from "@runko/core";
 import { isToolUIPart, simulateReadableStream } from "ai";
 import type { ToolUIPart, UITools } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
@@ -63,8 +63,8 @@ function mockModel(steps: Step[]): MockLanguageModelV4 {
   return new MockLanguageModelV4({ doStream: steps });
 }
 
-async function drainStream(gen: AsyncGenerator<NimboChunk, unknown>): Promise<NimboChunk[]> {
-  const chunks: NimboChunk[] = [];
+async function drainStream(gen: AsyncGenerator<RunkoChunk, unknown>): Promise<RunkoChunk[]> {
+  const chunks: RunkoChunk[] = [];
   let next = await gen.next();
   while (!next.done) {
     chunks.push(next.value);
@@ -74,7 +74,7 @@ async function drainStream(gen: AsyncGenerator<NimboChunk, unknown>): Promise<Ni
 }
 
 /** 一条消息里全部工具部件（`tool-<名字>`，排除理论上不会出现的 `dynamic-tool`）。 */
-function toolPartsOf(message: NimboUIMessage): ToolUIPart<UITools>[] {
+function toolPartsOf(message: RunkoUIMessage): ToolUIPart<UITools>[] {
   const result: ToolUIPart<UITools>[] = [];
   for (const part of message.parts) {
     if (isToolUIPart<UITools>(part) && part.type !== "dynamic-tool") {result.push(part);}
@@ -83,7 +83,7 @@ function toolPartsOf(message: NimboUIMessage): ToolUIPart<UITools>[] {
 }
 
 /** 账本级查找：全部消息里的全部工具部件 flatMap——同一 toolCallId 只记结算态，理应各出现一次。 */
-function toolCallItems(messages: NimboUIMessage[]): ToolUIPart<UITools>[] {
+function toolCallItems(messages: RunkoUIMessage[]): ToolUIPart<UITools>[] {
   return messages.flatMap(toolPartsOf);
 }
 
@@ -155,7 +155,7 @@ describe("b) bypass proof: writing through the sandbox's fs directly (not the fi
       runCommandImpl: async (call) => {
         // simulates the script's real side effect: the sandbox process writes the file
         // for real, exactly like a real `bash -lc "echo -n changed-by-bash > /f.txt"` would —
-        // going through sandbox.fs directly (not the injected NimboFS wrapper) proves this is
+        // going through sandbox.fs directly (not the injected RunkoFS wrapper) proves this is
         // the bash bypass path, not a file-tool write.
         await sandbox.fs.writeFile("/vercel/sandbox/f.txt", "changed-by-bash");
         return { exitCode: 0 };

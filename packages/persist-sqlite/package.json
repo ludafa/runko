@@ -1,5 +1,5 @@
 {
-  "name": "@nimbo/persist-sqlite",
+  "name": "@runko/persist-sqlite",
   "version": "0.1.0",
   "description": "持久化实现：SQLite（better-sqlite3）—— 你只有一个驱动实例时装这个",
   "type": "module",
@@ -37,8 +37,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@nimbo/agent": "workspace:*",
-    "@nimbo/persist-kysely": "workspace:*",
+    "@runko/agent": "workspace:*",
+    "@runko/persist-kysely": "workspace:*",
     "kysely": "catalog:"
   },
   "peerDependencies": {
@@ -46,7 +46,7 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "catalog:",
-    "@nimbo/conformance": "workspace:*",
+    "@runko/conformance": "workspace:*",
     "@types/better-sqlite3": "catalog:",
     "@types/node": "catalog:",
     "better-sqlite3": "catalog:",

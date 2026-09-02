@@ -1,8 +1,8 @@
 import { defineConfig } from "tsdown";
 
 export default defineConfig({
-  // "src/load.ts" 是 P7-3 新增的第二个入口——落地 docs/tech/core-sdk.md §4.7 的 `nimbo/load`
-  // 子路径（本仓裁量为 @nimbo/core 的 "./load" subpath export，见 package.json
+  // "src/load.ts" 是 P7-3 新增的第二个入口——落地 docs/tech/core-sdk.md §4.7 的 `runko/load`
+  // 子路径（本仓裁量为 @runko/core 的 "./load" subpath export，见 package.json
   // "exports" 与 src/load.ts 头注释）。产出 dist/load.js/.cjs/.d.ts/.d.cts，
   // 与主入口 dist/index.* 并列。
   entry: ["src/index.ts", "src/load.ts"],

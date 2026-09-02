@@ -1,9 +1,9 @@
 /**
- * `createFsAdapter`（NimboFS → IFileSystem）单测——逐行覆盖 docs/tech/core-sdk.md §4.5b
+ * `createFsAdapter`（RunkoFS → IFileSystem）单测——逐行覆盖 docs/tech/core-sdk.md §4.5b
  * 降级表（`src/fs-adapter.ts` 头注释）。不经 `Bash`/`justBash`，直接对适配器
  * 调用，隔离"翻译是否正确"与"just-bash 解释器怎么用它"两层关注点。
  */
-import { fromMemory } from "@nimbo/virtual-fs";
+import { fromMemory } from "@runko/virtual-fs";
 import { latin1FromBytes } from "just-bash";
 import { describe, expect, it } from "vitest";
 import { createFsAdapter } from "../src/fs-adapter.js";
@@ -20,7 +20,7 @@ describe("createFsAdapter: direct translation (readFile/readFileBuffer/writeFile
     expect([...(await adapter.readFileBuffer("/a.bin"))]).toEqual([1, 2, 3, 255]);
   });
 
-  it("writeFile accepts string content, visible to the underlying NimboFS", async () => {
+  it("writeFile accepts string content, visible to the underlying RunkoFS", async () => {
     const fs = fromMemory({});
     const adapter = createFsAdapter(fs);
     await adapter.writeFile("/w.txt", "written");

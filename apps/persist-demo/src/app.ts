@@ -5,8 +5,8 @@
  * 抽成一个函数（而不是写在 `index.ts` 里）是为了让 e2e 能不起真端口就把它装起来，
  * 直接对 `app.request()` 打——这是 Hono 的原生能力，比起真监听端口快且没有端口冲突。
  */
-import type { AgentRuntime } from "@nimbo/agent";
-import { createAgentRuntime } from "@nimbo/agent";
+import type { AgentRuntime } from "@runko/agent";
+import { createAgentRuntime } from "@runko/agent";
 import type { LanguageModel } from "ai";
 import type { Hono } from "hono";
 

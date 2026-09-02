@@ -4,7 +4,7 @@ slug: chat-ui
 view: 施工
 layer: 接入层
 module: —
-packages: ["@nimbo-chat/web"]
+packages: ["@runko-chat/web"]
 tags: ["界面语言", "ai-elements", "shadcn", "密度"]
 related: ["ingress/features/chat-ui.md", "ingress/tech/chat-ui.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -34,7 +34,7 @@ related: ["ingress/features/chat-ui.md", "ingress/tech/chat-ui.md", "architectur
 - [x] **D3 动作行** — 工具卡片改单行（hover 满幅底、展开区左发丝线）；推理改轨道行；计划改 1px 方框勾选；文件改动改 `+/~/-` 路径行。
 - [x] **D4 打断** — 审批 / 待答提问改打断形态（冲出轨道、上下信号色实线、琥珀底）；已答 / 已失效退回安静行；`TurnFailedBar` 改红色左实边条。
 - [x] **D5 结算行** — 一轮末尾一道横线 + `第 N 轮 · 耗时 · 工具 · tok` 数字行 + `统计` 文字钮；弹窗排版跟随新 token。
-- [x] **D6 外壳** — 顶栏改 `nimbo/chat` + 仓库名；侧栏新建表单折叠、行改状态点；会话头「分支为 H1」+ 点击复制；composer 底部键位按钮；队列条贴附 composer 上沿；空态文案改写。
+- [x] **D6 外壳** — 顶栏改 `runko/chat` + 仓库名；侧栏新建表单折叠、行改状态点；会话头「分支为 H1」+ 点击复制；composer 底部键位按钮；队列条贴附 composer 上沿；空态文案改写。
 - [x] **D7 收口** — typecheck / lint / test 全绿；浅色 + 深色 + 窄屏（720px）三组截图；本文件与产品/技术文档回填。
 - [x] **D8 推翻重做** — 用户看过 D0–D7 的成品后否掉了这套自研视觉（「有点太丑了，风格我不是很能接受」），改用 ai-elements。手工从 registry 取件（CLI 在本机崩，见[技术方案 §2](../tech/chat-ui.md)）、做 radix→base-ui 适配、统一收 sm 档密度、色板与圆角回退到 shadcn 默认。
 

@@ -4,7 +4,7 @@ slug: graceful-shutdown
 view: 技术
 layer: 逻辑层
 module: 轮编排
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["优雅关闭", "崩溃恢复", "交权", "SIGTERM"]
 related: ["logic/orchestration/features/graceful-shutdown.md", "logic/orchestration/plans/graceful-shutdown.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -43,7 +43,7 @@ related: ["logic/orchestration/features/graceful-shutdown.md", "logic/orchestrat
 
 | 层 | 文件 | 改什么 |
 |---|---|---|
-| core | `packages/core/src/loop.ts` | 因 abort 收尾时，`NimboError.message` 优先取宿主给的 `signal.reason`（patch，见 §2） |
+| core | `packages/core/src/loop.ts` | 因 abort 收尾时，`RunkoError.message` 优先取宿主给的 `signal.reason`（patch，见 §2） |
 | server | `agent/turn-runner/`（`shutdown.ts`·`abort.ts`） | `shutdownTurns()`（中止全部 + 等收尾 + 超时）· `isShuttingDown()` 闸门 · `abortTurn` 支持传 reason |
 | server | `agent/turn-launcher.ts` | `reserveTurn` 被闸门拒时报新的 `reason: 'shutting_down'` |
 | server | `routes/chat.ts` | 该 outcome → `503` |
@@ -74,7 +74,7 @@ function abortMessage(signal: AbortSignal, fallback: string): string {
 }
 ```
 
-**为什么这个分层是对的**（不只是省事）：core 只需要知道「这一轮被宿主中止了」（`code: 'aborted'`），**为什么**中止是宿主自己的概念——用户按了按钮、进程要关闭、pod 要迁移，core 不该认识这些词。宿主传 reason、宿主的界面解释 reason，闭环在 chat 应用内。所以这里**不给 `NimboError.code` 加新值**：那会把宿主的运维概念塞进 SDK 的类型，也会让所有对 code 做穷尽分支的消费者被迫改代码。
+**为什么这个分层是对的**（不只是省事）：core 只需要知道「这一轮被宿主中止了」（`code: 'aborted'`），**为什么**中止是宿主自己的概念——用户按了按钮、进程要关闭、pod 要迁移，core 不该认识这些词。宿主传 reason、宿主的界面解释 reason，闭环在 chat 应用内。所以这里**不给 `RunkoError.code` 加新值**：那会把宿主的运维概念塞进 SDK 的类型，也会让所有对 code 做穷尽分支的消费者被迫改代码。
 
 不改 API、不改类型，只让 `message` 更有信息量 → `patch`。
 
@@ -139,11 +139,11 @@ SIGTERM / SIGINT
 
 | 位置 | 用途 |
 |---|---|
-| `agent/turn-runner/abort-reasons.ts` | 优雅关闭时 `abortTurn` 的 reason（经 core 透传进 `NimboError.message`） |
+| `agent/turn-runner/abort-reasons.ts` | 优雅关闭时 `abortTurn` 的 reason（经 core 透传进 `RunkoError.message`） |
 | `agent/crash-recovery.ts` | 启动扫描补的那条 metadata 的 `error.message` |
 | `web` 的 `turn-marker.tsx` | 命中它 → 「服务重启，这一轮已中断」；否则 → 「已停止」 |
 
-文本定为 `"The server shut down while this turn was running."`（英文，与 core 的 `NimboError.message` 口径一致；界面从不直接显示它，只用来判档）。
+文本定为 `"The server shut down while this turn was running."`（英文，与 core 的 `RunkoError.message` 口径一致；界面从不直接显示它，只用来判档）。
 
 两档都是 `code: 'aborted'` → `status: 'interrupted'`，所以界面上都走**中性** Alert，不是红色报错（既有行为，见 [turn-abort §4.3](./turn-abort.md)）。
 
@@ -227,7 +227,7 @@ sequenceDiagram
 
 ### 7.3 不做跨进程接管
 
-新进程不接管老进程的轮。要做那个，得把「轮的执行状态」持久化到足以让另一个进程续跑的程度（模型流的位置、工具的执行状态），是另一个量级的工程，且与 nimbo 「一轮一个进程内驱动」的既有架构冲突。
+新进程不接管老进程的轮。要做那个，得把「轮的执行状态」持久化到足以让另一个进程续跑的程度（模型流的位置、工具的执行状态），是另一个量级的工程，且与 runko 「一轮一个进程内驱动」的既有架构冲突。
 
 ### 7.4 多实例部署时只管自己
 

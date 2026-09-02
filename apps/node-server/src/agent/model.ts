@@ -5,7 +5,7 @@ import type { LanguageModel } from 'ai';
 // docs/tech/sandbox.md §8.4): same "v4 pro" default tier as
 // examples/src/12-vercel-sandbox-real-project.ts's
 // `DEEPSEEK_DESIGN_MODEL_ID` (confirmed there via `GET
-// {DEEPSEEK_API_BASE_URL}/models`), overridable with `NIMBO_MODEL`. Reads
+// {DEEPSEEK_API_BASE_URL}/models`), overridable with `RUNKO_MODEL`. Reads
 // `process.env` lazily inside `resolveModel()` (not at module load) so
 // importing this file — e.g. transitively through `src/app.ts` for
 // `generate:openapi`/`typecheck` — never fails just because credentials
@@ -34,7 +34,7 @@ export function resolveModel(): LanguageModel {
     );
   }
   const deepseek = createDeepSeek({ baseURL, apiKey });
-  const modelId = process.env.NIMBO_MODEL?.trim();
+  const modelId = process.env.RUNKO_MODEL?.trim();
   return deepseek(
     modelId === undefined || modelId.length === 0 ? DEFAULT_MODEL_ID : modelId,
   );

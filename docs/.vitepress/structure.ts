@@ -45,13 +45,13 @@ export const SECTIONS: Section[] = [
     dir: 'logic/orchestration',
     landing: 'single-ledger',
     text: '轮编排',
-    blurb: '逻辑层中间那块（`@nimbo/agent`）：一轮的一生，外加账本、队列、沙盒生命周期。',
+    blurb: '逻辑层中间那块（`@runko/agent`）：一轮的一生，外加账本、队列、沙盒生命周期。',
   },
   {
     dir: 'logic/engine',
     landing: 'core-sdk',
     text: '执行引擎',
-    blurb: '逻辑层最底下那块（`@nimbo/core`）：调模型 → 跑工具 → 喂回去。',
+    blurb: '逻辑层最底下那块（`@runko/core`）：调模型 → 跑工具 → 喂回去。',
   },
 
   /* ── 宿主层：可替换的那一块。契约只有一份，实现按环境各一份 ─────────── */
@@ -134,5 +134,5 @@ export const LAYERS = ['总纲', '逻辑层', '宿主层', '接入层', '周边'
  */
 export const MODULES = ['执行引擎', '轮编排', '归属仲裁', '沙盒', '持久化', '流分发', '—'] as const;
 
-export const REPO = 'https://github.com/ludafa/nimbo';
+export const REPO = 'https://github.com/ludafa/runko';
 export const REPO_BLOB = `${REPO}/blob/main`;

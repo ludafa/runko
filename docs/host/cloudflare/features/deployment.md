@@ -4,7 +4,7 @@ slug: deployment
 view: 功能
 layer: 宿主层
 module: —
-packages: ["@nimbo/durable-object", "@nimbo/sandbox-cloudflare"]
+packages: ["@runko/durable-object", "@runko/sandbox-cloudflare"]
 tags: ["Cloudflare", "Durable Object", "Workers", "部署形态", "网关形态"]
 related: ["host/cloudflare/tech/deployment.md", "host/cloudflare/features/cloudflare-worker-server.md", "architecture/features/agent-kernel.md"]
 ---
@@ -28,7 +28,7 @@ related: ["host/cloudflare/tech/deployment.md", "host/cloudflare/features/cloudf
 | [归属仲裁机制](../../../terms.md) | **什么都不做**，平台保证单实例 | **大幅省事**——独占是真保证，不是尽力保证 |
 | [持久化](../../../terms.md) | Durable Object 自带 SQLite（`ctx.storage.sql`） | 省事，但**每个会话一个独立存储** |
 | [流分发](../../../terms.md) | 平台自带——订阅方直接连到那个实例 | 省事，不用外挂任何东西 |
-| [沙盒](../../../terms.md) | `@nimbo/sandbox-cloudflare` | **费事**——SDK 只能在 Worker 里跑，见 §4 |
+| [沙盒](../../../terms.md) | `@runko/sandbox-cloudflare` | **费事**——SDK 只能在 Worker 里跑，见 §4 |
 
 **这一档要还的债只有两笔**：跨会话查询要自己建索引（§3），沙盒接法要绕一下（§4）。
 
@@ -49,12 +49,12 @@ Cloudflare Sandbox 的 SDK **只能跑在 Cloudflare Workers 里**——它靠 D
 ```mermaid
 flowchart LR
     N["你的 Node 进程<br/><small>纯 fetch 客户端</small>"]
-    G["你自部署的 Worker 网关<br/><small>@nimbo/sandbox-cloudflare/worker</small>"]
+    G["你自部署的 Worker 网关<br/><small>@runko/sandbox-cloudflare/worker</small>"]
     S["Cloudflare Sandbox"]
     N -->|"HTTP + JSON"| G -->|"DO binding"| S
 ```
 
-`@nimbo/sandbox-cloudflare` 因此是**双入口**——`.` 是客户端（任意 Node 进程可用），`./worker` 是网关（放进你的 wrangler 项目）。
+`@runko/sandbox-cloudflare` 因此是**双入口**——`.` 是客户端（任意 Node 进程可用），`./worker` 是网关（放进你的 wrangler 项目）。
 
 **好消息**：以后再接别的「连不上」的沙盒，这套协议和客户端可以直接复用，只需重写网关那一侧。
 
@@ -73,5 +73,5 @@ flowchart LR
 ## 7. 范围与非目标
 
 - **不解决跨会话查询。** 索引表你自己建，框架不管。
-- **不在 Workers 里跑完整 nimbo 是可选的，不是必须的。** 实测证明核心零改动可以跑在 workerd 上（见[技术方案](../tech/deployment.md)附录），但默认推荐的是网关形态。
+- **不在 Workers 里跑完整 runko 是可选的，不是必须的。** 实测证明核心零改动可以跑在 workerd 上（见[技术方案](../tech/deployment.md)附录），但默认推荐的是网关形态。
 - **单次执行时长没有硬上限**，但 CPU 时间有额度——细节见[技术方案](../tech/deployment.md)。

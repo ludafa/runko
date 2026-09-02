@@ -1,4 +1,4 @@
-import type { NimboUIMessage } from '@nimbo/core';
+import type { RunkoUIMessage } from '@runko/core';
 import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -24,7 +24,7 @@ describe('TimelineView — empty state', () => {
 
 describe('TimelineView — message part rendering', () => {
   it("renders a user message's text", () => {
-    const messages: NimboUIMessage[] = [
+    const messages: RunkoUIMessage[] = [
       { id: 'm1', role: 'user', parts: [{ type: 'text', text: '你好啊' }] },
     ];
     render(<TimelineView messages={messages} />);
@@ -32,7 +32,7 @@ describe('TimelineView — message part rendering', () => {
   });
 
   it('marks a steered user message with the "插话" label', () => {
-    const messages: NimboUIMessage[] = [
+    const messages: RunkoUIMessage[] = [
       {
         id: 'm1',
         role: 'user',
@@ -45,7 +45,7 @@ describe('TimelineView — message part rendering', () => {
   });
 
   it('renders assistant text and reasoning parts', () => {
-    const messages: NimboUIMessage[] = [
+    const messages: RunkoUIMessage[] = [
       {
         id: 'm1',
         role: 'assistant',
@@ -63,7 +63,7 @@ describe('TimelineView — message part rendering', () => {
   });
 
   it('renders data-file-change, data-plan-update, and data-error parts', () => {
-    const messages: NimboUIMessage[] = [
+    const messages: RunkoUIMessage[] = [
       {
         id: 'm1',
         role: 'assistant',
@@ -113,7 +113,7 @@ describe('TimelineView — message part rendering', () => {
   });
 
   it('第一帧到达后（awaitingFirstEvent 为假）不再有占位', () => {
-    const messages: NimboUIMessage[] = [
+    const messages: RunkoUIMessage[] = [
       {
         id: 'm1',
         role: 'assistant',
@@ -131,7 +131,7 @@ describe('TimelineView — message part rendering', () => {
   });
 
   it('a gated tool call in approval-requested state renders ApprovalCard, not ToolCallCard', () => {
-    const messages: NimboUIMessage[] = [
+    const messages: RunkoUIMessage[] = [
       {
         id: 'm1',
         role: 'assistant',
@@ -155,7 +155,7 @@ describe('TimelineView — message part rendering', () => {
   // 再点任何按钮都只会拿到 404。此前界面要等用户点下去吃了 404 才翻，在那之前一直画着
   // 三个可点的按钮（用户实测报告：一张「待审批」卡片下面就是「服务重启，这一轮已中断」）。
   it('轮已结束时，还停在 approval-requested 的卡片直接显示「已失效」且不给按钮', () => {
-    const messages: NimboUIMessage[] = [
+    const messages: RunkoUIMessage[] = [
       {
         id: 'm1',
         role: 'assistant',
@@ -194,7 +194,7 @@ describe('TimelineView — message part rendering', () => {
   // 卡片自己那一轮**还在跑吗」：账本里每一轮以一条带终态 metadata 的消息收尾，收尾消息
   // 及其之前的一切都属于已结束的轮。
   it('新一轮起来后，上一轮那张卡片仍然是「已失效」，不会跟着复活', () => {
-    const messages: NimboUIMessage[] = [
+    const messages: RunkoUIMessage[] = [
       // ---- 上一轮：卡片还挂着，就被停止收尾了 ----
       {
         id: 'm1',
@@ -240,7 +240,7 @@ describe('TimelineView — message part rendering', () => {
   });
 
   it('轮还在跑时同一张卡片照常是「待审批」（默认档不受影响）', () => {
-    const messages: NimboUIMessage[] = [
+    const messages: RunkoUIMessage[] = [
       {
         id: 'm1',
         role: 'assistant',
@@ -268,7 +268,7 @@ describe('TimelineView — message part rendering', () => {
   // 已回答的提问卡片不能被轮结束「追认」成失效——`expired` 在卡片里优先于 `answered`，
   // 叠错了会把一条答完的问题画成「已失效」。
   it('轮已结束不影响已回答的提问卡片（仍是「已回答」）', () => {
-    const messages: NimboUIMessage[] = [
+    const messages: RunkoUIMessage[] = [
       {
         id: 'm1',
         role: 'assistant',
@@ -291,7 +291,7 @@ describe('TimelineView — message part rendering', () => {
   });
 
   it('a gated tool call resolved to approval-responded(denied) renders ToolCallCard with the deny reason, not ApprovalCard', async () => {
-    const messages: NimboUIMessage[] = [
+    const messages: RunkoUIMessage[] = [
       {
         id: 'm1',
         role: 'assistant',
@@ -320,7 +320,7 @@ describe('TimelineView — message part rendering', () => {
   });
 
   it('an ask-user tool part in input-available state renders QuestionCard, not ToolCallCard', () => {
-    const messages: NimboUIMessage[] = [
+    const messages: RunkoUIMessage[] = [
       {
         id: 'm1',
         role: 'assistant',
@@ -341,7 +341,7 @@ describe('TimelineView — message part rendering', () => {
   });
 
   it('an ask-user tool part in output-available state also renders QuestionCard (answered), not ToolCallCard', () => {
-    const messages: NimboUIMessage[] = [
+    const messages: RunkoUIMessage[] = [
       {
         id: 'm1',
         role: 'assistant',
@@ -363,7 +363,7 @@ describe('TimelineView — message part rendering', () => {
   });
 
   it('joins a data-tool-timing part into its matching ToolCallCard by toolCallId (chat 可观测性), coexisting with other data parts on the same message, and never renders it as an independent card of its own', () => {
-    const messages: NimboUIMessage[] = [
+    const messages: RunkoUIMessage[] = [
       {
         id: 'm1',
         role: 'assistant',
@@ -405,7 +405,7 @@ describe('TimelineView — message part rendering', () => {
   });
 
   it('renders no tool-timing strip at all when the tool part has no matching data-tool-timing (old session, or input still streaming) — no crash, no empty strip', () => {
-    const messages: NimboUIMessage[] = [
+    const messages: RunkoUIMessage[] = [
       {
         id: 'm1',
         role: 'assistant',
@@ -426,7 +426,7 @@ describe('TimelineView — message part rendering', () => {
   });
 
   it('a non-gated, non-ask-user tool call (e.g. write-file, output-available) renders the generic ToolCallCard', () => {
-    const messages: NimboUIMessage[] = [
+    const messages: RunkoUIMessage[] = [
       {
         id: 'm1',
         role: 'assistant',
@@ -452,7 +452,7 @@ describe('TimelineView — message part rendering', () => {
     const { default: userEvent } = await import('@testing-library/user-event');
     const user = userEvent.setup();
     const onSubmitApproval = vi.fn();
-    const messages: NimboUIMessage[] = [
+    const messages: RunkoUIMessage[] = [
       {
         id: 'm1',
         role: 'assistant',
@@ -479,7 +479,7 @@ describe('TimelineView — message part rendering', () => {
 
 describe('TimelineView — turn-stats / turn-failed bar placement', () => {
   it('a completed assistant message shows the turn-stats button after its parts', () => {
-    const messages: NimboUIMessage[] = [
+    const messages: RunkoUIMessage[] = [
       {
         id: 'm1',
         role: 'assistant',
@@ -498,7 +498,7 @@ describe('TimelineView — turn-stats / turn-failed bar placement', () => {
   });
 
   it('a failed assistant message shows TurnFailedBar (not the turn-stats button)', () => {
-    const messages: NimboUIMessage[] = [
+    const messages: RunkoUIMessage[] = [
       {
         id: 'm1',
         role: 'assistant',
@@ -519,7 +519,7 @@ describe('TimelineView — turn-stats / turn-failed bar placement', () => {
   });
 
   it('一轮被[停止](../../../../../docs/terms.md)（status interrupted / code aborted）走中性的「已停止」标记，不是红色失败条，也不把 core 那句英文 message 抛给用户', () => {
-    const messages: NimboUIMessage[] = [
+    const messages: RunkoUIMessage[] = [
       {
         id: 'm1',
         role: 'assistant',
@@ -548,7 +548,7 @@ describe('TimelineView — turn-stats / turn-failed bar placement', () => {
   // 中止的（docs/tech/graceful-shutdown.md §4）。判档靠 message 与服务端那个常量逐字相等，
   // 所以这条用例同时是那个跨端文案契约的哨兵：服务端改了文案而这里没跟，它就会红。
   it('服务重启导致的中断走「服务重启，这一轮已中断」，与用户按停止分开', () => {
-    const messages: NimboUIMessage[] = [
+    const messages: RunkoUIMessage[] = [
       {
         id: 'm1',
         role: 'assistant',
@@ -582,7 +582,7 @@ describe('TimelineView — turn-stats / turn-failed bar placement', () => {
   });
 
   it('a "turn signal" placeholder message (empty parts, only metadata) renders just the trailing bar, no bubble', () => {
-    const messages: NimboUIMessage[] = [
+    const messages: RunkoUIMessage[] = [
       {
         id: 'turn-signal-1',
         role: 'assistant',
@@ -601,7 +601,7 @@ describe('TimelineView — turn-stats / turn-failed bar placement', () => {
   });
 
   it('an assistant message with no metadata status shows neither bar', () => {
-    const messages: NimboUIMessage[] = [
+    const messages: RunkoUIMessage[] = [
       {
         id: 'm1',
         role: 'assistant',
@@ -619,7 +619,7 @@ describe('TimelineView — turn-stats / turn-failed bar placement', () => {
 
 describe('TimelineView — pending-echo interleaving with real materialized messages', () => {
   it('renders a pending echo between the two turns it was sent between, in document order', () => {
-    const messages: NimboUIMessage[] = [
+    const messages: RunkoUIMessage[] = [
       { id: 'm1', role: 'user', parts: [{ type: 'text', text: '第一轮' }] },
       {
         id: 'm2',

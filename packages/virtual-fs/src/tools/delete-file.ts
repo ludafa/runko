@@ -5,8 +5,8 @@
  * 目录展开为逐文件 delete 清单（宿主拿到精确列表，而不是一条目录级事件）。
  */
 import { z } from "zod";
-import { defineTool } from "@nimbo/core";
-import type { Tool, ToolReturn } from "@nimbo/core";
+import { defineTool } from "@runko/core";
+import type { Tool, ToolReturn } from "@runko/core";
 import { NotFoundError } from "../memory.js";
 import { type CreateFileToolsOptions, describeError, errorResult } from "./shared.js";
 import type { FileChange } from "./shared.js";
@@ -20,7 +20,7 @@ export function createDeleteFileTool(opts: CreateFileToolsOptions): Tool {
   return defineTool({
     description:
       "Delete a file, or a directory and everything under it. Deleting a directory requires recursive:true, " +
-      "even for an empty one — this is the only way to remove things in nimbo, since there is no bash by default.",
+      "even for an empty one — this is the only way to remove things in runko, since there is no bash by default.",
     inputSchema,
     execute: async (input, ctx): Promise<ToolReturn> => {
       let stat;

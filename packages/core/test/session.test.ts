@@ -1,6 +1,6 @@
 /**
  * P13-5-2（docs/tech/single-ledger.md）迁移：`session.stream()`/
- * `session.send()` 产出/消费 `NimboChunk`/`NimboUIMessage` 而不是退役的
+ * `session.send()` 产出/消费 `RunkoChunk`/`RunkoUIMessage` 而不是退役的
  * `SessionEvent`/`SessionItem`；"emits session.started only on the very
  * first stream()/send() call" 一节随 `session.started`/`turn.started` 事件
  * 整体退役直接删除（`session.ts` 文件头：两者不再有对应 chunk，没有"重发
@@ -11,11 +11,11 @@ import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { z } from "zod";
 import { defineAgent } from "../src/agent.js";
-import { createSession, NimboSessionError } from "../src/session.js";
+import { createSession, RunkoSessionError } from "../src/session.js";
 import type { Session, SessionOptions } from "../src/session.js";
 import type { AgentDefinition } from "../src/agent.js";
 import type { Tool } from "../src/types.js";
-import { allToolParts, drainTurn, fingerprintMessage } from "./helpers/nimbo-chunks.js";
+import { allToolParts, drainTurn, fingerprintMessage } from "./helpers/runko-chunks.js";
 
 /** Same shape as `loop.test.ts`/`model/step.test.ts` — see those files for why the callback form. */
 function mockModel(buildOptions: () => ConstructorParameters<typeof MockLanguageModelV4>[0]): MockLanguageModelV4 {
@@ -122,7 +122,7 @@ describe("createSession", () => {
     expect(sendResult.usage).toEqual(streamResult.usage);
   });
 
-  it("turn.failed causes send() to throw NimboSessionError carrying the same code", async () => {
+  it("turn.failed causes send() to throw RunkoSessionError carrying the same code", async () => {
     const tool: Tool = { description: "d", inputSchema: z.object({}), execute: () => "ok" };
     const agent = baseAgent(alwaysToolCallsModel("loop_tool"), { tools: { loop_tool: tool }, maxTurnsPerRun: 1 });
     const session = createSession(agent);
@@ -133,11 +133,11 @@ describe("createSession", () => {
     } catch (error) {
       caught = error;
     }
-    expect(caught).toBeInstanceOf(NimboSessionError);
-    expect(caught instanceof NimboSessionError ? caught.code : undefined).toBe("max_turns");
+    expect(caught).toBeInstanceOf(RunkoSessionError);
+    expect(caught instanceof RunkoSessionError ? caught.code : undefined).toBe("max_turns");
   });
 
-  it("TurnOptions.signal abort propagates through send() as an 'aborted' NimboSessionError", async () => {
+  it("TurnOptions.signal abort propagates through send() as an 'aborted' RunkoSessionError", async () => {
     const controller = new AbortController();
     controller.abort(new Error("stop"));
     const session = createSession(baseAgent(stopModel("hi")));
@@ -250,19 +250,19 @@ describe("createSession", () => {
   });
 
   describe("fs left unconfigured", () => {
-    it("every NimboFS method rejects with guidance pointing at { fs } or @nimbo/sdk", async () => {
+    it("every RunkoFS method rejects with guidance pointing at { fs } or @runko/sdk", async () => {
       const session = createSession(baseAgent(stopModel("x")));
-      await expect(session.fs.readFile("/a.txt")).rejects.toThrow(/@nimbo\/sdk/);
+      await expect(session.fs.readFile("/a.txt")).rejects.toThrow(/@runko\/sdk/);
       await expect(session.fs.writeFile("/a.txt", "x")).rejects.toThrow(/fs/);
-      await expect(session.fs.rm("/a.txt")).rejects.toThrow(/@nimbo\/sdk/);
-      await expect(session.fs.mkdir("/a")).rejects.toThrow(/@nimbo\/sdk/);
-      await expect(session.fs.readdir("/a")).rejects.toThrow(/@nimbo\/sdk/);
-      await expect(session.fs.stat("/a.txt")).rejects.toThrow(/@nimbo\/sdk/);
-      await expect(session.fs.glob("**/*")).rejects.toThrow(/@nimbo\/sdk/);
+      await expect(session.fs.rm("/a.txt")).rejects.toThrow(/@runko\/sdk/);
+      await expect(session.fs.mkdir("/a")).rejects.toThrow(/@runko\/sdk/);
+      await expect(session.fs.readdir("/a")).rejects.toThrow(/@runko\/sdk/);
+      await expect(session.fs.stat("/a.txt")).rejects.toThrow(/@runko\/sdk/);
+      await expect(session.fs.glob("**/*")).rejects.toThrow(/@runko\/sdk/);
     });
   });
 
-  it("uses the injected NimboFS when SessionOptions.fs is provided", async () => {
+  it("uses the injected RunkoFS when SessionOptions.fs is provided", async () => {
     const fs = {
       readFile: vi.fn(async () => new Uint8Array()),
       writeFile: vi.fn(async () => {}),

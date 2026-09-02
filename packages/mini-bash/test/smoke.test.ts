@@ -1,9 +1,9 @@
-import { fromMemory } from "@nimbo/virtual-fs";
+import { fromMemory } from "@runko/virtual-fs";
 import { describe, expect, it } from "vitest";
 import { miniBash } from "../src/index.js";
 
-describe("@nimbo/mini-bash smoke", () => {
-  it("exposes miniBash(fs) returning a NimboExec", async () => {
+describe("@runko/mini-bash smoke", () => {
+  it("exposes miniBash(fs) returning a RunkoExec", async () => {
     const fs = fromMemory({ "/hello.txt": "hi\n" });
     const bash = miniBash(fs);
     expect(bash.defaultApproval).toBe("allow");

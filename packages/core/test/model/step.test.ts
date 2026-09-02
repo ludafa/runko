@@ -4,12 +4,12 @@ import { MockLanguageModelV4 } from "ai/test";
 import { z } from "zod";
 import { runStep } from "../../src/model/step.js";
 import type { StepEvent, StepResult } from "../../src/model/step.js";
-import type { Tool as NimboTool } from "../../src/types.js";
+import type { Tool as RunkoTool } from "../../src/types.js";
 
 /**
  * `LanguageModelV4StreamPart` (the chunk shape `simulateReadableStream` needs
  * here) lives in `@ai-sdk/provider`, a transitive dependency of `ai` that
- * `@nimbo/core` does not declare directly — pnpm's strict linking correctly
+ * `@runko/core` does not declare directly — pnpm's strict linking correctly
  * keeps it unresolvable by name from this package. Deriving the options type
  * via `ConstructorParameters<typeof MockLanguageModelV4>` instead of
  * importing it lets each call site's inline options literal keep full
@@ -101,7 +101,7 @@ describe("runStep", () => {
   });
 
   it("maps a tool-call stream: tool-input-delta chunks stream-aggregate into a fully parsed tool-call StepEvent", async () => {
-    const readFile: NimboTool = {
+    const readFile: RunkoTool = {
       description: "reads a file",
       inputSchema: z.object({ path: z.string() }),
       execute: vi.fn(() => {
@@ -145,7 +145,7 @@ describe("runStep", () => {
   });
 
   it("omits execute from the converted tool passed to streamText (so the SDK cannot auto-execute)", async () => {
-    const readFile: NimboTool = {
+    const readFile: RunkoTool = {
       description: "reads a file",
       inputSchema: z.object({ path: z.string() }),
       execute: () => "unused",
@@ -194,7 +194,7 @@ describe("runStep", () => {
   });
 
   it("resolves finishReason: 'tool-calls' with the tool call returned unexecuted", async () => {
-    const searchTool: NimboTool = {
+    const searchTool: RunkoTool = {
       description: "search",
       inputSchema: z.object({ query: z.string() }),
       execute: vi.fn(() => "unused"),
@@ -204,7 +204,7 @@ describe("runStep", () => {
         stream: simulateReadableStream({
           chunks: [
             { type: "stream-start", warnings: [] },
-            { type: "tool-call", toolCallId: "call_9", toolName: "search", input: '{"query":"nimbo"}' },
+            { type: "tool-call", toolCallId: "call_9", toolName: "search", input: '{"query":"runko"}' },
             { type: "finish", finishReason: { unified: "tool-calls", raw: undefined }, usage },
           ],
           initialDelayInMs: null,
@@ -218,7 +218,7 @@ describe("runStep", () => {
     );
 
     expect(result.finishReason).toBe("tool-calls");
-    expect(result.toolCalls).toEqual([{ id: "call_9", toolName: "search", input: { query: "nimbo" } }]);
+    expect(result.toolCalls).toEqual([{ id: "call_9", toolName: "search", input: { query: "runko" } }]);
     expect(searchTool.execute).not.toHaveBeenCalled();
   });
 

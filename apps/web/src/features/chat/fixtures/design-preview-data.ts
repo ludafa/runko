@@ -2,12 +2,12 @@
  * 设计预览数据（只服务于 `/design` 这个设计工作台，见 `routes/design.tsx`）。
  *
  * 与 `sample-conversation-events.ts` 分工不同：那份是**测试**用的 chunk 序列
- * （断言物化/渲染的输入），这份是**设计**用的成品 `NimboUIMessage[]`——把一次
+ * （断言物化/渲染的输入），这份是**设计**用的成品 `RunkoUIMessage[]`——把一次
  * 真实会话里会出现的全部界面状态（推理、文本、五种工具状态、计划、文件改动、
  * 审批、提问、失败、统计）一次性摆在同一屏上，好让界面语言的每一档都能被眼睛
  * 直接比对。不进任何测试断言，改它不会让测试变红。
  */
-import type { NimboUIMessage } from '@nimbo/core';
+import type { RunkoUIMessage } from '@runko/core';
 
 import type { Conversation, QueuedMessage } from '../schema';
 import type { PendingUserEcho } from '../timeline';
@@ -41,9 +41,9 @@ export const previewConversations: Conversation[] = [
   {
     id: 'conv-redesign',
     title: '重做 chat 页面的界面语言',
-    repo: 'ludafa/nimbo',
-    branchName: 'nimbo/chat-a91f2c',
-    sandboxName: 'nimbo-conv-redesign',
+    repo: 'ludafa/runko',
+    branchName: 'runko/chat-a91f2c',
+    sandboxName: 'runko-conv-redesign',
     provider: 'vercel',
     status: 'active',
     lastActiveAt: new Date(T0).toISOString(),
@@ -55,9 +55,9 @@ export const previewConversations: Conversation[] = [
   {
     id: 'conv-auth',
     title: '修登录态过期后不跳转',
-    repo: 'ludafa/nimbo',
-    branchName: 'nimbo/chat-77b0de',
-    sandboxName: 'nimbo-conv-auth',
+    repo: 'ludafa/runko',
+    branchName: 'runko/chat-77b0de',
+    sandboxName: 'runko-conv-auth',
     provider: 'e2b',
     status: 'sleeping',
     lastActiveAt: new Date(T0 - 86_400_000).toISOString(),
@@ -69,9 +69,9 @@ export const previewConversations: Conversation[] = [
   {
     id: 'conv-docs',
     title: null,
-    repo: 'ludafa/nimbo',
-    branchName: 'nimbo/chat-04c1aa',
-    sandboxName: 'nimbo-conv-docs',
+    repo: 'ludafa/runko',
+    branchName: 'runko/chat-04c1aa',
+    sandboxName: 'runko-conv-docs',
     provider: 'vercel',
     status: 'expired',
     lastActiveAt: new Date(T0 - 6 * 86_400_000).toISOString(),
@@ -108,7 +108,7 @@ const AGENT_PROSE = `我先把现在的界面语言摸一遍，再动手。
 3. 最后把需要人介入的那两类单独做成打断。`;
 
 /** 一次完整的会话：从用户指令到本轮统计，覆盖界面每一档状态。 */
-export const previewMessages: NimboUIMessage[] = [
+export const previewMessages: RunkoUIMessage[] = [
   {
     id: 'm-user-1',
     role: 'user',
@@ -296,7 +296,7 @@ export const previewMessages: NimboUIMessage[] = [
         type: 'tool-bash',
         toolCallId: 'call-5',
         state: 'approval-requested',
-        input: { command: 'git push origin nimbo/chat-a91f2c' },
+        input: { command: 'git push origin runko/chat-a91f2c' },
         approval: { id: 'call-5' },
       },
       {
@@ -333,7 +333,7 @@ export const previewPendingEchoes: PendingUserEcho[] = [
 ];
 
 /** 第二组：一轮失败收尾——错误条 + 失败徽标，单独摆一处好比对。 */
-export const previewFailedMessages: NimboUIMessage[] = [
+export const previewFailedMessages: RunkoUIMessage[] = [
   {
     id: 'm-user-3',
     role: 'user',
@@ -356,7 +356,7 @@ export const previewFailedMessages: NimboUIMessage[] = [
         type: 'tool-bash',
         toolCallId: 'call-7',
         state: 'output-denied',
-        input: { command: 'git merge --no-ff nimbo/chat-a91f2c' },
+        input: { command: 'git merge --no-ff runko/chat-a91f2c' },
         approval: {
           id: 'call-7',
           approved: false,
@@ -386,7 +386,7 @@ export const previewFailedMessages: NimboUIMessage[] = [
  * ——中性的「已停止」标记，摆在失败那组旁边正是为了比对：同样是「没跑完」，但一个是
  * 故障（红），一个是用户自己按的（中性）。
  */
-export const previewStoppedMessages: NimboUIMessage[] = [
+export const previewStoppedMessages: RunkoUIMessage[] = [
   {
     id: 'm-user-4',
     role: 'user',
@@ -419,7 +419,7 @@ export const previewStoppedMessages: NimboUIMessage[] = [
  * 以为自己按过停止。`message` 必须与 `turn-marker.tsx` 的 `SHUTDOWN_ABORT_MESSAGE`
  * 逐字一致，否则这一档就退回成「已停止」——这组样例同时也是那个文案契约的哨兵。
  */
-export const previewShutdownInterruptedMessages: NimboUIMessage[] = [
+export const previewShutdownInterruptedMessages: RunkoUIMessage[] = [
   {
     id: 'm-user-5',
     role: 'user',

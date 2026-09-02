@@ -4,7 +4,7 @@
  * 横跨解释器的三层（管道/链/整段脚本+实例），不属于任何单个命令的单元测
  * 试，独立成文件，与 cd.test.ts/pwd.test.ts（单命令行为）分开。
  */
-import { fromMemory } from "@nimbo/virtual-fs";
+import { fromMemory } from "@runko/virtual-fs";
 import { describe, expect, it } from "vitest";
 import { miniBash } from "../src/index.js";
 import { run } from "./helpers.js";

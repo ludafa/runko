@@ -6,14 +6,14 @@
  * 在 `test/type-conformance.test-d.ts`（`import type { Sandbox } from "@vercel/sandbox"`
  * 把真实实例赋给这里的接口形参，验证结构没有漂移）。
  *
- * 字段收紧到七个 NimboFS 方法 + `runCommand` 实际用到的那一份：`fs` 只列
+ * 字段收紧到七个 RunkoFS 方法 + `runCommand` 实际用到的那一份：`fs` 只列
  * `readFile/writeFile/mkdir/readdir/stat/rm/rmdir`（`rmdir` 是 `rm` 非递归删
  * 目录语义的关键——见 fs.ts 头注释的实测发现），`runCommand` 只列对象重载中
  * 非 detached 一支需要的字段。`Writable` 用 node:stream 的真实类型（node 内建
  * 类型，不是 `@vercel/sandbox` 的类型），因为我们确实要构造一个真的 `Writable`
  * 传给它。
  */
-import type { KeepAliveOptions } from "@nimbo/core";
+import type { KeepAliveOptions } from "@runko/core";
 import type { Writable } from "node:stream";
 
 /** `fs.readdir(path, { withFileTypes: true })` 的单条目——结构对齐 node `fs.Dirent`。 */

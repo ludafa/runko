@@ -1,8 +1,8 @@
-import type { NimboFS } from "@nimbo/core";
+import type { RunkoFS } from "@runko/core";
 
 /** 单条管道阶段执行时可见的环境：注入的 fs、已解析的 cwd、上一阶段的 stdout（首阶段为 undefined）。 */
 export interface CommandContext {
-  fs: NimboFS;
+  fs: RunkoFS;
   cwd: string;
   stdin: string | undefined;
   signal: AbortSignal;

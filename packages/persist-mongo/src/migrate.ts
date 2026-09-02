@@ -62,12 +62,12 @@ export async function migrate(db: Db): Promise<void> {
     // 顺序也正好是读路径要的（按会话过滤 + 按 seq 升序），一个索引两用。
     ensureIndex(db, LEDGER_COLLECTION, { conversationId: 1, seq: 1 }, {
       unique: true,
-      name: "nimbo_ledger_conversation_seq",
+      name: "agent_ledger_conversation_seq",
     }),
     // 裁决表：`(conversationId, toolCallId)` 唯一，同上。
     ensureIndex(db, DECISIONS_COLLECTION, { conversationId: 1, toolCallId: 1 }, {
       unique: true,
-      name: "nimbo_decisions_conversation_call",
+      name: "agent_decisions_conversation_call",
     }),
     // 队列：**唯一**。除了「按会话取、按 seq 排」（`findOneAndDelete` 走的就是它），它还
     // 承担一件事——**保证 seq 不重号**。应用层「先查最大值再插」在并发下必然有窗口：
@@ -75,7 +75,7 @@ export async function migrate(db: Db): Promise<void> {
     // 有了唯一索引，撞号那条插入直接失败，调用方换个号重来（见 `stores.ts` 的 `enqueue`）。
     ensureIndex(db, QUEUE_COLLECTION, { conversationId: 1, seq: 1 }, {
       unique: true,
-      name: "nimbo_queue_conversation_seq",
+      name: "agent_queue_conversation_seq",
     }),
   ]);
 }

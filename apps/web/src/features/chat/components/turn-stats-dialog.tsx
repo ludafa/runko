@@ -1,6 +1,6 @@
 /**
  * 本轮统计按钮 + 弹窗（docs/features/telemetry.md · docs/tech/telemetry.md §4.2）：
- * assistant 消息末尾（该轮 metadata.status === 'completed'，@nimbo/core loop 的
+ * assistant 消息末尾（该轮 metadata.status === 'completed'，@runko/core loop 的
  * finalizeTurn）挂一枚「统计」按钮——界面上不再有常驻的汇总条，一轮的全部指标
  * 都收进点开的弹窗里。弹窗分两层数据源，正是「账本为源、遥测做增强」的分工：
  *
@@ -18,7 +18,7 @@
  * payloadJson 用零星 zod safeParse 按需取字段——形状随 ai 小版本演化，解析失败
  * 的行静默跳过，不让一条坏数据毁掉整个弹窗。
  */
-import type { Usage } from '@nimbo/core';
+import type { Usage } from '@runko/core';
 import { BarChart3Icon } from 'lucide-react';
 import { Fragment, useState } from 'react';
 import { z } from 'zod';
@@ -461,9 +461,9 @@ export function TurnStatsButton({
   turn,
 }: {
   usage: Usage;
-  /** 全 turn 墙钟耗时（`NimboMessageMetadata.durationMs`，`@nimbo/core` loop 的 `finalizeTurn` 写入）——旧记录（字段引入前落盘）没有，概览就不显示这一段。 */
+  /** 全 turn 墙钟耗时（`RunkoMessageMetadata.durationMs`，`@runko/core` loop 的 `finalizeTurn` 写入）——旧记录（字段引入前落盘）没有，概览就不显示这一段。 */
   durationMs?: number;
-  /** 本轮工具执行墙钟（`NimboMessageMetadata.toolDurationMs`，并行批区间并集）——`durationMs - toolDurationMs` 即 agent（模型思考/往返）时间。 */
+  /** 本轮工具执行墙钟（`RunkoMessageMetadata.toolDurationMs`，并行批区间并集）——`durationMs - toolDurationMs` 即 agent（模型思考/往返）时间。 */
   toolDurationMs?: number;
   /** 遥测明细的查询键（chat 会话 id + metadata.turn）——任一缺席就只出概览，没有明细。 */
   conversationId?: string;

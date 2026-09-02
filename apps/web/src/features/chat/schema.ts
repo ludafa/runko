@@ -5,7 +5,7 @@
  * `sessionEventSchema`) plus every server-invented wire sentinel built on top
  * of it (`user.message`, `turn.result`/`turn.failed`,
  * `approval.requested`/`approval.resolved`, `question.asked`/
- * `question.answered`) are retired — `@nimbo/core` no longer exports
+ * `question.answered`) are retired — `@runko/core` no longer exports
  * `SessionEvent`/`SessionItem` at all (see that package's `state.ts`), and
  * `apps/node-server`'s own `schemas/chat.ts` (already migrated, P13-5-3) confirms
  * there's nothing left to mirror them with.
@@ -13,7 +13,7 @@
  * The wire is now a stream of `ChatReplayFrame`s — a `ChunkEnvelope`
  * (`{ seq?, chunk }`, `seq` present ⇔ durable/replayable) or a `MessageFrame`
  * (`{ seq, message }`, only ever appears in replay, a finished
- * `NimboUIMessage` verbatim) — see `apps/node-server/src/schemas/chat.ts`'s own
+ * `RunkoUIMessage` verbatim) — see `apps/node-server/src/schemas/chat.ts`'s own
  * file header for the full rationale (this file's frame shapes are a
  * hand-written mirror of that server-side zod, not the kubb-generated
  * `gen/zod/chatChunkEnvelopeSchema.ts`/`chatMessageFrameSchema.ts`: kubb
@@ -25,7 +25,7 @@
  * more precision than kubb's OpenAPI-derived output can express, same as
  * before this migration).
  */
-import type { NimboChunk, NimboUIMessage } from '@nimbo/core';
+import type { RunkoChunk, RunkoUIMessage } from '@runko/core';
 import { z } from 'zod';
 
 // ---- JsonValue (packages/core/src/types.ts) — still useful client-side for
@@ -50,8 +50,8 @@ export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
 
 /**
  * Controlled exception (same rationale as `apps/node-server/src/schemas/chat.ts`'s
- * own `nimboChunkSchema`/`nimboUIMessageSchema`): `NimboChunk`/`NimboUIMessage`
- * (ai's `UIMessageChunk`/`UIMessage`, instantiated in `@nimbo/core`'s
+ * own `runkoChunkSchema`/`runkoUIMessageSchema`): `RunkoChunk`/`RunkoUIMessage`
+ * (ai's `UIMessageChunk`/`UIMessage`, instantiated in `@runko/core`'s
  * `state.ts`) have no zod schema this file can reuse — `z.any()` is the same
  * escape hatch this file has always used for structurally-unschemaable
  * external types (`jsonValueSchema` above didn't need it, but this repo's
@@ -61,15 +61,15 @@ export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
  * declaration. Both only ever parse a value that has already round-tripped
  * through `JSON.parse()` (an SSE `data:` payload, or a fetched
  * `GET .../messages` JSON body) — the server already validated the real
- * `NimboChunk`/`NimboUIMessage` shape before ever serializing it, so this
+ * `RunkoChunk`/`RunkoUIMessage` shape before ever serializing it, so this
  * boundary only needs "is this JSON, structurally, in the right envelope
- * shape" — not a redundant re-implementation of `@nimbo/core`'s own
+ * shape" — not a redundant re-implementation of `@runko/core`'s own
  * `validateSessionMessages()`/ai's `validateUIMessages()`.
  */
-const nimboChunkSchema: z.ZodType<NimboChunk> = z.any();
+const runkoChunkSchema: z.ZodType<RunkoChunk> = z.any();
 
-/** Same rationale as `nimboChunkSchema` above, for `NimboUIMessage` (`MessageFrame.message`). */
-const nimboUIMessageSchema: z.ZodType<NimboUIMessage> = z.any();
+/** Same rationale as `runkoChunkSchema` above, for `RunkoUIMessage` (`MessageFrame.message`). */
+const runkoUIMessageSchema: z.ZodType<RunkoUIMessage> = z.any();
 
 /**
  * `{ seq?, chunk }` — the live tail's own wire shape (`seq` present ⇔
@@ -80,20 +80,20 @@ const nimboUIMessageSchema: z.ZodType<NimboUIMessage> = z.any();
  */
 export const chunkEnvelopeSchema = z.object({
   seq: z.number().int().optional(),
-  chunk: nimboChunkSchema,
+  chunk: runkoChunkSchema,
 });
 
 export type ChunkEnvelope = z.infer<typeof chunkEnvelopeSchema>;
 
 /**
- * `{ seq, message }` — replay-only: a finished `NimboUIMessage`, read back
+ * `{ seq, message }` — replay-only: a finished `RunkoUIMessage`, read back
  * verbatim from a `kind = 'message'` row. Never appears on the live tail's
  * own broadcast path (a message row is only ever written once a turn has
  * already finished).
  */
 export const messageFrameSchema = z.object({
   seq: z.number().int(),
-  message: nimboUIMessageSchema,
+  message: runkoUIMessageSchema,
 });
 
 export type MessageFrame = z.infer<typeof messageFrameSchema>;

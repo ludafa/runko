@@ -1,11 +1,11 @@
 /**
  * 协议两端进程内对接（docs/tech/sandbox.md §8.4）：`cloudflareWorkspace()` 的 `fetch` 注入为
  * `fetchViaGateway(gateway)`，客户端 ← fake fetch ← 网关 ← `FakeCfSandbox` 全链路
- * 走真实 wire 编解码——覆盖 NimboFS 七方法 + NimboExec 契约、二进制往返、NDJSON
+ * 走真实 wire 编解码——覆盖 RunkoFS 七方法 + RunkoExec 契约、二进制往返、NDJSON
  * 跨 chunk 边界、401/404/409 错误翻译、abort 传播、timeoutMs 124。
  */
 import { describe, expect, it } from "vitest";
-import { DirectoryNotEmptyError, NotFoundError } from "@nimbo/virtual-fs";
+import { DirectoryNotEmptyError, NotFoundError } from "@runko/virtual-fs";
 import { cloudflareWorkspace } from "../src/index.js";
 import { createSandboxGateway } from "../src/worker.js";
 import type { CfExecResult, CfSandboxLike } from "../src/worker.js";
@@ -28,7 +28,7 @@ function neverAbort(): AbortSignal {
   return new AbortController().signal;
 }
 
-describe("NimboFS 七方法：走真实 wire 编解码", () => {
+describe("RunkoFS 七方法：走真实 wire 编解码", () => {
   it("writeFile → readFile 往返，二进制内容（含 0x00 字节）精确保真", async () => {
     const ws = makeWorkspace(new FakeCfSandbox());
     const bytes = new Uint8Array([0, 1, 2, 3, 0, 255, 254, 0, 65, 66]);
@@ -214,7 +214,7 @@ describe("鉴权与传输层错误", () => {
   });
 });
 
-describe("NimboExec：exec() 走 NDJSON 流", () => {
+describe("RunkoExec：exec() 走 NDJSON 流", () => {
   it("成功命令：onOutput 收到分片，最终 ExecResult 聚合正确", async () => {
     const ws = makeWorkspace(new FakeCfSandbox());
     const chunks: { stream: string; data: string }[] = [];

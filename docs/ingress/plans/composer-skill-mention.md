@@ -4,7 +4,7 @@ slug: composer-skill-mention
 view: 施工
 layer: 接入层
 module: —
-packages: ["@nimbo-chat/web", "@nimbo/core"]
+packages: ["@runko-chat/web", "@runko/core"]
 tags: ["composer", "skill 提及", "渐进式披露"]
 related: ["ingress/features/composer-skill-mention.md", "ingress/tech/composer-skill-mention.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -50,7 +50,7 @@ related: ["ingress/features/composer-skill-mention.md", "ingress/tech/composer-s
 2. 依赖安装（tiptap 3.29.0，版本对齐）：
 
 ```bash
-pnpm --filter @nimbo-chat/web add \
+pnpm --filter @runko-chat/web add \
   @tiptap/react @tiptap/pm @tiptap/core \
   @tiptap/extension-document @tiptap/extension-paragraph \
   @tiptap/extension-text @tiptap/extension-hard-break \
@@ -59,7 +59,7 @@ pnpm --filter @nimbo-chat/web add \
 
 > `Placeholder` 在 tiptap 3 里归 `@tiptap/extensions`（不再是独立包）。装完核对一遍实际导出位置，与技术方案 §5.3 的 import 对齐。
 
-**验收**：`pnpm --filter @nimbo-chat/web typecheck` 通过；术语表三个词条就位。
+**验收**：`pnpm --filter @runko-chat/web typecheck` 通过；术语表三个词条就位。
 
 ---
 
@@ -85,7 +85,7 @@ pnpm --filter @nimbo-chat/web add \
 - 一个合法 + 一个缺 `SKILL.md` → 只得合法那个，且有 warn 日志
 - 缺 `description` frontmatter 的 packaged skill → 跳过（`Skill.fromFS` 对此是抛错的，验证被 catch 住）
 
-**验收**：`pnpm --filter @nimbo-chat/node-server test` 全绿；旧有 chat-agent 测试改造后仍覆盖「skill 被正确传进 `defineAgent`」。
+**验收**：`pnpm --filter @runko-chat/node-server test` 全绿；旧有 chat-agent 测试改造后仍覆盖「skill 被正确传进 `defineAgent`」。
 
 ---
 
@@ -112,7 +112,7 @@ pnpm --filter @nimbo-chat/web add \
 - 清单是**缓存不是事实来源**：这一列空了/坏了，最坏是菜单空着，`buildSession` 照常自己扫描，agent 照常能用 skill。
 
 **验收**：
-- `pnpm --filter @nimbo-chat/node-server test` 全绿
+- `pnpm --filter @runko-chat/node-server test` 全绿
 - 新建会话后查库，`available_skills_json` 含 `frontend-design`
 - `GET /conversations/{id}` 响应带 `availableSkills`
 - 迁移在已有库上跑得过（存量行不炸）
@@ -137,8 +137,8 @@ pnpm --filter @nimbo-chat/web add \
 - 提示行的措辞集中在 `buildModelText` 一处，方便日后按实测效果调。
 
 **验收**：
-- 关键断言：一条带提及的消息，落[账本](../../terms.md)的 `NimboUIMessage` 文本 **==** 用户原话（不含提示行），而 `session.stream()` 收到的 **含** 提示行。
-- `pnpm --filter @nimbo-chat/node-server test` 全绿。
+- 关键断言：一条带提及的消息，落[账本](../../terms.md)的 `RunkoUIMessage` 文本 **==** 用户原话（不含提示行），而 `session.stream()` 收到的 **含** 提示行。
+- `pnpm --filter @runko-chat/node-server test` 全绿。
 
 ---
 
@@ -169,7 +169,7 @@ pnpm --filter @nimbo-chat/web add \
 - 空消息（只有空白）不发送
 - 流式期间发送键是停止键、点击触发 `onStop`
 
-**验收**：`pnpm --filter @nimbo-chat/web test` + `typecheck` + `lint` 全绿。
+**验收**：`pnpm --filter @runko-chat/web test` + `typecheck` + `lint` 全绿。
 
 ---
 
@@ -182,8 +182,8 @@ pnpm --filter @nimbo-chat/web add \
 | 命令 | 结果 |
 |------|------|
 | `pnpm -r typecheck` | ✅ 12 个成员全过 |
-| `pnpm --filter @nimbo-chat/node-server test` | ✅ 442 passed（本功能新增 39：skill-catalog 22 + store 4 + turn-runner 2 + 既有用例改造） |
-| `pnpm --filter @nimbo-chat/web test` | ✅ 244 passed（本功能新增 8 个 skill 提及用例；既有 9 个 composer 键位用例**逐条保住**） |
+| `pnpm --filter @runko-chat/node-server test` | ✅ 442 passed（本功能新增 39：skill-catalog 22 + store 4 + turn-runner 2 + 既有用例改造） |
+| `pnpm --filter @runko-chat/web test` | ✅ 244 passed（本功能新增 8 个 skill 提及用例；既有 9 个 composer 键位用例**逐条保住**） |
 | `pnpm build` / `pnpm test`（packages/\*） | ✅ 未受影响 |
 | eslint（本功能改动的文件） | ✅ 0 error（仓库预先存在的 11 个 error 全在 `test/agent/uimessage-single-ledger.test.ts`，与本功能无关） |
 
@@ -192,7 +192,7 @@ pnpm --filter @nimbo-chat/web add \
 - **键位没坏**：Enter 排队 / ⌥⏎ 插话 / Shift+Enter 换行 / 空白不发 / 流式期停止键 —— 换 tiptap 前的 9 个用例一字未改地全绿（除两处 `toHaveValue` → `toHaveTextContent`，因为 contenteditable 没有 `value` 属性）。
 - **菜单开着时 Enter 归菜单**：`onSend` 不被调用，标记块入框（对应上面回归风险最高的那条）。
 - **`/usr/local` 不被误判为提及**：前端菜单不弹 + 服务端 `extractMentionedSkills` 返回空，两侧各有用例。
-- **界面拿原话、模型拿加料版**：`turn-runner` 用例断言账本里的 `NimboUIMessage` 文本 == 用户原话，而 `session.stream()` 收到的含提示行。
+- **界面拿原话、模型拿加料版**：`turn-runner` 用例断言账本里的 `RunkoUIMessage` 文本 == 用户原话，而 `session.stream()` 收到的含提示行。
 - **不用这功能就零影响**：`buildModelText(text, [])` 返回同一个字符串（`toBe` 断言，不是 `toEqual`）。
 
 ### 5.2 真机验证（待用户执行）

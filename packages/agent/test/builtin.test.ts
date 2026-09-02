@@ -4,13 +4,13 @@
  */
 import { describe, expect, it } from "vitest";
 
-import type { ArbitrationConformanceSetup, ConformanceCase, PersistenceConformanceSetup } from "@nimbo/conformance";
-import { arbitrationCases, persistenceCases } from "@nimbo/conformance";
+import type { ArbitrationConformanceSetup, ConformanceCase, PersistenceConformanceSetup } from "@runko/conformance";
+import { arbitrationCases, persistenceCases } from "@runko/conformance";
 import type { Frame } from "../src/index.js";
 import { inProcessArbitration, inProcessStream, memoryPersistence } from "../src/index.js";
 
 // 内置内存实现也要跑一致性套件——它是「换实现不改行为」这个承诺的**基准**，
-// 别的实现全都对着它看齐。同一套用例在 `@nimbo/conformance`。
+// 别的实现全都对着它看齐。同一套用例在 `@runko/conformance`。
 /**
  * 把一致性用例接进 vitest。**套件本身不依赖任何测试框架**（它只导出 `{ name, run }`），
  * 这十几行就是「接上去」的全部成本。

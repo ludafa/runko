@@ -4,7 +4,7 @@ slug: push-notification
 view: 施工
 layer: 接入层
 module: —
-packages: ["@nimbo-chat/node-server", "@nimbo-chat/web"]
+packages: ["@runko-chat/node-server", "@runko-chat/web"]
 tags: ["推送通知", "Web Push", "等人提醒"]
 related: ["ingress/features/push-notification.md", "ingress/tech/push-notification.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -82,7 +82,7 @@ PN-9 独立，任何时候都能做，但要在 PN-10 之前定
 - [x] 三个 VAPID 变量全空时 `isPushEnabled()` 为 false，启动日志恰好一行，之后不再刷。
 - [x] 只配了两个（漏一个）时同样是 false，并 warn 出漏了哪个。
 - [x] `CHAT_PUSH_EVENTS=approval` 时只有 approval 一类通过。
-- [x] `pnpm -F @nimbo-chat/node-server typecheck` 绿。
+- [x] `pnpm -F @runko-chat/node-server typecheck` 绿。
 
 ---
 
@@ -93,7 +93,7 @@ PN-9 独立，任何时候都能做，但要在 PN-10 之前定
 **涉及文件**：
 
 - `apps/node-server/src/db/schema.ts`：新增表（字段见[技术方案 §2](../tech/push-notification.md)）
-- `drizzle/`：`pnpm -F @nimbo-chat/node-server db:generate` 产出的迁移
+- `drizzle/`：`pnpm -F @runko-chat/node-server db:generate` 产出的迁移
 - `apps/node-server/src/push/store.ts`（新建）
 
 **产出物**：
@@ -197,7 +197,7 @@ PN-9 独立，任何时候都能做，但要在 PN-10 之前定
 - [x] 浏览器设置里拒绝权限后，铃铛显示 `blocked` 且给出改设置的指引。
 - [x] `enabled:false` 时页面上完全看不到铃铛。
 - [x] 刷新页面不会产生第二行订阅。
-- [x] `pnpm -F @nimbo-chat/web typecheck` + `lint` 绿（`sw.js` 走 `// @ts-check`）。
+- [x] `pnpm -F @runko-chat/web typecheck` + `lint` 绿（`sw.js` 走 `// @ts-check`）。
 
 ---
 
@@ -280,8 +280,8 @@ PN-9 独立，任何时候都能做，但要在 PN-10 之前定
 
 **验收标准**：
 
-- [x] `pnpm -F @nimbo-chat/node-server test` 全绿，新增用例覆盖上表每一行。
-- [x] `pnpm -F @nimbo-chat/web test` 全绿。
+- [x] `pnpm -F @runko-chat/node-server test` 全绿，新增用例覆盖上表每一行。
+- [x] `pnpm -F @runko-chat/web test` 全绿。
 - [x] `pnpm -r build && pnpm -r typecheck` 全绿（CI 口径，覆盖 apps 与 examples）。
 
 ---
@@ -293,7 +293,7 @@ PN-9 独立，任何时候都能做，但要在 PN-10 之前定
 > **这一项要你点头再做。** 详细论证见[技术方案 §8](../tech/push-notification.md)。要点：
 >
 > - 现在审批 **4 分钟**没人应答就自动拒绝。手机上收到通知、人在开会，回来时它已经自己拒了——被打扰一次却什么都做不了，比不通知更糟。
-> - **两个旋钮必须一起动**：审批超时住在 `turn-runner.ts`（240 秒），[审批保活预算](../../terms.md)住在 `@nimbo/core` 的默认值（5 分钟，chat 侧没显式传）。只提超时不提预算，第 5 分钟沙盒就睡了，人第 10 分钟点「允许」，工具在一个睡掉的沙盒上执行、失败得莫名其妙。
+> - **两个旋钮必须一起动**：审批超时住在 `turn-runner.ts`（240 秒），[审批保活预算](../../terms.md)住在 `@runko/core` 的默认值（5 分钟，chat 侧没显式传）。只提超时不提预算，第 5 分钟沙盒就睡了，人第 10 分钟点「允许」，工具在一个睡掉的沙盒上执行、失败得莫名其妙。
 > - 代价在钱上：等人期间沙盒是活的。15 分钟是"收到通知 → 掏手机 → 看清命令 → 决定"的合理上限。
 
 **涉及文件**：

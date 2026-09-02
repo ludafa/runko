@@ -4,7 +4,7 @@ slug: compaction
 view: 施工
 layer: 逻辑层
 module: 执行引擎
-packages: ["@nimbo/core"]
+packages: ["@runko/core"]
 tags: ["上下文压缩", "token 预算", "历史裁剪"]
 related: ["logic/engine/features/compaction.md", "logic/engine/tech/compaction.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -24,11 +24,11 @@ related: ["logic/engine/features/compaction.md", "logic/engine/tech/compaction.m
 | P14-3 | 测试补强：验证项 5–7 + 链式/竞态用例 | tester | 未开工 |
 | P14-4 | 文档回填 | 主线程 | 未开工 |
 
-**前置条件（gate）**：P14 依赖 P13-5（single-ledger）落地。P13-5 未完成前不开工——本方案的地基是「账本里存的就是 `NimboUIMessage`、模型上下文从账本现场推导」，没有单账本则整套推导过滤无从谈起。
+**前置条件（gate）**：P14 依赖 P13-5（single-ledger）落地。P13-5 未完成前不开工——本方案的地基是「账本里存的就是 `RunkoUIMessage`、模型上下文从账本现场推导」，没有单账本则整套推导过滤无从谈起。
 
 ## 拆单
 
-1. **P14-1 server（coder）**：`compaction` 条目 kind（`agent_events.kind` 枚举扩到三值、`NimboMessageMetadata` 增补 `compaction`）+ 推导过滤（`routes/chat.ts` 的 `loadResumeState` 改造）+ 自动触发器（`turn-runner.ts` 的 `finalizeTurnPersistence` 收尾钩子）+ 摘要生成（fork 调用 + 结构化模板 + 失败降级）+ 手动端点（`POST /api/chat/sessions/:id/compact`，`isTurnActive` → 409 语义）+ `(session_id, upToSeq)` 唯一约束 + openapi 重生成；离线验证项 1–4 的单测。
+1. **P14-1 server（coder）**：`compaction` 条目 kind（`agent_events.kind` 枚举扩到三值、`RunkoMessageMetadata` 增补 `compaction`）+ 推导过滤（`routes/chat.ts` 的 `loadResumeState` 改造）+ 自动触发器（`turn-runner.ts` 的 `finalizeTurnPersistence` 收尾钩子）+ 摘要生成（fork 调用 + 结构化模板 + 失败降级）+ 手动端点（`POST /api/chat/sessions/:id/compact`，`isTurnActive` → 409 语义）+ `(session_id, upToSeq)` 唯一约束 + openapi 重生成；离线验证项 1–4 的单测。
 2. **P14-2 web（coder）**：[kubb 重生成](../../../terms.md)；分隔卡片（可展开摘要，auto / manual 文案区分）；输入框 `/compact` 命令（可带 instructions）。
 3. **P14-3 测试补强（tester）**：验证项 5–7（真机段沿 examples 凭证门控约定）+ 链式 / 竞态用例。
 4. **P14-4 文档回填（主线程）**：plans/core-sdk 变更记录、plans/verification 用例、tech/chat-webapp 存储相关表述修订、terms.md §七校对。

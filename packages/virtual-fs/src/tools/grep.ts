@@ -11,8 +11,8 @@
  * **JavaScript 正则语义**（非 POSIX/PCRE），非法正则返回带提示错误。
  */
 import { z } from "zod";
-import { defineTool, SearchUnsupportedError } from "@nimbo/core";
-import type { ContentSearchGroup, ContentSearchLine, ContentSearchQuery, ContentSearchResult, NimboFS, Tool, ToolReturn } from "@nimbo/core";
+import { defineTool, SearchUnsupportedError } from "@runko/core";
+import type { ContentSearchGroup, ContentSearchLine, ContentSearchQuery, ContentSearchResult, RunkoFS, Tool, ToolReturn } from "@runko/core";
 import { globToRegExp, isIgnoredPath } from "../path.js";
 import { GREP_MAX_FILES, GREP_MAX_LINES, decode, describeError, errorResult, isTextMimeType, joinGlobPattern, resolveDefaultIgnore, truncationNotice } from "./shared.js";
 
@@ -26,7 +26,7 @@ const inputSchema = z.object({
 });
 
 /** Directories/references/binary files are not text-searchable; returns undefined to skip them. */
-async function readTextOrSkip(fs: NimboFS, path: string): Promise<string | undefined> {
+async function readTextOrSkip(fs: RunkoFS, path: string): Promise<string | undefined> {
   let stat;
   try {
     stat = await fs.stat(path);
@@ -100,7 +100,7 @@ function capContentSearch(groups: ContentSearchGroup[], maxFiles: number, maxLin
 }
 
 /** JS 正则逐文件扫描回退：候选集经 `fs.glob(scope)` 拿到，本地过滤 ignore + 排序后逐个读取匹配。 */
-async function fallbackSearchContent(fs: NimboFS, regex: RegExp, query: ContentSearchQuery): Promise<ContentSearchResult> {
+async function fallbackSearchContent(fs: RunkoFS, regex: RegExp, query: ContentSearchQuery): Promise<ContentSearchResult> {
   const candidates = await fs.glob(query.scope);
   const ignorePatterns = (query.ignore ?? []).map(globToRegExp);
   const sorted = candidates.filter((path) => !isIgnoredPath(path, ignorePatterns)).sort();
@@ -120,7 +120,7 @@ async function fallbackSearchContent(fs: NimboFS, regex: RegExp, query: ContentS
   return capContentSearch(groups, query.maxFiles, query.maxLines, query.mode);
 }
 
-async function resolveContentSearch(fs: NimboFS, regex: RegExp, query: ContentSearchQuery): Promise<ContentSearchResult> {
+async function resolveContentSearch(fs: RunkoFS, regex: RegExp, query: ContentSearchQuery): Promise<ContentSearchResult> {
   if (fs.searchContent) {
     try {
       return await fs.searchContent(query);
@@ -187,7 +187,7 @@ export function createGrepTool(): Tool {
         regex = new RegExp(input.pattern, input.ignore_case ? "i" : "");
       } catch (error) {
         return errorResult(
-          `Invalid regular expression "${input.pattern}": ${describeError(error)}. nimbo grep uses JavaScript ` +
+          `Invalid regular expression "${input.pattern}": ${describeError(error)}. runko grep uses JavaScript ` +
             "RegExp syntax (not POSIX/PCRE) — check for unsupported syntax.",
         );
       }

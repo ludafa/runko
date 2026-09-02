@@ -26,7 +26,7 @@
  * `diff()/writeBack()` 的宿主导出面；两者语义相邻但服务不同消费者，P2-1 已在
  * docs/tech/core-sdk.md §4.4"语义澄清"里定过一次，这里是 P2-2 侧的落地（orchitector 补充 a）。
  */
-import type { JsonValue, NimboFS } from "@nimbo/core";
+import type { JsonValue, RunkoFS } from "@runko/core";
 import { DEFAULT_MIME_TYPE } from "../mime.js";
 import { globToRegExp, isIgnoredPath } from "../path.js";
 
@@ -124,7 +124,7 @@ export function isTextMimeType(mimeType: string | undefined): boolean {
  * readState，使"连续编辑无需重读"成立（docs/tech/builtin-tools.md §4："read→edit→
  * 再 edit，第二次无需重读"）。
  */
-export async function registerWrite(fs: NimboFS, path: string, readState: ReadStateStore): Promise<void> {
+export async function registerWrite(fs: RunkoFS, path: string, readState: ReadStateStore): Promise<void> {
   const stat = await fs.stat(path);
   if (stat.mtime !== undefined) {readState.set(path, stat.mtime);}
 }
@@ -148,7 +148,7 @@ export function checkReadBeforeWrite(path: string, currentMtime: number | undefi
   return undefined;
 }
 
-/** `path`(scope) + `pattern`(relative) → 单个绝对 glob 模式串，喂给 `NimboFS.glob()`。 */
+/** `path`(scope) + `pattern`(relative) → 单个绝对 glob 模式串，喂给 `RunkoFS.glob()`。 */
 export function joinGlobPattern(base: string, pattern: string): string {
   const normalizedBase = base === "/" ? "" : base.replace(/\/+$/, "");
   const normalizedPattern = pattern.startsWith("/") ? pattern.slice(1) : pattern;

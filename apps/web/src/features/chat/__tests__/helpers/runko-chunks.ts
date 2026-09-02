@@ -1,9 +1,9 @@
 /**
- * Web-side counterpart to `apps/node-server/test/helpers/nimbo-chunks.ts` /
- * `packages/core/test/helpers/nimbo-chunks.ts` (docs/tech/single-ledger.md §5/§6, P13-5-5): small factories for `NimboChunk`s and the wire's
+ * Web-side counterpart to `apps/node-server/test/helpers/runko-chunks.ts` /
+ * `packages/core/test/helpers/runko-chunks.ts` (docs/tech/single-ledger.md §5/§6, P13-5-5): small factories for `RunkoChunk`s and the wire's
  * `ChatReplayFrame` envelopes around them, trimmed to what this package's own
  * tests need (`MessageLedger`/`useChatMessages`/component fixtures) — no
- * `drainTurn`/`fingerprintChunk` (nothing here drives a real `@nimbo/core`
+ * `drainTurn`/`fingerprintChunk` (nothing here drives a real `@runko/core`
  * generator or needs structural-equivalence comparisons that ignore random
  * ids; this package's tests assign every id by hand instead of getting one
  * from `randomUUID()`, so plain `toEqual` already works for the replay-vs-
@@ -12,12 +12,12 @@
 import type {
   ErrorData,
   FileChangeData,
-  NimboChunk,
-  NimboMessageMetadata,
-  NimboUIMessage,
   PlanUpdateData,
+  RunkoChunk,
+  RunkoMessageMetadata,
+  RunkoUIMessage,
   ToolTimingData,
-} from '@nimbo/core';
+} from '@runko/core';
 import type { ToolUIPart, UITools } from 'ai';
 import { isToolUIPart } from 'ai';
 
@@ -29,16 +29,16 @@ import type {
 } from '../../schema';
 
 // ---------------------------------------------------------------------------
-// Chunk factories — one per `NimboChunk` variant these tests construct by
-// hand, mirroring the shapes `@nimbo/core`'s `loop.ts` actually produces
+// Chunk factories — one per `RunkoChunk` variant these tests construct by
+// hand, mirroring the shapes `@runko/core`'s `loop.ts` actually produces
 // (`runOneStep`/`settleToolCall`/`drainSteerMessages`/`finalizeTurn`, see
 // that file's own doc comments for the exact sequencing this mirrors).
 // ---------------------------------------------------------------------------
 
 export function startChunk(
   messageId: string,
-  messageMetadata?: NimboMessageMetadata,
-): NimboChunk {
+  messageMetadata?: RunkoMessageMetadata,
+): RunkoChunk {
   return {
     type: 'start',
     messageId,
@@ -46,41 +46,41 @@ export function startChunk(
   };
 }
 
-export function startStepChunk(): NimboChunk {
+export function startStepChunk(): RunkoChunk {
   return { type: 'start-step' };
 }
 
-export function finishStepChunk(): NimboChunk {
+export function finishStepChunk(): RunkoChunk {
   return { type: 'finish-step' };
 }
 
 export function finishChunk(
   finishReason: 'stop' | 'tool-calls' = 'stop',
-): NimboChunk {
+): RunkoChunk {
   return { type: 'finish', finishReason };
 }
 
-export function textStartChunk(id: string): NimboChunk {
+export function textStartChunk(id: string): RunkoChunk {
   return { type: 'text-start', id };
 }
-export function textDeltaChunk(id: string, delta: string): NimboChunk {
+export function textDeltaChunk(id: string, delta: string): RunkoChunk {
   return { type: 'text-delta', id, delta };
 }
-export function textEndChunk(id: string): NimboChunk {
+export function textEndChunk(id: string): RunkoChunk {
   return { type: 'text-end', id };
 }
 
-export function reasoningStartChunk(id: string): NimboChunk {
+export function reasoningStartChunk(id: string): RunkoChunk {
   return { type: 'reasoning-start', id };
 }
-export function reasoningDeltaChunk(id: string, delta: string): NimboChunk {
+export function reasoningDeltaChunk(id: string, delta: string): RunkoChunk {
   return { type: 'reasoning-delta', id, delta };
 }
-export function reasoningEndChunk(id: string): NimboChunk {
+export function reasoningEndChunk(id: string): RunkoChunk {
   return { type: 'reasoning-end', id };
 }
 
-export function fileChunk(url: string, mediaType: string): NimboChunk {
+export function fileChunk(url: string, mediaType: string): RunkoChunk {
   return { type: 'file', url, mediaType };
 }
 
@@ -88,11 +88,11 @@ export function toolInputAvailableChunk(
   toolCallId: string,
   toolName: string,
   input: JsonValue,
-): NimboChunk {
+): RunkoChunk {
   return { type: 'tool-input-available', toolCallId, toolName, input };
 }
 
-export function toolApprovalRequestChunk(callId: string): NimboChunk {
+export function toolApprovalRequestChunk(callId: string): RunkoChunk {
   return {
     type: 'tool-approval-request',
     approvalId: callId,
@@ -104,7 +104,7 @@ export function toolApprovalResponseChunk(
   callId: string,
   approved: boolean,
   reason?: string,
-): NimboChunk {
+): RunkoChunk {
   return {
     type: 'tool-approval-response',
     approvalId: callId,
@@ -116,42 +116,42 @@ export function toolApprovalResponseChunk(
 export function toolOutputAvailableChunk(
   toolCallId: string,
   output: JsonValue,
-): NimboChunk {
+): RunkoChunk {
   return { type: 'tool-output-available', toolCallId, output };
 }
 
 export function toolOutputErrorChunk(
   toolCallId: string,
   errorText: string,
-): NimboChunk {
+): RunkoChunk {
   return { type: 'tool-output-error', toolCallId, errorText };
 }
 
-export function toolOutputDeniedChunk(toolCallId: string): NimboChunk {
+export function toolOutputDeniedChunk(toolCallId: string): RunkoChunk {
   return { type: 'tool-output-denied', toolCallId };
 }
 
 export function dataFileChangeChunk(
   id: string,
   data: FileChangeData,
-): NimboChunk {
+): RunkoChunk {
   return { type: 'data-file-change', id, data };
 }
 
-export function dataPlanUpdateChunk(data: PlanUpdateData): NimboChunk {
+export function dataPlanUpdateChunk(data: PlanUpdateData): RunkoChunk {
   return { type: 'data-plan-update', id: 'plan-update', data };
 }
 
-export function dataErrorChunk(data: ErrorData): NimboChunk {
+export function dataErrorChunk(data: ErrorData): RunkoChunk {
   return { type: 'data-error', id: 'turn-error', data };
 }
 
-/** `transient` defaults to `true` — the only shape `@nimbo/core`'s loop actually produces for this chunk type (docs/tech/single-ledger.md §2.2b). */
+/** `transient` defaults to `true` — the only shape `@runko/core`'s loop actually produces for this chunk type (docs/tech/single-ledger.md §2.2b). */
 export function dataToolProgressChunk(
   toolCallId: string,
   text: string,
   transient = true,
-): NimboChunk {
+): RunkoChunk {
   return {
     type: 'data-tool-progress',
     id: toolCallId,
@@ -161,13 +161,13 @@ export function dataToolProgressChunk(
 }
 
 export function messageMetadataChunk(
-  messageMetadata: NimboMessageMetadata,
-): NimboChunk {
+  messageMetadata: RunkoMessageMetadata,
+): RunkoChunk {
   return { type: 'message-metadata', messageMetadata };
 }
 
 /**
- * `data-tool-timing`（chat 可观测性：工具起止时间戳，`@nimbo/core`'s
+ * `data-tool-timing`（chat 可观测性：工具起止时间戳，`@runko/core`'s
  * `state.ts`/`loop.ts`）——`id` 恒等于 `toolCallId`（同 id 覆盖）。
  * `completedAt` 省略时对应"只打 `startedAt`"那次更新（`startToolTiming`）。
  */
@@ -175,7 +175,7 @@ export function dataToolTimingChunk(
   toolCallId: string,
   startedAt: number,
   completedAt?: number,
-): NimboChunk {
+): RunkoChunk {
   const data: ToolTimingData =
     completedAt === undefined ?
       { toolCallId, startedAt }
@@ -191,13 +191,13 @@ export function dataToolTimingChunk(
 // only on durable chunks) in one call.
 // ---------------------------------------------------------------------------
 
-export function chunkFrame(chunk: NimboChunk, seq?: number): ChunkEnvelope {
+export function chunkFrame(chunk: RunkoChunk, seq?: number): ChunkEnvelope {
   return seq === undefined ? { chunk } : { seq, chunk };
 }
 
 export function messageFrame(
   seq: number,
-  message: NimboUIMessage,
+  message: RunkoUIMessage,
 ): MessageFrame {
   return { seq, message };
 }
@@ -207,7 +207,7 @@ export function messageFrame(
  * `reasoning-delta` and anything `transient: true` never consume a `seq`;
  * every other chunk does.
  */
-export function isDurableChunk(chunk: NimboChunk): boolean {
+export function isDurableChunk(chunk: RunkoChunk): boolean {
   if (chunk.type === 'text-delta' || chunk.type === 'reasoning-delta') {
     return false;
   }
@@ -216,7 +216,7 @@ export function isDurableChunk(chunk: NimboChunk): boolean {
 
 /** Assigns sequential `seq`s to only the durable chunks in order, starting after `startSeq` — mirrors the server's own persist-then-broadcast numbering (`turn-runner/persistence.ts`'s `createEmitWire`). */
 export function toChunkEnvelopes(
-  chunks: readonly NimboChunk[],
+  chunks: readonly RunkoChunk[],
   startSeq = 0,
 ): ChunkEnvelope[] {
   let seq = startSeq;
@@ -230,8 +230,8 @@ export function toChunkEnvelopes(
 }
 
 // ---------------------------------------------------------------------------
-// Higher-level step builders — one nimbo "step" = one assistant
-// `NimboUIMessage`'s worth of chunks (`loop.ts`'s own file header), composed
+// Higher-level step builders — one runko "step" = one assistant
+// `RunkoUIMessage`'s worth of chunks (`loop.ts`'s own file header), composed
 // from the factories above in the exact order `runOneStep`/`settleToolCall`
 // actually yield them.
 // ---------------------------------------------------------------------------
@@ -242,7 +242,7 @@ export function textStepChunks(opts: {
   textId: string;
   text: string;
   finishReason?: 'stop' | 'tool-calls';
-}): NimboChunk[] {
+}): RunkoChunk[] {
   return [
     startChunk(opts.messageId),
     startStepChunk(),
@@ -262,7 +262,7 @@ export function toolAllowedStepChunks(opts: {
   input: JsonValue;
   output: JsonValue;
   finishReason?: 'stop' | 'tool-calls';
-}): NimboChunk[] {
+}): RunkoChunk[] {
   return [
     startChunk(opts.messageId),
     startStepChunk(),
@@ -279,7 +279,7 @@ export function toolReviewPendingChunks(opts: {
   toolCallId: string;
   toolName: string;
   input: JsonValue;
-}): NimboChunk[] {
+}): RunkoChunk[] {
   return [
     startChunk(opts.messageId),
     startStepChunk(),
@@ -293,7 +293,7 @@ export function toolReviewAllowedChunks(opts: {
   toolCallId: string;
   output: JsonValue;
   finishReason?: 'stop' | 'tool-calls';
-}): NimboChunk[] {
+}): RunkoChunk[] {
   return [
     toolApprovalResponseChunk(opts.toolCallId, true),
     toolOutputAvailableChunk(opts.toolCallId, opts.output),
@@ -305,7 +305,7 @@ export function toolReviewDeniedChunks(opts: {
   toolCallId: string;
   reason: string;
   finishReason?: 'stop' | 'tool-calls';
-}): NimboChunk[] {
+}): RunkoChunk[] {
   return [
     toolApprovalResponseChunk(opts.toolCallId, false, opts.reason),
     toolOutputDeniedChunk(opts.toolCallId),
@@ -320,7 +320,7 @@ export function toolDirectDeniedStepChunks(opts: {
   toolName: string;
   input: JsonValue;
   finishReason?: 'stop' | 'tool-calls';
-}): NimboChunk[] {
+}): RunkoChunk[] {
   return [
     startChunk(opts.messageId),
     startStepChunk(),
@@ -335,7 +335,7 @@ export function toolDirectDeniedStepChunks(opts: {
 export function steerTextMessageChunks(opts: {
   messageId: string;
   text: string;
-}): NimboChunk[] {
+}): RunkoChunk[] {
   const partId = `${opts.messageId}-0`;
   return [
     startChunk(opts.messageId, { steered: true }),
@@ -347,16 +347,16 @@ export function steerTextMessageChunks(opts: {
 }
 
 /** The turn-ending standalone `message-metadata` chunk (`loop.ts`'s `finalizeTurn`) — not wrapped in any `start`/`finish` of its own. */
-export function turnEndChunk(metadata: NimboMessageMetadata): NimboChunk {
+export function turnEndChunk(metadata: RunkoMessageMetadata): RunkoChunk {
   return messageMetadataChunk(metadata);
 }
 
-/** Plain assistant `NimboUIMessage` — for constructing a `MessageFrame` (replay-only, a message already fully finished server-side) without going through chunk materialization. */
+/** Plain assistant `RunkoUIMessage` — for constructing a `MessageFrame` (replay-only, a message already fully finished server-side) without going through chunk materialization. */
 export function assistantMessage(
   id: string,
-  parts: NimboUIMessage['parts'],
-  metadata?: NimboMessageMetadata,
-): NimboUIMessage {
+  parts: RunkoUIMessage['parts'],
+  metadata?: RunkoMessageMetadata,
+): RunkoUIMessage {
   return {
     id,
     role: 'assistant',
@@ -365,25 +365,25 @@ export function assistantMessage(
   };
 }
 
-export function userMessage(id: string, text: string): NimboUIMessage {
+export function userMessage(id: string, text: string): RunkoUIMessage {
   return { id, role: 'user', parts: [{ type: 'text', text }] };
 }
 
 /** Every `ChatReplayFrame` this test helper module can produce, flattened + seq-assigned in one call — the common case of "feed this whole scenario into a ledger/hook". */
 export function toReplayFrames(
-  chunks: readonly NimboChunk[],
+  chunks: readonly RunkoChunk[],
   startSeq = 0,
 ): ChatReplayFrame[] {
   return toChunkEnvelopes(chunks, startSeq);
 }
 
 // ---------------------------------------------------------------------------
-// Message extractors — reading a materialized `NimboUIMessage` back out
-// (mirrors `apps/node-server/test/helpers/nimbo-chunks.ts`'s own extractor set).
+// Message extractors — reading a materialized `RunkoUIMessage` back out
+// (mirrors `apps/node-server/test/helpers/runko-chunks.ts`'s own extractor set).
 // ---------------------------------------------------------------------------
 
-/** Every tool part on one message (excludes the never-produced-by-nimbo `dynamic-tool`). */
-export function toolPartsOf(message: NimboUIMessage): ToolUIPart<UITools>[] {
+/** Every tool part on one message (excludes the never-produced-by-runko `dynamic-tool`). */
+export function toolPartsOf(message: RunkoUIMessage): ToolUIPart<UITools>[] {
   const result: ToolUIPart<UITools>[] = [];
   for (const part of message.parts) {
     if (isToolUIPart<UITools>(part) && part.type !== 'dynamic-tool') {
@@ -395,14 +395,14 @@ export function toolPartsOf(message: NimboUIMessage): ToolUIPart<UITools>[] {
 
 /** The one tool part on `message` with this `toolCallId`, if any. */
 export function toolPartById(
-  message: NimboUIMessage,
+  message: RunkoUIMessage,
   toolCallId: string,
 ): ToolUIPart<UITools> | undefined {
   return toolPartsOf(message).find((part) => part.toolCallId === toolCallId);
 }
 
 /** Concatenates every `text` part on a message. */
-export function collectText(message: NimboUIMessage | undefined): string {
+export function collectText(message: RunkoUIMessage | undefined): string {
   let text = '';
   if (message === undefined) {
     return text;

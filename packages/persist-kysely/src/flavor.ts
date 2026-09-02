@@ -33,7 +33,7 @@
  * > `ask-user` 的问题正文）读回来就是个 JS string，跟「还没解析的 JSON 文本」在类型上
  * > 完全一样，猜不出来。上一版就是栽在这。每种方言只认自己那一种。
  */
-import type { JsonValue } from "@nimbo/core";
+import type { JsonValue } from "@runko/core";
 
 export type Flavor = "sqlite" | "postgres" | "mysql";
 

@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
-import { nimboDataPartSchemas, sessionStateSchema, validateSessionMessages, type NimboUIMessage, type SessionState } from "../src/state.js";
+import { runkoDataPartSchemas, sessionStateSchema, validateSessionMessages, type RunkoUIMessage, type SessionState } from "../src/state.js";
 
 const validState: SessionState = {
   id: "sess_1",
@@ -82,12 +82,12 @@ describe("sessionStateSchema", () => {
 });
 
 describe("SessionState.messages type", () => {
-  it("is NimboUIMessage[] (the single-ledger working format, docs/tech/single-ledger.md §5-2)", () => {
-    expectTypeOf<SessionState["messages"]>().toEqualTypeOf<NimboUIMessage[]>();
+  it("is RunkoUIMessage[] (the single-ledger working format, docs/tech/single-ledger.md §5-2)", () => {
+    expectTypeOf<SessionState["messages"]>().toEqualTypeOf<RunkoUIMessage[]>();
 
-    const fromLedger: NimboUIMessage[] = [{ id: "m1", role: "user", parts: [{ type: "text", text: "hi" }] }];
+    const fromLedger: RunkoUIMessage[] = [{ id: "m1", role: "user", parts: [{ type: "text", text: "hi" }] }];
     const state: SessionState = { id: "s", turn: 0, createdAt: 0, messages: fromLedger };
-    const backToLedger: NimboUIMessage[] = state.messages;
+    const backToLedger: RunkoUIMessage[] = state.messages;
 
     expect(backToLedger).toBe(fromLedger);
   });
@@ -95,26 +95,26 @@ describe("SessionState.messages type", () => {
 
 // ---- data-tool-timing（chat 可观测性：工具起止时间戳，state.ts 的 toolTimingDataSchema） ----
 
-describe('nimboDataPartSchemas["tool-timing"]', () => {
+describe('runkoDataPartSchemas["tool-timing"]', () => {
   it("accepts { toolCallId, startedAt } with completedAt omitted (still in flight, or a crash-residue record)", () => {
-    expect(nimboDataPartSchemas["tool-timing"].safeParse({ toolCallId: "call_1", startedAt: 1000 }).success).toBe(true);
+    expect(runkoDataPartSchemas["tool-timing"].safeParse({ toolCallId: "call_1", startedAt: 1000 }).success).toBe(true);
   });
 
   it("accepts { toolCallId, startedAt, completedAt } (settled)", () => {
-    expect(nimboDataPartSchemas["tool-timing"].safeParse({ toolCallId: "call_1", startedAt: 1000, completedAt: 1500 }).success).toBe(true);
+    expect(runkoDataPartSchemas["tool-timing"].safeParse({ toolCallId: "call_1", startedAt: 1000, completedAt: 1500 }).success).toBe(true);
   });
 
   it("rejects a value missing startedAt — the one required timestamp", () => {
-    expect(nimboDataPartSchemas["tool-timing"].safeParse({ toolCallId: "call_1", completedAt: 1500 }).success).toBe(false);
+    expect(runkoDataPartSchemas["tool-timing"].safeParse({ toolCallId: "call_1", completedAt: 1500 }).success).toBe(false);
   });
 
   it("rejects a value missing toolCallId", () => {
-    expect(nimboDataPartSchemas["tool-timing"].safeParse({ startedAt: 1000 }).success).toBe(false);
+    expect(runkoDataPartSchemas["tool-timing"].safeParse({ startedAt: 1000 }).success).toBe(false);
   });
 
   it("rejects non-numeric startedAt/completedAt", () => {
-    expect(nimboDataPartSchemas["tool-timing"].safeParse({ toolCallId: "call_1", startedAt: "1000" }).success).toBe(false);
-    expect(nimboDataPartSchemas["tool-timing"].safeParse({ toolCallId: "call_1", startedAt: 1000, completedAt: "1500" }).success).toBe(false);
+    expect(runkoDataPartSchemas["tool-timing"].safeParse({ toolCallId: "call_1", startedAt: "1000" }).success).toBe(false);
+    expect(runkoDataPartSchemas["tool-timing"].safeParse({ toolCallId: "call_1", startedAt: 1000, completedAt: "1500" }).success).toBe(false);
   });
 });
 
@@ -124,7 +124,7 @@ describe("validateSessionMessages() — data-tool-timing deep validation (ai's v
    * 的第三条消息本身就带一个合法的 output-available 工具部件——复用这个真实
    * 消息骨架，只在它的 `parts` 末尾追加一个 `data-tool-timing` 部件，而不是
    * 从零手搭一整条消息去猜 ai 的深层校验对其它字段的具体要求。返回
-   * `unknown[]`（不是 `NimboUIMessage[]`）——`validateSessionMessages(raw:
+   * `unknown[]`（不是 `RunkoUIMessage[]`）——`validateSessionMessages(raw:
    * unknown)` 本就接受 `unknown`，这里刻意不需要给 `data` 字段做任何类型断言
    * 就能构造出"结构基本合法，只有这一个 data 部件可能不合法"的输入。
    */

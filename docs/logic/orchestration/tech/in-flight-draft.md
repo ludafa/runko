@@ -4,7 +4,7 @@ slug: in-flight-draft
 view: 技术
 layer: 逻辑层
 module: 轮编排
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["进行中草稿", "内存态", "账本写入时机", "崩溃恢复"]
 related: ["architecture/tech/agent-kernel.md"]
 ---
@@ -133,7 +133,7 @@ flowchart LR
 
 因为官方那套的前提是 **serverless**——每个请求可能是一个全新的短命实例，进程里存不住任何东西，**它没得选**。
 
-nimbo 是常驻进程，而且这一轮本来就在进程内跑着：
+runko 是常驻进程，而且这一轮本来就在进程内跑着：
 
 ```mermaid
 flowchart TB
@@ -142,7 +142,7 @@ flowchart TB
         V1["请求 1<br/>实例 A"] -.->|"进程结束<br/>东西没了"| V2["请求 2<br/>实例 B"]
         V2 --> VR[("必须外置到 Redis")]
     end
-    subgraph nimbo["nimbo（常驻进程）"]
+    subgraph runko["runko（常驻进程）"]
         direction TB
         N1["一轮在后台跑着<br/>内存里有它的全套状态"]
         N2["SSE 连接直接挂在它身上"]
@@ -162,7 +162,7 @@ flowchart TB
 interface ActiveTurn {
   // …既有字段…
   /** 本轮至今的全部临时数据，按到达顺序。这一轮结束时随它一起被丢掉。 */
-  draft: NimboChunk[];
+  draft: RunkoChunk[];
 }
 ```
 
@@ -523,7 +523,7 @@ flowchart TB
         direction TB
         T1["交给持久化工作流引擎"] --> T2["引擎自己负责存和唤醒"]
     end
-    subgraph p3["nimbo：第三条路"]
+    subgraph p3["runko：第三条路"]
         direction TB
         U1["在进程里等着"] --> U2["需要固定路由"]
     end
@@ -535,7 +535,7 @@ flowchart TB
 
 - **我们选的是第三条路。** 换来的是「一轮语义完整」（agent 停下来等你，而不是结束了再重来）和账本干净，代价就是需要固定路由。这跟本附录的结论一致，不是妥协。
 
-  > **这一条已经过时，以 [架构总纲 · 技术方案 §4](../../../architecture/tech/agent-kernel.md) 为准。** 上图那个「nimbo：第三条路 = 在进程里等着 → 需要固定路由」画的是**只在内存里等**，而正式方案是**混合模式**：先在内存里等一段（默认沿用[审批保活预算](../../../terms.md) 5 分钟），**等不到就[挂起](../../../terms.md)**——落盘退出、释放归属、腾出机器，人几小时后回来**在任意节点**恢复。
+  > **这一条已经过时，以 [架构总纲 · 技术方案 §4](../../../architecture/tech/agent-kernel.md) 为准。** 上图那个「runko：第三条路 = 在进程里等着 → 需要固定路由」画的是**只在内存里等**，而正式方案是**混合模式**：先在内存里等一段（默认沿用[审批保活预算](../../../terms.md) 5 分钟），**等不到就[挂起](../../../terms.md)**——落盘退出、释放归属、腾出机器，人几小时后回来**在任意节点**恢复。
   >
   > 所以「等人」不再要求那个节点一直活着，固定路由只在**内存窗口那一段**内需要。三点澄清：
   >

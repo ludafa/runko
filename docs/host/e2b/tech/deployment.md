@@ -4,7 +4,7 @@ slug: deployment
 view: 技术
 layer: 宿主层
 module: 沙盒
-packages: ["@nimbo/sandbox-e2b"]
+packages: ["@runko/sandbox-e2b"]
 tags: ["E2B", "沙盒", "pause", "autoResume", "心跳", "缓存失效", "沙盒模板"]
 related: ["host/e2b/features/deployment.md", "host/contract/tech/sandbox-provider.md", "host/contract/tech/sandbox.md"]
 ---
@@ -103,7 +103,7 @@ E2B 的 `POST /sandboxes/{id}/timeout` 文档原话是「沙盒将在**请求时
 
 `SandboxOpts` 只有 template / timeout / lifecycle / envs / metadata，**没有任何内存参数**。E2B 只在构建模板时给你设资源的机会。
 
-自带的 `base` 是 2 vCPU / 512 MiB，跑 `npm install` 会 OOM。所以用 `Template().fromBaseImage()`（**同一个** base 镜像，盒内环境零变化）以 `memoryMB: 1024` 构建并发布 `nimbo-chat-base`。
+自带的 `base` 是 2 vCPU / 512 MiB，跑 `npm install` 会 OOM。所以用 `Template().fromBaseImage()`（**同一个** base 镜像，盒内环境零变化）以 `memoryMB: 1024` 构建并发布 `runko-chat-base`。
 
 规格三项都**从 env 读、以代码里的 `DEFAULT_*` 常量兜底**，构建脚本与运行时共用同一组 resolver，名字不会漂。**但生效时机不同**：
 

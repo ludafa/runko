@@ -10,8 +10,8 @@
  * **实例级、不是模块级**：一个进程里可以有多个 `AgentRuntime`（多租户、测试并跑），
  * 模块级的 Map 会让它们互相踩。
  */
-import type { NimboChunk } from "@nimbo/core";
-import type { HumanDecision, JsonValue } from "@nimbo/core";
+import type { RunkoChunk } from "@runko/core";
+import type { HumanDecision, JsonValue } from "@runko/core";
 
 import type { Grant } from "../arbitration.js";
 import type { TurnInput, TurnPhase } from "../types.js";
@@ -60,7 +60,7 @@ export interface ActiveTurn {
    */
   abortReason: string | undefined;
   /** [进行中草稿](../../../../docs/terms.md)：本轮至今的全部耐久 chunk，按到达顺序。这一轮结束时随它一起丢掉。 */
-  draft: NimboChunk[];
+  draft: RunkoChunk[];
   /** 绑到这一轮自己的 `session.steer`；`preparing` 阶段是 `undefined`（还没有 session 可绑）。 */
   steer: ((input: string) => boolean) | undefined;
   pendingReviews: Map<string, ReviewPendingEntry>;

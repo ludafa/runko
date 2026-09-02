@@ -1,8 +1,8 @@
 {
-  "name": "@nimbo/docs",
+  "name": "@runko/docs",
   "version": "0.0.0",
   "private": true,
-  "description": "nimbo 设计文档站（VitePress）：按架构分层组织的功能 / 技术方案 / 施工进展三视角文档，可独立构建与部署（不发布）",
+  "description": "runko 设计文档站（VitePress）：按架构分层组织的功能 / 技术方案 / 施工进展三视角文档，可独立构建与部署（不发布）",
   "type": "module",
   "license": "ISC",
   "engines": {

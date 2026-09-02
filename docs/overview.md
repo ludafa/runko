@@ -1,4 +1,4 @@
-# nimbo（中文）
+# runko（中文）
 
 > 英文版（根目录）见 [../README.md](../README.md)。
 
@@ -10,23 +10,23 @@
 
 - **CLI 封装类**（`@openai/codex-sdk`、`@anthropic-ai/claude-agent-sdk`）：本质是 spawn 平台二进制的进程包装——重、绑定单一厂商、**没有虚拟文件抽象**（agent 只能操作真实磁盘）、会话状态落在用户目录，服务端多租户场景难用。
 - **纯 API client**（`@anthropic-ai/sdk`、`openai`）：只给 messages/tool-use 原语，loop、工具、文件、skills 全要自己搭。
-- **eve**（API 设计优秀，nimbo 的 API 层次即参考它）：但它是带 HTTP server 与 durable workflow 的**框架**，不是可嵌入进程内的库；文件操作在真实沙盒。
+- **eve**（API 设计优秀，runko 的 API 层次即参考它）：但它是带 HTTP server 与 durable workflow 的**框架**，不是可嵌入进程内的库；文件操作在真实沙盒。
 
 **核心痛点**：想在普通 Node 服务里嵌入"能改文件、能执行任务"的 agent，要么被绑死在某家 CLI 上，要么从零手写 loop。
 
-**nimbo 的答案** = eve 的 API 人体工学 + codex-sdk 的 item 级事件粒度 + AI SDK 的模型层（30+ provider 任选）+ 自有的 VirtualFS 内核与 loop，以可嵌入库的形态交付。关键差异化：**虚拟文件系统**——agent 的所有文件读写默认落在内存/overlay 层，全程不碰真实磁盘，天然多租户安全；结束后 `diff()` 导出、`writeBack()` 才落盘。
+**runko 的答案** = eve 的 API 人体工学 + codex-sdk 的 item 级事件粒度 + AI SDK 的模型层（30+ provider 任选）+ 自有的 VirtualFS 内核与 loop，以可嵌入库的形态交付。关键差异化：**虚拟文件系统**——agent 的所有文件读写默认落在内存/overlay 层，全程不碰真实磁盘，天然多租户安全；结束后 `diff()` 导出、`writeBack()` 才落盘。
 
-典型场景：SaaS 内嵌代码助手（改代码返回 diff，零临时文件）、CI/后台流水线节点（结构化输出接回流水线）、带领域能力的 agent 产品（SKILL.md 生态复用）、自定义执行环境（宿主沙盒经 `NimboExec` 接口注入，loop 零改动）。
+典型场景：SaaS 内嵌代码助手（改代码返回 diff，零临时文件）、CI/后台流水线节点（结构化输出接回流水线）、带领域能力的 agent 产品（SKILL.md 生态复用）、自定义执行环境（宿主沙盒经 `RunkoExec` 接口注入，loop 零改动）。
 
 ## 5 行上手
 
 ```ts
-import { defineAgent, createSession, NimboFS } from "@nimbo/sdk";
+import { defineAgent, createSession, RunkoFS } from "@runko/sdk";
 // 或直连 provider：import { anthropic } from "@ai-sdk/anthropic"; model: anthropic("claude-sonnet-5")
 
 const agent = defineAgent({ model: "anthropic/claude-sonnet-5" }); // AI SDK Gateway 字符串或任意 LanguageModel 实例
 const session = createSession(agent, {
-  fs: NimboFS.fromDirectory("./project"),
+  fs: RunkoFS.fromDirectory("./project"),
 });
 const result = await session.send("把 src/index.ts 里的 var 全部改成 const");
 console.log(result.finalResponse, await session.fs.diff());
@@ -35,16 +35,16 @@ console.log(result.finalResponse, await session.fs.diff());
 `./project` 被零拷贝 overlay 挂载：读穿透磁盘、写落内存层——上面这段跑完，真实目录一个字节都没变，变更全在 `diff()` 里；要落盘调 `session.fs.writeBack()`。
 
 ```sh
-pnpm add @nimbo/sdk ai
+pnpm add @runko/sdk ai
 ```
 
-> TODO：npm 裸名 `nimbo` 的发布决策待定（[plans/core-sdk](./logic/engine/plans/core-sdk.md) P7-1 遗留）——目前一律 `@nimbo/sdk`，定了之后全部 README/examples 的 import 同步替换。
+> TODO：npm 裸名 `runko` 的发布决策待定（[plans/core-sdk](./logic/engine/plans/core-sdk.md) P7-1 遗留）——目前一律 `@runko/sdk`，定了之后全部 README/examples 的 import 同步替换。
 
 ## 配置 agent：模型 / instructions / tools / skills
 
 四样都挂在 `defineAgent` 上——定义是纯数据、无运行状态，同一份定义可以反复开 session。
 
-**模型**。nimbo 的模型层完全构建在 Vercel AI SDK（`ai` 包）之上，不自建 provider 层、不自建模型注册表——「接入某个模型」就是拿到一个 AI SDK 的 `LanguageModel` 值，三条路：
+**模型**。runko 的模型层完全构建在 Vercel AI SDK（`ai` 包）之上，不自建 provider 层、不自建模型注册表——「接入某个模型」就是拿到一个 AI SDK 的 `LanguageModel` 值，三条路：
 
 ```ts
 // ① Gateway 字符串：零 provider 包，环境里配 AI_GATEWAY_API_KEY 即可
@@ -60,7 +60,7 @@ const deepseek = createDeepSeek({ baseURL, apiKey });
 const agent = defineAgent({ model: deepseek("deepseek-chat") });
 ```
 
-`ai` 是 peerDependency（`^7`）——宿主自装 `ai` 和所选 provider 包，版本跟宿主走。其余一切（loop、工具、审批、沙盒）对模型层透明：换模型只改这一个值（examples 的 `NIMBO_MODEL` 环境变量一行换模型即此机制）；宿主已有的 AI SDK 中间件（`wrapLanguageModel`、缓存、observability）包装后照常传入。
+`ai` 是 peerDependency（`^7`）——宿主自装 `ai` 和所选 provider 包，版本跟宿主走。其余一切（loop、工具、审批、沙盒）对模型层透明：换模型只改这一个值（examples 的 `RUNKO_MODEL` 环境变量一行换模型即此机制）；宿主已有的 AI SDK 中间件（`wrapLanguageModel`、缓存、observability）包装后照常传入。
 
 **instructions**。系统提示正文写在 `defineAgent({ instructions })`；多租户场景在 `createSession(agent, { instructions: { append } })` 追加租户专属内容，不动定义。
 
@@ -78,7 +78,7 @@ const agent = defineAgent({ model: deepseek("deepseek-chat") });
 defineSkill({ name, description, markdown, files? })      // 程序化定义
 Skill.fromMarkdown(name, md)                              // flat markdown
 Skill.fromDirectory("./skills/frontend-design")           // 本地 packaged 目录（SKILL.md + 附属文件）
-await Skill.fromFS(fs, "/.agents/skills/frontend-design") // 从任意 NimboFS 装载——包括沙盒工作区
+await Skill.fromFS(fs, "/.agents/skills/frontend-design") // 从任意 RunkoFS 装载——包括沙盒工作区
 ```
 
 运行机制是渐进式披露：instructions 里只注入名字和描述清单，模型需要时调 `load_skill` 拿正文——只加指令，不加新的执行面。
@@ -87,7 +87,7 @@ await Skill.fromFS(fs, "/.agents/skills/frontend-design") // 从任意 NimboFS �
 
 整套设计压成一句话：**凡是可替换的东西，语义在 [agent 逻辑层](./terms.md)、实现在[宿主层](./terms.md)。**
 
-<svg viewBox="0 0 980 500" width="100%" role="img" aria-label="nimbo 架构分层图：构建者的接入代码调用 agent 逻辑层的归属仲裁、轮编排、执行引擎三个模块，三者按条件向下依赖宿主层的归属仲裁机制、持久化、流分发、沙盒四样可替换能力" style="max-width:980px;margin:0 auto;display:block;font-family:var(--vp-font-family-base)">
+<svg viewBox="0 0 980 500" width="100%" role="img" aria-label="runko 架构分层图：构建者的接入代码调用 agent 逻辑层的归属仲裁、轮编排、执行引擎三个模块，三者按条件向下依赖宿主层的归属仲裁机制、持久化、流分发、沙盒四样可替换能力" style="max-width:980px;margin:0 auto;display:block;font-family:var(--vp-font-family-base)">
   <defs>
     <pattern id="a-grid" width="40" height="40" patternUnits="userSpaceOnUse">
       <path d="M 40 0 L 0 0 0 40" fill="none" stroke="var(--vp-c-divider)" stroke-width="0.5" opacity="0.55"/>
@@ -192,13 +192,13 @@ await Skill.fromFS(fs, "/.agents/skills/frontend-design") // 从任意 NimboFS �
   </g>
 </svg>
 
-**虚线是有条件的依赖**——宿主层四样**都有内置的平凡实现**，所以零配置就能跑；**换部署形态，就是换掉其中一两个**。完整推导见 [agent 内核包](./architecture/features/agent-kernel.md) · [技术方案](./architecture/tech/agent-kernel.md)（设计讨论见 [issue #2](https://github.com/ludafa/nimbo/issues/2)）。
+**虚线是有条件的依赖**——宿主层四样**都有内置的平凡实现**，所以零配置就能跑；**换部署形态，就是换掉其中一两个**。完整推导见 [agent 内核包](./architecture/features/agent-kernel.md) · [技术方案](./architecture/tech/agent-kernel.md)（设计讨论见 [issue #2](https://github.com/ludafa/runko/issues/2)）。
 
 ## 包结构（pnpm monorepo，依赖单向）
 
-**已发布 8 个**，另有 **7 个已定案待建**（`@nimbo/agent` 及其配套）。下图是已发布的部分：
+**已发布 8 个**，另有 **7 个已定案待建**（`@runko/agent` 及其配套）。下图是已发布的部分：
 
-<svg viewBox="0 0 980 560" width="100%" role="img" aria-label="nimbo 已发布 8 个包的依赖图：@nimbo/sdk 打包 core、virtual-fs、mini-bash；just-bash 与三个云沙盒适配器需单独安装；全部依赖指向 @nimbo/core" style="max-width:980px;margin:0 auto;display:block;font-family:var(--vp-font-family-base)">
+<svg viewBox="0 0 980 560" width="100%" role="img" aria-label="runko 已发布 8 个包的依赖图：@runko/sdk 打包 core、virtual-fs、mini-bash；just-bash 与三个云沙盒适配器需单独安装；全部依赖指向 @runko/core" style="max-width:980px;margin:0 auto;display:block;font-family:var(--vp-font-family-base)">
   <defs>
     <pattern id="p-grid" width="40" height="40" patternUnits="userSpaceOnUse">
       <path d="M 40 0 L 0 0 0 40" fill="none" stroke="var(--vp-c-divider)" stroke-width="0.5" opacity="0.55"/>
@@ -226,12 +226,12 @@ await Skill.fromFS(fs, "/.agents/skills/frontend-design") // 从任意 NimboFS �
 
   <!-- 随 sdk 一起装 -->
   <rect x="250" y="24" width="480" height="208" rx="12" fill="none" stroke="#34d399" stroke-width="1.5" opacity="0.55"/>
-  <text x="270" y="48" fill="var(--vp-c-text-1)" font-size="18" font-weight="700">随 @nimbo/sdk 一起装</text>
+  <text x="270" y="48" fill="var(--vp-c-text-1)" font-size="18" font-weight="700">随 @runko/sdk 一起装</text>
   <text x="270" y="65" fill="var(--vp-c-text-3)" font-size="14">5 行上手只装它一个</text>
 
   <rect x="346" y="78" width="288" height="62" rx="6" fill="var(--vp-c-bg)"/>
   <rect x="346" y="78" width="288" height="62" rx="6" fill="rgba(52,211,153,0.15)" stroke="#34d399" stroke-width="1.8"/>
-  <text x="490" y="104" fill="var(--vp-c-text-1)" font-size="19" font-weight="700" text-anchor="middle" font-family="var(--vp-font-family-mono)">@nimbo/sdk</text>
+  <text x="490" y="104" fill="var(--vp-c-text-1)" font-size="19" font-weight="700" text-anchor="middle" font-family="var(--vp-font-family-mono)">@runko/sdk</text>
   <text x="490" y="124" fill="var(--vp-c-text-2)" font-size="14" text-anchor="middle">门面 · batteries-included</text>
 
   <rect x="270" y="164" width="196" height="52" rx="6" fill="var(--vp-c-bg)"/>
@@ -247,7 +247,7 @@ await Skill.fromFS(fs, "/.agents/skills/frontend-design") // 从任意 NimboFS �
   <!-- core：依赖的根 -->
   <rect x="370" y="266" width="240" height="68" rx="8" fill="var(--vp-c-bg)"/>
   <rect x="370" y="266" width="240" height="68" rx="8" fill="rgba(34,211,238,0.16)" stroke="#22d3ee" stroke-width="2.2"/>
-  <text x="490" y="294" fill="var(--vp-c-text-1)" font-size="21" font-weight="700" text-anchor="middle" font-family="var(--vp-font-family-mono)">@nimbo/core</text>
+  <text x="490" y="294" fill="var(--vp-c-text-1)" font-size="21" font-weight="700" text-anchor="middle" font-family="var(--vp-font-family-mono)">@runko/core</text>
   <text x="490" y="314" fill="var(--vp-c-text-2)" font-size="14" text-anchor="middle">执行引擎 · 内置工具 · skills</text>
   <rect x="624" y="288" width="72" height="20" rx="10" fill="rgba(34,211,238,0.16)" stroke="#22d3ee" stroke-width="1"/>
   <text x="660" y="302" fill="#22d3ee" font-size="14" text-anchor="middle" font-weight="700">依赖的根</text>
@@ -275,64 +275,64 @@ await Skill.fromFS(fs, "/.agents/skills/frontend-design") // 从任意 NimboFS �
   <text x="821" y="464" fill="var(--vp-c-text-1)" font-size="16" font-weight="600" text-anchor="middle" font-family="var(--vp-font-family-mono)">sandbox-cloudflare</text>
   <text x="821" y="483" fill="var(--vp-c-text-2)" font-size="13" text-anchor="middle">网关形态</text>
 
-  <text x="490" y="522" fill="var(--vp-c-text-3)" font-size="14" text-anchor="middle">下排均为 @nimbo/* 包 —— 只依赖 core，不随 sdk 装入，需要时显式 <tspan font-family="var(--vp-font-family-mono)">pnpm add</tspan></text>
+  <text x="490" y="522" fill="var(--vp-c-text-3)" font-size="14" text-anchor="middle">下排均为 @runko/* 包 —— 只依赖 core，不随 sdk 装入，需要时显式 <tspan font-family="var(--vp-font-family-mono)">pnpm add</tspan></text>
 </svg>
 
-箭头表示「依赖」。`@nimbo/sdk` 打包 `core` + `virtual-fs` + `mini-bash`；`just-bash`
+箭头表示「依赖」。`@runko/sdk` 打包 `core` + `virtual-fs` + `mini-bash`；`just-bash`
 与三个沙盒适配器只依赖 `core`、需单独安装。每个包的细节见下方表格。
 
 ### 按模块看：哪个包管哪一块
 
 | 层 / 模块 | 包 | 状态 |
 | --- | --- | --- |
-| 逻辑层 · **执行引擎** | `@nimbo/core` | ✅ 已有 |
-| 逻辑层 · **轮编排 + 归属仲裁** | `@nimbo/agent`（四种宿主能力的**接口** + 语义实现 + **全套内置实现**） | ✅ 已有（[挂起与恢复](./logic/orchestration/plans/agent-runtime.md)未做） |
-| 宿主层 · **沙盒**（文件） | `@nimbo/virtual-fs` | ✅ 已有 |
-| 宿主层 · **沙盒**（命令） | `@nimbo/mini-bash` · `@nimbo/just-bash` | ✅ 已有 |
-| 宿主层 · **沙盒**（远端） | `@nimbo/sandbox-e2b` · `-vercel` · `-cloudflare` | ✅ 已有 |
-| 宿主层 · **持久化 + 归属仲裁机制** | `@nimbo/persist-kysely`（核心，方言是参数）· `-sqlite` · `-postgres` · `-mysql`（三个薄壳）· `-mongo` | ✅ 已有 |
-| 契约自证 | `@nimbo/conformance`（一致性套件，验一个实现合不合契约） | ✅ 已有 |
-| 宿主层 · **流分发** | `@nimbo/stream-redis`（Redis Streams） | 🚧 待建 |
-| Cloudflare DO **全套** | `@nimbo/durable-object`（持久化 + 平凡仲裁 + 实例内流分发） | 🚧 待建 |
-| 门面 | `@nimbo/sdk` | ✅ 已有 |
-| 开箱应用 | `@nimbo/cli`（**不是框架包，是拿框架搭的成品**） | 🚧 待建 |
+| 逻辑层 · **执行引擎** | `@runko/core` | ✅ 已有 |
+| 逻辑层 · **轮编排 + 归属仲裁** | `@runko/agent`（四种宿主能力的**接口** + 语义实现 + **全套内置实现**） | ✅ 已有（[挂起与恢复](./logic/orchestration/plans/agent-runtime.md)未做） |
+| 宿主层 · **沙盒**（文件） | `@runko/virtual-fs` | ✅ 已有 |
+| 宿主层 · **沙盒**（命令） | `@runko/mini-bash` · `@runko/just-bash` | ✅ 已有 |
+| 宿主层 · **沙盒**（远端） | `@runko/sandbox-e2b` · `-vercel` · `-cloudflare` | ✅ 已有 |
+| 宿主层 · **持久化 + 归属仲裁机制** | `@runko/persist-kysely`（核心，方言是参数）· `-sqlite` · `-postgres` · `-mysql`（三个薄壳）· `-mongo` | ✅ 已有 |
+| 契约自证 | `@runko/conformance`（一致性套件，验一个实现合不合契约） | ✅ 已有 |
+| 宿主层 · **流分发** | `@runko/stream-redis`（Redis Streams） | 🚧 待建 |
+| Cloudflare DO **全套** | `@runko/durable-object`（持久化 + 平凡仲裁 + 实例内流分发） | 🚧 待建 |
+| 门面 | `@runko/sdk` | ✅ 已有 |
+| 开箱应用 | `@runko/cli`（**不是框架包，是拿框架搭的成品**） | 🚧 待建 |
 
 **打包原则：接口按模块分；实现按「一次装什么」打包。** 持久化和租约版仲裁总是一起用（共享连接与 CRUD + CAS 原语）→ 同包；流分发跟存储无关 → 独立成包；DO 上三样全是平台自带 → 独立且一次给全。
 
-**`@nimbo/sdk` 和 `@nimbo/agent` 是不同抽象层次的两个入口，并存不冲突**：只要一个 agent loop（会话怎么管我自己来）装 `sdk`；要完整的会话生命周期（起轮、挂起、恢复、归属）装 `agent` + 按场景挑实现包。
+**`@runko/sdk` 和 `@runko/agent` 是不同抽象层次的两个入口，并存不冲突**：只要一个 agent loop（会话怎么管我自己来）装 `sdk`；要完整的会话生命周期（起轮、挂起、恢复、归属）装 `agent` + 按场景挑实现包。
 
 | 包                          | 一句话                                                                                                                                                | README                                                                  |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `@nimbo/sdk`                | 主包门面，5 行上手只装它                                                                                                                              | [packages/sdk](../packages/sdk/README.md)                               |
-| `@nimbo/core`               | L0 接口 / L1 定义层 / L2 运行层 / L3 目录约定层 / 内置工具本体                                                                                        | [packages/core](../packages/core/README.md)                             |
-| `@nimbo/agent`              | 轮编排运行时：一轮接一轮地跑下去（起 / 停 / 收尾、待发队列与插话、人在回路、崩溃恢复），外加四种宿主能力的接口与内置实现                              | [packages/agent](../packages/agent/README.md)                           |
-| `@nimbo/virtual-fs`         | MemoryFS / OverlayFS / DirFS、diff / writeBack、文件工具八件套                                                                                        | [packages/virtual-fs](../packages/virtual-fs/README.md)                 |
-| `@nimbo/mini-bash`          | 跑在任意 NimboFS 上的只读命令解释器（bash 工具的纯内存执行环境，零依赖极简档，随 sdk 装入）                                                           | [packages/mini-bash](../packages/mini-bash/README.md)                   |
-| `@nimbo/just-bash`          | 跑在任意 NimboFS 上的全语法档 bash（`if`/`for`/`while`/`case`/函数，vercel-labs/just-bash 适配器，**不随 sdk 装入**，需单独 `pnpm add`）              | [packages/just-bash](../packages/just-bash/README.md)                   |
-| `@nimbo/sandbox-e2b`        | NimboFS & NimboExec 适配 E2B 云沙盒（真实 Firecracker microVM，BYO 实例，e2b 仅类型依赖，**不随 sdk 装入**）                                          | [packages/sandbox-e2b](../packages/sandbox-e2b/README.md)               |
-| `@nimbo/sandbox-vercel`     | NimboFS & NimboExec 适配 Vercel Sandbox（真实 Amazon Linux 2023 Firecracker microVM，BYO 实例，`@vercel/sandbox` 仅类型依赖，**不随 sdk 装入**）      | [packages/sandbox-vercel](../packages/sandbox-vercel/README.md)         |
-| `@nimbo/sandbox-cloudflare` | NimboFS & NimboExec 适配 Cloudflare Sandbox（网关形态：`.` 纯 fetch 客户端跑在任意 Node，`./worker` 网关部署在宿主 wrangler 项目，**不随 sdk 装入**） | [packages/sandbox-cloudflare](../packages/sandbox-cloudflare/README.md) |
-| `@nimbo/persist-kysely`     | 持久化 + 租约版归属仲裁的核心实现，吃一个 Kysely 实例；三方言差异收敛在一处                                                                            | [packages/persist-kysely](../packages/persist-kysely/README.md)         |
-| `@nimbo/persist-sqlite`     | 薄壳：吃 better-sqlite3 实例 → Kysely → 核心                                                                                                          | [packages/persist-sqlite](../packages/persist-sqlite/README.md)         |
-| `@nimbo/persist-postgres`   | 薄壳：吃 `pg.Pool`                                                                                                                                    | [packages/persist-postgres](../packages/persist-postgres/README.md)     |
-| `@nimbo/persist-mysql`      | 薄壳：吃 mysql2 连接池                                                                                                                                | [packages/persist-mysql](../packages/persist-mysql/README.md)           |
-| `@nimbo/persist-mongo`      | MongoDB 直接实现三个领域接口（不走 Kysely——那是 SQL 的东西）                                                                                          | [packages/persist-mongo](../packages/persist-mongo/README.md)           |
-| `@nimbo/conformance`        | 契约一致性套件：写了自己的持久化 / 归属仲裁实现，拿它验合不合契约（**不依赖任何测试框架**）                                                            | [packages/conformance](../packages/conformance/README.md)               |
+| `@runko/sdk`                | 主包门面，5 行上手只装它                                                                                                                              | [packages/sdk](../packages/sdk/README.md)                               |
+| `@runko/core`               | L0 接口 / L1 定义层 / L2 运行层 / L3 目录约定层 / 内置工具本体                                                                                        | [packages/core](../packages/core/README.md)                             |
+| `@runko/agent`              | 轮编排运行时：一轮接一轮地跑下去（起 / 停 / 收尾、待发队列与插话、人在回路、崩溃恢复），外加四种宿主能力的接口与内置实现                              | [packages/agent](../packages/agent/README.md)                           |
+| `@runko/virtual-fs`         | MemoryFS / OverlayFS / DirFS、diff / writeBack、文件工具八件套                                                                                        | [packages/virtual-fs](../packages/virtual-fs/README.md)                 |
+| `@runko/mini-bash`          | 跑在任意 RunkoFS 上的只读命令解释器（bash 工具的纯内存执行环境，零依赖极简档，随 sdk 装入）                                                           | [packages/mini-bash](../packages/mini-bash/README.md)                   |
+| `@runko/just-bash`          | 跑在任意 RunkoFS 上的全语法档 bash（`if`/`for`/`while`/`case`/函数，vercel-labs/just-bash 适配器，**不随 sdk 装入**，需单独 `pnpm add`）              | [packages/just-bash](../packages/just-bash/README.md)                   |
+| `@runko/sandbox-e2b`        | RunkoFS & RunkoExec 适配 E2B 云沙盒（真实 Firecracker microVM，BYO 实例，e2b 仅类型依赖，**不随 sdk 装入**）                                          | [packages/sandbox-e2b](../packages/sandbox-e2b/README.md)               |
+| `@runko/sandbox-vercel`     | RunkoFS & RunkoExec 适配 Vercel Sandbox（真实 Amazon Linux 2023 Firecracker microVM，BYO 实例，`@vercel/sandbox` 仅类型依赖，**不随 sdk 装入**）      | [packages/sandbox-vercel](../packages/sandbox-vercel/README.md)         |
+| `@runko/sandbox-cloudflare` | RunkoFS & RunkoExec 适配 Cloudflare Sandbox（网关形态：`.` 纯 fetch 客户端跑在任意 Node，`./worker` 网关部署在宿主 wrangler 项目，**不随 sdk 装入**） | [packages/sandbox-cloudflare](../packages/sandbox-cloudflare/README.md) |
+| `@runko/persist-kysely`     | 持久化 + 租约版归属仲裁的核心实现，吃一个 Kysely 实例；三方言差异收敛在一处                                                                            | [packages/persist-kysely](../packages/persist-kysely/README.md)         |
+| `@runko/persist-sqlite`     | 薄壳：吃 better-sqlite3 实例 → Kysely → 核心                                                                                                          | [packages/persist-sqlite](../packages/persist-sqlite/README.md)         |
+| `@runko/persist-postgres`   | 薄壳：吃 `pg.Pool`                                                                                                                                    | [packages/persist-postgres](../packages/persist-postgres/README.md)     |
+| `@runko/persist-mysql`      | 薄壳：吃 mysql2 连接池                                                                                                                                | [packages/persist-mysql](../packages/persist-mysql/README.md)           |
+| `@runko/persist-mongo`      | MongoDB 直接实现三个领域接口（不走 Kysely——那是 SQL 的东西）                                                                                          | [packages/persist-mongo](../packages/persist-mongo/README.md)           |
+| `@runko/conformance`        | 契约一致性套件：写了自己的持久化 / 归属仲裁实现，拿它验合不合契约（**不依赖任何测试框架**）                                                            | [packages/conformance](../packages/conformance/README.md)               |
 
-**bash 分档说明**：`bash` 工具的命令执行环境（`NimboExec`）分两档，按需二选一注入，一行代码互换、loop/session 代码零改动（[tech/core-sdk §4.5b](./logic/engine/tech/core-sdk.md)）——
+**bash 分档说明**：`bash` 工具的命令执行环境（`RunkoExec`）分两档，按需二选一注入，一行代码互换、loop/session 代码零改动（[tech/core-sdk §4.5b](./logic/engine/tech/core-sdk.md)）——
 
-- **`@nimbo/mini-bash`（零依赖极简档）**：六个只读命令（`cat`/`grep`/`find`/`tail`/`head`/`echo`）+ 四个控制操作符，随 `@nimbo/sdk` 一起装，无需额外安装，定位安全默认与测试/演示载体。
-- **`@nimbo/just-bash`（全语法档）**：Claude 系模型高频产出的 `if`/`for`/`while`/`case`/函数等控制流脚本超出 mini-bash 语法面时换这一档。因依赖树含 sql.js / quickjs-emscripten 等 wasm 大件，**不进 `@nimbo/sdk` 依赖**，需要的宿主显式 `pnpm add @nimbo/just-bash`。
+- **`@runko/mini-bash`（零依赖极简档）**：六个只读命令（`cat`/`grep`/`find`/`tail`/`head`/`echo`）+ 四个控制操作符，随 `@runko/sdk` 一起装，无需额外安装，定位安全默认与测试/演示载体。
+- **`@runko/just-bash`（全语法档）**：Claude 系模型高频产出的 `if`/`for`/`while`/`case`/函数等控制流脚本超出 mini-bash 语法面时换这一档。因依赖树含 sql.js / quickjs-emscripten 等 wasm 大件，**不进 `@runko/sdk` 依赖**，需要的宿主显式 `pnpm add @runko/just-bash`。
 
-两档都是 `NimboExec` 接口的实现，也都不是唯一选项——真实本机命令执行用 `@nimbo/core` 的 `localExec`，宿主自有沙盒（Docker/e2b/远程执行器）直接实现 `NimboExec` 注入即可（示例见 [examples/05-custom-exec.ts](../examples/src/05-custom-exec.ts)）。
+两档都是 `RunkoExec` 接口的实现，也都不是唯一选项——真实本机命令执行用 `@runko/core` 的 `localExec`，宿主自有沙盒（Docker/e2b/远程执行器）直接实现 `RunkoExec` 注入即可（示例见 [examples/05-custom-exec.ts](../examples/src/05-custom-exec.ts)）。
 
 ## 云沙盒适配器
 
-三个适配器把 agent 的 fs/bash 放进真实云沙盒里，而 agent 本身跑在任意 Node 机器上——同一种「模式 A 同源工作区」形态（一个对象实现 `NimboFS & NimboExec`，经 `workspace` 注入）。调研与设计决策见 [沙盒功能](./host/contract/features/sandbox.md) / [技术方案](./host/contract/tech/sandbox.md) / [施工进展](./host/contract/plans/sandbox.md)；E2B 和 Vercel 已对真实沙盒验证，Cloudflare 走自部署网关。
+三个适配器把 agent 的 fs/bash 放进真实云沙盒里，而 agent 本身跑在任意 Node 机器上——同一种「模式 A 同源工作区」形态（一个对象实现 `RunkoFS & RunkoExec`，经 `workspace` 注入）。调研与设计决策见 [沙盒功能](./host/contract/features/sandbox.md) / [技术方案](./host/contract/tech/sandbox.md) / [施工进展](./host/contract/plans/sandbox.md)；E2B 和 Vercel 已对真实沙盒验证，Cloudflare 走自部署网关。
 
 ## 示例应用：chat agent 网页应用
 
-[`apps/`](../apps) 下是一个**基于** nimbo 构建的完整 chat agent 网页应用——SDK 的一个产品形态的具体演示。用户在 chat 界面里驱动 agent 在 Vercel 沙盒里修改真实仓库、开 PR、触发 Vercel 部署。亮点：会话级沙盒生命周期（活跃时保持、空闲快照休眠、下一条消息带分支代码恢复）、loop 每个事件断线可续地 SSE 流式推给前端（刷新/HMR 不断）、完整对话 SQLite 持久化、streamdown markdown 渲染、每轮 token 统计（含缓存命中）。设计见 [chat webapp 功能](./ingress/features/chat-webapp.md) / [技术方案](./ingress/tech/chat-webapp.md) / [施工进展](./ingress/plans/chat-webapp.md)。
+[`apps/`](../apps) 下是一个**基于** runko 构建的完整 chat agent 网页应用——SDK 的一个产品形态的具体演示。用户在 chat 界面里驱动 agent 在 Vercel 沙盒里修改真实仓库、开 PR、触发 Vercel 部署。亮点：会话级沙盒生命周期（活跃时保持、空闲快照休眠、下一条消息带分支代码恢复）、loop 每个事件断线可续地 SSE 流式推给前端（刷新/HMR 不断）、完整对话 SQLite 持久化、streamdown markdown 渲染、每轮 token 统计（含缓存命中）。设计见 [chat webapp 功能](./ingress/features/chat-webapp.md) / [技术方案](./ingress/tech/chat-webapp.md) / [施工进展](./ingress/plans/chat-webapp.md)。
 
 ```sh
 cp .env.template .env         # 填入必需的 key（见模板注释）
@@ -361,8 +361,8 @@ docs/
 ├─ architecture/{features,tech,plans}/   架构总纲
 ├─ logic/                                agent 逻辑层（固定，不可替换）
 │  ├─ arbitration/…                        归属仲裁——语义 + 三种随宿主变化的实现
-│  ├─ orchestration/…                      轮编排（@nimbo/agent）
-│  └─ engine/…                             执行引擎（@nimbo/core）
+│  ├─ orchestration/…                      轮编排（@runko/agent）
+│  └─ engine/…                             执行引擎（@runko/core）
 ├─ host/                                 宿主层（可替换）
 │  ├─ contract/…                           跨环境的接口契约：沙盒 · 持久化 · 流分发
 │  ├─ node/…                               Node 长驻：单进程 / cluster / Docker / k8s
@@ -377,17 +377,17 @@ docs/
 
 ```sh
 grep -rl 'module: 轮编排' docs/     # 轮编排相关的全部文档
-grep -rl '@nimbo/agent' docs/       # 某个包相关的全部文档
+grep -rl '@runko/agent' docs/       # 某个包相关的全部文档
 ls docs/logic/orchestration/*/            # 轮编排的三视角文档一把捞全
 ```
 
 ### 先读这一份
 
-**[agent-kernel（agent 内核包 `@nimbo/agent`）](./architecture/features/agent-kernel.md)** — [功能](./architecture/features/agent-kernel.md) · [技术](./architecture/tech/agent-kernel.md) · [施工](./architecture/plans/agent-kernel.md)
+**[agent-kernel（agent 内核包 `@runko/agent`）](./architecture/features/agent-kernel.md)** — [功能](./architecture/features/agent-kernel.md) · [技术](./architecture/tech/agent-kernel.md) · [施工](./architecture/plans/agent-kernel.md)
 
-架构总纲：分层、四种可替换的宿主能力、六档部署形态、包怎么拆。**下面所有文档的归位都由它定义。** 设计讨论的完整记录（含被推翻的路线）见 [issue #2](https://github.com/ludafa/nimbo/issues/2)。
+架构总纲：分层、四种可替换的宿主能力、六档部署形态、包怎么拆。**下面所有文档的归位都由它定义。** 设计讨论的完整记录（含被推翻的路线）见 [issue #2](https://github.com/ludafa/runko/issues/2)。
 
-### agent 逻辑层 · 执行引擎（`@nimbo/core`）
+### agent 逻辑层 · 执行引擎（`@runko/core`）
 
 > 给定历史和工具，调模型 → 跑工具 → 喂回去，直到模型说完。目录：`docs/logic/engine/`
 
@@ -400,14 +400,14 @@ ls docs/logic/orchestration/*/            # 轮编排的三视角文档一把捞
 | **web-search**（联网搜索） | [功能](./logic/engine/features/web-search.md) · [技术](./logic/engine/tech/web-search.md) · [施工](./logic/engine/plans/web-search.md) |
 | **native-search**（原生搜索快路径） | [施工](./logic/engine/plans/native-search.md)（仅施工视角） |
 
-### agent 逻辑层 · 轮编排（`@nimbo/agent`）
+### agent 逻辑层 · 轮编排（`@runko/agent`）
 
 > 一轮的一生：起、中断、挂起、恢复、收尾、状态推导；定义账本/裁决/待发队列的模型；管沙盒生命周期。目录：`docs/logic/orchestration/`
 
 | 功能 | 三视角 |
 | --- | --- |
 | **single-ledger**（UIMessage 单账本） | [功能](./logic/orchestration/features/single-ledger.md) · [技术](./logic/orchestration/tech/single-ledger.md) · [施工](./logic/orchestration/plans/single-ledger.md) |
-| **agent-runtime**（轮编排运行时 `@nimbo/agent`） | [功能](./logic/orchestration/features/agent-runtime.md) · [技术](./logic/orchestration/tech/agent-runtime.md) · [施工](./logic/orchestration/plans/agent-runtime.md) |
+| **agent-runtime**（轮编排运行时 `@runko/agent`） | [功能](./logic/orchestration/features/agent-runtime.md) · [技术](./logic/orchestration/tech/agent-runtime.md) · [施工](./logic/orchestration/plans/agent-runtime.md) |
 | **in-flight-draft**（进行中草稿放内存） | [技术](./logic/orchestration/tech/in-flight-draft.md) · [施工](./logic/orchestration/plans/in-flight-draft.md) |
 | **turn-abort**（停止本轮） | [功能](./logic/orchestration/features/turn-abort.md) · [技术](./logic/orchestration/tech/turn-abort.md) · [施工](./logic/orchestration/plans/turn-abort.md) |
 | **steer-and-queue**（插话与排队） | [功能](./logic/orchestration/features/steer-and-queue.md) · [技术](./logic/orchestration/tech/steer-and-queue.md) · [施工](./logic/orchestration/plans/steer-and-queue.md) |
@@ -415,7 +415,7 @@ ls docs/logic/orchestration/*/            # 轮编排的三视角文档一把捞
 | **turn-checkpoint**（每轮代码快照） | [功能](./logic/orchestration/features/turn-checkpoint.md) · [技术](./logic/orchestration/tech/turn-checkpoint.md) · [施工](./logic/orchestration/plans/turn-checkpoint.md) |
 | **graceful-shutdown**（优雅关闭与崩溃恢复） | [功能](./logic/orchestration/features/graceful-shutdown.md) · [技术](./logic/orchestration/tech/graceful-shutdown.md) · [施工](./logic/orchestration/plans/graceful-shutdown.md) |
 
-### agent 逻辑层 · 归属仲裁（`@nimbo/agent` + 随宿主变化的实现）
+### agent 逻辑层 · 归属仲裁（`@runko/agent` + 随宿主变化的实现）
 
 > 保证同一份对话、同一时刻只有一个执行在跑。**语义固定，实现随宿主换**——所以三种实现的文档跟语义并排放在这里，而不是散在各个宿主环境下。目录：`docs/logic/arbitration/`
 

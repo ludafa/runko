@@ -1,7 +1,7 @@
 /**
  * chat 的 telemetry 落库（docs/tech/chat-webapp.md §11.4）：ai@7 转正的
  * `Telemetry` 事件集成接口（纯回调，无 OpenTelemetry 依赖）→ 每个事件一行
- * SQLite，按 `functionId = "<agentSessionId>#<turn>"`（`@nimbo/core` loop 在每次
+ * SQLite，按 `functionId = "<agentSessionId>#<turn>"`（`@runko/core` loop 在每次
  * `streamText` 恒注入，见 `SessionTelemetry` 的注释）拆出 (agent_session_id, turn)
  * 两列建索引——"用 turn 查一下"就是一条
  * `SELECT * FROM telemetry_events WHERE agent_session_id = ? AND turn = ?`。
@@ -19,11 +19,11 @@
  * 3. **遥测永不影响 turn**：每个回调整体 try/catch 吞错——SQLite 写失败
  *    最多丢一行遥测，绝不把错误抛回 `streamText` 的执行路径。
  *
- * 注意：nimbo 的工具由 loop 自己结算，AI SDK 的 onToolExecutionStart/End
+ * 注意：runko 的工具由 loop 自己结算，AI SDK 的 onToolExecutionStart/End
  * 在这里永远不会触发——工具维度的数据在 `data-tool-timing` 部件里（见
  * docs/tech/single-ledger.md §3.2），按同一对 (agent_session_id, turn) 即可 join。
  */
-import type { SessionTelemetry } from '@nimbo/core';
+import type { SessionTelemetry } from '@runko/core';
 import type { Telemetry } from 'ai';
 import Database from 'better-sqlite3';
 
@@ -234,8 +234,8 @@ export function createSqliteTelemetry(store: TelemetryStore): Telemetry {
     onStepStart: record('step-start'),
     onLanguageModelCallStart: record('model-call-start'),
     onLanguageModelCallEnd: record('model-call-end'),
-    // nimbo 的工具由 loop 自己结算，`settleExecution` 在 `executeToolCall` 前后
-    // **替 AI SDK 补发** onToolExecutionStart/End（`@nimbo/core` loop.ts 的
+    // runko 的工具由 loop 自己结算，`settleExecution` 在 `executeToolCall` 前后
+    // **替 AI SDK 补发** onToolExecutionStart/End（`@runko/core` loop.ts 的
     // `notifyToolExecution*`）——集成必须挂这两个回调才接得住，漏挂则工具耗时
     // 事件虽被 core 发出却无人记录（账本有 `toolDurationMs`、遥测却零工具事件）。
     onToolExecutionStart: record('tool-execution-start'),

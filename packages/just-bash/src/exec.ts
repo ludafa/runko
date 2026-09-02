@@ -1,6 +1,6 @@
 /**
- * `justBash(fs, opts?)`：`NimboExec` 的全语法档实现（docs/tech/core-sdk.md §4.5b），
- * 用 `just-bash` 的 `Bash` 类跑在注入的 `NimboFS` 之上（经 `fs-adapter.ts`
+ * `justBash(fs, opts?)`：`RunkoExec` 的全语法档实现（docs/tech/core-sdk.md §4.5b），
+ * 用 `just-bash` 的 `Bash` 类跑在注入的 `RunkoFS` 之上（经 `fs-adapter.ts`
  * 翻译成 `IFileSystem`）。模式 A（同源工作区）的典型消费方式与 mini-bash
  * 一致：`createSession({ fs, exec: justBash(fs) })`。
  *
@@ -48,7 +48,7 @@
  * 展开至少反映脚本开始那一刻的 fs 状态"——脚本运行期间的新写入要下一次
  * `exec()` 才可见，是已知且如实记录的限制（同文件头注释）。
  */
-import type { ExecOptions, ExecRequest, ExecResult, NimboExec, NimboFS } from "@nimbo/core";
+import type { ExecOptions, ExecRequest, ExecResult, RunkoExec, RunkoFS } from "@runko/core";
 import type { BashExecResult, BashOptions } from "just-bash";
 import { Bash } from "just-bash";
 import { createFsAdapter } from "./fs-adapter.js";
@@ -96,7 +96,7 @@ const DEFAULT_EXECUTION_LIMITS: ExecutionLimits = {
 };
 
 const DESCRIBE = [
-  "just-bash: full-syntax bash interpreter (vercel-labs/just-bash), running entirely on the injected NimboFS",
+  "just-bash: full-syntax bash interpreter (vercel-labs/just-bash), running entirely on the injected RunkoFS",
   "(mode A same-source workspace — bash and the file tools share one filesystem, nothing to reconcile).",
   "Supports the full control-flow surface: if/elif/else, for (list and C-style `for ((i=0;i<n;i++))`),",
   "while, until, case, functions with local variables, variable/parameter expansion, glob expansion,",
@@ -107,7 +107,7 @@ const DESCRIBE = [
   "Output is NOT streamed: just-bash reports stdout/stderr only once the whole script has finished, so",
   "onOutput fires at most once per stream, after the command completes (not incrementally as it runs).",
   "cwd is persistent on this instance: a `cd` inside a script carries over to the next exec() call on the",
-  "same justBash(fs) instance (same semantics as @nimbo/mini-bash); an explicit req.cwd only overrides the",
+  "same justBash(fs) instance (same semantics as @runko/mini-bash); an explicit req.cwd only overrides the",
   "starting point for that one call and is not promoted to permanent memory unless a cd actually runs.",
   "Execution limits are enforced (loop iterations, command count, call depth, output size, and more) to",
   "bound runaway scripts; see justBash(fs, { limits }) to override the defaults.",
@@ -121,7 +121,7 @@ class JustBashAbortedError extends Error {
 }
 
 /**
- * 同 `@nimbo/mini-bash` 的 `raceAbort`：`signal` 先触发就立刻 reject，不等
+ * 同 `@runko/mini-bash` 的 `raceAbort`：`signal` 先触发就立刻 reject，不等
  * `work` 真正落定（`work` 可能因为注入的 fs/glob 永久 pending，这正是需要
  * 竞速的原因）。给 `work` 补一个空 catch，避免它在竞速结束后才 reject/resolve
  * 时产生 unhandled rejection 噪音。
@@ -161,7 +161,7 @@ function endingCwdOf(result: BashExecResult, fallback: string): string {
   return typeof pwd === "string" ? pwd : fallback;
 }
 
-export function justBash(fs: NimboFS, opts: JustBashOptions = {}): NimboExec {
+export function justBash(fs: RunkoFS, opts: JustBashOptions = {}): RunkoExec {
   const adapter = createFsAdapter(fs);
   const bash = new Bash({
     fs: adapter,
@@ -175,7 +175,7 @@ export function justBash(fs: NimboFS, opts: JustBashOptions = {}): NimboExec {
   let instanceCwd = "/";
 
   return {
-    // docs/tech/single-ledger.md §6.1（@nimbo/core 审批三值重构，P13-5-2c）：旧 "never" → "allow"（沙盒实现，隔离即边界）。
+    // docs/tech/single-ledger.md §6.1（@runko/core 审批三值重构，P13-5-2c）：旧 "never" → "allow"（沙盒实现，隔离即边界）。
     defaultApproval: "allow",
     describe(): string {
       return DESCRIBE;

@@ -1,4 +1,4 @@
-import { fromMemory } from "@nimbo/virtual-fs";
+import { fromMemory } from "@runko/virtual-fs";
 import { describe, expect, it } from "vitest";
 import { run } from "./helpers.js";
 

@@ -1,4 +1,4 @@
--- nimbo 持久化的参考 DDL —— 四张表，三个方言各一份。
+-- runko 持久化的参考 DDL —— 四张表，三个方言各一份。
 --
 -- 两条路都留（见 docs/host/contract/tech/persistence.md §7）：
 --   ① 直接调包导出的 `migrate(db, { flavor })`，它跑的就是下面这些；
@@ -14,15 +14,15 @@
 -- ===========================================================================
 -- SQLite
 -- ===========================================================================
-CREATE TABLE IF NOT EXISTS nimbo_ledger (
+CREATE TABLE IF NOT EXISTS agent_ledger (
   conversation_id varchar(255) NOT NULL,
   seq             integer      NOT NULL,
   payload         text         NOT NULL,
   ts              integer      NOT NULL,
-  CONSTRAINT nimbo_ledger_pk PRIMARY KEY (conversation_id, seq)
+  CONSTRAINT agent_ledger_pk PRIMARY KEY (conversation_id, seq)
 );
 
-CREATE TABLE IF NOT EXISTS nimbo_decisions (
+CREATE TABLE IF NOT EXISTS agent_decisions (
   conversation_id varchar(255) NOT NULL,
   tool_call_id    varchar(255) NOT NULL,
   kind            varchar(32)  NOT NULL,
@@ -34,42 +34,42 @@ CREATE TABLE IF NOT EXISTS nimbo_decisions (
   message         text,
   requested_at    integer      NOT NULL,
   decided_at      integer,
-  CONSTRAINT nimbo_decisions_pk PRIMARY KEY (conversation_id, tool_call_id)
+  CONSTRAINT agent_decisions_pk PRIMARY KEY (conversation_id, tool_call_id)
 );
 
-CREATE TABLE IF NOT EXISTS nimbo_queue (
+CREATE TABLE IF NOT EXISTS agent_queue (
   conversation_id varchar(255) NOT NULL,
   id              varchar(255) NOT NULL,
   seq             integer      NOT NULL,
   input           text         NOT NULL,
   created_at      integer      NOT NULL,
-  CONSTRAINT nimbo_queue_pk PRIMARY KEY (conversation_id, id),
+  CONSTRAINT agent_queue_pk PRIMARY KEY (conversation_id, id),
   -- seq 的唯一性交给数据库：应用层「先查最大值再插」在并发下必然有窗口。
-  CONSTRAINT nimbo_queue_seq_uk UNIQUE (conversation_id, seq)
+  CONSTRAINT agent_queue_seq_uk UNIQUE (conversation_id, seq)
 );
 
-CREATE TABLE IF NOT EXISTS nimbo_leases (
+CREATE TABLE IF NOT EXISTS agent_leases (
   conversation_id varchar(255) NOT NULL,
   holder          varchar(255),
   lease_token     varchar(255),
   seq_watermark   integer       NOT NULL,
   heartbeat_at    integer       NOT NULL,
   acquired_at     integer       NOT NULL,
-  CONSTRAINT nimbo_leases_pk PRIMARY KEY (conversation_id)
+  CONSTRAINT agent_leases_pk PRIMARY KEY (conversation_id)
 );
 
 -- ===========================================================================
 -- PostgreSQL
 -- ===========================================================================
-CREATE TABLE IF NOT EXISTS nimbo_ledger (
+CREATE TABLE IF NOT EXISTS agent_ledger (
   conversation_id varchar(255) NOT NULL,
   seq             bigint       NOT NULL,
   payload         jsonb        NOT NULL,
   ts              bigint       NOT NULL,
-  CONSTRAINT nimbo_ledger_pk PRIMARY KEY (conversation_id, seq)
+  CONSTRAINT agent_ledger_pk PRIMARY KEY (conversation_id, seq)
 );
 
-CREATE TABLE IF NOT EXISTS nimbo_decisions (
+CREATE TABLE IF NOT EXISTS agent_decisions (
   conversation_id varchar(255) NOT NULL,
   tool_call_id    varchar(255) NOT NULL,
   kind            varchar(32)  NOT NULL,
@@ -81,27 +81,27 @@ CREATE TABLE IF NOT EXISTS nimbo_decisions (
   message         text,
   requested_at    bigint       NOT NULL,
   decided_at      bigint,
-  CONSTRAINT nimbo_decisions_pk PRIMARY KEY (conversation_id, tool_call_id)
+  CONSTRAINT agent_decisions_pk PRIMARY KEY (conversation_id, tool_call_id)
 );
 
-CREATE TABLE IF NOT EXISTS nimbo_queue (
+CREATE TABLE IF NOT EXISTS agent_queue (
   conversation_id varchar(255) NOT NULL,
   id              varchar(255) NOT NULL,
   seq             bigint       NOT NULL,
   input           jsonb        NOT NULL,
   created_at      bigint       NOT NULL,
-  CONSTRAINT nimbo_queue_pk PRIMARY KEY (conversation_id, id),
-  CONSTRAINT nimbo_queue_seq_uk UNIQUE (conversation_id, seq)
+  CONSTRAINT agent_queue_pk PRIMARY KEY (conversation_id, id),
+  CONSTRAINT agent_queue_seq_uk UNIQUE (conversation_id, seq)
 );
 
-CREATE TABLE IF NOT EXISTS nimbo_leases (
+CREATE TABLE IF NOT EXISTS agent_leases (
   conversation_id varchar(255) NOT NULL,
   holder          varchar(255),
   lease_token     varchar(255),
   seq_watermark   bigint       NOT NULL,
   heartbeat_at    bigint       NOT NULL,
   acquired_at     bigint       NOT NULL,
-  CONSTRAINT nimbo_leases_pk PRIMARY KEY (conversation_id)
+  CONSTRAINT agent_leases_pk PRIMARY KEY (conversation_id)
 );
 
 -- ===========================================================================
@@ -111,15 +111,15 @@ CREATE TABLE IF NOT EXISTS nimbo_leases (
 -- `utf8mb4_0900_ai_ci` 大小写与重音都不敏感，而 SQLite 与 Postgres 都区分大小写。
 -- 不带它的话 `AbC` 和 `abc` 会被当成同一个 conversationId——跨会话读到别人的账本，
 -- 主键上还会撞键；`tool_call_id` 更要紧（各家模型的 call id 本来就是混合大小写）。
-CREATE TABLE IF NOT EXISTS nimbo_ledger (
+CREATE TABLE IF NOT EXISTS agent_ledger (
   conversation_id varchar(255) COLLATE utf8mb4_bin NOT NULL,
   seq             bigint       NOT NULL,
   payload         json         NOT NULL,
   ts              bigint       NOT NULL,
-  CONSTRAINT nimbo_ledger_pk PRIMARY KEY (conversation_id, seq)
+  CONSTRAINT agent_ledger_pk PRIMARY KEY (conversation_id, seq)
 );
 
-CREATE TABLE IF NOT EXISTS nimbo_decisions (
+CREATE TABLE IF NOT EXISTS agent_decisions (
   conversation_id varchar(255) COLLATE utf8mb4_bin NOT NULL,
   tool_call_id    varchar(255) COLLATE utf8mb4_bin NOT NULL,
   kind            varchar(32)  NOT NULL,
@@ -131,25 +131,25 @@ CREATE TABLE IF NOT EXISTS nimbo_decisions (
   message         text,
   requested_at    bigint       NOT NULL,
   decided_at      bigint,
-  CONSTRAINT nimbo_decisions_pk PRIMARY KEY (conversation_id, tool_call_id)
+  CONSTRAINT agent_decisions_pk PRIMARY KEY (conversation_id, tool_call_id)
 );
 
-CREATE TABLE IF NOT EXISTS nimbo_queue (
+CREATE TABLE IF NOT EXISTS agent_queue (
   conversation_id varchar(255) COLLATE utf8mb4_bin NOT NULL,
   id              varchar(255) COLLATE utf8mb4_bin NOT NULL,
   seq             bigint       NOT NULL,
   input           json         NOT NULL,
   created_at      bigint       NOT NULL,
-  CONSTRAINT nimbo_queue_pk PRIMARY KEY (conversation_id, id),
-  CONSTRAINT nimbo_queue_seq_uk UNIQUE (conversation_id, seq)
+  CONSTRAINT agent_queue_pk PRIMARY KEY (conversation_id, id),
+  CONSTRAINT agent_queue_seq_uk UNIQUE (conversation_id, seq)
 );
 
-CREATE TABLE IF NOT EXISTS nimbo_leases (
+CREATE TABLE IF NOT EXISTS agent_leases (
   conversation_id varchar(255) COLLATE utf8mb4_bin NOT NULL,
   holder          varchar(255),
   lease_token     varchar(255) COLLATE utf8mb4_bin,
   seq_watermark   bigint       NOT NULL,
   heartbeat_at    bigint       NOT NULL,
   acquired_at     bigint       NOT NULL,
-  CONSTRAINT nimbo_leases_pk PRIMARY KEY (conversation_id)
+  CONSTRAINT agent_leases_pk PRIMARY KEY (conversation_id)
 );

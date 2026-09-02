@@ -1,7 +1,7 @@
 /**
  * E2B 的[保活](../../../docs/terms.md)接线（docs/tech/sandbox-keepalive.md §5.5）。
  *
- * [续期闸门](../../../docs/terms.md)本身是通用的（`@nimbo/core` 的 `createKeepAlive`），
+ * [续期闸门](../../../docs/terms.md)本身是通用的（`@runko/core` 的 `createKeepAlive`），
  * 这里只补上 E2B 独有的两件事：
  *
  * 1. **怎么查剩余**——查不了。E2B 没有「还剩多少」的属性（Vercel 有 `sandbox.timeout`），
@@ -10,8 +10,8 @@
  * 2. **怎么补**——`setTimeout(targetMs)` 直接把倒计时重置成 targetMs，天然幂等，
  *    不需要算差额（Vercel 那边是加时，必须算）。
  */
-import type { KeepAlive, KeepAliveDriver, KeepAliveOptions } from "@nimbo/core";
-import { createKeepAlive } from "@nimbo/core";
+import type { KeepAlive, KeepAliveDriver, KeepAliveOptions } from "@runko/core";
+import { createKeepAlive } from "@runko/core";
 import type { E2bSandboxLike } from "./types.js";
 
 /** 沙盒实例没有 `setTimeout` 时的指引——出现在这里说明宿主传了保活配置，但传进来的对象补不了期。 */

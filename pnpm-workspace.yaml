@@ -1,14 +1,14 @@
 packages:
   - "packages/*"
   # P12（docs/08 §2.1）：chat agent web 应用。并入根 workspace 是因为 apps/node-server
-  # 依赖 @nimbo/* 的 workspace:* 协议（独立子 workspace 无法解析）；根管线不受
+  # 依赖 @runko/* 的 workspace:* 协议（独立子 workspace 无法解析）；根管线不受
   # 影响——根脚本 filter 收窄到 ./packages/*，root vitest projects 本就只收 packages。
   - "apps/*"
   # examples/：可运行的示例集，做成 workspace 成员为自管依赖
-  # （workspace:* 依赖 @nimbo/*、catalog: 依赖 zod/ai/e2b/@vercel/sandbox，
+  # （workspace:* 依赖 @runko/*、catalog: 依赖 zod/ai/e2b/@vercel/sandbox，
   # pnpm install 自动搭好，取代旧的手工符号链接 setup-node-modules.mjs）。
   # 源码在 examples/src/；examples/package.json 只定义 typecheck（tsc --noEmit，
-  # 只查 src/ 自身，靠 base 的 skipLibCheck 把 import 的 @nimbo/* 当黑盒、不下钻
+  # 只查 src/ 自身，靠 base 的 skipLibCheck 把 import 的 @runko/* 当黑盒、不下钻
   # 依赖包）——随根管线的 pnpm -r typecheck 进 CI 质量门（ci.yml 直接跑
   # `pnpm -r typecheck`，覆盖含 examples 的全部成员；注意根脚本 `pnpm typecheck`
   # 是 `--filter ./packages/*`，本地只查核心包、不含 examples）；刻意不定义
@@ -20,7 +20,7 @@ packages:
   # docs/：VitePress 设计文档站。做成独立成员是为了**能单独部署**——自带
   # vitepress/mermaid 依赖、自己 build，产物 docs/.vitepress/dist 是一堆静态文件，
   # 跟 packages/* 的发布流程完全解耦（子路径部署用 DOCS_BASE 环境变量指定）。
-  # 它不 import 任何 @nimbo/*，只把 markdown 编译成站点，所以没有 workspace 依赖，
+  # 它不 import 任何 @runko/*，只把 markdown 编译成站点，所以没有 workspace 依赖，
   # `pnpm -r build` 扫到它时也不需要等别的包先建好。
   # 同样不带 /*——docs 根自身就是那个成员。
   - "docs"
@@ -34,14 +34,14 @@ allowBuilds:
   # worktree 上尤其明显——连 pre-commit 的 pnpm test 都跑不起来）。
   '@mongodb-js/zstd': false
   node-liblzma: false
-  # P12 apps 侧（docs/08 §2.1）：零二进制原则约束的是发布的 @nimbo/* 包；
+  # P12 apps 侧（docs/08 §2.1）：零二进制原则约束的是发布的 @runko/* 包；
   # apps 是消费侧产品代码，seed 技术栈（drizzle+better-sqlite3 等）按需放行。
   better-sqlite3: true
   esbuild: true
   msw: true
   es5-ext: true
   # apps/cloudflare-worker-server：wrangler 的本地 Workers 运行时（workerd 是 workerd 二进制，
-  # sharp 是其图片处理依赖）。同上——放行的是 apps 侧消费依赖，不影响发布的 @nimbo/* 包。
+  # sharp 是其图片处理依赖）。同上——放行的是 apps 侧消费依赖，不影响发布的 @runko/* 包。
   workerd: true
   sharp: true
 
@@ -64,7 +64,7 @@ catalog:
   # P1-1 引入：spec §4.1/§4.5a 的 AbortSignal 等 Node 全局环境类型需要它才能
   # typecheck 通过（此前 P0 脚手架未涉及任何 Node 全局类型，故未装）。
   "@types/node": ^24.13.3
-  # P9-1 引入：@nimbo/just-bash 的 NimboExec 全语法档实现（tech-spec §4.5b）。
+  # P9-1 引入：@runko/just-bash 的 RunkoExec 全语法档实现（tech-spec §4.5b）。
   just-bash: ^3.1.0
   # P10 引入（docs/06 §8.1）：三个云沙盒 provider SDK 均为 devDependencies——
   # 适配器仅 `import type`（结构化子集接口），运行时零 provider import；
@@ -72,7 +72,7 @@ catalog:
   e2b: ^2.32.0
   "@vercel/sandbox": ^2.5.0
   "@cloudflare/sandbox": ^0.12.3
-  # K5 引入（docs/host/contract/plans/persistence.md）：@nimbo/persist-* 的两个
+  # K5 引入（docs/host/contract/plans/persistence.md）：@runko/persist-* 的两个
   # 驱动。跟三个沙盒 SDK 同款姿态——包里只 `import type` 一个手写的最小结构接口，
   # 运行时零驱动 import，所以它们只进 devDependencies（类型对照 + 跑测试）。
   pg: ^8.23.0
@@ -87,7 +87,7 @@ catalog:
   # 那版已经在「MySQL 不支持 RETURNING」这类差异上要开始长分支了，不如用现成的。
   kysely: ^0.29.5
   mysql2: ^3.23.4
-  # K5 第三档：@nimbo/persist-mongo 的驱动。Mongo 不是 SQL，走不了 kysely 那条路，
+  # K5 第三档：@runko/persist-mongo 的驱动。Mongo 不是 SQL，走不了 kysely 那条路，
   # 直接实现三个领域接口——它同时是对「不假设事务能跨接口 / 不要求 CAS」这两条
   # 契约准则的硬检验（那两条当初就是为了不把非关系型挡在门外才那么写的）。
   mongodb: ^7.5.0

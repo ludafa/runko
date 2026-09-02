@@ -1,11 +1,11 @@
 /**
- * MemoryFS：纯内存路径树，实现 core 的 NimboFS 全部七方法（docs/tech/core-sdk.md §4.4）。
- * 另提供不进 NimboFS 接口的"附加能力"：writeReference（供 fromMemory 构造 reference
+ * MemoryFS：纯内存路径树，实现 core 的 RunkoFS 全部七方法（docs/tech/core-sdk.md §4.4）。
+ * 另提供不进 RunkoFS 接口的"附加能力"：writeReference（供 fromMemory 构造 reference
  * 条目）、diff()/writeBack()/snapshot()/restore()（§4.4 第 5 点）。
  */
 import * as nodeFs from "node:fs/promises";
 import * as nodePath from "node:path";
-import type { DirEntry, FileStat, NimboFS } from "@nimbo/core";
+import type { DirEntry, FileStat, RunkoFS } from "@runko/core";
 import { buildFileDiff, type FileDiff } from "./diff.js";
 import { inferMimeType } from "./mime.js";
 import { basename, dirname, globToRegExp, normalizePath } from "./path.js";
@@ -126,7 +126,7 @@ export interface MemoryFSOptions {
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
-export class MemoryFS implements NimboFS {
+export class MemoryFS implements RunkoFS {
   private files = new Map<string, Entry>();
   private dirs = new Set<string>(["/"]);
   private clock = 0;
@@ -197,7 +197,7 @@ export class MemoryFS implements NimboFS {
     });
   }
 
-  /** 不在 NimboFS 接口内——fromMemory() 用它构造 reference 条目。同步，理由同 writeFile。 */
+  /** 不在 RunkoFS 接口内——fromMemory() 用它构造 reference 条目。同步，理由同 writeFile。 */
   writeReference(path: string, init: ReferenceInit): void {
     const p = normalizePath(path);
     if (this.dirs.has(p)) {throw new Error(`cannot write: "${p}" is a directory`);}
@@ -389,11 +389,11 @@ export class MemoryFS implements NimboFS {
  * 走 writeReference——三者是可判别联合，typeof/instanceof 足以让编译器自然收窄到
  * else 分支就是 ReferenceInit，不需要额外的类型守卫函数或断言。
  *
- * 命名说明（工单裁量）：docs/tech/core-sdk.md §4.4 写的是 `NimboFS.fromMemory(...)`，但
- * `NimboFS` 在 @nimbo/core 是一个 interface（类型），在 @nimbo/virtual-fs 里
+ * 命名说明（工单裁量）：docs/tech/core-sdk.md §4.4 写的是 `RunkoFS.fromMemory(...)`，但
+ * `RunkoFS` 在 @runko/core 是一个 interface（类型），在 @runko/virtual-fs 里
  * 再声明一个同名的值做静态方法命名空间会与该类型名冲突，且跨包做 interface+
- * namespace 合并并不成立。这里改为导出独立函数 fromMemory；`NimboFS.fromMemory`
- * 这种门面呈现方式留给 P7（@nimbo/sdk）在 re-export 时按需包一层。
+ * namespace 合并并不成立。这里改为导出独立函数 fromMemory；`RunkoFS.fromMemory`
+ * 这种门面呈现方式留给 P7（@runko/sdk）在 re-export 时按需包一层。
  */
 export function fromMemory(
   files: Record<string, string | Uint8Array | ReferenceInit> = {},

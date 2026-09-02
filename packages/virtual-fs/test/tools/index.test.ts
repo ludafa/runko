@@ -16,7 +16,7 @@ describe("createFileTools", () => {
     }
   });
 
-  it("flags exactly the four pure-read tools readOnly (loop 的全只读批并行结算依据，@nimbo/core Tool.readOnly)", () => {
+  it("flags exactly the four pure-read tools readOnly (loop 的全只读批并行结算依据，@runko/core Tool.readOnly)", () => {
     const tools = createFileTools({ readState: createMapReadStateStore() });
     const readOnlyNames: FileToolName[] = ["read-file", "list-dir", "glob", "grep"];
     const mutatingNames: FileToolName[] = ["write-file", "edit-file", "delete-file", "move-file"];

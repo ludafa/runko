@@ -1,6 +1,6 @@
 /**
  * 测试共享辅助（不是 *.test.ts，vitest 不会当测试文件收集）。同
- * `@nimbo/just-bash`/`@nimbo/mini-bash` 的 `test/helpers.ts` 先例。
+ * `@runko/just-bash`/`@runko/mini-bash` 的 `test/helpers.ts` 先例。
  *
  * `FakeVercelSandbox` 实现 `VercelSandboxLike`，进程内跑，不碰网络：
  * - `fs`：一棵内存路径树，精确复刻实测过的 node `fs.promises` 怪癖——

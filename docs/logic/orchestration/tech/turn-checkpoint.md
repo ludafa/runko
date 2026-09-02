@@ -4,7 +4,7 @@ slug: turn-checkpoint
 view: 技术
 layer: 逻辑层
 module: 轮编排
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["轮检查点", "代码快照", "沙盒生命周期"]
 related: ["logic/orchestration/features/turn-checkpoint.md", "logic/orchestration/plans/turn-checkpoint.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -33,10 +33,10 @@ related: ["logic/orchestration/features/turn-checkpoint.md", "logic/orchestratio
 
 ```mermaid
 sequenceDiagram
-    participant Core as session.stream()（@nimbo/core loop）
+    participant Core as session.stream()（@runko/core loop）
     participant Drive as driveTurn (turn-runner/drive.ts)
-    participant CP as @nimbo/git-checkpoint
-    participant Exec as 工作区 / NimboExec（沙盒）
+    participant CP as @runko/git-checkpoint
+    participant Exec as 工作区 / RunkoExec（沙盒）
     participant Origin as origin（用户仓库）
     participant Ledger as 账本（conversation_events / DB）
     participant Client as SSE 订阅者
@@ -45,7 +45,7 @@ sequenceDiagram
     Core-->>Drive: 生成器 done，返回 TurnResult
 
     Note over Drive,Origin: ① 快照（先于模型上下文落账）
-    Drive->>CP: snapshotWorkspace(exec, ref refs/nimbo/wip/$sessionId, parent 上轮快照, metadata session/turn/lastSeq)
+    Drive->>CP: snapshotWorkspace(exec, ref refs/runko/wip/$sessionId, parent 上轮快照, metadata session/turn/lastSeq)
     CP->>Exec: git add -A / write-tree / reset -q / commit-tree（本地同步，毫秒级）
     Exec-->>CP: 树对象（与上轮相同则短路 changed=false，不推）
     CP-)Origin: git push（异步、尽力而为；失败即快照欠账，下轮全树补齐）
@@ -62,9 +62,9 @@ sequenceDiagram
 
 > 竞态说明：快照的**同步部分**（本地 commit）发生在 turn 从注册表摘除**之前**，这毫秒级窗口内的新消息会撞 409（push 已异步化、不占窗口）——接受，不上锁。
 
-## 2. 能力包 `@nimbo/git-checkpoint`（平台无关）
+## 2. 能力包 `@runko/git-checkpoint`（平台无关）
 
-新包，与 mini-bash 同粒度，SDK 透传。只依赖 [`NimboExec`](../../../terms.md)（git plumbing 命令编排），对 session/turn 无知——元数据是调用方给的**不透明键值**。适配任意有 git 的沙盒，可用 fake exec 单测。符合 spec「要基线管理，用沙盒里的 git」（§4.5 规则 3）与「生命周期归宿主」（[BYO 原则](../../../terms.md)）。
+新包，与 mini-bash 同粒度，SDK 透传。只依赖 [`RunkoExec`](../../../terms.md)（git plumbing 命令编排），对 session/turn 无知——元数据是调用方给的**不透明键值**。适配任意有 git 的沙盒，可用 fake exec 单测。符合 spec「要基线管理，用沙盒里的 git」（§4.5 规则 3）与「生命周期归宿主」（[BYO 原则](../../../terms.md)）。
 
 ```ts
 snapshotWorkspace(exec, { ref, parent?, metadata })
@@ -79,9 +79,9 @@ readCheckpoint(exec, { ref }) → { commit, metadata } | undefined
 - **快照**：`git add -A → write-tree → reset -q → commit-tree → push`——不动分支 / index / 工作区，模型无感；树对象与上一轮相同时短路返回（`changed: false`，不推）。**这是唯一可靠的「有没有改动」判定**——bash 写入（sed、`npm install` 改 lockfile）不产生 file_change 事件，靠事件做门槛会漏。
 - **延迟**：本地 commit 同步完成（毫秒级，保证对齐判定），push 异步尽力而为——push 失败即「快照欠账」，由全树语义自愈（见 §4 第 4 条）。
 - **ref 布局**：
-  - `refs/nimbo/wip/<sessionId>`——正常存档，**链式**：每轮以上一轮快照为 parent。
-  - `refs/nimbo/crash/<sessionId>`——事故现场留底（见 §4 第 2 条）。
-  - `refs/nimbo/*` 不在 `refs/heads/*` 下：GitHub UI 不可见、不触发 CI；仓库管理员 `git ls-remote` 可见（如实记录，不算隐藏后门）。
+  - `refs/runko/wip/<sessionId>`——正常存档，**链式**：每轮以上一轮快照为 parent。
+  - `refs/runko/crash/<sessionId>`——事故现场留底（见 §4 第 2 条）。
+  - `refs/runko/*` 不在 `refs/heads/*` 下：GitHub UI 不可见、不触发 CI；仓库管理员 `git ls-remote` 可见（如实记录，不算隐藏后门）。
 - **metadata** 写进 commit message：`session` / `turn` / `lastSeq`（该轮 turn 结果的 seq）——三本账（[账本](../../../terms.md)、模型上下文、代码快照）可互相校验对齐。单账本落地后 `lastSeq` 即账本 `seq`。
 - **restore**：`git fetch <ref>` → `read-tree -u --reset` 到快照树 → `git reset -q` 回到分支基线——工作区精确等于快照（含删除的文件），改动以未提交形态呈现，与休眠前的真实状态同构。
 
@@ -102,8 +102,8 @@ sequenceDiagram
     participant Msg as POST .../messages
     participant Acq as acquire / doAcquire (sandbox-manager.ts)
     participant Client as SandboxClient（Vercel）
-    participant Exec as 工作区 / NimboExec
-    participant CP as @nimbo/git-checkpoint
+    participant Exec as 工作区 / RunkoExec
+    participant CP as @runko/git-checkpoint
     participant Ledger as 时间线（账本）
     participant Model as 模型（下一轮注入）
 
@@ -118,7 +118,7 @@ sequenceDiagram
     else 重建（get 返回 unavailable：404/410）
         Acq->>Client: create() + 初始化计划
         Acq->>Exec: recoverSessionBranch（git fetch && checkout 会话分支）
-        Acq->>CP: restoreWorkspace(exec, { ref: refs/nimbo/wip/$sessionId })
+        Acq->>CP: restoreWorkspace(exec, { ref: refs/runko/wip/$sessionId })
         alt wip 还原成功
             CP->>Exec: read-tree -u --reset 到快照树 → git reset -q 回基线
             CP-->>Acq: { restored:true, commit, metadata:{ turn: checkpointTurn } }
@@ -154,7 +154,7 @@ sequenceDiagram
 
 > **本节已被取代**（2026-07-26）：保活独立成功能，见 [沙盒保活 · 技术方案](./sandbox-keepalive.md)。
 >
-> - **推翻**：本节"不进 nimbo SDK / 适配器"的定位——保活下沉进[沙盒适配器](../../../terms.md)，理由见新方案 §2.1（本节说的"归宿主"指生命周期**所有权**，那部分不变；下沉的只是续期动作的**执行**）。
+> - **推翻**：本节"不进 runko SDK / 适配器"的定位——保活下沉进[沙盒适配器](../../../terms.md)，理由见新方案 §2.1（本节说的"归宿主"指生命周期**所有权**，那部分不变；下沉的只是续期动作的**执行**）。
 > - **保留**：本节的补足语义（`ensureLifetime`）、单轮上限、以及下面这段平台事实——它们是新方案的地基。
 > - 本节其余内容（checkpoint 相关）不受影响。
 
@@ -168,7 +168,7 @@ sequenceDiagram
 
 设计：
 
-- **接缝按意图定义**：chat 应用的 `ManagedSandbox` 接口把现有的 `extendTimeout(durationMs)` 演进为 `ensureLifetime(targetMs)`（补足到至少 X，够了就什么都不做）——平台差异全部封在 `SandboxClient` 实现里，不进 nimbo SDK / 适配器（spec BYO 原则：「超时延长」点名归宿主）。
+- **接缝按意图定义**：chat 应用的 `ManagedSandbox` 接口把现有的 `extendTimeout(durationMs)` 演进为 `ensureLifetime(targetMs)`（补足到至少 X，够了就什么都不做）——平台差异全部封在 `SandboxClient` 实现里，不进 runko SDK / 适配器（spec BYO 原则：「超时延长」点名归宿主）。
 - **touch 修正**：用户消息 / 审批 / 回答时的 `touch` 改调 `ensureLifetime(idleTimeout)`——修掉现有 `touch → extendTimeout(idleTimeout)`「每条消息盲加 5 分钟」的累积 bug（高频对话后沙盒多活几十分钟白计费，还可能撞套餐总时长上限）。
 - **[心跳](../../../terms.md)**：turn 注册时启动、收尾（含异常）时停止的定时器，每 `idleTimeout / 2`（默认 150 秒）调一次 `ensureLifetime(idleTimeout)`。补足语义保证水位恒定。心跳失败只记日志（网络抖动常见；沙盒真死了工具报错会自己浮出来）。进程崩溃时定时器随进程死，沙盒 5 分钟后照常休眠——行为与现状一致。
 - **单轮上限**：`SANDBOX_TURN_KEEPALIVE_MAX_MS`（默认 30 分钟）——超限停止续命，让倒计时自然终结失控任务，防无限烧钱。

@@ -1,7 +1,7 @@
 {
-  "name": "@nimbo/just-bash",
+  "name": "@runko/just-bash",
   "version": "0.1.0",
-  "description": "NimboExec 实现：适配 vercel-labs/just-bash 的全语法档 bash（if/for/while/case/函数），跑在任意 NimboFS 上",
+  "description": "RunkoExec 实现：适配 vercel-labs/just-bash 的全语法档 bash（if/for/while/case/函数），跑在任意 RunkoFS 上",
   "type": "module",
   "license": "ISC",
   "publishConfig": {
@@ -37,11 +37,11 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@nimbo/core": "workspace:*",
+    "@runko/core": "workspace:*",
     "just-bash": "catalog:"
   },
   "devDependencies": {
-    "@nimbo/virtual-fs": "workspace:*",
+    "@runko/virtual-fs": "workspace:*",
     "@types/node": "catalog:",
     "ai": "catalog:",
     "tsdown": "catalog:",

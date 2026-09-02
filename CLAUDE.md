@@ -2,27 +2,27 @@
 
 ## 仓库拓扑
 
-pnpm workspace 三组成员（见 [pnpm-workspace.yaml](./pnpm-workspace.yaml)）：`packages/*` 是对外发布的 `@nimbo/*` 包，`apps/*` 与 `examples` 是 `private: true` 的消费侧、不发布。各包的对外定位与 README 索引见 [docs/overview.md](./docs/overview.md)，这里只给改代码时要的**落点**与**依赖方向**。
+pnpm workspace 三组成员（见 [pnpm-workspace.yaml](./pnpm-workspace.yaml)）：`packages/*` 是对外发布的 `@runko/*` 包，`apps/*` 与 `examples` 是 `private: true` 的消费侧、不发布。各包的对外定位与 README 索引见 [docs/overview.md](./docs/overview.md)，这里只给改代码时要的**落点**与**依赖方向**。
 
 ### packages/\*（发布，changesets 管版本）
 
 | 包                          | 落点                                                                         | runtime workspace 依赖      |
 | --------------------------- | ---------------------------------------------------------------------------- | --------------------------- |
-| `@nimbo/core`               | L0 接口 / L1 定义层 / L2 运行层 / AI SDK step runner / skills / 内置工具本体 | 无（peer `ai`）             |
-| `@nimbo/agent`              | 轮编排运行时：一轮接一轮地跑（起/停/收尾、待发队列、人在回路、崩溃恢复）+ 四种宿主能力的接口与内置实现 | core, virtual-fs            |
-| `@nimbo/virtual-fs`         | MemoryFS·OverlayFS·DirFS、mime 推断、diff/writeBack、文件工具八件套          | core                        |
-| `@nimbo/mini-bash`          | NimboExec 实现：纯 TS 只读解释器（零依赖极简档，随 sdk 装入）                | core                        |
-| `@nimbo/just-bash`          | NimboExec 实现：全语法档 bash（just-bash 适配器，不随 sdk 装入）             | core                        |
-| `@nimbo/sandbox-e2b`        | NimboFS & NimboExec 适配 E2B（BYO 实例，provider SDK 仅类型依赖）            | core, virtual-fs            |
-| `@nimbo/sandbox-vercel`     | 同上，适配 Vercel Sandbox                                                    | core, virtual-fs            |
-| `@nimbo/sandbox-cloudflare` | 同上，适配 Cloudflare Sandbox（`.` fetch 客户端 + `./worker` 网关双入口）    | core, virtual-fs            |
-| `@nimbo/persist-kysely`     | 持久化实现（核心）：吃一个 Kysely 实例；三方言差异收敛到五处（全在 `flavor.ts`） | agent, core（peer kysely）  |
-| `@nimbo/persist-sqlite`     | 薄壳：吃 better-sqlite3 实例 → Kysely → 核心                                 | agent, persist-kysely       |
-| `@nimbo/persist-postgres`   | 薄壳：吃 `pg.Pool`                                                           | agent, persist-kysely       |
-| `@nimbo/persist-mysql`      | 薄壳：吃 mysql2 连接池                                                       | agent, persist-kysely       |
-| `@nimbo/persist-mongo`      | **非** 薄壳：MongoDB 直接实现三个领域接口（Kysely 是 SQL，用不上）            | agent, core（peer mongodb） |
-| `@nimbo/conformance`        | 契约一致性套件：持久化 / 归属仲裁的用例数据（`{ name, run }`），**不依赖任何测试框架** | agent（peer）、core（dev） |
-| `@nimbo/sdk`                | 主包门面：re-export core + virtual-fs + mini-bash，不放实现                  | core, virtual-fs, mini-bash |
+| `@runko/core`               | L0 接口 / L1 定义层 / L2 运行层 / AI SDK step runner / skills / 内置工具本体 | 无（peer `ai`）             |
+| `@runko/agent`              | 轮编排运行时：一轮接一轮地跑（起/停/收尾、待发队列、人在回路、崩溃恢复）+ 四种宿主能力的接口与内置实现 | core, virtual-fs            |
+| `@runko/virtual-fs`         | MemoryFS·OverlayFS·DirFS、mime 推断、diff/writeBack、文件工具八件套          | core                        |
+| `@runko/mini-bash`          | RunkoExec 实现：纯 TS 只读解释器（零依赖极简档，随 sdk 装入）                | core                        |
+| `@runko/just-bash`          | RunkoExec 实现：全语法档 bash（just-bash 适配器，不随 sdk 装入）             | core                        |
+| `@runko/sandbox-e2b`        | RunkoFS & RunkoExec 适配 E2B（BYO 实例，provider SDK 仅类型依赖）            | core, virtual-fs            |
+| `@runko/sandbox-vercel`     | 同上，适配 Vercel Sandbox                                                    | core, virtual-fs            |
+| `@runko/sandbox-cloudflare` | 同上，适配 Cloudflare Sandbox（`.` fetch 客户端 + `./worker` 网关双入口）    | core, virtual-fs            |
+| `@runko/persist-kysely`     | 持久化实现（核心）：吃一个 Kysely 实例；三方言差异收敛到五处（全在 `flavor.ts`） | agent, core（peer kysely）  |
+| `@runko/persist-sqlite`     | 薄壳：吃 better-sqlite3 实例 → Kysely → 核心                                 | agent, persist-kysely       |
+| `@runko/persist-postgres`   | 薄壳：吃 `pg.Pool`                                                           | agent, persist-kysely       |
+| `@runko/persist-mysql`      | 薄壳：吃 mysql2 连接池                                                       | agent, persist-kysely       |
+| `@runko/persist-mongo`      | **非** 薄壳：MongoDB 直接实现三个领域接口（Kysely 是 SQL，用不上）            | agent, core（peer mongodb） |
+| `@runko/conformance`        | 契约一致性套件：持久化 / 归属仲裁的用例数据（`{ name, run }`），**不依赖任何测试框架** | agent（peer）、core（dev） |
+| `@runko/sdk`                | 主包门面：re-export core + virtual-fs + mini-bash，不放实现                  | core, virtual-fs, mini-bash |
 
 **依赖方向单向**：`core` 是根，其余全部指向它。`agent` 建在 `core` 之上、**不依赖 `sdk`**——`sdk` 是门面包（re-export core + virtual-fs + mini-bash），让逻辑层反过来依赖门面会把依赖图从一棵树变成有回边；代价是 `agent` 自己写了一份与 sdk 同款的文件工具默认装配（`runtime/session-factory.ts`，改 sdk 的默认装配时要同步）。`core` 反向持有 `mini-bash`/`virtual-fs` 的是 **devDependencies**（自测用）——这条循环 devDep 正是「跨包类型解析指向 dist、必须先 `build` 再 `typecheck`」的原因，别改成 dependencies。
 
@@ -30,23 +30,23 @@ pnpm workspace 三组成员（见 [pnpm-workspace.yaml](./pnpm-workspace.yaml)�
 
 | 成员                                   | 是什么                                                                               | workspace 依赖                                |
 | -------------------------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------- |
-| `@nimbo-chat/node-server`              | chat 应用服务端：Hono + zod-openapi + drizzle/better-sqlite3 + better-auth，SSE 流式 | agent, core, sdk, sandbox-e2b, sandbox-vercel |
-| `@nimbo-chat/web`                      | chat 应用前端：Vite + React + TanStack Router + shadcn(base-ui) + Tailwind           | core                                          |
-| `@nimbo-chat/cloudflare-worker-server` | 双角色 Worker：进程内直连真实 CF Sandbox，同时对外提供 BYO 网关端点                  | sdk, sandbox-cloudflare                       |
-| `@nimbo-demo/persist-demo`             | 零 ORM 的宿主 demo：持久化只用官方 `@nimbo/persist-*` 包，Hono + 内存工作区 + mini-bash | agent, core, persist-sqlite/postgres/mysql/mongo, virtual-fs, mini-bash |
-| `@nimbo/examples`                      | 示例集（实验田），`pnpm example <编号>` 即跑；只有 typecheck，无 build/test          | sdk, just-bash, sandbox-e2b/vercel/cloudflare |
-| `@nimbo/docs`                          | VitePress 设计文档站，**可独立部署**；有 build/typecheck，另有 `check`（front matter 体检） | **无**——它只把 markdown 编译成站点            |
+| `@runko-chat/node-server`              | chat 应用服务端：Hono + zod-openapi + drizzle/better-sqlite3 + better-auth，SSE 流式 | agent, core, sdk, sandbox-e2b, sandbox-vercel |
+| `@runko-chat/web`                      | chat 应用前端：Vite + React + TanStack Router + shadcn(base-ui) + Tailwind           | core                                          |
+| `@runko-chat/cloudflare-worker-server` | 双角色 Worker：进程内直连真实 CF Sandbox，同时对外提供 BYO 网关端点                  | sdk, sandbox-cloudflare                       |
+| `@runko-demo/persist-demo`             | 零 ORM 的宿主 demo：持久化只用官方 `@runko/persist-*` 包，Hono + 内存工作区 + mini-bash | agent, core, persist-sqlite/postgres/mysql/mongo, virtual-fs, mini-bash |
+| `@runko/examples`                      | 示例集（实验田），`pnpm example <编号>` 即跑；只有 typecheck，无 build/test          | sdk, just-bash, sandbox-e2b/vercel/cloudflare |
+| `@runko/docs`                          | VitePress 设计文档站，**可独立部署**；有 build/typecheck，另有 `check`（front matter 体检） | **无**——它只把 markdown 编译成站点            |
 
-`apps/*` 并入根 workspace，是因为它们要用 `workspace:*` 协议解析 `@nimbo/*`（独立子 workspace 解析不到）；`examples` 与 `docs` 不带 `/*`——它们的根目录自身就是那个成员。
+`apps/*` 并入根 workspace，是因为它们要用 `workspace:*` 协议解析 `@runko/*`（独立子 workspace 解析不到）；`examples` 与 `docs` 不带 `/*`——它们的根目录自身就是那个成员。
 
-**`docs` 独立成员意味着两件事**：① 依赖自管（vitepress/mermaid 装在 `docs/package.json`，不占根）；② **产物可单独部署**——`docs/.vitepress/dist` 是纯静态文件，跟 `packages/*` 的发布流程完全解耦。部署到子路径用 `DOCS_BASE=/nimbo/ pnpm docs:build`，不用改配置。
+**`docs` 独立成员意味着两件事**：① 依赖自管（vitepress/mermaid 装在 `docs/package.json`，不占根）；② **产物可单独部署**——`docs/.vitepress/dist` 是纯静态文件，跟 `packages/*` 的发布流程完全解耦。部署到子路径用 `DOCS_BASE=/runko/ pnpm docs:build`，不用改配置。
 
 ### 命令边界（容易踩）
 
 - 根 `pnpm build` / `typecheck` / `test` 只 filter `./packages/*`，**不覆盖 apps、examples 与 docs**；动了 apps 要进对应目录跑它自己的 `typecheck`/`lint`/`test`。
 - CI（`.github/workflows/ci.yml`）跑的是 `pnpm -r build|typecheck|test`，覆盖**全部** 21 个成员——本地只跑根脚本会漏掉 apps/examples/docs 的问题。
 - **文档站的死链检查藏在 `pnpm -r build` 里**（`docs` 的 build 就是 `vitepress build`，构建时会校验全站链接）；`typecheck` 查的是 `.vitepress/` 下的配置。但 **front matter 体检（`docs:check`）不在 `-r` 的三个脚本里**，CI 单列了一步。
-- chat 应用另有根级 `chat:bootstrap`（建库 + 生成 OpenAPI 与前端 client）、`chat:server`、`chat:web`；文档站有 `docs:dev` / `docs:build` / `docs:preview` / `docs:check`（都是 `--filter @nimbo/docs` 的快捷方式）。
+- chat 应用另有根级 `chat:bootstrap`（建库 + 生成 OpenAPI 与前端 client）、`chat:server`、`chat:web`；文档站有 `docs:dev` / `docs:build` / `docs:preview` / `docs:check`（都是 `--filter @runko/docs` 的快捷方式）。
 - **lint 跟其余三个根脚本不一样：`pnpm lint` / `pnpm lint:fix` 走的是 `pnpm -r`，覆盖全部 20 个有 lint 脚本的成员**（`packages/*` 十五个 + `examples` + 四个 app；只有 `docs` 没配——它的源码里没有可 lint 的 JS/TS，`.vitepress/cache` 全是构建缓存）。规则分两套：`packages/*`、`examples` 与 `cloudflare-worker-server` 引根目录的 `eslint.config.base.js`（共享基线，目前只有「花括号强制」一条）；`web` 与 `node-server` 各有自己的完整配置（prettier + import 排序 + react-hooks），不引基线。
 - **给 app 的配置加规则时，位置很关键**：两个 app 的配置最后一项是 `eslint-config-prettier`，它会把 `curly` 这类「特殊规则」直接关掉。新规则若被它覆盖，必须写在它**后面**的配置块里（`curly: ['error', 'all']` 就是这么加的——`all` 档只加括号、不动折行，与 prettier 不冲突）。
 - **根 `package.json` 的 `typescript` 是 `^6.0.3`，跟 catalog 的 `^7.0.2` 不一致，这是故意的**：`typescript-eslint` 至今（8.67）的 peer 范围是 `>=4.8.4 <6.1.0`，装在 TS 7 上一 import 就崩（`Cannot read properties of undefined (reading 'Cjs')`）。根上这份 TS 6 只给 lint 工具链用；`packages/*` 各自的 `typescript: catalog:` 仍是 7.0.2，编译不受影响（两个 app 早就为同一原因把自己钉在 `^6.0.3`）。**typescript-eslint 支持 TS 7 后可以撤掉这个钉子。**
@@ -73,19 +73,19 @@ pnpm workspace 三组成员（见 [pnpm-workspace.yaml](./pnpm-workspace.yaml)�
 
 | 目录 | 装什么 | 对应包 |
 | --- | --- | --- |
-| `docs/architecture/` | 架构总纲（分层、部署形态、包怎么拆） | `@nimbo/agent` |
+| `docs/architecture/` | 架构总纲（分层、部署形态、包怎么拆） | `@runko/agent` |
 | **`docs/logic/`** | **agent 逻辑层，三个子层自上而下** | |
-| &nbsp;&nbsp;`logic/arbitration/` | 归属仲裁——语义 + **随宿主变化的多种实现** | `@nimbo/agent` · `persist-*` · `durable-object` |
-| &nbsp;&nbsp;`logic/orchestration/` | 轮编排 | `@nimbo/agent` |
-| &nbsp;&nbsp;`logic/engine/` | 执行引擎 | `@nimbo/core` |
+| &nbsp;&nbsp;`logic/arbitration/` | 归属仲裁——语义 + **随宿主变化的多种实现** | `@runko/agent` · `persist-*` · `durable-object` |
+| &nbsp;&nbsp;`logic/orchestration/` | 轮编排 | `@runko/agent` |
+| &nbsp;&nbsp;`logic/engine/` | 执行引擎 | `@runko/core` |
 | **`docs/host/`** | **宿主层，按宿主环境分档** | |
-| &nbsp;&nbsp;`host/contract/` | **跨环境的接口契约**（沙盒 · 持久化 · 流分发），只写一遍 | `@nimbo/agent` · `virtual-fs` |
+| &nbsp;&nbsp;`host/contract/` | **跨环境的接口契约**（沙盒 · 持久化 · 流分发），只写一遍 | `@runko/agent` · `virtual-fs` |
 | &nbsp;&nbsp;`host/node/` | Node 长驻：单进程 / cluster / Docker / k8s | `persist-*` |
 | &nbsp;&nbsp;`host/cloudflare/` | Worker + Durable Object | `durable-object` · `sandbox-cloudflare` |
 | &nbsp;&nbsp;`host/vercel/` | Functions + Sandbox | `sandbox-vercel` · `stream-redis` |
 | &nbsp;&nbsp;`host/e2b/` | E2B 沙盒（只提供沙盒这一样能力，可配在任何一档下） | `sandbox-e2b` |
 | `docs/ingress/` | 接入层——构建者写的应用代码（`apps/` 下的 chat 应用） | 不发布 |
-| `docs/misc/` | 周边（示例集、验证与验收、文档站） | `@nimbo/examples` |
+| `docs/misc/` | 周边（示例集、验证与验收、文档站） | `@runko/examples` |
 
 只有[术语表](./docs/terms.md)、`overview.md`、`index.md` 和 README 留在 `docs/` 根——它们是词典/索引，不是功能文档。
 
@@ -112,7 +112,7 @@ slug: single-ledger              # 与文件名一致；三个视角共用同一
 view: 功能                        # 功能 | 技术 | 施工
 layer: 逻辑层                     # 总纲 | 逻辑层 | 宿主层 | 接入层 | 周边
 module: 轮编排                    # 执行引擎 | 轮编排 | 归属仲裁 | 沙盒 | 持久化 | 流分发 | —
-packages: ["@nimbo/agent"]        # 这份文档对应哪些包
+packages: ["@runko/agent"]        # 这份文档对应哪些包
 tags: ["账本", "UIMessage", "seq", "断线续传", "数据模型"]
 related: ["logic/orchestration/tech/single-ledger.md", "architecture/tech/agent-kernel.md"]  # 相对 docs/ 根
 ---
@@ -124,7 +124,7 @@ related: ["logic/orchestration/tech/single-ledger.md", "architecture/tech/agent-
 
 ```sh
 grep -rl 'module: 轮编排' docs/          # 轮编排相关的全部文档
-grep -rl '@nimbo/agent' docs/            # 某个包相关的全部文档
+grep -rl '@runko/agent' docs/            # 某个包相关的全部文档
 ls docs/host/*/tech/deployment.md        # 全部宿主环境的落地方案
 ```
 
@@ -146,7 +146,7 @@ pnpm docs:dev        # 常驻进程 —— 按上面「dev server 归我自己�
 - **`view` 字段是「功能 / 技术 / 施工」**（短形式），侧栏上显示的「技术方案 / 施工进展」是另一回事，别互相冒充。
 - **指向 `docs/` 之外的相对链接不用改**（`../../packages/core/README.md` 这种）——构建时会自动改写成 GitHub 地址，源文件保持相对路径以便在编辑器里跳转。
 
-nimbo 是技术产品，**技术面本身就是产品功能**——架构总纲、内置工具、沙盒适配契约这类「底座」对开发者而言都是功能，一律按上面的分层 + 三视角归位，不另设参考目录。唯一例外：术语表 `docs/terms.md` 与总览 `README` 留在 `docs/` 根（它们是词典/索引，不是功能文档）。
+runko 是技术产品，**技术面本身就是产品功能**——架构总纲、内置工具、沙盒适配契约这类「底座」对开发者而言都是功能，一律按上面的分层 + 三视角归位，不另设参考目录。唯一例外：术语表 `docs/terms.md` 与总览 `README` 留在 `docs/` 根（它们是词典/索引，不是功能文档）。
 
 请用简单易懂、清晰明了的语言来编写所有文档，避免晦涩、避免过度术语化。可以的时候尽量多画图，业务领域实体关系图、时序图是很重要的。
 

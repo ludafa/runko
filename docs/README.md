@@ -1,6 +1,6 @@
-# @nimbo/docs
+# @runko/docs
 
-nimbo 的设计文档站（VitePress）。**它是一个独立的 workspace 成员**——自带依赖、自己构建、可以单独部署，不跟 `packages/*` 的发布流程绑在一起。
+runko 的设计文档站（VitePress）。**它是一个独立的 workspace 成员**——自带依赖、自己构建、可以单独部署，不跟 `packages/*` 的发布流程绑在一起。
 
 > 这份 README 是给「要动这个站」的人看的。**文档站本身的产品/技术/施工三份文档**在
 > [文档站（VitePress） · 功能](./misc/features/docs-site.md) ·
@@ -31,8 +31,8 @@ pnpm typecheck  # 检查 .vitepress/ 下的配置与脚本
 | --- | --- |
 | `architecture/` | 架构总纲：分层、部署形态、包怎么拆 |
 | `logic/arbitration/` | 逻辑层 · 归属仲裁——语义 + 随宿主变化的三种实现 |
-| `logic/orchestration/` | 逻辑层 · 轮编排（`@nimbo/agent`） |
-| `logic/engine/` | 逻辑层 · 执行引擎（`@nimbo/core`） |
+| `logic/orchestration/` | 逻辑层 · 轮编排（`@runko/agent`） |
+| `logic/engine/` | 逻辑层 · 执行引擎（`@runko/core`） |
 | `host/contract/` | 宿主层 · 跨环境的接口契约：沙盒 · 持久化 · 流分发 |
 | `host/node/` | 宿主层 · Node 长驻：单进程 / cluster / Docker / k8s |
 | `host/cloudflare/` | 宿主层 · Worker + Durable Object |
@@ -78,10 +78,10 @@ pnpm typecheck  # 检查 .vitepress/ 下的配置与脚本
 
 产物在 `.vitepress/dist/`，是一堆静态文件，托管在哪儿都行。
 
-**部署到子路径**（比如 GitHub Pages 的 `https://<user>.github.io/nimbo/`）时用环境变量指定，不用改配置：
+**部署到子路径**（比如 GitHub Pages 的 `https://<user>.github.io/runko/`）时用环境变量指定，不用改配置：
 
 ```sh
-DOCS_BASE=/nimbo/ pnpm build
+DOCS_BASE=/runko/ pnpm build
 ```
 
 放在域名根下（Cloudflare Pages / Vercel / Netlify）则不用设，默认就是 `/`。

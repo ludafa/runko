@@ -4,16 +4,16 @@
  * 而且测试能精确控制每个 chunk 什么时候到、这一轮怎么结束。
  */
 import { randomUUID } from "node:crypto";
-import type { NimboChunk, NimboUIMessage, SessionOptions, SessionState, TurnResult } from "@nimbo/core";
+import type { RunkoChunk, RunkoUIMessage, SessionOptions, SessionState, TurnResult } from "@runko/core";
 
 import type { DrivenSession, SessionFactory } from "../../src/index.js";
 
 export interface FakeSession extends DrivenSession {
   /** `stream()` 被调用（这一轮真正开跑）时 resolve，带上喂给模型的文本。 */
   readonly started: Promise<string>;
-  emit(chunk: NimboChunk): void;
+  emit(chunk: RunkoChunk): void;
   /** 往内部账本追加一条成品消息——收尾时框架会把它落进[账本](../../../../docs/terms.md)。 */
-  push(message: NimboUIMessage): void;
+  push(message: RunkoUIMessage): void;
   /** 正常收尾。 */
   finish(result?: TurnResult): void;
   /** 让 `stream()` 抛出——模拟「生成器自己炸了」那条路。 */
@@ -25,12 +25,12 @@ const EMPTY_RESULT: TurnResult = { finalResponse: "", usage: {} };
 
 export function createFakeSession(options: SessionOptions = {}): FakeSession {
   const resume = options.resume;
-  const messages: NimboUIMessage[] = resume === undefined ? [] : [...resume.messages];
+  const messages: RunkoUIMessage[] = resume === undefined ? [] : [...resume.messages];
   const id = resume?.id ?? randomUUID();
   const createdAt = resume?.createdAt ?? Date.now();
   let turn = resume?.turn ?? 0;
 
-  const queued: NimboChunk[] = [];
+  const queued: RunkoChunk[] = [];
   let finished = false;
   let failure: Error | undefined;
   let result: TurnResult = EMPTY_RESULT;
@@ -54,7 +54,7 @@ export function createFakeSession(options: SessionOptions = {}): FakeSession {
     markStarted = resolve;
   });
 
-  async function* stream(input: string, opts?: { signal?: AbortSignal }): AsyncGenerator<NimboChunk, TurnResult> {
+  async function* stream(input: string, opts?: { signal?: AbortSignal }): AsyncGenerator<RunkoChunk, TurnResult> {
     active = true;
     signal = opts?.signal;
     turn += 1;
@@ -92,11 +92,11 @@ export function createFakeSession(options: SessionOptions = {}): FakeSession {
       messages.push({ id: randomUUID(), role: "user", parts: [{ type: "text", text: input }], metadata: { steered: true } });
       return true;
     },
-    emit(chunk: NimboChunk): void {
+    emit(chunk: RunkoChunk): void {
       queued.push(chunk);
       bump();
     },
-    push(message: NimboUIMessage): void {
+    push(message: RunkoUIMessage): void {
       messages.push(message);
     },
     finish(next?: TurnResult): void {
@@ -147,12 +147,12 @@ export function createFakeSessionFactory(): { factory: SessionFactory; sessions:
 const claimed = new WeakSet<FakeSession>();
 
 /** 一条最小的收尾帧——`status` 决定这一轮算怎么结束的。 */
-export function endTurnChunk(turn: number, status: "completed" | "failed" | "interrupted" = "completed"): NimboChunk {
+export function endTurnChunk(turn: number, status: "completed" | "failed" | "interrupted" = "completed"): RunkoChunk {
   return { type: "message-metadata", messageMetadata: { turn, usage: {}, status } };
 }
 
 /** 一条最小的 assistant 成品消息。 */
-export function assistantMessage(text: string, metadata?: NimboUIMessage["metadata"]): NimboUIMessage {
+export function assistantMessage(text: string, metadata?: RunkoUIMessage["metadata"]): RunkoUIMessage {
   return {
     id: randomUUID(),
     role: "assistant",

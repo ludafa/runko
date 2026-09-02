@@ -21,14 +21,14 @@ describe('agent/store', () => {
     seedUser(db, 'user-2');
   });
 
-  it('conversations: create/list/get scoped by user — a fresh row has a null nimbo header (docs/tech/single-ledger.md §5 单-3)', () => {
+  it('conversations: create/list/get scoped by user — a fresh row has a null runko header (docs/tech/single-ledger.md §5 单-3)', () => {
     const row = createConversation(db, {
       id: 'sess-1',
       userId: 'user-1',
       title: 'My session',
       repo: 'acme/demo',
-      branchName: 'nimbo/chat-sess-1',
-      sandboxName: 'nimbo-chat-sess-1',
+      branchName: 'runko/chat-sess-1',
+      sandboxName: 'runko-chat-sess-1',
     });
     expect(row.status).toBe('active');
     expect(row.agentSessionId).toBeNull();
@@ -40,8 +40,8 @@ describe('agent/store', () => {
       userId: 'user-2',
       title: 'Someone else’s session',
       repo: 'acme/demo',
-      branchName: 'nimbo/chat-sess-2',
-      sandboxName: 'nimbo-chat-sess-2',
+      branchName: 'runko/chat-sess-2',
+      sandboxName: 'runko-chat-sess-2',
     });
 
     expect(listConversations(db, 'user-1').map((r) => r.id)).toEqual([
@@ -62,8 +62,8 @@ describe('agent/store', () => {
       userId: 'user-1',
       title: 'My session',
       repo: 'acme/demo',
-      branchName: 'nimbo/chat-sess-1',
-      sandboxName: 'nimbo-chat-sess-1',
+      branchName: 'runko/chat-sess-1',
+      sandboxName: 'runko-chat-sess-1',
     });
     expect(row.provider).toBe('vercel');
     expect(row.sandboxId).toBeNull();
@@ -75,8 +75,8 @@ describe('agent/store', () => {
       userId: 'user-1',
       title: 'E2B session',
       repo: 'acme/demo',
-      branchName: 'nimbo/chat-sess-e2b',
-      sandboxName: 'nimbo-chat-sess-e2b',
+      branchName: 'runko/chat-sess-e2b',
+      sandboxName: 'runko-chat-sess-e2b',
       provider: 'e2b',
       sandboxId: 'sbx_123',
     });
@@ -84,14 +84,14 @@ describe('agent/store', () => {
     expect(row.sandboxId).toBe('sbx_123');
   });
 
-  it('updateConversation: a sandboxId-only patch persists in isolation — status/lastActiveAt and the nimbo header columns are untouched (docs/tech/sandbox-provider.md §3.1)', () => {
+  it('updateConversation: a sandboxId-only patch persists in isolation — status/lastActiveAt and the runko header columns are untouched (docs/tech/sandbox-provider.md §3.1)', () => {
     createConversation(db, {
       id: 'sess-1',
       userId: 'user-1',
       title: 'My session',
       repo: 'acme/demo',
-      branchName: 'nimbo/chat-sess-1',
-      sandboxName: 'nimbo-chat-sess-1',
+      branchName: 'runko/chat-sess-1',
+      sandboxName: 'runko-chat-sess-1',
       provider: 'e2b',
     });
     const before = getConversation(db, 'sess-1', 'user-1');
@@ -117,14 +117,14 @@ describe('agent/store', () => {
     );
   });
 
-  it('updateConversation: status/lastActiveAt patch independently of the nimbo header (agentSessionHeader omitted leaves the header columns untouched)', () => {
+  it('updateConversation: status/lastActiveAt patch independently of the runko header (agentSessionHeader omitted leaves the header columns untouched)', () => {
     createConversation(db, {
       id: 'sess-1',
       userId: 'user-1',
       title: 'My session',
       repo: 'acme/demo',
-      branchName: 'nimbo/chat-sess-1',
-      sandboxName: 'nimbo-chat-sess-1',
+      branchName: 'runko/chat-sess-1',
+      sandboxName: 'runko-chat-sess-1',
     });
 
     const patchTime = new Date('2026-01-01T00:00:00.000Z');
@@ -135,7 +135,7 @@ describe('agent/store', () => {
     const updated = getConversation(db, 'sess-1', 'user-1');
     expect(updated?.status).toBe('sleeping');
     expect(updated?.lastActiveAt.toISOString()).toBe(patchTime.toISOString());
-    // nimbo header columns untouched — still the fresh-session null triple.
+    // runko header columns untouched — still the fresh-session null triple.
     expect(updated?.agentSessionId).toBeNull();
     expect(updated?.agentSessionCreatedAt).toBeNull();
     expect(updated?.agentSessionTurn).toBeNull();
@@ -147,22 +147,22 @@ describe('agent/store', () => {
       userId: 'user-1',
       title: 'My session',
       repo: 'acme/demo',
-      branchName: 'nimbo/chat-sess-1',
-      sandboxName: 'nimbo-chat-sess-1',
+      branchName: 'runko/chat-sess-1',
+      sandboxName: 'runko-chat-sess-1',
     });
 
     const createdAt = new Date('2026-01-02T00:00:00.000Z');
     updateConversation(db, 'sess-1', {
       status: 'active',
       agentSessionHeader: {
-        conversationId: 'nimbo-sess-abc',
+        conversationId: 'runko-sess-abc',
         createdAt,
         turn: 1,
       },
     });
 
     const updated = getConversation(db, 'sess-1', 'user-1');
-    expect(updated?.agentSessionId).toBe('nimbo-sess-abc');
+    expect(updated?.agentSessionId).toBe('runko-sess-abc');
     expect(updated?.agentSessionCreatedAt?.toISOString()).toBe(
       createdAt.toISOString(),
     );
@@ -171,7 +171,7 @@ describe('agent/store', () => {
     // A second patch (turn 2, same session id/createdAt as a real "resumed" turn would send) overwrites all three again.
     updateConversation(db, 'sess-1', {
       agentSessionHeader: {
-        conversationId: 'nimbo-sess-abc',
+        conversationId: 'runko-sess-abc',
         createdAt,
         turn: 2,
       },
@@ -186,8 +186,8 @@ describe('agent/store', () => {
         userId: 'user-1',
         title: 'My session',
         repo: 'acme/demo',
-        branchName: 'nimbo/chat-sess-1',
-        sandboxName: 'nimbo-chat-sess-1',
+        branchName: 'runko/chat-sess-1',
+        sandboxName: 'runko-chat-sess-1',
       });
     });
 

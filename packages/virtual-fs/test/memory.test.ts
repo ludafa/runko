@@ -2,8 +2,8 @@ import * as nodeFs from "node:fs/promises";
 import * as nodePath from "node:path";
 import * as os from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { jsonValueSchema } from "@nimbo/core";
-import type { NimboFS } from "@nimbo/core";
+import { jsonValueSchema } from "@runko/core";
+import type { RunkoFS } from "@runko/core";
 import {
   DirectoryNotEmptyError,
   MemoryFS,
@@ -13,7 +13,7 @@ import {
 } from "../src/memory.js";
 import { PathEscapesRootError } from "../src/path.js";
 
-describe("MemoryFS basic NimboFS surface", () => {
+describe("MemoryFS basic RunkoFS surface", () => {
   it("writes and reads a text file", async () => {
     const fs = new MemoryFS();
     await fs.writeFile("/a.txt", "hello");
@@ -206,7 +206,7 @@ describe("MemoryFS.writeBack()", () => {
   let tmpDir: string;
 
   beforeEach(async () => {
-    tmpDir = await nodeFs.mkdtemp(nodePath.join(os.tmpdir(), "nimbo-memoryfs-"));
+    tmpDir = await nodeFs.mkdtemp(nodePath.join(os.tmpdir(), "runko-memoryfs-"));
   });
 
   afterEach(async () => {
@@ -321,10 +321,10 @@ describe("MemoryFS.snapshot()/restore()", () => {
 
 describe("MemoryFS native search seam (docs/tech/sandbox.md §4)", () => {
   it("does not implement searchFiles/searchContent — grep/glob must always fall back to JS scanning against it", () => {
-    // typed as the NimboFS interface (not the concrete class) — searchFiles/searchContent are
+    // typed as the RunkoFS interface (not the concrete class) — searchFiles/searchContent are
     // optional members of the interface, not members of MemoryFS's own declared shape, so accessing
     // them off a bare `MemoryFS`-typed value wouldn't even type-check.
-    const fs: NimboFS = new MemoryFS();
+    const fs: RunkoFS = new MemoryFS();
     expect(fs.searchFiles).toBeUndefined();
     expect(fs.searchContent).toBeUndefined();
   });

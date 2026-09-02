@@ -1,5 +1,5 @@
 /**
- * 进程入口。`pnpm --filter @nimbo-demo/persist-demo start`。
+ * 进程入口。`pnpm --filter @runko-demo/persist-demo start`。
  *
  * 环境变量：
  *

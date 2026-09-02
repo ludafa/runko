@@ -14,16 +14,16 @@
  * Expected output shape:
  *   1. A deterministic section (no model, no env vars needed): builds one
  *      flat skill and one packaged skill (the packaged one loaded from an
- *      in-memory NimboFS via Skill.fromFS, proving packaged skills don't
- *      require real disk), then prints the `<available_skills>` block nimbo
+ *      in-memory RunkoFS via Skill.fromFS, proving packaged skills don't
+ *      require real disk), then prints the `<available_skills>` block runko
  *      injects into the system prompt — just name + description, not the
  *      full markdown (progressive disclosure).
- *   2. If NIMBO_MODEL is set: the agent is asked a question that should make
+ *   2. If RUNKO_MODEL is set: the agent is asked a question that should make
  *      it call `load-skill`, and the transcript's tool_call items are
- *      printed. If NIMBO_MODEL is unset, this section is skipped with a
+ *      printed. If RUNKO_MODEL is unset, this section is skipped with a
  *      clean exit.
  */
-import { buildAvailableSkillsBlock, createSession, defineAgent, NimboFS, Skill } from "@nimbo/sdk";
+import { buildAvailableSkillsBlock, createSession, defineAgent, RunkoFS, Skill } from "@runko/sdk";
 import { resolveModel } from "./shared/model.ts";
 
 const FLAT_SKILL_MARKDOWN = `---
@@ -51,7 +51,7 @@ async function buildSkills(): Promise<Skill[]> {
 
   // A packaged skill's attachments can live on a VirtualFS just as well as on
   // real disk — Skill.fromFS proves it without needing any fixture files.
-  const skillsFs = NimboFS.fromMemory({
+  const skillsFs = RunkoFS.fromMemory({
     "pr-review/SKILL.md": PACKAGED_SKILL_MD,
     "pr-review/checklist.md": PACKAGED_SKILL_CHECKLIST,
   });
@@ -79,7 +79,7 @@ async function modelDrivenSection(): Promise<void> {
 
   const skills = await buildSkills();
   const agent = defineAgent({ model, skills });
-  const session = createSession(agent, { fs: NimboFS.fromMemory({}) });
+  const session = createSession(agent, { fs: RunkoFS.fromMemory({}) });
 
   const result = await session.send("我要写一条 commit message，先看看仓库的规范是什么。");
   console.log("finalResponse:", result.finalResponse);

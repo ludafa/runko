@@ -1,4 +1,4 @@
-# @nimbo/agent
+# @runko/agent
 
 ## 0.1.0
 
@@ -52,9 +52,9 @@
 
   新导出 `SteerPolicy` 类型。三个枚举值的行为一字未改，缺省仍是 `'onRequest'`。
 
-- 3029ae3: 新包 `@nimbo/agent`——轮编排运行时。
+- 3029ae3: 新包 `@runko/agent`——轮编排运行时。
 
-  `@nimbo/core` 给的是「跑一轮」，这个包给的是「**一轮接一轮地跑下去**」：
+  `@runko/core` 给的是「跑一轮」，这个包给的是「**一轮接一轮地跑下去**」：
 
   - **一轮的一生**：起轮占位 → 装配 → 驱动 → 收尾，全套失败路径都有交代（装配抛错、生成器抛错、跑到一半失去独占权）。
   - **待发队列与插话**：`enqueue` 一个函数管三种情况（空闲起新轮 / 忙就排队 / 插进当前这一轮），收尾时自动出队；「查完队列没活儿了到真正释放归属之间用户又发了一条」那个竞态由框架内部兜一次，构建者不需要知道它存在。
@@ -66,16 +66,16 @@
 
   挂起与恢复、租约版归属仲裁不在这一批，接口已按它们定形。
 
-- 48b461b: **新包 `@nimbo/conformance`：宿主能力的契约一致性套件。** 写了一个 `Persistence` 或
+- 48b461b: **新包 `@runko/conformance`：宿主能力的契约一致性套件。** 写了一个 `Persistence` 或
   `Arbitration` 实现，装上它就能验合不合契约——接口注释里那些写死了却从没验过的承诺
   （同一个 seq 重复写入不得写出两行、`settle` 对已结清的返回 `false` 而不是抛、取号一律
-  不抛错……）全部变成可执行断言。nimbo 自己的五个官方持久化实现跑的就是这一份。
+  不抛错……）全部变成可执行断言。runko 自己的五个官方持久化实现跑的就是这一份。
 
   **它不依赖任何测试框架。** 套件只导出**用例数据**（`{ name, run }`），`describe` / `it`
   由消费方来接，所以 vitest / jest / node:test / Workers 上都能跑：
 
   ```ts
-  import { persistenceCases } from "@nimbo/conformance";
+  import { persistenceCases } from "@runko/conformance";
 
   describe("我自己的实现", () => {
     for (const testCase of persistenceCases) {
@@ -91,8 +91,8 @@
   两个节点的）、`arbitrationTakeoverCases`（能表达超时接管的）。分组不是可选字段，是三个
   独立数组：一个本该支持接管的实现漏传 `expire`，不会静默跳过还显示绿。
 
-  **这套东西曾经是 `@nimbo/agent` 的子路径导出 `@nimbo/agent/conformance`，现已移除。**
-  它需要一套断言，而断言不该把测试框架拖进一个**运行时**包的依赖里——`@nimbo/agent` 因此
+  **这套东西曾经是 `@runko/agent` 的子路径导出 `@runko/agent/conformance`，现已移除。**
+  它需要一套断言，而断言不该把测试框架拖进一个**运行时**包的依赖里——`@runko/agent` 因此
   不再有 `vitest` 这个可选 peer。改用新包即可，用例内容一条没少。
 
 - 3029ae3: 裁决记录的 `scope` 从 `'once' | 'broader'` 改成 **`'once' | 'conversation'`**。
@@ -109,9 +109,9 @@
   传 `'broader'` 的宿主改传 `'conversation'`；已落库的旧值需要自己刷一遍（`scope` 只是审计字段，
   没有代码读它回来做放行判断）。
 
-- 1282005: **新增租约版[归属仲裁机制](https://github.com/ludafa/nimbo/blob/main/docs/logic/arbitration/features/arbitration-impl.md)**——多进程 / 多节点共享一个数据库时，保证同一份对话同时刻只有一个执行在跑。
+- 1282005: **新增租约版[归属仲裁机制](https://github.com/ludafa/runko/blob/main/docs/logic/arbitration/features/arbitration-impl.md)**——多进程 / 多节点共享一个数据库时，保证同一份对话同时刻只有一个执行在跑。
 
-  `@nimbo/persist-kysely` 导出 `leaseArbitration(db, { flavor, holder })`：
+  `@runko/persist-kysely` 导出 `leaseArbitration(db, { flavor, holder })`：
 
   ```ts
   createAgentRuntime({
@@ -127,12 +127,12 @@
 
   默认 **心跳 5 秒 / 判死 60 秒**（12 拍）/ 交权宽限 15 秒，三个都可配；**阈值必须 ≥ 3× 心跳，配错构造时就抛**——阈值太短会把一次普通的调度延迟变成两个同时持有者，那是静默的数据损坏。
 
-  [`@nimbo/conformance`](https://www.npmjs.com/package/@nimbo/conformance) 同批新增仲裁用例，按能力分三组：内存版跑「通用」一组，能表达多节点的实现另跑「多节点」与「超时接管」两组。其中**「被误判的老持有者取号一律被拒」是整个租约版唯一真正要证明的东西**，已在 SQLite / pglite / 真 Postgres / 真 MySQL 四档上跑过。
+  [`@runko/conformance`](https://www.npmjs.com/package/@runko/conformance) 同批新增仲裁用例，按能力分三组：内存版跑「通用」一组，能表达多节点的实现另跑「多节点」与「超时接管」两组。其中**「被误判的老持有者取号一律被拒」是整个租约版唯一真正要证明的东西**，已在 SQLite / pglite / 真 Postgres / 真 MySQL 四档上跑过。
 
 - fca6c03: 收尾状态多了第四种：`suspended`（挂起）。
 
-  - `@nimbo/core`：`NimboMessageMetadata.status` 与它的 zod schema 从三值扩到四值。
-  - `@nimbo/agent`：`TurnStatus` 跟着扩（它原样透传 core 的收尾 metadata）。
+  - `@runko/core`：`RunkoMessageMetadata.status` 与它的 zod schema 从三值扩到四值。
+  - `@runko/agent`：`TurnStatus` 跟着扩（它原样透传 core 的收尾 metadata）。
 
   **挂起是主动且可恢复的**——一轮停在「正在等人」这个干净边界上收尾、释放归属，人回来之后由
   **新的一轮**接着跑。它跟 `interrupted`（宿主主动中断）不是一回事，宿主别把它当失败处理：别重试、
@@ -152,11 +152,11 @@
   - **并发 `enqueue` 不再重号、不再越过 `max`。** 队列的 `(conversationId, seq)` 上加了唯一约束/索引，撞号的那条换个号重来。此前是「先查最大值再插」，两个并发请求会算出同一个 seq，之后按 seq 排序平局——先到先发不再成立。
   - **`append` 撞号时会如实报 `{ ok: false, reason: 'rejected' }`。** 同一条消息重写仍是幂等；但**另一条**消息占了同一个号时，此前一律报成功，等于静默丢消息。
 
-  **`@nimbo/persist-mongo` 的 `migrate()` 现在能就地升级同名索引。** 队列索引这次从非唯一改成了唯一，而 Mongo 会拒绝同名不同选项的 `createIndex`——不处理的话，从上一版升上来的人会直接崩在启动上（`IndexOptionsConflict`）。现在撞上冲突就删了重建；重建失败（存量数据违反唯一性）照常抛，那种情况需要人介入、不该静默。
+  **`@runko/persist-mongo` 的 `migrate()` 现在能就地升级同名索引。** 队列索引这次从非唯一改成了唯一，而 Mongo 会拒绝同名不同选项的 `createIndex`——不处理的话，从上一版升上来的人会直接崩在启动上（`IndexOptionsConflict`）。现在撞上冲突就删了重建；重建失败（存量数据违反唯一性）照常抛，那种情况需要人介入、不该静默。
 
   另外：`migrate()` 的承诺范围写进了 README 与 `schema.sql`（只做首建、不做演进、不能并发调），参考 DDL 随包发布（`schema.sql`），队列 `input` 列改为运行时校验而不是裸类型断言。
 
-  一致性套件（`@nimbo/conformance`）新增 4 条：ID 大小写敏感（conversationId 与 toolCallId 各一条）、并发 enqueue、append 撞号报拒绝——五个实现都要满足。
+  一致性套件（`@runko/conformance`）新增 4 条：ID 大小写敏感（conversationId 与 toolCallId 各一条）、并发 enqueue、append 撞号报拒绝——五个实现都要满足。
 
 - Updated dependencies [847222d]
 - Updated dependencies [be08aac]
@@ -165,5 +165,5 @@
 - Updated dependencies [3ffdf28]
 - Updated dependencies [fca6c03]
 - Updated dependencies
-  - @nimbo/core@0.1.0
-  - @nimbo/virtual-fs@0.1.0
+  - @runko/core@0.1.0
+  - @runko/virtual-fs@0.1.0

@@ -1,13 +1,13 @@
 /**
  * 薄壳的冒烟测：**它只做一件事——把驱动包成 Kysely 转交给核心**，所以这里只验
- * 「转交对了没」，不重复跑一致性套件（那是 `@nimbo/persist-kysely` 的活，同一份
+ * 「转交对了没」，不重复跑一致性套件（那是 `@runko/persist-kysely` 的活，同一份
  * 实现跑两遍没有信息量）。
  *
- * 它要连真库，所以**给了 `NIMBO_TEST_POSTGRES_URL` 才跑**（没给就跳过并说明原因）——
+ * 它要连真库，所以**给了 `RUNKO_TEST_POSTGRES_URL` 才跑**（没给就跳过并说明原因）——
  * Postgres 没有进程内的替身。
  */
-import type { ConformanceCase } from "@nimbo/conformance";
-import { persistenceCases } from "@nimbo/conformance";
+import type { ConformanceCase } from "@runko/conformance";
+import { persistenceCases } from "@runko/conformance";
 import { Pool } from "pg";
 import { describe, expect, it } from "vitest";
 
@@ -36,11 +36,11 @@ function runCases<S extends { cleanup?: () => Promise<void> | void }>(
   });
 }
 
-const URL = process.env["NIMBO_TEST_POSTGRES_URL"];
+const URL = process.env["RUNKO_TEST_POSTGRES_URL"];
 
 if (URL === undefined) {
   describe.skip("persist-postgres", () => {
-    it("没给 NIMBO_TEST_POSTGRES_URL，跳过 —— Postgres 没有进程内替身，只能对真库跑", () => undefined);
+    it("没给 RUNKO_TEST_POSTGRES_URL，跳过 —— Postgres 没有进程内替身，只能对真库跑", () => undefined);
   });
 } else {
   describe("persist-postgres", () => {

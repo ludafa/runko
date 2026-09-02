@@ -4,7 +4,7 @@ slug: single-ledger
 view: 施工
 layer: 逻辑层
 module: 轮编排
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["账本", "UIMessage", "seq", "断线续传", "数据模型"]
 related: ["logic/orchestration/features/single-ledger.md", "logic/orchestration/tech/single-ledger.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -17,7 +17,7 @@ related: ["logic/orchestration/features/single-ledger.md", "logic/orchestration/
 
 > 状态（2026-07-14）：实验方案待 review。「唯一数据真相」被定为 P13 系列最高优先级，先于 checkpoint 施工。
 >
-> 相关（原始 docs/09·docs/logic/engine/tech/core-sdk.md §4.3·docs/08，迁移后指向）：[turn-checkpoint 计划](./turn-checkpoint.md)（checkpoint 与保活——本实验若通过，其「对齐」语义将基于单账本简化）· [core-sdk 的手动 loop 选型](../../engine/tech/core-sdk.md)（本实验不推翻它：loop 仍是 nimbo 自己的，换的是 loop 的**工作格式**）· [chat-webapp](../../../ingress/plans/chat-webapp.md)（chat 应用）。
+> 相关（原始 docs/09·docs/logic/engine/tech/core-sdk.md §4.3·docs/08，迁移后指向）：[turn-checkpoint 计划](./turn-checkpoint.md)（checkpoint 与保活——本实验若通过，其「对齐」语义将基于单账本简化）· [core-sdk 的手动 loop 选型](../../engine/tech/core-sdk.md)（本实验不推翻它：loop 仍是 runko 自己的，换的是 loop 的**工作格式**）· [chat-webapp](../../../ingress/plans/chat-webapp.md)（chat 应用）。
 >
 > 状态（2026-07-15）：P13-5-1..6 已全部交付，改动累积工作区（未 commit）。审批最终定案为**三值重构**（P13-5-2c），取代了初定的「用 ai@7 原生审批状态机（事后编码）」——原生事后编码对模型恢复正确、对直播交互失效。
 
@@ -29,7 +29,7 @@ related: ["logic/orchestration/features/single-ledger.md", "logic/orchestration/
 
 ### 2.1 实验形态
 
-`examples/13-uimessage-single-ledger.e2e.test.ts`——**不动 packages/\***，直接用 ai 包（`streamText` + `convertToModelMessages` + [UIMessage](../../../terms.md) 类型）手写一个最小 [loop](../../../terms.md)，复刻 nimbo loop 的全部关键语义：
+`examples/13-uimessage-single-ledger.e2e.test.ts`——**不动 packages/\***，直接用 ai 包（`streamText` + `convertToModelMessages` + [UIMessage](../../../terms.md) 类型）手写一个最小 [loop](../../../terms.md)，复刻 runko loop 的全部关键语义：
 
 - 工具声明**不带 execute**（手动 loop）：模型发起调用 → 实验代码自己执行 → 结果写回 UIMessage 的工具部件；
 - 一个审批场景（脚本化 deny 一次 bash 调用）；一个 ask-user 场景（脚本化回答）；一次 [steer](../../../terms.md)（第二步边界注入用户插话）；
@@ -43,7 +43,7 @@ related: ["logic/orchestration/features/single-ledger.md", "logic/orchestration/
 |---|---|---|---|
 | 1 | **推理往返** | 第一轮产出 reasoning + 工具调用；存档→读回→转换→第二轮。取证：两轮原始请求体 | DeepSeek 对历史 reasoning 的要求被满足（保留或按协议正确省略），第二轮请求合法、模型行为正常 |
 | 2 | **拒绝语义** | 脚本 deny 一次 bash 调用（output-error + errorText=拒绝理由） | 转换器生成的工具结果里拒绝理由完整可见；模型「理解被拒、改变方案」而非盲目重试 |
-| 3 | **多步等价** | 一轮内：文本 + 两步、每步各 1-2 个工具调用。对比转换器输出与旧 nimbo loop 手拼结构 | assistant→tool→assistant… 的分组与顺序等价；step-start 切分正确；无内容丢失 |
+| 3 | **多步等价** | 一轮内：文本 + 两步、每步各 1-2 个工具调用。对比转换器输出与旧 runko loop 手拼结构 | assistant→tool→assistant… 的分组与顺序等价；step-start 切分正确；无内容丢失 |
 | 4 | **前缀缓存** | 连续两轮；逐字节对比第二轮请求体前缀与第一轮的「请求+响应」；看 cachedInputTokens | 前缀逐字节一致；第二轮 cachedInputTokens > 0（真机信号） |
 | 5 | **中途插话（steer）** | 第一步结束后注入用户消息，assistant 在新消息中继续 | 转换后序列合法（user 消息正确插在步边界）；模型确认收到；界面 metadata 可区分「插话」与「新轮」 |
 
@@ -84,7 +84,7 @@ related: ["logic/orchestration/features/single-ledger.md", "logic/orchestration/
 依赖顺序串行施工，每单收尾双端管线全绿（typecheck/lint/test）；本会话不 commit，改动累积工作区：
 
 1. **P13-5-1 工具改名（coder，纯机械）**：全部工具名 kebab-case，涉及 packages/core、sdk、apps 两端与全部测试；文档正文留到 P13-5-6。
-2. **P13-5-2 core 账本迁移（coder，关键路径）**：`SessionState.messages` 改 `NimboUIMessage[]`（`validateSessionMessages` 校验恢复）；loop 工作态 = UIMessage 数组，每步 `convertToModelMessages` 推导；`session.stream()` 改吐 ai 的 `UIMessageChunk`（含 nimbo data 部件）；file_change/plan_update/error → `data-file-change`/`data-plan-update`/`data-error`；工具进度 transient 写入期分流；同一 toolCallId 只记结算态；steer = 步边界注入 metadata 标记的 user UIMessage；`SessionEvent`/`SessionItem` 退役。
+2. **P13-5-2 core 账本迁移（coder，关键路径）**：`SessionState.messages` 改 `RunkoUIMessage[]`（`validateSessionMessages` 校验恢复）；loop 工作态 = UIMessage 数组，每步 `convertToModelMessages` 推导；`session.stream()` 改吐 ai 的 `UIMessageChunk`（含 runko data 部件）；file_change/plan_update/error → `data-file-change`/`data-plan-update`/`data-error`；工具进度 transient 写入期分流；同一 toolCallId 只记结算态；steer = 步边界注入 metadata 标记的 user UIMessage；`SessionEvent`/`SessionItem` 退役。
 3. **P13-5-2c core 审批重构**（返工，插在 P13-5-2 之后、P13-5-3 之前，见 §5）。
 4. **P13-5-3 server（coder）**：`nimbo_state_json` 字段删除（drizzle 迁移）；`agent_events` 两类条目 message + chunk；回放算法 = 完工消息 + 进行中消息耐久块；turn-runner 审批/提问桥改为翻转工具部件状态；`GET events` 返回 `{ frames }`；openapi 重生成。
 5. **P13-5-4 web（coder）**：[kubb 重生成](../../../terms.md)；timeline 改渲染 UIMessage 部件（审批卡片由 `tool-approval-request` 驱动、提问卡片由 `tool-ask-user` 部件驱动——callId 对不上的旧痛点消失）。
@@ -111,7 +111,7 @@ P13-5-1..6 六单串行交付完毕，改动累积工作区（本会话不 commi
 | 单 | 交付 | 状态 |
 |---|---|---|
 | P13-5-1 工具改名 | 全部工具名 snake_case → kebab-case（`read-file`/`write-file`/`edit-file`/`delete-file`/`move-file`/`list-dir`/`update-plan`/`load-skill`/`ask-user`；`bash`/`glob`/`grep` 不变），core/sdk/两端 apps 与全部测试一并更新 | ✅ |
-| P13-5-2 core 账本迁移 | `SessionState.messages` 改 `NimboUIMessage[]`（`validateSessionMessages` 恢复）；loop 工作态 = UIMessage 数组，每步 `convertToModelMessages` 推导；`session.stream()` 改吐 `UIMessageChunk`（含 nimbo data 部件）；file_change/plan_update/轮内错误 → data 部件；工具进度 transient 写入期分流；同一 toolCallId 只记结算态；steer 注入 metadata；`SessionEvent`/`SessionItem`/`TurnResult.items` 退役 | ✅ |
+| P13-5-2 core 账本迁移 | `SessionState.messages` 改 `RunkoUIMessage[]`（`validateSessionMessages` 恢复）；loop 工作态 = UIMessage 数组，每步 `convertToModelMessages` 推导；`session.stream()` 改吐 `UIMessageChunk`（含 runko data 部件）；file_change/plan_update/轮内错误 → data 部件；工具进度 transient 写入期分流；同一 toolCallId 只记结算态；steer 注入 metadata；`SessionEvent`/`SessionItem`/`TurnResult.items` 退役 | ✅ |
 | P13-5-2c core 审批重构 | `ApprovalPolicy` 三值化 + `ApprovalOutcome`/`HumanDecision`；删 `ApprovalDecision.updatedInput`；loop 解析出 `review` 时先 yield `tool-approval-request` 再阻塞、经 `onReview` 等裁决，allow/deny 都 yield `tool-approval-response`；两层组合、review-once、无仲裁者 deny 语义保留 | ✅ |
 | P13-5-3 server | 删 `nimbo_state_json`（drizzle 迁移）；`agent_events` 两类条目 message + chunk；回放 = 完工消息 + 进行中消息耐久帧；turn-runner 审批/提问桥翻转工具部件状态；`GET events` 返回 `{ frames }`；openapi 重生成 | ✅ |
 | P13-5-4 web | kubb 重生成；timeline 渲染 UIMessage 部件（审批卡片 ← `tool-approval-request`、提问卡片 ← `tool-ask-user`，callId 旧痛点消失） | ✅ |

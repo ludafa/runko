@@ -1,7 +1,7 @@
 /**
  * L0 模型层：单步 `streamText` 封装 `runStep`（docs/tech/core-sdk.md §4.3 全节 / §4.8）。
  *
- * "每个 assistant step 调一次 `streamText`，loop 归 nimbo"——这里只做一步：
+ * "每个 assistant step 调一次 `streamText`，loop 归 runko"——这里只做一步：
  * 不设置 `stopWhen`（默认值就是 `isStepCount(1)`，见 AI SDK 文档），不做
  * 多步续跑、不做审批链、不执行工具、不产 `SessionEvent`（那些是 L2/P4 的
  * loop 职责）。`result.stream` 的增量块被映射为下面定义的 `StepEvent` 判别
@@ -32,7 +32,7 @@
  *   type（落进下面 switch 的 default 分支被忽略），让 for-await 循环随流
  *   关闭自然结束，随后 `Promise.all([...])` 的 reject 直接从这个 async
  *   generator 的 `next()` 抛出——调用方 `for await` 或 `.next()` 拿到的就是
- *   一次标准的 rejected promise，无需 nimbo 自造一套 abort 语义。
+ *   一次标准的 rejected promise，无需 runko 自造一套 abort 语义。
  */
 import { streamText } from "ai";
 import type {
@@ -44,7 +44,7 @@ import type {
   ToolModelMessage,
 } from "ai";
 import { jsonValueSchema } from "../types.js";
-import type { JsonValue, Tool as NimboTool } from "../types.js";
+import type { JsonValue, Tool as RunkoTool } from "../types.js";
 import { convertTools } from "./convert.js";
 
 /**
@@ -87,7 +87,7 @@ export interface RunStepInput {
   model: LanguageModel;
   system?: string;
   messages: ModelMessage[];
-  tools?: Record<string, NimboTool>;
+  tools?: Record<string, RunkoTool>;
   abortSignal?: AbortSignal;
   maxOutputTokens?: number;
 }

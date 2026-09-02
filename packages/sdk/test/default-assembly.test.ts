@@ -3,7 +3,7 @@
  * tools eight-set is wired end-to-end (readState + file_change → session.derivedData),
  * without the host hand-assembling `createFileTools({...})` the way core's own
  * `test/integration.test.ts` demonstrates as the "host" seam this ticket automates.
- * Also covers the `workspace` (NimboFS & NimboExec) overload's generic type retention.
+ * Also covers the `workspace` (RunkoFS & RunkoExec) overload's generic type retention.
  *
  * P13-5-2（docs/tech/single-ledger.md）迁移：断言从 `SessionEvent`/
  * `SessionItem` 改为读账本（`session.toJSON().messages` 的部件）：
@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { defineAgent, MemoryFS, miniBash } from "../src/index.js";
-import type { AgentDefinition, NimboExec, NimboFS } from "../src/index.js";
+import type { AgentDefinition, RunkoExec, RunkoFS } from "../src/index.js";
 import { createSession } from "../src/index.js";
 import { drainStream, fileChangeItems, mockModel, stopChunk, toolCallChunk, toolCallItems } from "./helpers.js";
 
@@ -30,7 +30,7 @@ describe("default assembly: fs defaults to MemoryFS, file tools eight-set defaul
 
   it("write-file (mock model tool call) actually writes the default MemoryFS, derives a data-file-change part, and is visible via session.fs.diff()", async () => {
     const model = mockModel(() => ({
-      doStream: [toolCallChunk("call_1", "write-file", { path: "/notes.txt", content: "hello nimbo" }), stopChunk("done")],
+      doStream: [toolCallChunk("call_1", "write-file", { path: "/notes.txt", content: "hello runko" }), stopChunk("done")],
     }));
     const agent = defineAgent({ model });
     const session = createSession(agent);
@@ -45,16 +45,16 @@ describe("default assembly: fs defaults to MemoryFS, file tools eight-set defaul
     const changes = fileChangeItems(messages);
     expect(changes).toEqual([{ type: "data-file-change", id: changes[0]?.id, data: { changes: [{ path: "/notes.txt", kind: "add" }] } }]);
 
-    expect(new TextDecoder().decode(await session.fs.readFile("/notes.txt"))).toBe("hello nimbo");
+    expect(new TextDecoder().decode(await session.fs.readFile("/notes.txt"))).toBe("hello runko");
     const diff = await session.fs.diff();
-    expect(diff).toEqual([{ path: "/notes.txt", kind: "created", after: "hello nimbo", patch: expect.any(String) }]);
+    expect(diff).toEqual([{ path: "/notes.txt", kind: "created", after: "hello runko", patch: expect.any(String) }]);
   });
 
   it("readState is shared internally: write-file then edit-file (same turn, no explicit read-file) succeeds", async () => {
     const model = mockModel(() => ({
       doStream: [
         toolCallChunk("call_1", "write-file", { path: "/a.txt", content: "hello world" }),
-        toolCallChunk("call_2", "edit-file", { path: "/a.txt", old_string: "world", new_string: "nimbo" }),
+        toolCallChunk("call_2", "edit-file", { path: "/a.txt", old_string: "world", new_string: "runko" }),
         stopChunk("done"),
       ],
     }));
@@ -64,7 +64,7 @@ describe("default assembly: fs defaults to MemoryFS, file tools eight-set defaul
     await drainStream(session.stream("write then edit"));
     const calls = toolCallItems(session.toJSON().messages);
     expect(calls.map((c) => c.state)).toEqual(["output-available", "output-available"]);
-    expect(new TextDecoder().decode(await session.fs.readFile("/a.txt"))).toBe("hello nimbo");
+    expect(new TextDecoder().decode(await session.fs.readFile("/a.txt"))).toBe("hello runko");
 
     // session.readState is the same store the internally-wired file tools use.
     expect(session.readState.get("/a.txt")).toBeDefined();
@@ -84,8 +84,8 @@ describe("default assembly: fs defaults to MemoryFS, file tools eight-set defaul
   });
 });
 
-describe("default assembly: SessionOptions.workspace (NimboFS & NimboExec, mode A same-source workspace)", () => {
-  function createWorkspace(): NimboFS & NimboExec & { marker(): string } {
+describe("default assembly: SessionOptions.workspace (RunkoFS & RunkoExec, mode A same-source workspace)", () => {
+  function createWorkspace(): RunkoFS & RunkoExec & { marker(): string } {
     const fs = new MemoryFS();
     const exec = miniBash(fs);
     return {
@@ -116,8 +116,8 @@ describe("default assembly: SessionOptions.workspace (NimboFS & NimboExec, mode 
     const session = createSession(agent, { workspace });
 
     // type-level proof: `marker()` only exists on our combined workspace object, not on the
-    // bare `NimboFS` interface — this line would fail to compile if the generic overload
-    // widened `session.fs` back down to `NimboFS`.
+    // bare `RunkoFS` interface — this line would fail to compile if the generic overload
+    // widened `session.fs` back down to `RunkoFS`.
     expect(session.fs.marker()).toBe("combined-workspace");
 
     await drainStream(session.stream("write then cat via bash"));

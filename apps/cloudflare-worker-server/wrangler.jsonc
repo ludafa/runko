@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "nimbo-cloudflare-worker-server",
+  "name": "runko-cloudflare-worker-server",
   "main": "src/index.ts",
   // nodejs_compat + 较新的 compat date：与 @cloudflare/sandbox 官方最小示例的
   // 装配保持一致。

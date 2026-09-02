@@ -16,12 +16,12 @@
  */
 import type {
   ApprovalPolicy,
-  NimboExec,
-  NimboFS,
+  RunkoExec,
+  RunkoFS,
   Skill,
   Tool,
-} from "@nimbo/core";
-import type { SessionTelemetry } from "@nimbo/core";
+} from "@runko/core";
+import type { SessionTelemetry } from "@runko/core";
 import type { LanguageModel } from "ai";
 
 import type { TurnInput } from "./types.js";
@@ -44,11 +44,11 @@ export interface PrepareTurnContext {
  * `workspace`），其余全可省略。
  */
 export interface TurnPreparation {
-  fs?: NimboFS;
+  fs?: RunkoFS;
   /** 注入即激活 core 的内置 `bash` 工具。 */
-  exec?: NimboExec;
+  exec?: RunkoExec;
   /** [模式 A（同源工作区）](../../../docs/terms.md)的语法糖：一个对象同时实现两个接口。与 `fs`/`exec` 互斥。 */
-  workspace?: (NimboFS & NimboExec) | undefined;
+  workspace?: (RunkoFS & RunkoExec) | undefined;
   /** 覆盖 `agent.model`（按会话切模型时用）。 */
   model?: LanguageModel;
   /** 覆盖 `agent.instructions`（宿主要把仓库/分支烤进提示词时用）。 */

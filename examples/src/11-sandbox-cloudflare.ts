@@ -5,17 +5,17 @@
  * different from E2B/Vercel: it can only be *accessed* from inside a
  * Cloudflare Worker (a Durable Object binding), so "agent runs on any Node
  * machine" (this repo's whole premise) requires a small **gateway** —
- * `@nimbo/sandbox-cloudflare/worker`'s `createSandboxGateway()` — deployed to
+ * `@runko/sandbox-cloudflare/worker`'s `createSandboxGateway()` — deployed to
  * the host's own Cloudflare account, translating a plain HTTP+NDJSON protocol
  * into real `@cloudflare/sandbox` calls. `apps/cloudflare-worker-server` is a
  * full, deployable Cloudflare Worker project whose `/gateway/*` route
- * implements that gateway (alongside its own in-Worker nimbo session route)
+ * implements that gateway (alongside its own in-Worker runko session route)
  * — bring your own CF account and deploy it as-is (see its own README),
  * rather than hand-copying files into your own wrangler project.
  *
- * `@nimbo/sandbox-cloudflare` is, like the other two adapters, **not**
- * re-exported by `@nimbo/sdk` — install it explicitly (`pnpm add
- * @nimbo/sandbox-cloudflare`; note there's no provider SDK to add on the
+ * `@runko/sandbox-cloudflare` is, like the other two adapters, **not**
+ * re-exported by `@runko/sdk` — install it explicitly (`pnpm add
+ * @runko/sandbox-cloudflare`; note there's no provider SDK to add on the
  * client side — see below).
  *
  * Two entry points, two different "no runtime import" stories (docs/tech/sandbox.md §8.1/
@@ -59,7 +59,7 @@
  *   - `mtime` is the container's real file modification time, commonly
  *     second-level precision (not the millisecond precision `MemoryFS`
  *     gives);
- *   - each NimboFS file-tool call is one HTTP round trip through the gateway
+ *   - each RunkoFS file-tool call is one HTTP round trip through the gateway
  *     (tens to hundreds of ms) — prefer a single bash command
  *     (`find`/`grep`) for scan-heavy work over many individual `glob`/
  *     `read-file` calls.
@@ -75,8 +75,8 @@
  *      `writeFile`/`readFile` round trip.
  *   2. A real-gateway section, gated in order: first `resolveModel()` (no
  *      model configured anywhere → setup instructions + clean `exit(0)`);
- *      then, only if a model *is* configured, both `NIMBO_CF_GATEWAY_URL`
- *      and `NIMBO_CF_GATEWAY_TOKEN` (see .env.template's
+ *      then, only if a model *is* configured, both `RUNKO_CF_GATEWAY_URL`
+ *      and `RUNKO_CF_GATEWAY_TOKEN` (see .env.template's
  *      "Cloudflare Sandbox gateway" section and
  *      apps/cloudflare-worker-server/README.md for how to deploy and obtain
  *      them) — either missing prints setup instructions and returns cleanly,
@@ -89,10 +89,10 @@
  *      tear down here (unlike 09/10): the sandbox's lifecycle is owned by
  *      the host's wrangler project, not by this client.
  */
-import { createSession, defineAgent } from "@nimbo/sdk";
-import { cloudflareWorkspace } from "@nimbo/sandbox-cloudflare";
-import { createSandboxGateway } from "@nimbo/sandbox-cloudflare/worker";
-import type { CfSandboxLike } from "@nimbo/sandbox-cloudflare/worker";
+import { createSession, defineAgent } from "@runko/sdk";
+import { cloudflareWorkspace } from "@runko/sandbox-cloudflare";
+import { createSandboxGateway } from "@runko/sandbox-cloudflare/worker";
+import type { CfSandboxLike } from "@runko/sandbox-cloudflare/worker";
 import { resolveModel } from "./shared/model.ts";
 
 /**
@@ -164,19 +164,19 @@ async function realGatewaySection(): Promise<void> {
 
   console.log("\n--- 2. a real, deployed Cloudflare Sandbox gateway, driven by the model ---");
 
-  const url = process.env.NIMBO_CF_GATEWAY_URL?.trim();
-  const token = process.env.NIMBO_CF_GATEWAY_TOKEN?.trim();
+  const url = process.env.RUNKO_CF_GATEWAY_URL?.trim();
+  const token = process.env.RUNKO_CF_GATEWAY_TOKEN?.trim();
   if (url === undefined || url.length === 0 || token === undefined || token.length === 0) {
     console.log(
-      "[nimbo example] NIMBO_CF_GATEWAY_URL/NIMBO_CF_GATEWAY_TOKEN are not fully set — skipping the real-gateway section.\n" +
+      "[runko example] RUNKO_CF_GATEWAY_URL/RUNKO_CF_GATEWAY_TOKEN are not fully set — skipping the real-gateway section.\n" +
         "Deploy apps/cloudflare-worker-server as your gateway first (see that project's README — Workers Paid plan required, no " +
-        "free tier; NIMBO_CF_GATEWAY_URL must include the /gateway prefix, e.g. https://<worker>.workers.dev/gateway), then fill both values in per the " +
+        "free tier; RUNKO_CF_GATEWAY_URL must include the /gateway prefix, e.g. https://<worker>.workers.dev/gateway), then fill both values in per the " +
         '"Cloudflare Sandbox gateway" section of ' +
         ".env.template. No HTTP request is made and no model call happens while either is missing.",
     );
     return;
   }
-  const sandboxId = process.env.NIMBO_CF_SANDBOX_ID?.trim();
+  const sandboxId = process.env.RUNKO_CF_SANDBOX_ID?.trim();
 
   // No SDK, no create()/kill() — the gateway's `getSandbox()` wiring (see
   // apps/cloudflare-worker-server/src/index.ts) owns the sandbox's lifecycle.

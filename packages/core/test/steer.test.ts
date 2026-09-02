@@ -6,11 +6,11 @@
  * dedicated STEER-1F regression section below them.
  *
  * P13-5-2（docs/tech/single-ledger.md）迁移：`session.stream()`/
- * `runTurn()` 现在产出 `NimboChunk` 而不是退役的 `SessionEvent`，"steer 注入
- * 的消息" 现在是一条 `metadata.steered:true` 的 user `NimboUIMessage`（不再有
+ * `runTurn()` 现在产出 `RunkoChunk` 而不是退役的 `SessionEvent`，"steer 注入
+ * 的消息" 现在是一条 `metadata.steered:true` 的 user `RunkoUIMessage`（不再有
  * `user_message` item 或摘要出来的 `item.text`——ledger 里的 `parts` 本身就是
  * 完整保真的展示形态，见 §7 一节的裁量说明）。断言因此分两层：
- * - chunk 层：`session.stream()`/`runTurn()` 产出的 `NimboChunk` 序列（步骤
+ * - chunk 层：`session.stream()`/`runTurn()` 产出的 `RunkoChunk` 序列（步骤
  *   边界、settle 时机）。
  * - 账本层：`session.toJSON().messages`（`runTurn` 直接 push 的同一个数组）
  *   与 `model.doStreamCalls[n].prompt`（`convertToModelMessages()` 现场推导、
@@ -64,8 +64,8 @@ import { runTurn } from "../src/loop.js";
 import type { RunTurnOptions } from "../src/loop.js";
 import { createOnceApprovalMemory } from "../src/approval.js";
 import { createDerivedDataCollector } from "../src/runtime.js";
-import type { NimboFS, Tool } from "../src/types.js";
-import type { NimboUIMessage } from "../src/state.js";
+import type { RunkoFS, Tool } from "../src/types.js";
+import type { RunkoUIMessage } from "../src/state.js";
 import {
   chunksOfType,
   collectText,
@@ -74,7 +74,7 @@ import {
   fingerprintMessage,
   lastIndexOfChunkType,
   userTextMessage,
-} from "./helpers/nimbo-chunks.js";
+} from "./helpers/runko-chunks.js";
 
 // ---------------------------------------------------------------------------
 // shared helpers (same shapes as loop.test.ts / session.test.ts — this repo's
@@ -184,7 +184,7 @@ function baseAgent(model: MockLanguageModelV4, overrides: Partial<AgentDefinitio
   return defineAgent({ model, ...overrides });
 }
 
-function isSteered(message: NimboUIMessage): boolean {
+function isSteered(message: RunkoUIMessage): boolean {
   return message.metadata?.steered === true;
 }
 
@@ -205,7 +205,7 @@ function readSlot(slot: SessionSlot): Session {
 
 // ---- loop.ts-level helpers (scenario 9 + the known-gap regression only — direct runTurn(...) calls) ----
 
-function fakeFs(): NimboFS {
+function fakeFs(): RunkoFS {
   return {
     readFile: async () => new Uint8Array(),
     writeFile: async () => {},
@@ -615,8 +615,8 @@ describe("runTurn — known gap (docs/tech/core-sdk.md §4.2): provider_error do
     // drives `drainSteers` directly (same level as loop.test.ts/the scenario-9 test below):
     // `doStream` pushes into `queue` as its very last act before throwing, standing in for
     // "something got queued right as this failing model call was in flight".
-    let queue: NimboUIMessage[] = [];
-    const drainSteers = (): NimboUIMessage[] => {
+    let queue: RunkoUIMessage[] = [];
+    const drainSteers = (): RunkoUIMessage[] => {
       const drained = queue;
       queue = [];
       return drained;
@@ -629,7 +629,7 @@ describe("runTurn — known gap (docs/tech/core-sdk.md §4.2): provider_error do
       },
     }));
 
-    const messages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+    const messages: RunkoUIMessage[] = [userTextMessage("u1", "go")];
     const { chunks } = await drainTurn(runTurn(turnOptions(model, { messages, drainSteers })));
 
     const metadataChunks = chunksOfType(chunks, "message-metadata");
@@ -810,10 +810,10 @@ describe("runTurn — drainSteers equivalence class (§4.2: omitted vs. always-e
       }));
     }
 
-    const withoutMessages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+    const withoutMessages: RunkoUIMessage[] = [userTextMessage("u1", "go")];
     const withoutDrain = await drainTurn(runTurn(turnOptions(buildModel(), { messages: withoutMessages })));
 
-    const withEmptyMessages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+    const withEmptyMessages: RunkoUIMessage[] = [userTextMessage("u1", "go")];
     const withEmptyDrain = await drainTurn(
       runTurn(turnOptions(buildModel(), { messages: withEmptyMessages, drainSteers: () => [] })),
     );

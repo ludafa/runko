@@ -2,7 +2,7 @@ import * as nodeFs from "node:fs/promises";
 import * as nodePath from "node:path";
 import * as os from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { NimboFS } from "@nimbo/core";
+import type { RunkoFS } from "@runko/core";
 import { OverlayFS, fromDirectory } from "../src/overlay.js";
 import { NotFoundError, fromMemory } from "../src/memory.js";
 
@@ -115,7 +115,7 @@ describe("OverlayFS.writeBack()", () => {
   let tmpDir: string;
 
   beforeEach(async () => {
-    tmpDir = await nodeFs.mkdtemp(nodePath.join(os.tmpdir(), "nimbo-overlay-writeback-"));
+    tmpDir = await nodeFs.mkdtemp(nodePath.join(os.tmpdir(), "runko-overlay-writeback-"));
   });
 
   afterEach(async () => {
@@ -185,7 +185,7 @@ describe("fromDirectory", () => {
   let tmpDir: string;
 
   beforeEach(async () => {
-    tmpDir = await nodeFs.mkdtemp(nodePath.join(os.tmpdir(), "nimbo-fromdirectory-"));
+    tmpDir = await nodeFs.mkdtemp(nodePath.join(os.tmpdir(), "runko-fromdirectory-"));
     await nodeFs.mkdir(nodePath.join(tmpDir, "node_modules"), { recursive: true });
     await nodeFs.writeFile(nodePath.join(tmpDir, "a.txt"), "real-a");
     await nodeFs.writeFile(nodePath.join(tmpDir, "node_modules", "x.js"), "ignored");
@@ -214,7 +214,7 @@ describe("fromDirectory", () => {
 describe("OverlayFS native search seam (docs/tech/sandbox.md §4)", () => {
   it("does not implement searchFiles/searchContent — a native-searching remote base's results would miss overlay writes, so grep/glob must fall back to JS scanning (which goes through the merged glob() view) against it", () => {
     const base = fromMemory({ "a.txt": "base-a" });
-    const fs: NimboFS = new OverlayFS(base);
+    const fs: RunkoFS = new OverlayFS(base);
     expect(fs.searchFiles).toBeUndefined();
     expect(fs.searchContent).toBeUndefined();
   });

@@ -1,10 +1,10 @@
 /**
- * `miniBash(fs)`：NimboExec 的纯 TS 解释器实现（docs/tech/core-sdk.md §4.5a）。不 fork
- * 子进程，全部命令跑在注入的 NimboFS 七方法上，只读。模式 A（同源工作区）
+ * `miniBash(fs)`：RunkoExec 的纯 TS 解释器实现（docs/tech/core-sdk.md §4.5a）。不 fork
+ * 子进程，全部命令跑在注入的 RunkoFS 七方法上，只读。模式 A（同源工作区）
  * 的典型消费方式是 `createSession({ fs, exec: miniBash(fs) })`——同一个
  * fs 实例既是文件工具的后端，也是 bash 命令的执行环境，天然一致。
  */
-import type { ExecOptions, ExecRequest, ExecResult, NimboExec, NimboFS } from "@nimbo/core";
+import type { ExecOptions, ExecRequest, ExecResult, RunkoExec, RunkoFS } from "@runko/core";
 import { COMMANDS } from "./commands/index.js";
 import type { CommandContext, CommandFn } from "./commands/index.js";
 import type { ParsedChain, ParsedPipeline, ParsedScript } from "./parse.js";
@@ -12,7 +12,7 @@ import { MiniBashParseError, parse } from "./parse.js";
 import { resolvePath } from "./path.js";
 
 const DESCRIBE = [
-  "mini-bash: 纯 TypeScript 解释器，跑在注入的 NimboFS 上（模式 A 同源工作区——",
+  "mini-bash: 纯 TypeScript 解释器，跑在注入的 RunkoFS 上（模式 A 同源工作区——",
   "bash 与文件工具共享同一份虚拟文件系统，数据只有一份，不存在同步/竞态）。",
   "全部命令只读、无副作用；不 fork 子进程，不访问真实文件系统或网络。",
   "支持命令：",
@@ -60,7 +60,7 @@ class MiniBashAbortedError extends Error {
 /**
  * 把 `work` 和 `signal` 的 abort 事件赛跑：signal 先触发就立刻 reject，
  * 不等待 `work` 本身结束（`work` 可能因为注入的 fs 一直不 resolve 而永久
- * 挂起，这也是 NimboExec 需要 abort 语义的原因）。给 `work` 补一个空
+ * 挂起，这也是 RunkoExec 需要 abort 语义的原因）。给 `work` 补一个空
  * catch，避免其在赛跑结束后才 reject 时产生 unhandled rejection。
  */
 function raceAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -140,7 +140,7 @@ interface PipelineOutcome {
  * `exec()` 据此决定要不要把状态穿透给后续链/持久化到实例。
  */
 async function runPipeline(
-  fs: NimboFS,
+  fs: RunkoFS,
   pipeline: ParsedPipeline,
   cwd: string,
   signal: AbortSignal,
@@ -191,7 +191,7 @@ async function runPipeline(
  * cwd（`cd src && cat index.ts` 里 cat 因此能看到 cd 之后的目录）；被跳
  * 过的管道自然不改变 cwd，与不改变退出码状态是同一回事。
  */
-async function runChain(fs: NimboFS, chain: ParsedChain, cwd: string, signal: AbortSignal, opts: ExecOptions | undefined): Promise<PipelineOutcome> {
+async function runChain(fs: RunkoFS, chain: ParsedChain, cwd: string, signal: AbortSignal, opts: ExecOptions | undefined): Promise<PipelineOutcome> {
   const [first, ...rest] = chain;
   if (first === undefined) {
     return { stdout: "", stderr: "mini-bash: 管道中出现空命令", exitCode: 2, cwd };
@@ -220,7 +220,7 @@ async function runChain(fs: NimboFS, chain: ParsedChain, cwd: string, signal: Ab
   return { stdout, stderr, exitCode: current.exitCode, cwd: currentCwd };
 }
 
-export function miniBash(fs: NimboFS): NimboExec {
+export function miniBash(fs: RunkoFS): RunkoExec {
   // 实例状态：这个 miniBash(fs) 闭包记住的"当前目录"，被 cd 成功更新，
   // 作为后续 exec() 调用在 req.cwd 未显式提供时的默认起点（跨调用持久化，
   // 见 DESCRIBE 与 cd.ts 顶部注释）。每次调用 miniBash(fs) 都产生一个新
@@ -228,7 +228,7 @@ export function miniBash(fs: NimboFS): NimboExec {
   let instanceCwd = "/";
 
   return {
-    // docs/tech/single-ledger.md §6.1（@nimbo/core 审批三值重构，
+    // docs/tech/single-ledger.md §6.1（@runko/core 审批三值重构，
     // P13-5-2c）：旧 "never" → "allow"（沙盒/只读实现，隔离即边界）。
     defaultApproval: "allow",
     describe(): string {

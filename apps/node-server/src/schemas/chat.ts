@@ -1,5 +1,5 @@
 import { z } from '@hono/zod-openapi';
-import type { NimboChunk, NimboUIMessage } from '@nimbo/core';
+import type { RunkoChunk, RunkoUIMessage } from '@runko/core';
 
 // ---------------------------------------------------------------------------
 // Wire vocabulary for the chat app's SSE stream + replay endpoints
@@ -11,30 +11,30 @@ import type { NimboChunk, NimboUIMessage } from '@nimbo/core';
 // `approval.resolved`/`question.asked`/`question.answered` bridge-event pairs
 // are ALL gone (docs/tech/single-ledger.md §5 单-3 施工要点):
 //
-// - `session.stream()` now yields `NimboChunk` (ai's `UIMessageChunk`
-//   vocabulary, instantiated for `NimboUIMessage` — `@nimbo/core`'s
+// - `session.stream()` now yields `RunkoChunk` (ai's `UIMessageChunk`
+//   vocabulary, instantiated for `RunkoUIMessage` — `@runko/core`'s
 //   `state.ts`) directly — the wire's live tail forwards these verbatim
-//   (`@nimbo/agent`'s `runtime/turn.ts`), no server-invented wrapper events left.
+//   (`@runko/agent`'s `runtime/turn.ts`), no server-invented wrapper events left.
 // - Approval visibility is now a `tool-approval-request`/
-//   `tool-approval-response` chunk pair `@nimbo/core`'s own loop produces
+//   `tool-approval-response` chunk pair `@runko/core`'s own loop produces
 //   (docs/tech/single-ledger.md §6.1) — the server no longer emits its own `approval.*` events
-//   (`@nimbo/agent`'s `runtime/human.ts` 人审通道 bridge is pure in-memory promise
+//   (`@runko/agent`'s `runtime/human.ts` 人审通道 bridge is pure in-memory promise
 //   routing, no server-emitted events at all).
 // - `ask-user` visibility is the `tool-ask-user` part's own
 //   `input-available`/`output-available` states (already a normal tool call
 //   as far as the loop is concerned) — no `question.*` events either.
 // - The turn-starting user message now has a real wire position of its own
-//   (closing what used to be a known gap inherited from `@nimbo/core`'s
+//   (closing what used to be a known gap inherited from `@runko/core`'s
 //   `Session.stream()`, which pushes it onto its own internal ledger but
-//   never yields anything for it): `@nimbo/agent`'s `runtime/turn.ts` synthesizes
-//   a user `NimboUIMessage` (its own `id`, a single `text` part — chat input
+//   never yields anything for it): `@runko/agent`'s `runtime/turn.ts` synthesizes
+//   a user `RunkoUIMessage` (its own `id`, a single `text` part — chat input
 //   is always plain text) *before* it ever starts consuming
 //   `session.stream()`, persists it as a `kind = 'message'` row, and
 //   broadcasts it as a `MessageFrame` — sharing the exact same monotonic
 //   `seq` counter the turn's subsequent chunks use
 //   (the turn's `Grant.nextSeq()`), so any listener sees it
 //   strictly before anything else from that turn. `finalizeTurnPersistence`
-//   skips over `@nimbo/core`'s own (structurally-identical, different-`id`)
+//   skips over `@runko/core`'s own (structurally-identical, different-`id`)
 //   copy of that same message when persisting the turn's newly-appended
 //   messages, so it's written exactly once, under the synthesized `id` (see
 //   that function's own doc comment). `steer()`'s queued messages are
@@ -46,7 +46,7 @@ import type { NimboChunk, NimboUIMessage } from '@nimbo/core';
 //
 // - **Live tail** (`GET .../stream`, its non-replay portion): mostly a
 //   stream of `ChunkEnvelope`s (`{ seq?, chunk }`) — `seq` present ⇔ this
-//   chunk was durable (replayable — `@nimbo/agent`'s `isDurableChunk`); absent ⇔ ephemeral (`text-delta`/`reasoning-delta`/any
+//   chunk was durable (replayable — `@runko/agent`'s `isDurableChunk`); absent ⇔ ephemeral (`text-delta`/`reasoning-delta`/any
 //   `transient: true` data part — P13-1's durable/ephemeral split, carried
 //   over verbatim) — plus exactly one `MessageFrame` per turn, its very
 //   first frame: the synthesized turn-start user message (see above).
@@ -54,8 +54,8 @@ import type { NimboChunk, NimboUIMessage } from '@nimbo/core';
 //   portion): a sequence of `ChatReplayFrame`s, each *either* a
 //   `ChunkEnvelope` (a still-`kind = 'chunk'` row — the in-progress or
 //   crashed turn's durable chunks) *or* a `MessageFrame` (`{ seq, message }`
-//   — a `kind = 'message'` row, one finished `NimboUIMessage` verbatim).
-//   Finished history never needs chunk replay at all: a `NimboUIMessage` is
+//   — a `kind = 'message'` row, one finished `RunkoUIMessage` verbatim).
+//   Finished history never needs chunk replay at all: a `RunkoUIMessage` is
 //   already exactly the shape a chat UI's message list holds, so the client
 //   splices `MessageFrame`s straight in; only the (at most one) turn still
 //   in progress needs its `ChunkEnvelope`s fed through the official
@@ -68,9 +68,9 @@ import type { NimboChunk, NimboUIMessage } from '@nimbo/core';
 /**
  * ============================================================
  * Controlled exception (same rationale/pattern as this file always used for
- * `@nimbo/core`'s recursive `JsonValue`, before the SessionEvent/SessionItem
- * era retired that usage): `NimboChunk`/`NimboUIMessage` (ai's
- * `UIMessageChunk`/`UIMessage`, instantiated in `@nimbo/core`'s `state.ts`)
+ * `@runko/core`'s recursive `JsonValue`, before the SessionEvent/SessionItem
+ * era retired that usage): `RunkoChunk`/`RunkoUIMessage` (ai's
+ * `UIMessageChunk`/`UIMessage`, instantiated in `@runko/core`'s `state.ts`)
  * have no zod schema this file can reuse for `@asteasolutions/zod-to-openapi`
  * generation (this file's `createRoute` machinery, via `request`/`responses`).
  * ============================================================
@@ -81,10 +81,10 @@ import type { NimboChunk, NimboUIMessage } from '@nimbo/core';
  * internal validation, not a zod schema `zod-to-openapi` can walk), and it's
  * parameterized over the *generic* `UIMessageChunk<unknown, UIDataTypes>`
  * shape anyway (`messageMetadata: unknown`, arbitrary `data-${string}`
- * parts) — not nimbo's own `NimboMessageMetadata`/`NimboDataParts`
+ * parts) — not runko's own `RunkoMessageMetadata`/`RunkoDataParts`
  * instantiation, and there's no way to hand it those without reimplementing
- * it. `@nimbo/core`'s own `state.ts` hit the identical wall for
- * `NimboUIMessage` and settled on "shallow structural `z.custom` + delegate
+ * it. `@runko/core`'s own `state.ts` hit the identical wall for
+ * `RunkoUIMessage` and settled on "shallow structural `z.custom` + delegate
  * deep validation to `validateUIMessages()`" — but that's a *validator*, not
  * an OpenAPI-documentable schema shape either.
  *
@@ -97,14 +97,14 @@ import type { NimboChunk, NimboUIMessage } from '@nimbo/core';
  * one declaration. The two places these appear (`ChunkEnvelope.chunk`,
  * `MessageFrame.message`) only ever parse a value that has already
  * round-tripped through `JSON.parse()` (reading `conversation_events.payload_json`
- * back, or `session.stream()`'s own already-typed `NimboChunk` output),
+ * back, or `session.stream()`'s own already-typed `RunkoChunk` output),
  * exactly the same "post-`JSON.parse`, already `JsonValue`-shaped" position
  * this file's old `openApiSafeJsonValueSchema` lived at.
  */
-const nimboChunkSchema: z.ZodType<NimboChunk> = z.any();
+const runkoChunkSchema: z.ZodType<RunkoChunk> = z.any();
 
-/** Same rationale as `nimboChunkSchema` above, for `NimboUIMessage` (`MessageFrame.message`). */
-const nimboUIMessageSchema: z.ZodType<NimboUIMessage> = z.any();
+/** Same rationale as `runkoChunkSchema` above, for `RunkoUIMessage` (`MessageFrame.message`). */
+const runkoUIMessageSchema: z.ZodType<RunkoUIMessage> = z.any();
 
 /**
  * `{ seq?, chunk }` — the live tail's own wire shape (docs/tech/chat-webapp.md §2.2d's
@@ -116,7 +116,7 @@ const nimboUIMessageSchema: z.ZodType<NimboUIMessage> = z.any();
 export const chunkEnvelopeSchema = z
   .object({
     seq: z.number().int().optional(),
-    chunk: nimboChunkSchema,
+    chunk: runkoChunkSchema,
   })
   .openapi('ChatChunkEnvelope');
 
@@ -124,19 +124,19 @@ export type ChunkEnvelope = z.infer<typeof chunkEnvelopeSchema>;
 
 /**
  * `{ seq, message }` — usually replay-only (see file header): a finished
- * `NimboUIMessage`, read back verbatim from a `kind = 'message'` row. Most
+ * `RunkoUIMessage`, read back verbatim from a `kind = 'message'` row. Most
  * `kind = 'message'` rows are only ever written once a turn has already
- * finished (`@nimbo/agent`'s `finalize`), by which point
+ * finished (`@runko/agent`'s `finalize`), by which point
  * there's no "live" activity left for that turn to broadcast — the one
  * exception is the turn-start synthesized user message, which *is*
- * broadcast live (as the turn's very first frame, `@nimbo/agent`'s
+ * broadcast live (as the turn's very first frame, `@runko/agent`'s
  * `driveTurn`) the same instant it's persisted, precisely so a client never
  * has to guess at its own just-sent message's final wire shape.
  */
 export const messageFrameSchema = z
   .object({
     seq: z.number().int(),
-    message: nimboUIMessageSchema,
+    message: runkoUIMessageSchema,
   })
   .openapi('ChatMessageFrame');
 
@@ -228,7 +228,7 @@ export type ChatReplayFrame =
  * contract — NOT a bare array): every persisted row for the session, in seq order.
  *
  * **账本里现在只有成品消息。** [进行中草稿](../../../../docs/terms.md)搬进内存之后
- * （`@nimbo/agent`），这一列不再写 `kind = 'chunk'` 行，那套「跑完 GC 掉本轮 chunk」的
+ * （`@runko/agent`），这一列不再写 `kind = 'chunk'` 行，那套「跑完 GC 掉本轮 chunk」的
  * 逻辑也随之删除。回放因此就是一串 `MessageFrame`；`ChunkEnvelope` 这一支只为**迁移前
  * 留下的存量 chunk 行**保留，读时被 `agent/persistence.ts` 过滤掉。进行中那一轮的草稿
  * 走[直播流](../../../../docs/terms.md)重连补发，不再经这个端点。
@@ -330,7 +330,7 @@ export const PostChatMessageInputSchema = z
  * `text` went into the conversation's 待发队列 instead, to be dequeued as the
  * next turn once this one finishes.
  *
- * **曾经有第四档 `'aborted'`，已经取消。** 轮编排搬进 `@nimbo/agent` 之后
+ * **曾经有第四档 `'aborted'`，已经取消。** 轮编排搬进 `@runko/agent` 之后
  * [起轮占位](../../../../docs/terms.md)成了装配的**第一件事**，所以本端点一登记就返回
  * `'started'`，不再等装配走完——老实现是 ack 卡在装配里，才有机会把它改判成 `aborted`。
  * 装配窗口里按停止的行为没变（照样停），只是那条 ack 说的是 `'started'`，「已停止」这个
@@ -381,7 +381,7 @@ export const ConversationReplayQuerySchema = z.object({
 /**
  * `POST .../approvals/{callId}`'s path params (docs/tech/chat-webapp.md §2.2c（审批链）): `id`
  * is the chat session, `callId` the pending tool call's own id
- * (`@nimbo/core`'s `ApprovalContext.callId`, carried on the
+ * (`@runko/core`'s `ApprovalContext.callId`, carried on the
  * `tool-approval-request` chunk as `approvalId`). Also reused as-is for
  * `POST .../questions/{callId}` (identical id+callId shape, same `callId`
  * namespace — `ToolContext.callId` — just for the `ask-user` tool call
@@ -417,7 +417,7 @@ export const ChatQueueParamsSchema = z.object({
  *
  * `allow-session` = 会话级授权（docs/terms.md §四）：放行本次 **并且** 记住这次
  * 具体调用 (tool + 入参指纹)，本会话内相同调用后续直接放行、不再弹卡片。对
- * `@nimbo/core` 而言它和 `allow` 无异（都映射成 `HumanDecision.{behavior:'allow'}`）
+ * `@runko/core` 而言它和 `allow` 无异（都映射成 `HumanDecision.{behavior:'allow'}`）
  * ——「会话内记住」是纯 chat 层概念（`conversation-grants.ts`），core 不感知。
  */
 export const PostApprovalInputSchema = z
@@ -430,7 +430,7 @@ export const PostApprovalInputSchema = z
 /**
  * `POST .../approvals/{callId}`'s 200 body — the decision itself now only
  * ever reaches the client via the live tail's own `tool-approval-response`
- * chunk (`@nimbo/core`'s loop produces it once `onReview` resolves — the
+ * chunk (`@runko/core`'s loop produces it once `onReview` resolves — the
  * server no longer emits a bridge event of its own, see file header), so
  * this is purely an ack. Also reused for `POST .../questions/{callId}`'s 200
  * (its own outcome likewise now only ever surfaces as the `ask-user` tool
@@ -487,7 +487,7 @@ export const TurnTelemetryEventSchema = z
   })
   .openapi('TurnTelemetryEvent');
 
-/** `GET .../turns/{turn}/telemetry`'s 200 body——遥测缺席（未启用/该轮无数据/会话尚无 nimbo header）一律空数组，不是错误。 */
+/** `GET .../turns/{turn}/telemetry`'s 200 body——遥测缺席（未启用/该轮无数据/会话尚无 runko header）一律空数组，不是错误。 */
 export const TurnTelemetrySchema = z
   .object({ events: z.array(TurnTelemetryEventSchema) })
   .openapi('TurnTelemetry');

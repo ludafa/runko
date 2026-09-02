@@ -1,8 +1,8 @@
 /**
  * 05-custom-exec — "bring your own sandbox" (docs/features/core-sdk.md §3.4 /
- * docs/tech/core-sdk.md §4.5a): `NimboExec` is a three-method interface
- * (`exec`, optional `describe`, optional `defaultApproval`). nimbo ships
- * `@nimbo/mini-bash` (a read-only in-process interpreter) and
+ * docs/tech/core-sdk.md §4.5a): `RunkoExec` is a three-method interface
+ * (`exec`, optional `describe`, optional `defaultApproval`). runko ships
+ * `@runko/mini-bash` (a read-only in-process interpreter) and
  * `localExec` (a real local shell) as reference implementations, but neither
  * is special — a host with its own Docker/e2b/remote-worker sandbox injects
  * its own object here and nothing about the agent loop, the `bash` tool, or
@@ -13,7 +13,7 @@
  * it "runs" a fixed whitelist of commands purely from a lookup table, to
  * keep the demo dependency-free while still exercising the real interface.
  *
- * Demonstrates: implementing NimboExec from scratch, `defaultApproval`,
+ * Demonstrates: implementing RunkoExec from scratch, `defaultApproval`,
  * `describe()`, wiring it via `createSession({ exec })`.
  *
  * Run: `node examples/05-custom-exec.ts` (see examples/README.md for setup).
@@ -22,25 +22,25 @@
  *   1. A deterministic section (no model, no env vars needed): calls the
  *      custom exec's `exec()` directly for a known and an unknown command,
  *      printing the resulting `ExecResult` (exit codes 0 and 127
- *      respectively — same convention `@nimbo/mini-bash` and `localExec`
+ *      respectively — same convention `@runko/mini-bash` and `localExec`
  *      follow).
- *   2. If NIMBO_MODEL is set: the custom exec is wired into a session via
+ *   2. If RUNKO_MODEL is set: the custom exec is wired into a session via
  *      `createSession({ exec })`, and the agent is asked to run one of the
- *      whitelisted commands through the `bash` tool. If NIMBO_MODEL is
+ *      whitelisted commands through the `bash` tool. If RUNKO_MODEL is
  *      unset, this section is skipped with a clean exit.
  */
-import type { ExecRequest, ExecResult, NimboExec } from "@nimbo/sdk";
-import { createSession, defineAgent } from "@nimbo/sdk";
+import type { ExecRequest, ExecResult, RunkoExec } from "@runko/sdk";
+import { createSession, defineAgent } from "@runko/sdk";
 import { resolveModel } from "./shared/model.ts";
 
 /**
- * A minimal custom NimboExec: a fixed command whitelist, no real process, no
+ * A minimal custom RunkoExec: a fixed command whitelist, no real process, no
  * real filesystem — this is the "fully decoupled" mode C from §4.5a (the
  * exec surface makes no promise about seeing files the agent wrote through
  * the file tools; a real sandbox implementation typically would, by running
- * on the same data as its own NimboFS, i.e. mode A).
+ * on the same data as its own RunkoFS, i.e. mode A).
  */
-function stubSandboxExec(): NimboExec {
+function stubSandboxExec(): RunkoExec {
   const whitelist: Record<string, string> = {
     "whoami": "sandbox-worker\n",
     "pwd": "/workspace\n",
@@ -51,7 +51,7 @@ function stubSandboxExec(): NimboExec {
     // sandboxes usually declare "allow" instead (isolation is the boundary).
     defaultApproval: "review",
     describe(): string {
-      return `stub-sandbox: an in-memory NimboExec fake for examples/05-custom-exec.ts. Supported commands: ${Object.keys(whitelist).join(", ")}.`;
+      return `stub-sandbox: an in-memory RunkoExec fake for examples/05-custom-exec.ts. Supported commands: ${Object.keys(whitelist).join(", ")}.`;
     },
     async exec(req: ExecRequest): Promise<ExecResult> {
       const start = Date.now();
@@ -65,7 +65,7 @@ function stubSandboxExec(): NimboExec {
 }
 
 async function deterministicSection(): Promise<void> {
-  console.log("--- 1. calling a hand-written NimboExec directly, no agent involved ---");
+  console.log("--- 1. calling a hand-written RunkoExec directly, no agent involved ---");
 
   const exec = stubSandboxExec();
   console.log("describe():", exec.describe?.());

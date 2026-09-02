@@ -1,6 +1,6 @@
 /**
  * transcript-store — persists a session's full execution transcript (every
- * `NimboChunk` from `session.stream()` + the final `TurnResult` + the serialized `SessionState`)
+ * `RunkoChunk` from `session.stream()` + the final `TurnResult` + the serialized `SessionState`)
  * into a local SQLite database, using Node's built-in `node:sqlite`
  * (zero new dependencies; prints one ExperimentalWarning on Node 24, which
  * is cosmetic — the DatabaseSync API surface used here has been unchanged
@@ -9,14 +9,14 @@
  * Layout: one `runs` row per session run, N `events` rows keyed by
  * `(run_id, seq)` in arrival order. Everything variable-shaped is stored as
  * JSON text — the point is a durable, queryable transcript, not a relational
- * model of nimbo's event union:
+ * model of runko's event union:
  *
  *   sqlite3 .transcripts/examples-transcript.sqlite \
  *     "SELECT type, COUNT(*) FROM events GROUP BY type"
  *
  * The default DB path is `<repo>/.transcripts/examples-transcript.sqlite`
  * (gitignored via the `.transcripts/` rule, so transcripts can never be
- * committed); override with `NIMBO_TRANSCRIPT_DB=/path/to.sqlite`. It lives
+ * committed); override with `RUNKO_TRANSCRIPT_DB=/path/to.sqlite`. It lives
  * in its own directory rather than under `.env` on purpose — the repo root
  * `.env` is a config *file* (see `.env.template`), not a directory.
  */
@@ -25,7 +25,7 @@ import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
-import type { NimboChunk, SessionState, TurnResult } from "@nimbo/sdk";
+import type { RunkoChunk, SessionState, TurnResult } from "@runko/sdk";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS runs (
@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS events (
 
 /** Default path: `<repo>/.transcripts/examples-transcript.sqlite` (see header). */
 export function resolveTranscriptDbPath(): string {
-  const override = process.env.NIMBO_TRANSCRIPT_DB?.trim();
+  const override = process.env.RUNKO_TRANSCRIPT_DB?.trim();
   if (override !== undefined && override.length > 0) {return override;}
   // src/shared/ -> src/ -> examples/ -> repo root
   const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
@@ -84,7 +84,7 @@ export class TranscriptStore {
     return runId;
   }
 
-  recordEvent(runId: string, chunk: NimboChunk): void {
+  recordEvent(runId: string, chunk: RunkoChunk): void {
     this.seq += 1;
     this.db
       .prepare("INSERT INTO events (run_id, seq, ts, type, payload_json) VALUES (?, ?, ?, ?, ?)")

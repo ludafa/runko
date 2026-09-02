@@ -13,7 +13,7 @@ import {
   messageFrame,
   startChunk,
   userMessage,
-} from './helpers/nimbo-chunks';
+} from './helpers/runko-chunks';
 
 describe('chatReplayFrameSchema / parseChatReplayFrame', () => {
   it('accepts a ChunkEnvelope with a seq (durable/replayable chunk)', () => {

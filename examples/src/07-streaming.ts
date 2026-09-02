@@ -1,8 +1,8 @@
 /**
  * 07-streaming — consuming `session.stream()` live (docs/tech/single-ledger.md
  * §5 单账本): `session.stream(input)` returns an
- * `AsyncGenerator<NimboChunk, TurnResult>` — every `yield` is a `NimboChunk`
- * (ai 的 `UIMessageChunk` 词汇表，对 `NimboUIMessage` 实例化) the host can
+ * `AsyncGenerator<RunkoChunk, TurnResult>` — every `yield` is a `RunkoChunk`
+ * (ai 的 `UIMessageChunk` 词汇表，对 `RunkoUIMessage` 实例化) the host can
  * render as it happens (assistant text arriving delta-by-delta via
  * `text-delta`, a tool call walking `tool-input-available` ->
  * `tool-output-available`, plus `start`/`finish` and `data-*` parts), while
@@ -17,7 +17,7 @@
  * see `packages/core/src/session.ts`), which is the only way to receive
  * both the live events *and* the final `TurnResult` from one `stream()` call.
  *
- * Demonstrates: `session.stream(input)`, `AsyncGenerator<NimboChunk,
+ * Demonstrates: `session.stream(input)`, `AsyncGenerator<RunkoChunk,
  * TurnResult>` consumed via manual `.next()` driving, `text-delta` rendered
  * as a typewriter (`process.stdout.write`, no per-delta reprint), tool chunks
  * (`tool-input-available` -> `tool-output-available`), and the `TurnResult`
@@ -31,21 +31,21 @@
  *      `packages/core/test/loop.test.ts`) is scripted with two response
  *      steps — a few text deltas explaining the plan followed by a
  *      `write-file` tool call, then a final wrap-up message — run through
- *      the real `createSession()` + `stream()` pipeline (`@nimbo/sdk`'s
- *      default file tools, an in-memory `NimboFS`). Every event prints as a
+ *      the real `createSession()` + `stream()` pipeline (`@runko/sdk`'s
+ *      default file tools, an in-memory `RunkoFS`). Every event prints as a
  *      typed timeline line (`[event.type] ...`); the agent_message deltas
  *      additionally render as a typewriter effect via `process.stdout.write`
  *      instead of being reprinted whole on every `item.updated`.
- *   2. If NIMBO_MODEL is set: the same `stream()` + manual-drive loop against
+ *   2. If RUNKO_MODEL is set: the same `stream()` + manual-drive loop against
  *      a real model asked to write a short file — the terminal shows a live
  *      typewriter response interleaved with real `tool_call` events as they
- *      happen, not replayed after the fact. If NIMBO_MODEL is unset, this
+ *      happen, not replayed after the fact. If RUNKO_MODEL is unset, this
  *      section is skipped with a clean exit.
  */
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
-import { createSession, defineAgent, NimboFS } from "@nimbo/sdk";
-import type { NimboChunk, TurnResult } from "@nimbo/sdk";
+import { createSession, defineAgent, RunkoFS } from "@runko/sdk";
+import type { RunkoChunk, TurnResult } from "@runko/sdk";
 import { resolveModel } from "./shared/model.ts";
 
 /** Same literal shape as the `usage` fixture in packages/core/test/loop.test.ts —
@@ -77,7 +77,7 @@ function buildMockModel(): MockLanguageModelV4 {
               type: "tool-call",
               toolCallId: "call_1",
               toolName: "write-file",
-              input: JSON.stringify({ path: "/notes.txt", content: "hello from nimbo\n" }),
+              input: JSON.stringify({ path: "/notes.txt", content: "hello from runko\n" }),
             },
             { type: "finish", finishReason: { unified: "tool-calls", raw: undefined }, usage: MOCK_USAGE },
           ],
@@ -103,17 +103,17 @@ function buildMockModel(): MockLanguageModelV4 {
   });
 }
 
-// ---- typed chunk formatting (NimboChunk = ai 的 UIMessageChunk 词汇表，对 NimboUIMessage 实例化) ----
+// ---- typed chunk formatting (RunkoChunk = ai 的 UIMessageChunk 词汇表，对 RunkoUIMessage 实例化) ----
 
 /**
- * One display line per `NimboChunk`. Handles the chunk types this demo
+ * One display line per `RunkoChunk`. Handles the chunk types this demo
  * actually produces; the `default` catch-all keeps it total over ai's
  * open-ended `UIMessageChunk` union (any other chunk just prints its bare
  * `type`), so no exhaustiveness burden as the vocabulary grows. Text deltas
  * are handled separately in `streamAndPrint` (typewriter), so they never
  * reach here.
  */
-function formatChunk(chunk: NimboChunk): string {
+function formatChunk(chunk: RunkoChunk): string {
   switch (chunk.type) {
     case "text-start":
       return `[text-start] id=${chunk.id}`;
@@ -142,7 +142,7 @@ function formatChunk(chunk: NimboChunk): string {
  * fires while text is still streaming) never gets glued onto the tail of a
  * delta instead of starting on its own line.
  */
-async function streamAndPrint(stream: AsyncGenerator<NimboChunk, TurnResult>): Promise<TurnResult> {
+async function streamAndPrint(stream: AsyncGenerator<RunkoChunk, TurnResult>): Promise<TurnResult> {
   let midLine = false;
 
   function logLine(text: string): void {
@@ -176,7 +176,7 @@ async function deterministicSection(): Promise<void> {
   console.log("--- 1. session.stream() consumed live against a scripted MockLanguageModelV4 ---\n");
 
   const agent = defineAgent({ model: buildMockModel() });
-  const session = createSession(agent, { fs: NimboFS.fromMemory({}) });
+  const session = createSession(agent, { fs: RunkoFS.fromMemory({}) });
 
   const result = await streamAndPrint(session.stream("写一个 /notes.txt 文件，内容随意，然后确认完成。"));
 
@@ -194,7 +194,7 @@ async function modelDrivenSection(): Promise<void> {
   console.log("\n--- 2. same stream() + manual-drive loop against a real model ---\n");
 
   const agent = defineAgent({ model });
-  const session = createSession(agent, { fs: NimboFS.fromMemory({}) });
+  const session = createSession(agent, { fs: RunkoFS.fromMemory({}) });
 
   const result = await streamAndPrint(
     session.stream("创建 /streaming-demo.txt，写一句你喜欢的技术格言，然后确认完成。"),

@@ -9,7 +9,7 @@
  * simulate a disconnect), and (c) `POST .../approvals/:id` /
  * `.../questions/:id` response statuses.
  */
-import type { NimboChunk, NimboUIMessage } from '@nimbo/core';
+import type { RunkoChunk, RunkoUIMessage } from '@runko/core';
 
 import type {
   ChatReplayFrame,
@@ -53,11 +53,11 @@ export class ControllableSSEStream {
     this.pushRaw(`data: ${JSON.stringify(frame)}\n\n`);
   }
 
-  pushChunk(chunk: NimboChunk, seq?: number): void {
+  pushChunk(chunk: RunkoChunk, seq?: number): void {
     this.pushFrame(seq === undefined ? { chunk } : { seq, chunk });
   }
 
-  pushMessage(seq: number, message: NimboUIMessage): void {
+  pushMessage(seq: number, message: RunkoUIMessage): void {
     this.pushFrame({ seq, message });
   }
 

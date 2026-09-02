@@ -4,7 +4,7 @@ slug: steer-and-queue
 view: 功能
 layer: 逻辑层
 module: 轮编排
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["待发队列", "插话", "排队", "conversation-drained"]
 related: ["logic/orchestration/plans/steer-and-queue.md", "logic/orchestration/tech/steer-and-queue.md", "architecture/tech/agent-kernel.md"]
 ---

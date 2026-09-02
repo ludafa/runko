@@ -1,13 +1,13 @@
 /**
  * P7-2: `Session.toJSON`/`SessionOptions.resume` — docs/tech/core-sdk.md §4.2/§4.8
- * "会话恢复" 段. `@nimbo/virtual-fs` is a devDependency here (not a runtime
- * dependency of `@nimbo/core`, see `session.ts`'s header "fs 缺省" note) —
+ * "会话恢复" 段. `@runko/virtual-fs` is a devDependency here (not a runtime
+ * dependency of `@runko/core`, see `session.ts`'s header "fs 缺省" note) —
  * this file plays the same "host" role `integration.test.ts` already does,
- * supplying a real snapshot()/restore()-capable `NimboFS` to exercise the
+ * supplying a real snapshot()/restore()-capable `RunkoFS` to exercise the
  * structural capability probes end to end.
  *
  * P13-5-2（docs/tech/single-ledger.md）迁移：messages 从 `ModelMessage[]`
- * 换成 `NimboUIMessage[]`；"resume 后不重发 session.started" 一节随
+ * 换成 `RunkoUIMessage[]`；"resume 后不重发 session.started" 一节随
  * `session.started`/`turn.started` 事件整体退役直接删除（`session.ts` 头注释：
  * 两者不再有对应 chunk，没有"重发抑制"这回事）；新增两条 resume 边界用例
  * （state.ts 头注释"恢复校验的深层通路"）：`toJSON()` 不需要等后台的深层
@@ -18,14 +18,14 @@ import { describe, expect, it } from "vitest";
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { z } from "zod";
-import { fromMemory } from "@nimbo/virtual-fs";
+import { fromMemory } from "@runko/virtual-fs";
 import { defineAgent } from "../src/agent.js";
 import { createSession } from "../src/session.js";
 import { sessionStateSchema } from "../src/state.js";
 import type { AgentDefinition } from "../src/agent.js";
-import type { NimboFS, Tool } from "../src/types.js";
-import type { NimboUIMessage, SessionState } from "../src/state.js";
-import { toolTimingPartFor } from "./helpers/nimbo-chunks.js";
+import type { RunkoFS, Tool } from "../src/types.js";
+import type { RunkoUIMessage, SessionState } from "../src/state.js";
+import { toolTimingPartFor } from "./helpers/runko-chunks.js";
 
 function mockModel(buildOptions: () => ConstructorParameters<typeof MockLanguageModelV4>[0]): MockLanguageModelV4 {
   return new MockLanguageModelV4(buildOptions());
@@ -56,8 +56,8 @@ function baseAgent(model: MockLanguageModelV4, overrides: Partial<AgentDefinitio
   return defineAgent({ model, ...overrides });
 }
 
-/** A `NimboFS` with exactly the base interface's 7 methods — no `snapshot()`/`restore()`, even though `inner` has them. */
-function bareNimboFS(inner: NimboFS): NimboFS {
+/** A `RunkoFS` with exactly the base interface's 7 methods — no `snapshot()`/`restore()`, even though `inner` has them. */
+function bareRunkoFS(inner: RunkoFS): RunkoFS {
   return {
     readFile: (path) => inner.readFile(path),
     writeFile: (path, data) => inner.writeFile(path, data),
@@ -123,7 +123,7 @@ describe("Session.toJSON", () => {
 
   it("includeFs: true throws a guiding error when the fs has no snapshot() capability", async () => {
     const model = mockModel(() => ({ doStream: stopStream("hi") }));
-    const fs = bareNimboFS(fromMemory({ "/a.txt": "hello" }));
+    const fs = bareRunkoFS(fromMemory({ "/a.txt": "hello" }));
     const session = createSession(baseAgent(model), { fs });
 
     expect(() => session.toJSON({ includeFs: true })).toThrow(/snapshot/i);
@@ -194,7 +194,7 @@ describe("SessionOptions.resume", () => {
     // 才 reject——所以没有这条用例的话，把那个 `messages.length > 0` 判断删掉，
     // 现有的 resume 用例一条都不会红。
     //
-    // 真实调用方是 `@nimbo/agent`：它每一轮都从账本重建 `SessionState` 再 resume，
+    // 真实调用方是 `@runko/agent`：它每一轮都从账本重建 `SessionState` 再 resume，
     // 会话的第一轮账本必然是空的。传 `undefined` 让 core 自己 mint 一个 id 也不行——
     // 那样第一轮与后续轮的 `session.id` 会不一样，遥测的 `"<sessionId>#<turn>"` 键就断了。
     const model = mockModel(() => ({ doStream: stopStream("first reply") }));
@@ -250,7 +250,7 @@ describe("SessionOptions.resume", () => {
     // is what routes createSession(...) into the restore-capability check in the first place.
     const state: SessionState = { id: "sess-x", turn: 1, createdAt: Date.now(), messages: [], fsSnapshot: { note: "irrelevant" } };
 
-    expect(() => createSession(baseAgent(model), { resume: state, fs: bareNimboFS(inner) })).toThrow(/restore/i);
+    expect(() => createSession(baseAgent(model), { resume: state, fs: bareRunkoFS(inner) })).toThrow(/restore/i);
   });
 
   it("throws a guiding error referencing sessionStateSchema when resume fails validation", () => {
@@ -262,7 +262,7 @@ describe("SessionOptions.resume", () => {
 
   it("toJSON() called synchronously right after resume (no await in between) returns the resumed messages without waiting on the background deep validation", () => {
     const model = mockModel(() => ({ doStream: stopStream("hi") }));
-    const priorMessages: NimboUIMessage[] = [
+    const priorMessages: RunkoUIMessage[] = [
       { id: "m1", role: "user", parts: [{ type: "text", text: "hi" }] },
       { id: "m2", role: "assistant", parts: [{ type: "text", text: "hello" }], metadata: { turn: 1, status: "completed" } },
     ];
@@ -279,7 +279,7 @@ describe("SessionOptions.resume", () => {
   it("a resume state that passes shallow sessionStateSchema but fails deep validateUIMessages rejects on the first stream()/send(), not at createSession()", async () => {
     const model = mockModel(() => ({ doStream: stopStream("hi") }));
     // `metadata.status: "not-a-real-status"` satisfies the shallow envelope check (state.ts's
-    // `isUIMessageShape` only looks at id/role/parts) but violates `nimboMessageMetadataSchema`'s
+    // `isUIMessageShape` only looks at id/role/parts) but violates `runkoMessageMetadataSchema`'s
     // status enum — exactly the "structure ok, deep semantics not ok" case `state.ts`'s header
     // describes as deferred to `validateSessionMessages()`.
     const malformed = asUntrustedSessionState({

@@ -4,7 +4,7 @@ slug: cloudflare-worker-server
 view: 功能
 layer: 宿主层
 module: 沙盒
-packages: ["@nimbo/sandbox-cloudflare"]
+packages: ["@runko/sandbox-cloudflare"]
 tags: ["Cloudflare", "Worker", "网关形态", "Durable Object"]
 related: ["host/cloudflare/plans/cloudflare-worker-server.md", "host/cloudflare/tech/cloudflare-worker-server.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -19,7 +19,7 @@ related: ["host/cloudflare/plans/cloudflare-worker-server.md", "host/cloudflare/
 
 Cloudflare [沙盒](../../../terms.md)有个结构性约束：**它只能从 Worker 内部经 Durable Object binding 访问**。这让想用 CF 沙盒的人立刻撞上两个问题：
 
-1. **「我的 agent 跑在自己电脑上，怎么用 CF 沙盒？」**——连不上。必须自己在 CF 账号里立一个 Worker 当[网关](../../../terms.md)，把 nimbo 的协议翻译成对沙盒的调用。此前我们只给一份三个文件的参考片段，读者得自己拼出一个 wrangler 项目。
+1. **「我的 agent 跑在自己电脑上，怎么用 CF 沙盒？」**——连不上。必须自己在 CF 账号里立一个 Worker 当[网关](../../../terms.md)，把 runko 的协议翻译成对沙盒的调用。此前我们只给一份三个文件的参考片段，读者得自己拼出一个 wrangler 项目。
 2. **「那把服务端整个搬进 Worker 呢？」**——可行性完全未知：模型调用、agent loop、沙盒驱动在 workerd 里到底跑不跑得起来，没人验证过。
 
 本项目**一次回答这两个问题**：一个完整可部署的 Worker 工程，既是问题 1 要的那个网关，也是问题 2 的可行性答案。
@@ -29,8 +29,8 @@ Cloudflare [沙盒](../../../terms.md)有个结构性约束：**它只能从 Wor
 | 你是谁 | 你要什么 | 用哪个角色 |
 |---|---|---|
 | 想在自己电脑上跑 agent、但用 CF 沙盒 | 一个现成的网关，部署完填两个环境变量就能用 | 角色 ②（`/gateway/*`） |
-| 想把 nimbo 服务端整个放进 Worker | 一份跑通了的参考实现，看清接线形状与坑 | 角色 ①（`/agent` 等） |
-| 在评估「nimbo 能不能上 Workers」 | 实测结论与仍未解决的卡点清单 | 读[施工进展](../plans/cloudflare-worker-server.md) |
+| 想把 runko 服务端整个放进 Worker | 一份跑通了的参考实现，看清接线形状与坑 | 角色 ①（`/agent` 等） |
+| 在评估「runko 能不能上 Workers」 | 实测结论与仍未解决的卡点清单 | 读[施工进展](../plans/cloudflare-worker-server.md) |
 
 ## 用户可见行为
 

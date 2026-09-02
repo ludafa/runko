@@ -4,7 +4,7 @@ slug: chat-ui
 view: 技术
 layer: 接入层
 module: —
-packages: ["@nimbo-chat/web"]
+packages: ["@runko-chat/web"]
 tags: ["界面语言", "ai-elements", "shadcn", "密度"]
 related: ["ingress/features/chat-ui.md", "ingress/plans/chat-ui.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -163,7 +163,7 @@ sequenceDiagram
 ## 6. 设计工作台（`/design`）
 
 - `routes/design.tsx`：`beforeLoad` 里 `if (!import.meta.env.DEV) throw notFound()`——生产构建下 404。
-- `fixtures/design-preview-data.ts`：手写的 `NimboUIMessage[]`，时间戳锚在**固定常量** `T0`（不能用 `Date.now()`，否则两次截图的耗时不一样）。其中特意留了一条只有单个部件的 assistant 消息——真实会话里一轮 = 很多条消息（一步一条），fixture 若不还原这个粒度，就验不出跨消息的排版问题。
+- `fixtures/design-preview-data.ts`：手写的 `RunkoUIMessage[]`，时间戳锚在**固定常量** `T0`（不能用 `Date.now()`，否则两次截图的耗时不一样）。其中特意留了一条只有单个部件的 assistant 消息——真实会话里一轮 = 很多条消息（一步一条），fixture 若不还原这个粒度，就验不出跨消息的排版问题。
 - `pages/design-preview.tsx`：直接装配展示组件，**不经** `ConversationPage`（那条路径要登录态与真沙盒）。
 
 ## 7. 取舍与已知限制

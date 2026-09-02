@@ -4,7 +4,7 @@ slug: persistence
 view: 施工
 layer: 宿主层
 module: 持久化
-packages: ["@nimbo/persist-kysely", "@nimbo/persist-sqlite", "@nimbo/persist-postgres", "@nimbo/persist-mysql", "@nimbo/persist-mongo"]
+packages: ["@runko/persist-kysely", "@runko/persist-sqlite", "@runko/persist-postgres", "@runko/persist-mysql", "@runko/persist-mongo"]
 tags: ["持久化", "存储适配", "SQLite", "Postgres", "MySQL", "MongoDB", "kysely", "一致性测试"]
 related: ["host/contract/features/persistence.md", "host/contract/tech/persistence.md", "architecture/plans/agent-kernel.md"]
 ---
@@ -18,25 +18,25 @@ related: ["host/contract/features/persistence.md", "host/contract/tech/persisten
 
 **全部交付**（2026-08-24）。五个包、四种数据库（含一个非关系型），全部对真库跑过。
 
-> **2026-08-30 复验**：对同一组容器（`nimbo-pg` :5433 · `nimbo-mysql` :3307 · `nimbo-mongo` :27018）重跑，全绿——
+> **2026-08-30 复验**：对同一组容器（`runko-pg` :5433 · `runko-mysql` :3307 · `runko-mongo` :27018）重跑，全绿——
 > `persist-kysely` **110**（pglite + Postgres + MySQL 三方言各跑一遍一致性套件）· `persist-sqlite` **28** ·
 > `persist-postgres` **1** · `persist-mysql` **1** · `persist-mongo` **33**（整套一致性套件对真 Mongo 跑通）。
 >
-> **注意这几个包默认是 skip 的**：不给 `NIMBO_TEST_{POSTGRES,MYSQL,MONGO}_URL` 就整档跳过（它们没有进程内替身）。
+> **注意这几个包默认是 skip 的**：不给 `RUNKO_TEST_{POSTGRES,MYSQL,MONGO}_URL` 就整档跳过（它们没有进程内替身）。
 > 所以**日常 `pnpm -r test` 里 postgres / mysql / mongo 三个包等于没测**——只有 `persist-kysely` 的 pglite 那一档是白跑的。
 > 真库口径下全仓是 2051 个用例，默认口径是 1962。要真跑：
 >
 > ```sh
-> NIMBO_TEST_POSTGRES_URL=postgres://nimbo:nimbo@127.0.0.1:5433/nimbo \
-> NIMBO_TEST_MYSQL_URL=mysql://root:nimbo@127.0.0.1:3307/nimbo \
-> NIMBO_TEST_MONGO_URL=mongodb://127.0.0.1:27018 \
+> RUNKO_TEST_POSTGRES_URL=postgres://runko:runko@127.0.0.1:5433/runko \
+> RUNKO_TEST_MYSQL_URL=mysql://root:runko@127.0.0.1:3307/runko \
+> RUNKO_TEST_MONGO_URL=mongodb://127.0.0.1:27018 \
 > pnpm -r test
 > ```
 
 > **本批中途按构建者反馈重做过一次**，见下「第二版：换 Kysely + 一种库一个包」。
-> 第一版（手搓方言层的单包 `@nimbo/persist-sql`）已退役，不在仓库里。
+> 第一版（手搓方言层的单包 `@runko/persist-sql`）已退役，不在仓库里。
 
-- 领域接口 **已定稿并已有一个真实实现**——`apps/node-server` 自建的那份（2026-08-16 随 `@nimbo/agent` 交付）。本批做的是**第二个**实现，官方包。
+- 领域接口 **已定稿并已有一个真实实现**——`apps/node-server` 自建的那份（2026-08-16 随 `@runko/agent` 交付）。本批做的是**第二个**实现，官方包。
 - 上位拆单 K5 原本的定义是「`persist-sql`，SQLite + Postgres 两个方言跑绿」。**实际交付超出了它**：五个包、四种数据库（含一个非关系型）。K6（租约版仲裁）仍然分开发。
 
 ## 开工前推翻的两个判断
@@ -45,7 +45,7 @@ related: ["host/contract/features/persistence.md", "host/contract/tech/persisten
 
 **① 「K5 取消，chat 应用自己实现就够了」——被推翻。**
 
-2026-08-16 交付时的理由是「让 chat 应用自己实现反而是对接口更真实的检验」。这个理由**对 chat 应用成立，但不能推广**：`@nimbo/cli`（K8）和第三方宿主想零成本接上，仍然需要一个官方包。取消 = 把这个成本推给用户。2026-08-22 构建者拍板：现在就做。
+2026-08-16 交付时的理由是「让 chat 应用自己实现反而是对接口更真实的检验」。这个理由**对 chat 应用成立，但不能推广**：`@runko/cli`（K8）和第三方宿主想零成本接上，仍然需要一个官方包。取消 = 把这个成本推给用户。2026-08-22 构建者拍板：现在就做。
 
 **② 「把 `apps/node-server` 改造到官方包上，是搬家不是重写」——错的，已放弃。**
 
@@ -85,7 +85,7 @@ related: ["host/contract/features/persistence.md", "host/contract/tech/persisten
 
 **④ 「orbstack 已启动，自己拉 postgres 和 mysql 测试」**
 
-拉了两个带 `nimbo-` 前缀的容器（pg `5433` / mysql `3307`），避开了构建者已有的那个
+拉了两个带 `runko-` 前缀的容器（pg `5433` / mysql `3307`），避开了构建者已有的那个
 `postgresql`（跑了 8 天，没碰）。P7 因此在本批内完成，不再是遗留项。
 
 ### 分包结果
@@ -111,11 +111,11 @@ Kysely 的宿主装它，把自己的实例给它，两套表进同一个实例�
 > 下面是**第二版**的拆单。第一版（手搓方言层的单包 `persist-sql`）的拆单已随包一起退役，
 > 不再保留——它的结论都并进了上面「第二版」那一节。
 
-### P1 · 核心包 `@nimbo/persist-kysely` ✅
+### P1 · 核心包 `@runko/persist-kysely` ✅
 
 - **目标**：三个 Store + `migrate()`，全部走 Kysely 的查询构建器，**没有一行手写 SQL**。
 - **涉及文件**：`packages/persist-kysely/src/{index,schema,flavor,migrate,stores}.ts`。
-- **产出物**：`kyselyPersistence(db, { flavor })` + `migrate(db, { flavor })`；`NimboDatabase`
+- **产出物**：`kyselyPersistence(db, { flavor })` + `migrate(db, { flavor })`；`RunkoDatabase`
   三张表的 Kysely 类型（DDL 与全部查询都从它推）。
 - **验收**：`peerDependencies` 只有 `kysely`，零驱动依赖；三方言差异全部收在 `flavor.ts`。
 
@@ -134,10 +134,10 @@ Kysely 的宿主装它，把自己的实例给它，两套表进同一个实例�
 - **产出物**：`persistenceCases`，**31 条不变量**。
 - **验收**：所有实现**同一套用例全绿**。任一条在任一实现上不成立，都算本批失败。
 
-> **套件独立成包 `@nimbo/conformance`。** 它断言的是**接口的承诺**，不是某个实现的行为，
+> **套件独立成包 `@runko/conformance`。** 它断言的是**接口的承诺**，不是某个实现的行为，
 > 所以 `persist-drizzle` / `persist-prisma` / 第三方实现都能直接引来自测。
 >
-> 第一版曾把它做成 `@nimbo/agent` 的子路径导出（`@nimbo/agent/conformance`），代价是
+> 第一版曾把它做成 `@runko/agent` 的子路径导出（`@runko/agent/conformance`），代价是
 > `vitest` 成了那个**运行时**包的可选 peer——测试框架不该出现在运行时包的依赖里。拆包
 > 之后套件自带一套手写断言（连 `node:assert` 都不用），只导出 `{ name, run }` 这样的
 > 用例数据，`describe`/`it` 由消费方接，任何测试框架都能跑。
@@ -147,7 +147,7 @@ Kysely 的宿主装它，把自己的实例给它，两套表进同一个实例�
 - **目标**：证明「装个包 + 给它一个驱动实例」真能跑起来一个完整的 agent 服务——不是玩具
   脚本，是**真的 HTTP 服务**。
 - **涉及文件**：新成员 `apps/persist-demo/`。
-- **产出物**：Hono 服务，持久化只用 `@nimbo/persist-*`、一行 ORM 都没有；端点形状与
+- **产出物**：Hono 服务，持久化只用 `@runko/persist-*`、一行 ORM 都没有；端点形状与
   `apps/node-server` 一致（起轮 / 回放 / SSE / 队列 / 审批）。`DEMO_DB` 切换四种库。
 - **验收**：见 P5。
 
@@ -164,12 +164,12 @@ Kysely 的宿主装它，把自己的实例给它，两套表进同一个实例�
 ### P6 · MySQL 支持 ✅
 
 - **目标**：构建者要求补上（原计划「首批只 SQLite + Postgres」）。
-- **产出物**：`@nimbo/persist-mysql` + `flavor.ts` 里的 `mysql` 一档。
+- **产出物**：`@runko/persist-mysql` + `flavor.ts` 里的 `mysql` 一档。
 - **踩到的两条**：MySQL **不支持 `RETURNING`**（改用 `numUpdatedRows` / `numDeletedRows`
   三家通吃）、**不支持 `CREATE INDEX IF NOT EXISTS`**（队列表的二级索引整个去掉，本来也用不上）。
 - **验收**：对真 MySQL 容器跑一致性套件 + e2e，全绿。
 
-### P7 · `@nimbo/persist-mongo` ✅
+### P7 · `@runko/persist-mongo` ✅
 
 - **目标**：第一个**非关系型**实现。构建者点名要的。
 - **涉及文件**：`packages/persist-mongo/src/{index,collections,migrate,stores}.ts`。
@@ -196,13 +196,13 @@ Kysely 的宿主装它，把自己的实例给它，两套表进同一个实例�
 不给连接串时，需要真库的那几档 `describe.skip` 并**说明原因**——不是静默跳过。
 
 ```sh
-docker run -d --name nimbo-pg    -e POSTGRES_PASSWORD=nimbo -e POSTGRES_USER=nimbo -e POSTGRES_DB=nimbo -p 5433:5432 postgres:18
-docker run -d --name nimbo-mysql -e MYSQL_ROOT_PASSWORD=nimbo -e MYSQL_DATABASE=nimbo -p 3307:3306 mysql:9
-docker run -d --name nimbo-mongo -p 27018:27017 mongo:8
+docker run -d --name runko-pg    -e POSTGRES_PASSWORD=runko -e POSTGRES_USER=runko -e POSTGRES_DB=runko -p 5433:5432 postgres:18
+docker run -d --name runko-mysql -e MYSQL_ROOT_PASSWORD=runko -e MYSQL_DATABASE=runko -p 3307:3306 mysql:9
+docker run -d --name runko-mongo -p 27018:27017 mongo:8
 
-NIMBO_TEST_POSTGRES_URL=postgres://nimbo:nimbo@127.0.0.1:5433/nimbo \
-NIMBO_TEST_MYSQL_URL=mysql://root:nimbo@127.0.0.1:3307/nimbo \
-NIMBO_TEST_MONGO_URL=mongodb://127.0.0.1:27018 \
+RUNKO_TEST_POSTGRES_URL=postgres://runko:runko@127.0.0.1:5433/runko \
+RUNKO_TEST_MYSQL_URL=mysql://root:runko@127.0.0.1:3307/runko \
+RUNKO_TEST_MONGO_URL=mongodb://127.0.0.1:27018 \
   pnpm -r test
 ```
 
@@ -217,7 +217,7 @@ NIMBO_TEST_MONGO_URL=mongodb://127.0.0.1:27018 \
 - **e2e 在每种库上全绿**。
 - `apps/node-server` **一行不改**仍然全绿（对照组没被碰坏）。
 - `pnpm docs:check` + `pnpm docs:build` 绿。
-- changeset：新包首发一条 minor；`@nimbo/agent` 因新增 conformance 子路径导出，一条 minor。
+- changeset：新包首发一条 minor；`@runko/agent` 因新增 conformance 子路径导出，一条 minor。
 
 ## 明确不做
 
@@ -226,7 +226,7 @@ NIMBO_TEST_MONGO_URL=mongodb://127.0.0.1:27018 \
 - **`persist-drizzle` / `persist-prisma`**——K9。
 - **「通用适配器」抽象层**——三条腿各写各的够用了，等真需要复用再抽。
 - **SQLite / PostgreSQL / MySQL / MongoDB 之外的存储**。其余走「自己实现三个领域接口」
-  这条头等路径，或者自己配一个 Kysely dialect 接 `@nimbo/persist-kysely`。
+  这条头等路径，或者自己配一个 Kysely dialect 接 `@runko/persist-kysely`。
 
 ## 验收结论
 
@@ -240,7 +240,7 @@ NIMBO_TEST_MONGO_URL=mongodb://127.0.0.1:27018 \
 | `persist-sqlite` | 28（整套一致性 + 冒烟） |
 | `persist-postgres` / `persist-mysql` | 各 1 条冒烟（对真库） |
 | `persist-demo` e2e | **37** —— 9 条 × **4 种真库** + 跨重启 1 条 |
-| `@nimbo/agent` | 64 → **91**（+27 一致性用例，内存实现是行为基准） |
+| `@runko/agent` | 64 → **91**（+27 一致性用例，内存实现是行为基准） |
 | `apps/node-server` | ✅ **395 一个没动**——对照组没被碰坏 |
 | `docs:check` / `docs:build` | 全绿（87 份，零死链） |
 
@@ -261,11 +261,11 @@ pglite、真 Postgres、真 MySQL、真 MongoDB。其中最后一个是**非关�
 更干净**：契约要求「取出即移除、一个方法内原子完成」，SQL 是读-删两步 + 竞态重试，
 Mongo 是数据库直接给的。
 
-真库连接串（本地容器，`nimbo-` 前缀，避开了构建者已有的实例）：
+真库连接串（本地容器，`runko-` 前缀，避开了构建者已有的实例）：
 
 ```sh
-NIMBO_TEST_POSTGRES_URL=postgres://nimbo:nimbo@127.0.0.1:5433/nimbo \
-NIMBO_TEST_MYSQL_URL=mysql://root:nimbo@127.0.0.1:3307/nimbo \
+RUNKO_TEST_POSTGRES_URL=postgres://runko:runko@127.0.0.1:5433/runko \
+RUNKO_TEST_MYSQL_URL=mysql://root:runko@127.0.0.1:3307/runko \
   pnpm -r test
 ```
 
@@ -331,9 +331,9 @@ pglite 侧炸在「question 通道与 approval 通道分得开」那条上：`as
 和异步的 pg 抹平。两点澄清，两点都容易被误读成「这个包没做完」：
 
 1. **它伺候的是 `demo_conversations`**——demo 自己的产品数据（会话标题）。**agent 那三张
-   表一次都没被它碰过**，全归 `@nimbo/persist-*`。这正是准则「nimbo 不拥有用户实体」
+   表一次都没被它碰过**，全归 `@runko/persist-*`。这正是准则「runko 不拥有用户实体」
    的样子：框架只认一个不透明的 `conversationId`。
-2. **它是「本 demo 要同时支持两种方言」的成本，不是「当 nimbo 宿主」的成本。** 真实应用
+2. **它是「本 demo 要同时支持两种方言」的成本，不是「当 runko 宿主」的成本。** 真实应用
    只挑一个数据库，自己的表直接 `db.prepare(…).run(…)` 就完了，不需要这一层抽象。
 
 ### 导出面收窄（同日修正）
@@ -350,7 +350,7 @@ pglite 侧炸在「question 通道与 approval 通道分得开」那条上：`as
 
 | 日期 | 变更 |
 |---|---|
-| 2026-08-24 | **加 `@nimbo/persist-mongo`**（构建者点名）：第一个非关系型实现，不走 Kysely、直接实现三个领域接口。跟其余实现跑同一套一致性用例全绿——契约里那三条「为非关系型留的」准则**首次得到验证**。demo 加第四档 `DEMO_DB=mongo`，连它自己那张会话表也换成集合。实测坐实「UPDATE 匹配到但值没变时计数为 0」这个坑的真身在 Mongo（`settle` 必须看 `matchedCount`），以及 BSON 把 `undefined` 存成 `null`（写入前做 JSON 归一对齐 SQL 那几家） |
+| 2026-08-24 | **加 `@runko/persist-mongo`**（构建者点名）：第一个非关系型实现，不走 Kysely、直接实现三个领域接口。跟其余实现跑同一套一致性用例全绿——契约里那三条「为非关系型留的」准则**首次得到验证**。demo 加第四档 `DEMO_DB=mongo`，连它自己那张会话表也换成集合。实测坐实「UPDATE 匹配到但值没变时计数为 0」这个坑的真身在 Mongo（`settle` 必须看 `matchedCount`），以及 BSON 把 `undefined` 存成 `null`（写入前做 JSON 归一对齐 SQL 那几家） |
 | 2026-08-23 | **第二版**：按构建者反馈重做——底层换 Kysely（同 better-auth）、一种库一个包（`persist-kysely` 核心 + sqlite/postgres/mysql 三个薄壳）、补齐 MySQL；砍掉 `tablePrefix` 与队列二级索引；对真 Postgres/MySQL 容器跑完 P7。实测推翻契约 §6 的 MySQL `affectedRows` 断言 |
-| 2026-08-23 | **第一版 P1–P6 交付**（已退役）：`packages/persist-sql`（方言层 / 三张表 + `migrate()` / 三个 Store）、`@nimbo/agent/conformance` 一致性套件（27 条不变量 × 3 个实现）、`apps/persist-demo`（零 ORM 的 Hono 服务）、19 条 e2e。一致性套件在 pglite 上抓到 `parseJson` 的对冲 bug，见「验收结论」 |
+| 2026-08-23 | **第一版 P1–P6 交付**（已退役）：`packages/persist-sql`（方言层 / 三张表 + `migrate()` / 三个 Store）、`@runko/agent/conformance` 一致性套件（27 条不变量 × 3 个实现）、`apps/persist-demo`（零 ORM 的 Hono 服务）、19 条 e2e。一致性套件在 pglite 上抓到 `parseJson` 的对冲 bug，见「验收结论」 |
 | 2026-08-23 | 方案定稿。K5 从「取消」恢复为「现在就做」；推翻「改造 node-server」的思路，改为 node-server 作对照组；一致性测试套件定为本批主产出；确定 pglite 作为 Postgres 的单测替身、真 Postgres 只在 P6 手动实测 |

@@ -4,7 +4,7 @@ slug: deployment
 view: 功能
 layer: 宿主层
 module: —
-packages: ["@nimbo/sandbox-vercel", "@nimbo/stream-redis", "@nimbo/persist-sql"]
+packages: ["@runko/sandbox-vercel", "@runko/stream-redis", "@runko/persist-sql"]
 tags: ["Vercel", "Functions", "Fluid", "Redis Streams", "部署形态", "平台快照"]
 related: ["host/vercel/tech/deployment.md", "host/contract/features/stream-fanout.md", "architecture/features/agent-kernel.md"]
 ---
@@ -27,8 +27,8 @@ related: ["host/vercel/tech/deployment.md", "host/contract/features/stream-fanou
 |---|---|---|
 | [归属仲裁机制](../../../terms.md) | 租约版 | 多实例并发，内存 Map 不管用 |
 | [持久化](../../../terms.md) | 外部数据库 | 函数实例没有持久磁盘 |
-| [流分发](../../../terms.md) | **`@nimbo/stream-redis`** | **找不到持有者，转发这条路走不通** |
-| [沙盒](../../../terms.md) | `@nimbo/sandbox-vercel` | 函数里跑不了 agent 要的那些命令 |
+| [流分发](../../../terms.md) | **`@runko/stream-redis`** | **找不到持有者，转发这条路走不通** |
+| [沙盒](../../../terms.md) | `@runko/sandbox-vercel` | 函数里跑不了 agent 要的那些命令 |
 
 ## 3. 只有一件事真的需要「找到持有者」
 
@@ -47,7 +47,7 @@ related: ["host/vercel/tech/deployment.md", "host/contract/features/stream-fanou
 
 Vercel Functions 的单次执行有时长上限（800 秒 GA / 30 分钟 beta）。
 
-nimbo 的[挂起点只有一个](../../../architecture/features/agent-kernel.md)——**正在等人**。命令跑到一半没有干净边界（不知道它跑完没有），所以**一轮本身超过函数时长上限这件事绕不过去**。
+runko 的[挂起点只有一个](../../../architecture/features/agent-kernel.md)——**正在等人**。命令跑到一半没有干净边界（不知道它跑完没有），所以**一轮本身超过函数时长上限这件事绕不过去**。
 
 这不是能靠加组件解决的问题，是这一档的固有边界。要跑长任务，去 [Node 长驻](../../node/features/deployment.md)或 [Cloudflare](../../cloudflare/features/deployment.md)。
 

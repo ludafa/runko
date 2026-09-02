@@ -36,7 +36,7 @@ describe('conversation-grants', () => {
         userId: USER,
         title: id,
         repo: 'acme/demo',
-        branchName: `nimbo/${id}`,
+        branchName: `runko/${id}`,
         sandboxName: `sb-${id}`,
       });
     }

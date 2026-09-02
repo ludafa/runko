@@ -14,7 +14,7 @@ import {
   toolApprovalRequestChunk,
   toolInputAvailableChunk,
   userMessage,
-} from './helpers/nimbo-chunks';
+} from './helpers/runko-chunks';
 
 function setup(): FakeChatFetch {
   const fake = new FakeChatFetch();

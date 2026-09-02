@@ -1,7 +1,7 @@
 {
-  "name": "@nimbo/mini-bash",
+  "name": "@runko/mini-bash",
   "version": "0.1.0",
-  "description": "NimboExec 实现：纯 TS 解释器（cat/grep/find/tail/head/echo），跑在任意 NimboFS 上",
+  "description": "RunkoExec 实现：纯 TS 解释器（cat/grep/find/tail/head/echo），跑在任意 RunkoFS 上",
   "type": "module",
   "license": "ISC",
   "publishConfig": {
@@ -37,10 +37,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@nimbo/core": "workspace:*"
+    "@runko/core": "workspace:*"
   },
   "devDependencies": {
-    "@nimbo/virtual-fs": "workspace:*",
+    "@runko/virtual-fs": "workspace:*",
     "@types/node": "catalog:",
     "tsdown": "catalog:",
     "typescript": "catalog:",

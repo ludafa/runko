@@ -1,10 +1,10 @@
 /**
  * `agent/chat-agent.ts` 剩下的那两个纯函数。
  *
- * 建 `Session` 已经归 `@nimbo/agent`（见 `agent/runtime.ts`），所以这里不再需要真跑一轮：
+ * 建 `Session` 已经归 `@runko/agent`（见 `agent/runtime.ts`），所以这里不再需要真跑一轮：
  *
  * 1. **`gateWorkspace`**——把 bash 卡进[审批链](../../../../docs/terms.md)：每个
- *    `NimboFS`/`NimboExec` 方法原样转发、`defaultApproval` 被强制成 `"review"`、
+ *    `RunkoFS`/`RunkoExec` 方法原样转发、`defaultApproval` 被强制成 `"review"`、
  *    **可选能力方法（`describe`/`searchFiles`/`searchContent`）必须跟着转发**（2026-07-16
  *    的线上事故：只转发七个必选方法，原生搜索被静默剥掉、grep 永远走 JS 慢路径）。
  * 2. **`buildInstructions`**——系统提示词里那几件必须钉住的事实（工作分支、只读纪律、
@@ -13,8 +13,8 @@
  * `ask-user` 的注册与行为现在归框架，覆盖在 `packages/agent/test/human.test.ts`；
  * `web-search` 的条件注册归 `agent/runtime.ts`，覆盖在 `test/agent/runtime.test.ts`。
  */
-import type { ExecRequest, ExecResult, NimboExec, NimboFS } from '@nimbo/core';
-import { MemoryFS } from '@nimbo/sdk';
+import type { ExecRequest, ExecResult, RunkoExec, RunkoFS } from '@runko/core';
+import { MemoryFS } from '@runko/sdk';
 import type { Mock } from 'vitest';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -24,18 +24,18 @@ import {
 } from '../../src/agent/chat-agent.js';
 
 interface SpyWorkspace {
-  workspace: NimboFS & NimboExec;
-  readFile: Mock<NimboFS['readFile']>;
-  writeFile: Mock<NimboFS['writeFile']>;
-  rm: Mock<NimboFS['rm']>;
-  mkdir: Mock<NimboFS['mkdir']>;
-  readdir: Mock<NimboFS['readdir']>;
-  stat: Mock<NimboFS['stat']>;
-  glob: Mock<NimboFS['glob']>;
-  exec: Mock<NimboExec['exec']>;
+  workspace: RunkoFS & RunkoExec;
+  readFile: Mock<RunkoFS['readFile']>;
+  writeFile: Mock<RunkoFS['writeFile']>;
+  rm: Mock<RunkoFS['rm']>;
+  mkdir: Mock<RunkoFS['mkdir']>;
+  readdir: Mock<RunkoFS['readdir']>;
+  stat: Mock<RunkoFS['stat']>;
+  glob: Mock<RunkoFS['glob']>;
+  exec: Mock<RunkoExec['exec']>;
   describe?: Mock<() => string>;
-  searchFiles?: Mock<NonNullable<NimboFS['searchFiles']>>;
-  searchContent?: Mock<NonNullable<NimboFS['searchContent']>>;
+  searchFiles?: Mock<NonNullable<RunkoFS['searchFiles']>>;
+  searchContent?: Mock<NonNullable<RunkoFS['searchContent']>>;
 }
 
 function createSpyWorkspace(
@@ -60,18 +60,18 @@ function createSpyWorkspace(
     opts.withDescribe === true ? vi.fn(() => 'test env') : undefined;
   const searchFilesSpy =
     opts.withNativeSearch === true ?
-      vi.fn<NonNullable<NimboFS['searchFiles']>>(() =>
+      vi.fn<NonNullable<RunkoFS['searchFiles']>>(() =>
         Promise.resolve({ paths: ['/hit.ts'], total: 1 }),
       )
     : undefined;
   const searchContentSpy =
     opts.withNativeSearch === true ?
-      vi.fn<NonNullable<NimboFS['searchContent']>>(() =>
+      vi.fn<NonNullable<RunkoFS['searchContent']>>(() =>
         Promise.resolve({ groups: [], totalFiles: 0, lineCapped: false }),
       )
     : undefined;
 
-  const workspace: NimboFS & NimboExec = {
+  const workspace: RunkoFS & RunkoExec = {
     readFile,
     writeFile,
     rm,
@@ -179,14 +179,14 @@ describe('buildInstructions', () => {
     repoOwner: 'acme',
     repoName: 'demo',
     defaultBranch: 'main',
-    branchName: 'nimbo/chat-abc',
+    branchName: 'runko/chat-abc',
   };
 
   it('把仓库、默认分支、工作分支都烤进提示词——模型不必去猜', () => {
     const text = buildInstructions({ ...base, hasWebSearch: false });
     expect(text).toContain('acme/demo');
     expect(text).toContain('main');
-    expect(text).toContain('nimbo/chat-abc');
+    expect(text).toContain('runko/chat-abc');
   });
 
   it('没注册 web-search 时不提它——否则指令会让模型去调一个不存在的工具', () => {

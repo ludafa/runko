@@ -2,7 +2,7 @@
  * `web-search`（docs/tech/web-search.md）：chat 应用注册给 agent 的[联网搜索]
  * 工具，后端是 Exa 的 `POST /search`。
  *
- * 为什么在 apps 而不在 `@nimbo/core` 的内置工具里（docs/tech/web-search.md §1）：
+ * 为什么在 apps 而不在 `@runko/core` 的内置工具里（docs/tech/web-search.md §1）：
  * core 的内置工具有一条隐含契约——零凭证、零网络、宿主什么都不配也能用；
  * 这个工具要第三方 API key、按次计费、走公网，塞进 core 等于让每个 SDK 用户
  * 被动继承一个外部依赖和一份账单面。形态与 `ask-user`（chat-agent.ts）同构：
@@ -16,8 +16,8 @@
  * （部件类型 `tool-web-search`）和模型上下文，与供应商解耦，将来换家不必改
  * 历史数据与指令。配置项则照实叫 `EXA_API_KEY`——那是运维要认的东西。
  */
-import type { Tool, ToolContext } from '@nimbo/sdk';
-import { defineTool } from '@nimbo/sdk';
+import type { Tool, ToolContext } from '@runko/sdk';
+import { defineTool } from '@runko/sdk';
 import { z } from 'zod';
 
 const EXA_SEARCH_ENDPOINT = 'https://api.exa.ai/search';
@@ -332,7 +332,7 @@ function collapseWhitespace(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
-/** `catch` 子句里从 `unknown` 安全窄化出可读消息——同款受控例外见 `@nimbo/core` 的 `loop.ts`。 */
+/** `catch` 子句里从 `unknown` 安全窄化出可读消息——同款受控例外见 `@runko/core` 的 `loop.ts`。 */
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

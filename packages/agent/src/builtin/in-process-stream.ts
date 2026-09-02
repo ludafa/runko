@@ -2,7 +2,7 @@
  * 内置的**平凡[流分发](../../../docs/terms.md)**：一个 `Map<conversationId, Set<listener>>`。
  *
  * 单进程下流分发平时是看不见的——发布方与订阅方在同一个进程里，转发一下就完了。
- * 跨实例时才需要外部实现（Redis Streams，`@nimbo/stream-redis`）。
+ * 跨实例时才需要外部实现（Redis Streams，`@runko/stream-redis`）。
  *
  * 刻意不用 `node:events` 的 `EventEmitter`：那东西有 maxListeners 警告要关、有
  * `error` 事件的特殊语义要绕，而这里要的只是「一组回调」。一个 `Set` 更直白，也天然

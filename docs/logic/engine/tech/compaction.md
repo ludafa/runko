@@ -4,7 +4,7 @@ slug: compaction
 view: 技术
 layer: 逻辑层
 module: 执行引擎
-packages: ["@nimbo/core"]
+packages: ["@runko/core"]
 tags: ["上下文压缩", "token 预算", "历史裁剪"]
 related: ["logic/engine/features/compaction.md", "logic/engine/plans/compaction.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -30,7 +30,7 @@ related: ["logic/engine/features/compaction.md", "logic/engine/plans/compaction.
 
 ## 领域模型：compaction 作为账本第三类条目
 
-账本落在 server 的 `conversation_events` 表（`apps/node-server/src/db/schema.ts`）。今天该表的 `kind` 只有两类——`'message'`（一条已完成的 `NimboUIMessage`）与 `'chunk'`（进行中/崩溃 turn 的 durable `NimboChunk`）。本功能引入**并列的第三类** `'compaction'`。
+账本落在 server 的 `conversation_events` 表（`apps/node-server/src/db/schema.ts`）。今天该表的 `kind` 只有两类——`'message'`（一条已完成的 `RunkoUIMessage`）与 `'chunk'`（进行中/崩溃 turn 的 durable `RunkoChunk`）。本功能引入**并列的第三类** `'compaction'`。
 
 ```mermaid
 erDiagram
@@ -57,7 +57,7 @@ erDiagram
         integer ts
         text kind "message | chunk | compaction(P14 新增)"
         text type "payloadJson 判别符 冗余以便过滤"
-        text payloadJson "message=UIMessage / chunk=NimboChunk / compaction=装摘要的UIMessage"
+        text payloadJson "message=UIMessage / chunk=RunkoChunk / compaction=装摘要的UIMessage"
     }
     COMPACTION_META {
         integer upToSeq "切点 seq≤此值的 message 已被摘要替代"
@@ -71,7 +71,7 @@ erDiagram
 
 > **读图说明**：`COMPACTION_META` **不是一张表**，而是 `kind='compaction'` 那一行 `payloadJson` 里 `metadata.compaction` 的形状。切点等簿记字段随 UIMessage 一起落在 `payloadJson`，不新增表列。
 >
-> **与当前 schema 的差异（P14 待落地）**：`apps/node-server/src/db/schema.ts` 现在的 `kind` 枚举是 `['message', 'chunk']`，`metadata.compaction` 也尚未加入 `NimboMessageMetadata`（`packages/core/src/state.ts`）。本图画的是**目标态**：`kind` 扩到三值、`NimboMessageMetadata` 增补 `compaction` 字段、并新增 `(conversation_id, upToSeq)` 唯一约束（见下）。
+> **与当前 schema 的差异（P14 待落地）**：`apps/node-server/src/db/schema.ts` 现在的 `kind` 枚举是 `['message', 'chunk']`，`metadata.compaction` 也尚未加入 `RunkoMessageMetadata`（`packages/core/src/state.ts`）。本图画的是**目标态**：`kind` 扩到三值、`RunkoMessageMetadata` 增补 `compaction` 字段、并新增 `(conversation_id, upToSeq)` 唯一约束（见下）。
 
 ### compaction 条目的 payload 形状
 

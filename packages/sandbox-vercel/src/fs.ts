@@ -1,5 +1,5 @@
 /**
- * `createVercelFs(sandbox, root)`：NimboFS 七方法在 `sandbox.fs`（node:fs/promises
+ * `createVercelFs(sandbox, root)`：RunkoFS 七方法在 `sandbox.fs`（node:fs/promises
  * 兼容子集）上的直译（docs/tech/sandbox.md §3.1 / §8.2 Vercel 列）。
  *
  * ---- 一个实测推翻工单研究原文的发现：`fs.rm()` 无法承担"非递归删非空目录
@@ -9,7 +9,7 @@
  * `node:fs/promises`（Vercel Sandbox 的 `fs.*` 是这套 API 的兼容子集，语义应
  * 一致）证明并不成立：`fs.rm(path)`（`recursive` 缺省/false）对**任何**目录都
  * 抛 `ERR_FS_EISDIR`，不区分空/非空——用它去实现"非递归删空目录成功、删非空
- * 目录报 DirectoryNotEmptyError"（NimboFS 的 `rm(path,{recursive?})` 契约，
+ * 目录报 DirectoryNotEmptyError"（RunkoFS 的 `rm(path,{recursive?})` 契约，
  * 对齐 MemoryFS 行为）完全对不上。真正带有"空则成功、非空则 ENOTEMPTY"语义
  * 的是 `fs.rmdir()`（同样实测确认）。因此非递归删除按目标类型分流：文件走
  * `fs.rm()`；目录走 `fs.rmdir()`（拿到真正的 `ENOTEMPTY` 可翻译）；`recursive:
@@ -30,8 +30,8 @@
  *
  * ---- 原生搜索快路径（docs/tech/sandbox.md §4）：`searchFiles`/`searchContent` + `glob` 重写 ----
  *
- * `NimboFS.searchFiles?`/`searchContent?` 是 grep/glob 工具的能力接缝（实现了就优先调，
- * 否则/`SearchUnsupportedError` 时回退现有 JS 逐文件扫描，见 `@nimbo/virtual-fs`
+ * `RunkoFS.searchFiles?`/`searchContent?` 是 grep/glob 工具的能力接缝（实现了就优先调，
+ * 否则/`SearchUnsupportedError` 时回退现有 JS 逐文件扫描，见 `@runko/virtual-fs`
  * `tools/{grep,glob}.ts`）。这里的实现是"一次网络往返"：把整棵树的扫描交给沙盒
  * 自己的 `node`（`sandbox.runCommand({cmd:"node", args:["-e", SEARCH_SCRIPT, "--", payload]})`），
  * 脚本体见 `search-script.ts`（其头注释详述了"为什么是裸字符串常量""语义零漂移"
@@ -63,10 +63,10 @@ import type {
   FileSearchQuery,
   FileSearchResult,
   FileStat,
-  NimboFS,
-} from "@nimbo/core";
-import { SearchUnsupportedError } from "@nimbo/core";
-import { globToRegExp, inferMimeType, matchesGlob } from "@nimbo/virtual-fs";
+  RunkoFS,
+} from "@runko/core";
+import { SearchUnsupportedError } from "@runko/core";
+import { globToRegExp, inferMimeType, matchesGlob } from "@runko/virtual-fs";
 import { Writable } from "node:stream";
 import { describeError, isErrnoException, translateFsError } from "./errors.js";
 import { toRealPath } from "./path.js";
@@ -333,7 +333,7 @@ async function searchContentNative(
   return parseContentSearchScriptOutput(await runSearchScript(sandbox, state, payload));
 }
 
-export function createVercelFs(sandbox: VercelSandboxLike, root: string): NimboFS {
+export function createVercelFs(sandbox: VercelSandboxLike, root: string): RunkoFS {
   const real = (virtualPath: string): string => toRealPath(root, virtualPath);
   const searchState: SearchScriptState = { nodeUnsupported: false };
 
@@ -384,7 +384,7 @@ export function createVercelFs(sandbox: VercelSandboxLike, root: string): NimboF
     async writeFile(path: string, data: Uint8Array | string): Promise<void> {
       const realPath = real(path);
       try {
-        // NimboFS.writeFile 隐含"自动创建中间目录"（MemoryFS.ensureParentDirs 的
+        // RunkoFS.writeFile 隐含"自动创建中间目录"（MemoryFS.ensureParentDirs 的
         // 契约），而 node:fs/promises 的 writeFile 不会——显式 mkdir 一次补齐。
         await ensureParentDir(realPath);
         await sandbox.fs.writeFile(realPath, data);

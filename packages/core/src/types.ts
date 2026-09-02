@@ -1,8 +1,8 @@
 /**
- * L0 原语层：Tool/ToolContext/Approval 系列、NimboFS、NimboExec（tech-spec
+ * L0 原语层：Tool/ToolContext/Approval 系列、RunkoFS、RunkoExec（tech-spec
  * §4.1 / §4.4 / §4.5a）。纯接口与基础类型，不含任何运行时实现——
- * MemoryFS/OverlayFS 落在 @nimbo/virtual-fs（P2），NimboExec 的默认实现落在
- * @nimbo/mini-bash（P6），defineAgent/defineTool/defineSkill 落在 P1-2。
+ * MemoryFS/OverlayFS 落在 @runko/virtual-fs（P2），RunkoExec 的默认实现落在
+ * @runko/mini-bash（P6），defineAgent/defineTool/defineSkill 落在 P1-2。
  */
 import { z } from "zod";
 
@@ -27,7 +27,7 @@ export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
 /** 工具/资源向模型返回的结果：字符串直传；对象会 JSON.stringify 给模型（§4.1）。 */
 export type ToolReturn = string | JsonValue;
 
-// ---- NimboFS：虚拟文件系统（§4.4） ----
+// ---- RunkoFS：虚拟文件系统（§4.4） ----
 
 export interface FileStat {
   type: "file" | "dir" | "reference";
@@ -72,7 +72,7 @@ export interface ExecResult {
   durationMs: number;
 }
 
-export interface NimboFS {
+export interface RunkoFS {
   /** reference 条目：默认抛 ReferenceNotResolvable，注入 resolver 后返回解析内容。 */
   readFile(path: string): Promise<Uint8Array>;
   writeFile(path: string, data: Uint8Array | string): Promise<void>;
@@ -94,7 +94,7 @@ export interface NimboFS {
   searchContent?(query: ContentSearchQuery): Promise<ContentSearchResult>;
 }
 
-/** `NimboFS.searchFiles` 的查询参数（对应 `glob` 工具的一次调用）。 */
+/** `RunkoFS.searchFiles` 的查询参数（对应 `glob` 工具的一次调用）。 */
 export interface FileSearchQuery {
   // 绝对虚拟 glob 模式：joinGlobPattern 拼好 scope 与 pattern 后的形态，如 "/app/**" 或 "/**" + "/*.ts"
   // 这类跨目录通配（注意：本行是 // 注释而非 /** */，因为形态本身含有会提前闭合块注释的 "*/" 子串）。
@@ -111,7 +111,7 @@ export interface FileSearchResult {
   total: number;
 }
 
-/** `NimboFS.searchContent` 的查询参数（对应 `grep` 工具的一次调用）。 */
+/** `RunkoFS.searchContent` 的查询参数（对应 `grep` 工具的一次调用）。 */
 export interface ContentSearchQuery {
   /** JavaScript RegExp 的 source（调用侧已校验过是合法正则）。 */
   pattern: string;
@@ -149,9 +149,9 @@ export interface ContentSearchResult {
   lineCapped: boolean;
 }
 
-// ---- NimboExec：命令执行的接口倒置，与 NimboFS 同构（§4.5a） ----
+// ---- RunkoExec：命令执行的接口倒置，与 RunkoFS 同构（§4.5a） ----
 
-export interface NimboExec {
+export interface RunkoExec {
   exec(req: ExecRequest, opts?: ExecOptions): Promise<ExecResult>;
   /** 环境自描述（OS/网络/cwd 语义），拼进 bash 工具描述。 */
   describe?(): string;
@@ -167,7 +167,7 @@ export interface NimboExec {
  * `reason` 区分两种「还活着」：`progress` 是这一轮在正常推进（模型在产出、工具在
  * 交付结果）；`awaiting-approval` 是 loop 已经停在 `tool-approval-request` 上、
  * 正 `await` 人审通道。两者值得区别对待——干活该续期，等人可能只该续一小会儿
- * （云沙盒适配器据此给两者不同的预算，见 `@nimbo/sandbox-e2b` 的 `keepAlive`）。
+ * （云沙盒适配器据此给两者不同的预算，见 `@runko/sandbox-e2b` 的 `keepAlive`）。
  */
 export interface ActivitySignal {
   /** 会话与轮次。实现方据此识别「新的一轮开始了」，重置自己的预算计数。 */
@@ -179,7 +179,7 @@ export interface ActivitySignal {
 /**
  * 工作区的可选能力：接收[活动信号](../../../docs/terms.md)。
  *
- * 与 `NimboFS.searchFiles?` / `NimboExec.describe?` 同类——远端实现（云沙盒适配器）
+ * 与 `RunkoFS.searchFiles?` / `RunkoExec.describe?` 同类——远端实现（云沙盒适配器）
  * 实现它来做[保活](../../../docs/terms.md)，内存态/本机实现不实现，core 结构探测
  * 后直接跳过，**没实现就完全不发生任何事**。
  *
@@ -188,18 +188,18 @@ export interface ActivitySignal {
  * 续期是网络往返，要是 core 等它，整条流就被拖住，用户看到的打字机效果会一顿一顿。
  * 实现方内部自己 fire-and-forget、自己吞错。
  */
-export interface NimboActivityAware {
+export interface RunkoActivityAware {
   onActivity?(signal: ActivitySignal): void;
 }
 
 /**
  * 工作区的可选能力：**手动**把沙盒存活时长补足一次（[保活](../../../docs/terms.md)）。
  *
- * 与 `NimboActivityAware` 分工不同——那条是 core 在一轮**进行中**自动推的，这条是
+ * 与 `RunkoActivityAware` 分工不同——那条是 core 在一轮**进行中**自动推的，这条是
  * 宿主在轮**之外**主动调的（起轮前、审批路由等 core 的轮还没起或已经结束的时刻）。
  * 自动那套内部就建在这个动作上，两者打同一个[续期闸门](../../../docs/terms.md)。
  */
-export interface NimboKeepAliveCapable {
+export interface RunkoKeepAliveCapable {
   keepAlive?(targetMs: number): Promise<void>;
 }
 
@@ -276,7 +276,7 @@ export interface SkillHandle {
 // ---- Tool / ToolContext（§4.1） ----
 
 export interface ToolContext {
-  fs: NimboFS;
+  fs: RunkoFS;
   abortSignal: AbortSignal;
   callId: string;
   session: { id: string; turn: number };

@@ -4,7 +4,7 @@ slug: web-search
 view: 功能
 layer: 逻辑层
 module: 执行引擎
-packages: ["@nimbo/core"]
+packages: ["@runko/core"]
 tags: ["联网搜索", "工具", "provider"]
 related: ["logic/engine/plans/web-search.md", "logic/engine/tech/web-search.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -55,7 +55,7 @@ Exa 按搜索次数计费，key 在服务端进程里，**不会进沙盒、不�
 - **不做用户手动搜索入口**。界面上不加搜索框——这是 agent 的工具，不是用户的功能。
 - **不做结果缓存 / 去重 / 配额管理**。每次调用即一次真实请求，按次计费；控成本靠 agent 自己少搜，以及默认只取 5 条。
 - **不做多供应商切换**。只接 Exa 一家。工具对模型暴露的名字叫 `web-search` 而不是 `exa-search`，是给将来换供应商留的余地，但这一版没有切换开关。
-- **不进 `@nimbo/*` 发布包**。这是 chat 应用自己的工具，SDK 用户不会因此多一个依赖（理由见[技术方案 §1](../tech/web-search.md)）。
+- **不进 `@runko/*` 发布包**。这是 chat 应用自己的工具，SDK 用户不会因此多一个依赖（理由见[技术方案 §1](../tech/web-search.md)）。
 
 ## 6. 成功标准
 

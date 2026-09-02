@@ -1,5 +1,5 @@
 /**
- * 活动信号（`NimboActivityAware.onActivity`）验收测试 —— KA-1。
+ * 活动信号（`RunkoActivityAware.onActivity`）验收测试 —— KA-1。
  *
  * 规格见 docs/tech/sandbox-keepalive.md §5.2，验收清单见
  * docs/plans/sandbox-keepalive.md KA-1。
@@ -23,9 +23,9 @@ import type {
   ApprovalPolicy,
   ApprovalReviewer,
   ExecResult,
-  NimboActivityAware,
-  NimboExec,
-  NimboFS,
+  RunkoActivityAware,
+  RunkoExec,
+  RunkoFS,
 } from "../src/types.js";
 
 const usage = {
@@ -92,7 +92,7 @@ function toolThenStopModel(toolName: string): MockLanguageModelV4 {
   }));
 }
 
-const bareFs: NimboFS = {
+const bareFs: RunkoFS = {
   readFile: async () => new Uint8Array(),
   writeFile: async () => {},
   rm: async () => {},
@@ -104,7 +104,7 @@ const bareFs: NimboFS = {
 
 const okExec: ExecResult = { exitCode: 0, stdout: "", stderr: "", durationMs: 0 };
 
-interface RecordingWorkspace extends NimboFS, NimboExec, NimboActivityAware {
+interface RecordingWorkspace extends RunkoFS, RunkoExec, RunkoActivityAware {
   readonly signals: ActivitySignal[];
 }
 

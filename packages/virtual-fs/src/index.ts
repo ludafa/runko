@@ -1,9 +1,9 @@
 /**
- * @nimbo/virtual-fs 公共入口（docs/tech/core-sdk.md §4.4）：MemoryFS/OverlayFS/DirFS 三个
- * NimboFS 实现，mime 推断，diff/patch，reference 条目相关类型与错误。
+ * @runko/virtual-fs 公共入口（docs/tech/core-sdk.md §4.4）：MemoryFS/OverlayFS/DirFS 三个
+ * RunkoFS 实现，mime 推断，diff/patch，reference 条目相关类型与错误。
  *
- * 工厂函数是独立导出的 fromMemory/fromDirectory，不是 `NimboFS.fromMemory` 这种
- * 值命名空间——理由见 memory.ts 顶部注释（与 @nimbo/core 的 NimboFS 类型名冲突）。
+ * 工厂函数是独立导出的 fromMemory/fromDirectory，不是 `RunkoFS.fromMemory` 这种
+ * 值命名空间——理由见 memory.ts 顶部注释（与 @runko/core 的 RunkoFS 类型名冲突）。
  */
 
 export { PathEscapesRootError, normalizePath, dirname, basename, globToRegExp, matchesGlob } from "./path.js";

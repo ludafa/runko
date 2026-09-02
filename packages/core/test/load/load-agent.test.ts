@@ -47,7 +47,7 @@ function stubToolContext(): ToolContext {
 }
 
 async function withTempDir(run: (dir: string) => Promise<void>): Promise<void> {
-  const dir = await mkdtemp(join(tmpdir(), "nimbo-load-agent-"));
+  const dir = await mkdtemp(join(tmpdir(), "runko-load-agent-"));
   try {
     await run(dir);
   } finally {

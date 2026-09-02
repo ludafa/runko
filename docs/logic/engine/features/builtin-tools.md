@@ -4,7 +4,7 @@ slug: builtin-tools
 view: 功能
 layer: 逻辑层
 module: 执行引擎
-packages: ["@nimbo/core", "@nimbo/virtual-fs"]
+packages: ["@runko/core", "@runko/virtual-fs"]
 tags: ["内置工具", "文件工具", "bash", "update_plan", "grep", "glob"]
 related: ["logic/engine/tech/builtin-tools.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -12,15 +12,15 @@ related: ["logic/engine/tech/builtin-tools.md", "architecture/tech/agent-kernel.
 
 > 相关：[技术方案](../tech/builtin-tools.md) · 依赖 [core-sdk 产品手册](./core-sdk.md)（本功能是 core SDK 的一部分）· 术语以 [terms.md](../../../terms.md) 为准。
 >
-> 状态：草案 v1（2026-07-10 定，随施工回填）。本文是**使用手册**——面向接 nimbo 的宿主开发者和被工具驱动的 [agent](../../../terms.md)，讲清「这些工具解决什么问题、有哪些、怎么开怎么关、看得见的行为」。内部实现与取舍在技术方案里。
+> 状态：草案 v1（2026-07-10 定，随施工回填）。本文是**使用手册**——面向接 runko 的宿主开发者和被工具驱动的 [agent](../../../terms.md)，讲清「这些工具解决什么问题、有哪些、怎么开怎么关、看得见的行为」。内部实现与取舍在技术方案里。
 
 ## 1. 解决什么问题
 
-**设计前提：nimbo 默认没有命令执行。** Claude Code / codex 这类编码 agent 的文件工具可以「偷懒」——删除交给 `rm`、重命名交给 `mv`，反正底下有个 shell。nimbo 不行：nimbo 可以在**完全没有 shell** 的环境里跑（嵌入式 SDK、只读审查场景、不给 agent 命令执行面的安全部署）。
+**设计前提：runko 默认没有命令执行。** Claude Code / codex 这类编码 agent 的文件工具可以「偷懒」——删除交给 `rm`、重命名交给 `mv`，反正底下有个 shell。runko 不行：runko 可以在**完全没有 shell** 的环境里跑（嵌入式 SDK、只读审查场景、不给 agent 命令执行面的安全部署）。
 
-因此，凡是「完成一次代码改造」必需的文件系统操作，nimbo 都把它做成**一等内置工具**：读、写、精确编辑、删除、移动、列目录、glob、grep 一个都不少。宿主什么都不用注入，agent 开箱就能读写一个工作区；要命令执行时，再单独把 [NimboExec](../../../terms.md) 注进来解锁 `bash`。
+因此，凡是「完成一次代码改造」必需的文件系统操作，runko 都把它做成**一等内置工具**：读、写、精确编辑、删除、移动、列目录、glob、grep 一个都不少。宿主什么都不用注入，agent 开箱就能读写一个工作区；要命令执行时，再单独把 [RunkoExec](../../../terms.md) 注进来解锁 `bash`。
 
-**内置工具**指的就是这一组 nimbo 出厂自带、不用宿主写一行代码就能用的 agent 工具。它们默认全开，宿主可以按需裁剪、覆盖或整组关闭。
+**内置工具**指的就是这一组 runko 出厂自带、不用宿主写一行代码就能用的 agent 工具。它们默认全开，宿主可以按需裁剪、覆盖或整组关闭。
 
 ## 2. 工具一览
 
@@ -36,9 +36,9 @@ related: ["logic/engine/tech/builtin-tools.md", "architecture/tech/agent-kernel.
 | `grep` | 正则搜文件内容 | 默认开 |
 | `update-plan` | 维护多步任务清单 | 默认开 |
 | `load-skill` | 加载一个 [skill](../../../terms.md) 的说明 | **条件**：agent 配了 `skills` 才出现 |
-| `bash` | 执行 shell 命令 | **条件**：session 注入了 NimboExec 才出现 |
+| `bash` | 执行 shell 命令 | **条件**：session 注入了 RunkoExec 才出现 |
 
-前九个（文件八件套 + `update-plan`）是**可裁剪内置**，由 `builtinTools` 选项统一控制。后两个是**条件内置**：不看 `builtinTools`，只看对应能力有没有被配上——配了 skills 就有 `load-skill`，注入了执行环境就有 `bash`。这样「不给命令执行面」是天然默认（不注入 NimboExec，工具列表里根本没有 `bash`），而不是要你记得去关。
+前九个（文件八件套 + `update-plan`）是**可裁剪内置**，由 `builtinTools` 选项统一控制。后两个是**条件内置**：不看 `builtinTools`，只看对应能力有没有被配上——配了 skills 就有 `load-skill`，注入了执行环境就有 `bash`。这样「不给命令执行面」是天然默认（不注入 RunkoExec，工具列表里根本没有 `bash`），而不是要你记得去关。
 
 ## 3. 怎么用
 
@@ -48,10 +48,10 @@ related: ["logic/engine/tech/builtin-tools.md", "architecture/tech/agent-kernel.
 defineAgent({ model })                 // 不写 builtinTools = 九个工具全开
 ```
 
-给 session 一个工作区（[NimboFS](../../../terms.md)），文件工具就在这个工作区上读写；再给一个 NimboExec，`bash` 出现：
+给 session 一个工作区（[RunkoFS](../../../terms.md)），文件工具就在这个工作区上读写；再给一个 RunkoExec，`bash` 出现：
 
 ```ts
-createSession(agent, { workspace })    // workspace 同时是 NimboFS + NimboExec：文件工具 + bash 全有
+createSession(agent, { workspace })    // workspace 同时是 RunkoFS + RunkoExec：文件工具 + bash 全有
 createSession(agent, { fs })           // 只给文件系统：文件工具有，bash 没有
 ```
 
@@ -67,11 +67,11 @@ defineAgent({ builtinTools: false })                          // 全关，工具
 预设常量 `READ_ONLY_TOOLS`（= `read-file` / `list-dir` / `glob` / `grep`）给只读审查场景一行开箱，它只是个类型层面的常量、不是新机制：
 
 ```ts
-import { READ_ONLY_TOOLS } from "@nimbo/core";
+import { READ_ONLY_TOOLS } from "@runko/core";
 defineAgent({ builtinTools: [...READ_ONLY_TOOLS] })
 ```
 
-注意 `builtinTools` 只管那九个可裁剪内置；`load-skill` 和 `bash` 是否出现由 skills / NimboExec 是否配置决定，跟这个数组无关。
+注意 `builtinTools` 只管那九个可裁剪内置；`load-skill` 和 `bash` 是否出现由 skills / RunkoExec 是否配置决定，跟这个数组无关。
 
 ### 3.3 覆盖：换掉某个内置实现
 
@@ -153,14 +153,14 @@ defineAgent({ tools: { grep: myRipgrepTool } })   // 同名即覆盖，其余内
 - **输入**：`{ command, cwd?, timeout_ms? }`。
 - **输出**：stdout / stderr 合并文本（各自上限 64KB，超限标 `[truncated: ...]`）+ 退出码。执行过程中流式回报输出，宿主能边跑边看。
 - **非零退出码 / 超时不是工具失败**：它们作为**正常结果**回给 agent，让它读 stderr 自己决定下一步（改命令、重试、换路子），而不是把 loop 打崩。
-- **激活**：只有 session 注入了 NimboExec 实现才出现。不注入 = 默认安全，工具列表里没有命令执行面。
+- **激活**：只有 session 注入了 RunkoExec 实现才出现。不注入 = 默认安全，工具列表里没有命令执行面。
 - **环境自描述**：执行环境实现可以自报一段元信息（OS/架构、shell、网络是否可达、工作区路径映射、关键工具链版本等），拼进工具描述里，让 agent 少走试错弯路。
-- **审批**：`bash` 是否需要人工把关，取决于执行环境自声明的默认审批档位——本机执行（`localExec()`）出厂要求 [人工审批 `review`](../../../terms.md)（本机跑命令必须把关），隔离沙盒实现通常声明 `allow`（隔离即边界，直接放行）。没声明的第三方实现，nimbo 保守地按 `review` 兜底。审批档位可在注入点或按工具覆盖。审批交互本身由宿主接（见 §5 的 ask-user / [人在回路](../../../terms.md)）。
+- **审批**：`bash` 是否需要人工把关，取决于执行环境自声明的默认审批档位——本机执行（`localExec()`）出厂要求 [人工审批 `review`](../../../terms.md)（本机跑命令必须把关），隔离沙盒实现通常声明 `allow`（隔离即边界，直接放行）。没声明的第三方实现，runko 保守地按 `review` 兜底。审批档位可在注入点或按工具覆盖。审批交互本身由宿主接（见 §5 的 ask-user / [人在回路](../../../terms.md)）。
 - **与文件系统的一致性**：当 `bash` 和文件工具共享同一个工作区时，`bash` 写的文件对 `read-file` 立即可见；但 `bash` 造成的改动**不产生文件变更事件**，且要编辑一个被 `bash` 改过的文件必须先重读它（mtime 变了）。三种工作区/执行环境的搭配模式详见技术方案。
 
 ## 5. 范围与非目标（哪些不内置）
 
-以下能力**刻意不做成内置**，改由宿主按需注入——nimbo 已经把接口备好，宿主几行代码接上自己的实现即可：
+以下能力**刻意不做成内置**，改由宿主按需注入——runko 已经把接口备好，宿主几行代码接上自己的实现即可：
 
 | 能力 | 为什么不内置 | 怎么补上 |
 |---|---|---|
@@ -168,14 +168,14 @@ defineAgent({ tools: { grep: myRipgrepTool } })   // 同名即覆盖，其余内
 | `ask-user` / 人工审批中断 | 嵌入式 SDK 没有 UI；人机交互形态只有宿主知道 | 宿主注入工具对接自己的前端 / IM；或用审批链实现「审批即交互」 |
 | `sub_agent` / task 编排 | 属于 v2 范围（需要 session 派生语义） | 暂不提供 |
 
-> 历史提示：`exec` / `bash` 原本也列在「不内置」里，现已**升级为条件内置**——工具本体内置，执行环境经 NimboExec 接口注入。安全边界仍然完全由宿主决定，只是宿主不用再自己写这个工具了。
+> 历史提示：`exec` / `bash` 原本也列在「不内置」里，现已**升级为条件内置**——工具本体内置，执行环境经 RunkoExec 接口注入。安全边界仍然完全由宿主决定，只是宿主不用再自己写这个工具了。
 
 ## 6. 成功标准
 
 这个功能算「做到位」的判据：
 
 - **零注入可用**：宿主只给一个工作区、不写任何工具，agent 就能完整地读、写、改、删、移、搜一个代码库，跑完一次真实的代码改造。
-- **默认安全**：不注入 NimboExec 时，agent 拿不到任何命令执行面（工具列表里没有 `bash`）；`bash` 出现时，本机执行默认走人工审批。
+- **默认安全**：不注入 RunkoExec 时，agent 拿不到任何命令执行面（工具列表里没有 `bash`）；`bash` 出现时，本机执行默认走人工审批。
 - **一行裁剪**：`builtinTools: ["read-file", "glob", "grep"]` 立刻得到一个只读 agent；`false` 全关。
 - **可覆盖**：宿主放同名工具即可替换任意内置实现，其余不受影响。
 - **错误可自纠 / 输出不骗人**：每个失败都带下一步指导，每次截断都有 `[truncated]` 标记，agent 靠这两条就能自己走出大部分死角。

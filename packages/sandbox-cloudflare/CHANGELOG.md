@@ -1,10 +1,10 @@
-# @nimbo/sandbox-cloudflare
+# @runko/sandbox-cloudflare
 
 ## 0.1.0
 
 ### Minor Changes
 
-- 首发：把 Cloudflare Sandbox（真实 Linux 容器）包成 `NimboFS & NimboExec`。
+- 首发：把 Cloudflare Sandbox（真实 Linux 容器）包成 `RunkoFS & RunkoExec`。
 
   跟 E2B / Vercel 两个适配器**架构不一样，这点要先知道**：Cloudflare Sandbox 只能从
   Worker 内部经 Durable Object binding 访问，**没有办法从任意 Node 进程直连**。所以本包
@@ -27,5 +27,5 @@
 - Updated dependencies [3ffdf28]
 - Updated dependencies [fca6c03]
 - Updated dependencies
-  - @nimbo/core@0.1.0
-  - @nimbo/virtual-fs@0.1.0
+  - @runko/core@0.1.0
+  - @runko/virtual-fs@0.1.0

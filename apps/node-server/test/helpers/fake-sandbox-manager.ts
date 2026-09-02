@@ -2,13 +2,13 @@
  * A fake `SandboxManager` for `routes/chat.ts` integration tests — no
  * `@vercel/sandbox` involved at all (that state machine has its own
  * dedicated tests in test/agent/sandbox-manager.test.ts). `acquire()` always
- * hands back the same in-memory workspace (an `@nimbo/virtual-fs` `MemoryFS`
+ * hands back the same in-memory workspace (an `@runko/virtual-fs` `MemoryFS`
  * pre-seeded with the frontend-design `SKILL.md`, so `Skill.fromFS()`
- * succeeds, plus a trivial `NimboExec` stub — the test scenarios never
+ * succeeds, plus a trivial `RunkoExec` stub — the test scenarios never
  * actually call `bash`).
  */
-import type { NimboExec, NimboFS } from '@nimbo/core';
-import { MemoryFS } from '@nimbo/sdk';
+import type { RunkoExec, RunkoFS } from '@runko/core';
+import { MemoryFS } from '@runko/sdk';
 
 import type {
   AcquiredSandbox,
@@ -23,13 +23,13 @@ description: Make one focused, non-generic visual/interaction improvement to an 
 # frontend-design (test stub)
 `;
 
-async function buildFakeWorkspace(): Promise<NimboFS & NimboExec> {
+async function buildFakeWorkspace(): Promise<RunkoFS & RunkoExec> {
   const fs = new MemoryFS();
   await fs.writeFile(
     '/.agents/skills/frontend-design/SKILL.md',
     FRONTEND_DESIGN_SKILL_STUB,
   );
-  const exec: NimboExec = {
+  const exec: RunkoExec = {
     async exec() {
       return { exitCode: 0, stdout: '', stderr: '', durationMs: 0 };
     },

@@ -6,8 +6,8 @@ import type {
   DecisionStore,
   Frame,
   QueuedInput,
-} from '@nimbo/agent';
-import type { SessionTelemetry } from '@nimbo/core';
+} from '@runko/agent';
+import type { SessionTelemetry } from '@runko/core';
 import type { LanguageModel } from 'ai';
 import type { MiddlewareHandler } from 'hono';
 import { streamSSE } from 'hono/streaming';
@@ -92,7 +92,7 @@ type ChatEnv = { Variables: { userId: string } };
 export interface ChatRouteDeps {
   db: Db;
   /**
-   * [轮编排](../../../../docs/terms.md)运行时（`@nimbo/agent`）——一轮的一生、
+   * [轮编排](../../../../docs/terms.md)运行时（`@runko/agent`）——一轮的一生、
    * [排队](../../../../docs/terms.md)、[停止](../../../../docs/terms.md)、人在回路全归它。
    * 本文件只做 HTTP：把请求翻译成 `runtime.*` 的一次调用，把 `Frame` 序列化成 SSE。
    */
@@ -113,7 +113,7 @@ export interface ChatRouteDeps {
    * `requireAuth`, so production behavior is unchanged.
    */
   authMiddleware: MiddlewareHandler<ChatEnv>;
-  /** telemetry 事件集成（`@nimbo/core` `SessionTelemetry`，docs/tech/chat-webapp.md §11.4）——注入后逐 turn 的模型调用事件落 SQLite；缺省 undefined = 不采集。生产默认装配见文件底部（`getChatTelemetry`）。 */
+  /** telemetry 事件集成（`@runko/core` `SessionTelemetry`，docs/tech/chat-webapp.md §11.4）——注入后逐 turn 的模型调用事件落 SQLite；缺省 undefined = 不采集。生产默认装配见文件底部（`getChatTelemetry`）。 */
   telemetry?: SessionTelemetry;
   /**
    * 同一个遥测库的另一个口，两处在用：turn 遥测明细端点用它**查数**
@@ -211,11 +211,11 @@ function frameEventName(
 }
 
 function generateSandboxName(conversationId: string): string {
-  return `nimbo-chat-${conversationId}`;
+  return `runko-chat-${conversationId}`;
 }
 
 function generateBranchName(conversationId: string): string {
-  return `nimbo/chat-${conversationId}`;
+  return `runko/chat-${conversationId}`;
 }
 
 export function createChatApp(deps: ChatRouteDeps) {
@@ -464,7 +464,7 @@ export function createChatApp(deps: ChatRouteDeps) {
       return c.json({ error: 'Not found' }, 404);
     }
 
-    // 遥测按 nimbo 会话 id（functionId 的前半段）落库。迁移到 `@nimbo/agent` 之后
+    // 遥测按 runko 会话 id（functionId 的前半段）落库。迁移到 `@runko/agent` 之后
     // **会话 id 就是 conversationId**（框架从账本重建 `SessionState` 时直接拿它当
     // session id，见 `buildResumeState`），所以这里查的就是 `row.id`。
     //
@@ -577,7 +577,7 @@ export function createChatApp(deps: ChatRouteDeps) {
       return c.json({ ok: true as const, mode: 'queued' as const }, 202);
     }
 
-    // 四种拒绝的处置各不相同（`@nimbo/agent` 的 `EnqueueRejection`）。
+    // 四种拒绝的处置各不相同（`@runko/agent` 的 `EnqueueRejection`）。
     if (outcome.reason === 'shutting_down') {
       // 进程正在[优雅关闭](docs/terms.md)——一个明确、可恢复的拒绝：刷新重发即可。
       // 不能报 409（那是「你已经有一轮在跑」，会误导）。
@@ -994,7 +994,7 @@ export function createChatApp(deps: ChatRouteDeps) {
 }
 
 /**
- * 生产装配。三样东西在这里成型：沙盒管理器、`@nimbo/agent` 运行时（`createChatRuntime`）、
+ * 生产装配。三样东西在这里成型：沙盒管理器、`@runko/agent` 运行时（`createChatRuntime`）、
  * 以及路由自己那几个可选外围（推送、遥测）。
  *
  * `chatRuntime` 单独导出，是因为 `index.ts` 还要用它两次：启动时 `recover()` 扫

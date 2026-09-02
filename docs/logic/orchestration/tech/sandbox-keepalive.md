@@ -4,7 +4,7 @@ slug: sandbox-keepalive
 view: 技术
 layer: 逻辑层
 module: 轮编排
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["沙盒保活", "活动信号", "保活预算", "等人状态"]
 related: ["logic/orchestration/features/sandbox-keepalive.md", "logic/orchestration/plans/sandbox-keepalive.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -36,11 +36,11 @@ E2B 还有个硬上限：**Pro 账户最长 24 小时，Hobby 最长 1 小时**�
 
 ### 2.1 保活下沉进 SDK（推翻 P13-2b 的原定位）
 
-[turn-checkpoint](./turn-checkpoint.md) §5（P13-2b，方案定稿未施工）原本规定保活"封在 chat 应用的 `SandboxClient` 实现里，**不进 nimbo SDK / 适配器**"，理由是 [BYO 实例](../../../terms.md)原则里"超时延长点名归宿主"。
+[turn-checkpoint](./turn-checkpoint.md) §5（P13-2b，方案定稿未施工）原本规定保活"封在 chat 应用的 `SandboxClient` 实现里，**不进 runko SDK / 适配器**"，理由是 [BYO 实例](../../../terms.md)原则里"超时延长点名归宿主"。
 
 **本方案推翻这一条。** 理由有三：
 
-1. **知识归属错位。** "E2B 的 setTimeout 是绝对时间"这类知识，天然属于懂 E2B 的那个包。放在宿主意味着每个用 `@nimbo/sandbox-e2b` 的人都要重新踩一次坑——而且是静默的坑。nimbo 自己就是靠一次线上事故才发现的。
+1. **知识归属错位。** "E2B 的 setTimeout 是绝对时间"这类知识，天然属于懂 E2B 的那个包。放在宿主意味着每个用 `@runko/sandbox-e2b` 的人都要重新踩一次坑——而且是静默的坑。runko 自己就是靠一次线上事故才发现的。
 
 2. **「补足」语义只有适配器做得干净。** 补足要知道"现在还剩多少"。适配器天然记着自己上次设了什么值、什么时候设的；宿主要做就得自己记一份账，或者多一次查询往返。
 
@@ -114,7 +114,7 @@ onProgress: (partial) => progressChunks.push(partial),
 
 **并发工具调用**（`loop.ts:896` 的 `mergeSettleStreams` 会让多个工具同时执行）：多个 `exec()` 共用**一个**定时器 + 引用计数（第一个 `beginExec` 起、最后一个停止函数清），比每个 exec 各起一个定时器省。停止函数幂等。
 
-> 落点订正：闸门实现在 **`@nimbo/core` 的 `keepalive.ts`**（`createKeepAlive`），不在各适配器包里。原因是 E2B 与 Vercel 的闸门逻辑逐行相同，两份拷贝必然漂移，而补足语义要可预测就要求两家严格一致。**这不违反「core 零保活策略」**——`session.ts` 不 import 也不调用它，只有适配器显式构造时才产生定时器。厂商真正不同的两件事（怎么查剩余、怎么补）经 `KeepAliveDriver` 注入。
+> 落点订正：闸门实现在 **`@runko/core` 的 `keepalive.ts`**（`createKeepAlive`），不在各适配器包里。原因是 E2B 与 Vercel 的闸门逻辑逐行相同，两份拷贝必然漂移，而补足语义要可预测就要求两家严格一致。**这不违反「core 零保活策略」**——`session.ts` 不 import 也不调用它，只有适配器显式构造时才产生定时器。厂商真正不同的两件事（怎么查剩余、怎么补）经 `KeepAliveDriver` 注入。
 
 ## 4. 核心流程时序图
 
@@ -199,9 +199,9 @@ sequenceDiagram
 
 ## 5. 接口设计
 
-### 5.1 core 侧：`NimboActivityAware`
+### 5.1 core 侧：`RunkoActivityAware`
 
-放在 `packages/core/src/types.ts`，与 `NimboFS.searchFiles?` / `NimboExec.describe?` 是同一类**可选能力接缝**。
+放在 `packages/core/src/types.ts`，与 `RunkoFS.searchFiles?` / `RunkoExec.describe?` 是同一类**可选能力接缝**。
 
 ```ts
 export interface ActivitySignal {
@@ -211,7 +211,7 @@ export interface ActivitySignal {
   reason: 'progress' | 'awaiting-approval';
 }
 
-export interface NimboActivityAware {
+export interface RunkoActivityAware {
   /**
    * 「这一轮还在干活」。
    *
@@ -279,7 +279,7 @@ export interface RenewInfo {
 }
 ```
 
-工作区对象上多一个可选方法（core 侧类型名 `NimboKeepAliveCapable`），给宿主在**轮之外**手动用：
+工作区对象上多一个可选方法（core 侧类型名 `RunkoKeepAliveCapable`），给宿主在**轮之外**手动用：
 
 ```ts
 /** 手动补足一次。宿主在 core 的轮还没起或已经结束时用（如 chat 应用的路由）。 */
@@ -399,7 +399,7 @@ ensureLifetime: (ms) => {
 
 | 内容 | 文件 |
 |---|---|
-| 活动信号类型 + 手动保活能力 | `packages/core/src/types.ts`（`ActivitySignal` / `NimboActivityAware` / `NimboKeepAliveCapable`） |
+| 活动信号类型 + 手动保活能力 | `packages/core/src/types.ts`（`ActivitySignal` / `RunkoActivityAware` / `RunkoKeepAliveCapable`） |
 | core 侧信号产出与节流 | `packages/core/src/session.ts`（`collectActivityTargets` + `stream()` 里的 `notifyActivity`） |
 | 续期闸门 | `packages/core/src/keepalive.ts`（`createKeepAlive` / `KeepAliveDriver`） |
 | E2B driver + 接线 | `packages/sandbox-e2b/src/keepalive.ts` / `workspace.ts` / `exec.ts` |

@@ -4,7 +4,7 @@
  */
 import * as nodeFs from "node:fs/promises";
 import * as nodePath from "node:path";
-import type { DirEntry, FileStat, NimboFS } from "@nimbo/core";
+import type { DirEntry, FileStat, RunkoFS } from "@runko/core";
 import { DirFS, type DirFSOptions } from "./dir.js";
 import { buildFileDiff, type FileDiff } from "./diff.js";
 import { DirectoryNotEmptyError, MemoryFS, NotFoundError, type MemoryFSSnapshot } from "./memory.js";
@@ -17,12 +17,12 @@ export interface OverlayFSSnapshot {
 
 const textDecoder = new TextDecoder();
 
-export class OverlayFS implements NimboFS {
-  private readonly base: NimboFS;
+export class OverlayFS implements RunkoFS {
+  private readonly base: RunkoFS;
   private readonly overlayFs: MemoryFS;
   private tombstones = new Set<string>();
 
-  constructor(base: NimboFS, overlay: MemoryFS = new MemoryFS()) {
+  constructor(base: RunkoFS, overlay: MemoryFS = new MemoryFS()) {
     this.base = base;
     this.overlayFs = overlay;
   }
@@ -40,10 +40,10 @@ export class OverlayFS implements NimboFS {
 
   /**
    * 假设：base 对不存在的路径统一抛 NotFoundError——我们自己的三个实现
-   * （MemoryFS/OverlayFS/DirFS）都遵守这一约定。接入第三方 NimboFS 作为 base
+   * （MemoryFS/OverlayFS/DirFS）都遵守这一约定。接入第三方 RunkoFS 作为 base
    * 时需保证同样的约定，否则请自行包一层做错误归一化。
    */
-  private async existsIn(fs: NimboFS, path: string): Promise<boolean> {
+  private async existsIn(fs: RunkoFS, path: string): Promise<boolean> {
     try {
       await fs.stat(path);
       return true;
@@ -217,7 +217,7 @@ export class OverlayFS implements NimboFS {
 }
 
 /**
- * 命名说明同 fromMemory：tech-spec 写的是 `NimboFS.fromDirectory(...)`，这里改为
+ * 命名说明同 fromMemory：tech-spec 写的是 `RunkoFS.fromDirectory(...)`，这里改为
  * 独立函数，理由见 memory.ts 顶部注释。
  */
 export function fromDirectory(dir: string, opts?: DirFSOptions): OverlayFS {

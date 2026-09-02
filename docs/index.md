@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: nimbo
+  name: runko
   text: 可嵌入的轻量 agent SDK
   tagline: 几行代码在自己的 Node 服务里跑起一个能读写文件、执行命令、装载 skills 的 agent loop——不 spawn 任何外部 CLI 二进制。
   actions:
@@ -26,11 +26,11 @@ features:
     link: /logic/arbitration/features/arbitration-impl
     linkText: 进入
   - title: 逻辑层 · 轮编排
-    details: "@nimbo/agent：一轮的一生——起、中断、挂起、恢复、收尾，外加账本、待发队列、沙盒生命周期。"
+    details: "@runko/agent：一轮的一生——起、中断、挂起、恢复、收尾，外加账本、待发队列、沙盒生命周期。"
     link: /logic/orchestration/features/single-ledger
     linkText: 进入
   - title: 逻辑层 · 执行引擎
-    details: "@nimbo/core：调模型 → 跑工具 → 喂回去，直到模型说完。内置工具、审批链、skills、上下文压缩。"
+    details: "@runko/core：调模型 → 跑工具 → 喂回去，直到模型说完。内置工具、审批链、skills、上下文压缩。"
     link: /logic/engine/features/core-sdk
     linkText: 进入
   - title: 宿主层

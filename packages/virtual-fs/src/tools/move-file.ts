@@ -2,7 +2,7 @@
  * `move-file`（docs/tech/builtin-tools.md §1.5）：重命名/移动；`to` 已存在且未
  * `overwrite` → 拒绝；事件为 `delete(from)` + `add(to)`（v1 不引入 rename kind）。
  *
- * 目录内含 reference 条目时拒绝整体移动而不是静默丢弃——设计裁量：`NimboFS`
+ * 目录内含 reference 条目时拒绝整体移动而不是静默丢弃——设计裁量：`RunkoFS`
  * 接口只有 `readFile`/`writeFile`，没有"复制一个 reference 条目的元信息"的
  * 通用原语（`writeReference` 是 `MemoryFS` 的附加能力，不在接口里，工具不能
  * 依赖具体实现）。若不做这个前置检查，目录移动流程会先把普通文件搬过去、
@@ -10,8 +10,8 @@
  * reference 条目一并删掉，造成静默数据丢失。宁可拒绝并告知原因。
  */
 import { z } from "zod";
-import { defineTool } from "@nimbo/core";
-import type { Tool, ToolReturn } from "@nimbo/core";
+import { defineTool } from "@runko/core";
+import type { Tool, ToolReturn } from "@runko/core";
 import { NotFoundError, ReferenceNotResolvable } from "../memory.js";
 import { normalizePath } from "../path.js";
 import { type CreateFileToolsOptions, describeError, errorResult, registerWrite } from "./shared.js";
@@ -27,7 +27,7 @@ export function createMoveFileTool(opts: CreateFileToolsOptions): Tool {
   return defineTool({
     description:
       "Move or rename a file or directory. Fails if `to` already exists unless overwrite:true. Produces a " +
-      "delete(from) + add(to) file_change pair (nimbo v1 has no dedicated rename kind).",
+      "delete(from) + add(to) file_change pair (runko v1 has no dedicated rename kind).",
     inputSchema,
     execute: async (input, ctx): Promise<ToolReturn> => {
       const from = normalizePath(input.from);
@@ -69,7 +69,7 @@ export function createMoveFileTool(opts: CreateFileToolsOptions): Tool {
         if (referenceEntry !== undefined) {
           return errorResult(
             `"${from}" contains a reference entry at "${referenceEntry.path}" that move-file cannot relocate ` +
-              "(there is no generic way to copy a reference entry's metadata through the NimboFS interface). " +
+              "(there is no generic way to copy a reference entry's metadata through the RunkoFS interface). " +
               "Move the regular files individually instead, or leave this subtree where it is.",
           );
         }
@@ -90,7 +90,7 @@ export function createMoveFileTool(opts: CreateFileToolsOptions): Tool {
           if (error instanceof ReferenceNotResolvable) {
             return errorResult(
               `"${from}" is a reference entry with no resolvable local content (href=${error.href}); move-file ` +
-                "cannot relocate it (no generic way to copy a reference entry's metadata through the NimboFS interface).",
+                "cannot relocate it (no generic way to copy a reference entry's metadata through the RunkoFS interface).",
             );
           }
           return errorResult(`Failed to read "${from}": ${describeError(error)}.`);

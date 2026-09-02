@@ -4,7 +4,7 @@ slug: approval-grant-split
 view: 施工
 layer: 逻辑层
 module: 执行引擎
-packages: ["@nimbo/core"]
+packages: ["@runko/core"]
 tags: ["审批", "分段授权", "human-in-the-loop", "授权范围"]
 related: ["logic/engine/features/approval-grant-split.md", "logic/engine/tech/approval-grant-split.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -49,7 +49,7 @@ related: ["logic/engine/features/approval-grant-split.md", "logic/engine/tech/ap
   1. 接受组：`§3.2` 每种语法至少一条用例，断言段数与每段 `argv`/`redirects` 精确相等。
   2. 拒绝组：`§3.4` **14 条逐条**各一个用例，断言返回 `undefined`。
   3. 引号内的 `&&` / `;` / `#` / `$` 不触发切分或拒绝（除双引号内的 `$`/`` ` ``，按 §3.2 仍拒绝）。
-  4. `pnpm --filter @nimbo-chat/node-server typecheck && test` 全绿。
+  4. `pnpm --filter @runko-chat/node-server typecheck && test` 全绿。
 - **产出物**：拆分器 + 单测。**不接线**，本阶段对运行时零影响。
 
 ### G-2 记账与查询（依赖 G-1）

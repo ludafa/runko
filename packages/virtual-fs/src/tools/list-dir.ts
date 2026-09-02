@@ -4,8 +4,8 @@
  * 500 条目上限。
  */
 import { z } from "zod";
-import { defineTool } from "@nimbo/core";
-import type { DirEntry, NimboFS, Tool, ToolReturn } from "@nimbo/core";
+import { defineTool } from "@runko/core";
+import type { DirEntry, RunkoFS, Tool, ToolReturn } from "@runko/core";
 import { NotFoundError } from "../memory.js";
 import { LIST_DIR_MAX_ENTRIES, describeError, errorResult, isTextMimeType, truncationNotice } from "./shared.js";
 
@@ -32,7 +32,7 @@ interface WalkState {
   truncated: boolean;
 }
 
-async function walk(fs: NimboFS, dirPath: string, currentDepth: number, maxDepth: number, indent: string, lines: string[], state: WalkState): Promise<void> {
+async function walk(fs: RunkoFS, dirPath: string, currentDepth: number, maxDepth: number, indent: string, lines: string[], state: WalkState): Promise<void> {
   if (state.truncated) {return;}
   const entries = await fs.readdir(dirPath);
   for (const entry of entries) {

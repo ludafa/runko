@@ -1,15 +1,15 @@
-# @nimbo/agent
+# @runko/agent
 
-**轮编排运行时**——`@nimbo/core` 给的是「跑一轮」，本包给的是「**一轮接一轮地跑下去，而且换个部署形态不用改业务代码**」。
+**轮编排运行时**——`@runko/core` 给的是「跑一轮」，本包给的是「**一轮接一轮地跑下去，而且换个部署形态不用改业务代码**」。
 
 > 文档：[使用手册](../../docs/logic/orchestration/features/agent-runtime.md) · [技术方案](../../docs/logic/orchestration/tech/agent-runtime.md) · [架构总纲](../../docs/architecture/tech/agent-kernel.md)
 
 ## 三十秒上手
 
 ```ts
-import { defineAgent, localExec } from "@nimbo/sdk";
-import { MemoryFS } from "@nimbo/virtual-fs";
-import { createAgentRuntime } from "@nimbo/agent";
+import { defineAgent, localExec } from "@runko/sdk";
+import { MemoryFS } from "@runko/virtual-fs";
+import { createAgentRuntime } from "@runko/agent";
 
 const runtime = createAgentRuntime({
   agent: defineAgent({ model: "anthropic/claude-sonnet-5" }),
@@ -46,9 +46,9 @@ for await (const frame of runtime.subscribe("conv_abc")) {
 
 | 能力 | 接口 | 内置实现 | 换成什么 |
 | --- | --- | --- | --- |
-| 工作区（沙盒） | `TurnPreparer` | —— | `@nimbo/virtual-fs` · `sandbox-*` |
-| 持久化 | `LedgerStore` / `DecisionStore` / `QueueStore` | `memoryPersistence()` | 宿主自己实现（推荐）· `@nimbo/persist-*` |
-| 流分发 | `StreamFanout` | `inProcessStream()` | `@nimbo/stream-redis` |
+| 工作区（沙盒） | `TurnPreparer` | —— | `@runko/virtual-fs` · `sandbox-*` |
+| 持久化 | `LedgerStore` / `DecisionStore` / `QueueStore` | `memoryPersistence()` | 宿主自己实现（推荐）· `@runko/persist-*` |
+| 流分发 | `StreamFanout` | `inProcessStream()` | `@runko/stream-redis` |
 | 归属仲裁机制 | `Arbitration` | `inProcessArbitration()` | 租约版 · Durable Object |
 
 真实的宿主实现长什么样，看 [`apps/node-server/src/agent/persistence.ts`](../../apps/node-server/src/agent/persistence.ts)——它把这四样全架在既有的 drizzle schema 上，没有引入第二套数据访问方式。

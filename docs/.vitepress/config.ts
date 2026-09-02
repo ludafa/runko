@@ -106,13 +106,13 @@ function splitHash(href: string): [string, string] {
 
 export default withMermaid(
   defineConfig({
-    title: 'nimbo',
+    title: 'runko',
     description: '可嵌入 Node.js 应用的轻量 agent SDK —— 设计文档',
     lang: 'zh-CN',
     cleanUrls: true,
     lastUpdated: true,
     // 独立部署用：放在域名根下不用设；部署到子路径（GitHub Pages 的
-    // https://<user>.github.io/nimbo/）时 `DOCS_BASE=/nimbo/ pnpm build`，不用改配置
+    // https://<user>.github.io/runko/）时 `DOCS_BASE=/runko/ pnpm build`，不用改配置
     base: process.env.DOCS_BASE ?? '/',
     // 本包的 README 是给「要动这个站」的人看的，不是站上的一页
     srcExclude: ['**/README.md', '**/node_modules/**'],
@@ -161,7 +161,7 @@ export default withMermaid(
       sidebarMenuLabel: '目录',
       footer: {
         message: '按架构分层组织：agent 逻辑层三块、宿主层按环境分档，每段再分功能 / 技术方案 / 施工进展。',
-        copyright: `<a href="${REPO}">github.com/ludafa/nimbo</a>`,
+        copyright: `<a href="${REPO}">github.com/ludafa/runko</a>`,
       },
     },
   }),

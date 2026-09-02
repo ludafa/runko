@@ -4,7 +4,7 @@ slug: arbitration-impl
 view: 功能
 layer: 逻辑层
 module: 归属仲裁
-packages: ["@nimbo/agent", "@nimbo/persist-kysely", "@nimbo/durable-object"]
+packages: ["@runko/agent", "@runko/persist-kysely", "@runko/durable-object"]
 tags: ["归属仲裁机制", "租约", "租期标识", "CAS", "心跳"]
 related: ["logic/arbitration/tech/arbitration-impl.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -42,9 +42,9 @@ related: ["logic/arbitration/tech/arbitration-impl.md", "architecture/tech/agent
 
 | 部署形态 | 用哪种 | 装什么 |
 |---|---|---|
-| 单进程（本机 CLI、单个 Node 服务） | 内存里一个 Map | **什么都不用装**（`@nimbo/agent` 内置） |
-| 多进程 / 多节点共享数据库 | 租约 + 心跳 + [租期标识](../../../terms.md) | `@nimbo/persist-*`（跟持久化同包） |
-| Cloudflare Durable Object | **什么都不做**（平台保证单实例） | `@nimbo/durable-object` |
+| 单进程（本机 CLI、单个 Node 服务） | 内存里一个 Map | **什么都不用装**（`@runko/agent` 内置） |
+| 多进程 / 多节点共享数据库 | 租约 + 心跳 + [租期标识](../../../terms.md) | `@runko/persist-*`（跟持久化同包） |
+| Cloudflare Durable Object | **什么都不做**（平台保证单实例） | `@runko/durable-object` |
 
 **租约版为什么跟持久化同包**：两者总是一起用——都要落库、共享同一个连接、共用同一套「比对后再写」的原语。分成两个包只会让人多装一个。
 

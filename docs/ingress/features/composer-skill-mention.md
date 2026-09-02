@@ -4,7 +4,7 @@ slug: composer-skill-mention
 view: 功能
 layer: 接入层
 module: —
-packages: ["@nimbo-chat/web", "@nimbo/core"]
+packages: ["@runko-chat/web", "@runko/core"]
 tags: ["composer", "skill 提及", "渐进式披露"]
 related: ["ingress/plans/composer-skill-mention.md", "ingress/tech/composer-skill-mention.md", "architecture/tech/agent-kernel.md"]
 ---

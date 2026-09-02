@@ -1,5 +1,5 @@
 /**
- * 零依赖分级日志（本工单：nimbo chat server 的 step / tool call 级别可观测性）。
+ * 零依赖分级日志（本工单：runko chat server 的 step / tool call 级别可观测性）。
  * 不引第三方日志库——内网 registry 装依赖有坑（见
  * `docs/tech/*` 的既有教训），而这里要的能力（分级、单行结构化、可注入
  * sink）用 `process.stdout.write` + 几个纯函数就够。

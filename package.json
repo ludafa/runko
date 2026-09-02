@@ -1,5 +1,5 @@
 {
-  "name": "nimbo",
+  "name": "runko",
   "version": "0.0.0",
   "private": true,
   "description": "Embeddable lightweight agent SDK for Node.js",
@@ -16,14 +16,14 @@
     "lint": "pnpm -r run lint",
     "lint:fix": "pnpm -r run lint:fix",
     "coverage": "vitest run --coverage",
-    "chat:bootstrap": "pnpm --filter @nimbo-chat/node-server run db:generate && pnpm --filter @nimbo-chat/node-server run db:migrate && pnpm --filter @nimbo-chat/node-server run generate:openapi && pnpm --filter @nimbo-chat/web run generate:api",
-    "chat:server": "pnpm --filter @nimbo-chat/node-server run dev",
-    "chat:web": "pnpm --filter @nimbo-chat/web run dev",
+    "chat:bootstrap": "pnpm --filter @runko-chat/node-server run db:generate && pnpm --filter @runko-chat/node-server run db:migrate && pnpm --filter @runko-chat/node-server run generate:openapi && pnpm --filter @runko-chat/web run generate:api",
+    "chat:server": "pnpm --filter @runko-chat/node-server run dev",
+    "chat:web": "pnpm --filter @runko-chat/web run dev",
     "prepare": "husky",
-    "docs:dev": "pnpm --filter @nimbo/docs run dev",
-    "docs:build": "pnpm --filter @nimbo/docs run build",
-    "docs:preview": "pnpm --filter @nimbo/docs run preview",
-    "docs:check": "pnpm --filter @nimbo/docs run check"
+    "docs:dev": "pnpm --filter @runko/docs run dev",
+    "docs:build": "pnpm --filter @runko/docs run build",
+    "docs:preview": "pnpm --filter @runko/docs run preview",
+    "docs:check": "pnpm --filter @runko/docs run check"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.1",

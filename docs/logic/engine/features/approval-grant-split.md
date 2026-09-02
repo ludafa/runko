@@ -4,7 +4,7 @@ slug: approval-grant-split
 view: 功能
 layer: 逻辑层
 module: 执行引擎
-packages: ["@nimbo/core"]
+packages: ["@runko/core"]
 tags: ["审批", "分段授权", "human-in-the-loop", "授权范围"]
 related: ["logic/engine/plans/approval-grant-split.md", "logic/engine/tech/approval-grant-split.md", "architecture/tech/agent-kernel.md"]
 ---

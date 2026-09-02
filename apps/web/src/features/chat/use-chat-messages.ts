@@ -56,7 +56,7 @@
  * (its own doc comment) in case a stale-closure race ever produces more than
  * one anyway.
  */
-import type { NimboMessageMetadata, NimboUIMessage } from '@nimbo/core';
+import type { RunkoMessageMetadata, RunkoUIMessage } from '@runko/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
@@ -84,7 +84,7 @@ export type ChatTurnStatus = 'idle' | 'streaming' | 'error';
 export type SendIntent = 'queue' | 'steer';
 
 export interface UseChatMessagesResult {
-  messages: NimboUIMessage[];
+  messages: RunkoUIMessage[];
   /** Short-lived — popped, FIFO, once the real turn-start `MessageFrame` arrives (see file header) — render these interleaved with `messages` via `timeline.ts`'s `buildRenderEntries`. */
   pendingUserEchoes: PendingUserEcho[];
   status: ChatTurnStatus;
@@ -163,11 +163,11 @@ function describeError(error: unknown): string {
  * 按的[停止](../../../../../docs/terms.md)，不是故障——「已停止」的呈现落在时间线里那条
  * 收尾标记上（`turn-marker.tsx`），不占顶部那条红色的直播中断提示。
  */
-function statusFromTurnEnd(metadata: NimboMessageMetadata): ChatTurnStatus {
+function statusFromTurnEnd(metadata: RunkoMessageMetadata): ChatTurnStatus {
   return metadata.status === 'failed' ? 'error' : 'idle';
 }
 
-function errorFromTurnEnd(metadata: NimboMessageMetadata): string | undefined {
+function errorFromTurnEnd(metadata: RunkoMessageMetadata): string | undefined {
   return metadata.status === 'failed' ? metadata.error?.message : undefined;
 }
 
@@ -187,7 +187,7 @@ export function useChatMessages(
    */
   initialTurnInProgress = false,
 ): UseChatMessagesResult {
-  const [messages, setMessages] = useState<NimboUIMessage[]>([]);
+  const [messages, setMessages] = useState<RunkoUIMessage[]>([]);
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>(
     () =>
       // 初值优先取 `initialFrames` 里最后一帧队列快照（纯防御——今天

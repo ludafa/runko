@@ -1,14 +1,14 @@
-# @nimbo/persist-mongo
+# @runko/persist-mongo
 
-nimbo 的持久化实现，**MongoDB**——也是第一个**非关系型**实现。
+runko 的持久化实现，**MongoDB**——也是第一个**非关系型**实现。
 
 ```sh
-pnpm add @nimbo/persist-mongo mongodb
+pnpm add @runko/persist-mongo mongodb
 ```
 
 ```ts
-import { createAgentRuntime } from "@nimbo/agent";
-import { migrate, mongoPersistence } from "@nimbo/persist-mongo";
+import { createAgentRuntime } from "@runko/agent";
+import { migrate, mongoPersistence } from "@runko/persist-mongo";
 import { MongoClient } from "mongodb";
 
 const client = new MongoClient(process.env.MONGO_URL);
@@ -25,7 +25,7 @@ const runtime = createAgentRuntime(agent, { persistence: mongoPersistence(db) })
 
 ## 它不是薄壳
 
-SQLite / PostgreSQL / MySQL 那三个包底下共用 `@nimbo/persist-kysely`。Kysely 是 SQL
+SQLite / PostgreSQL / MySQL 那三个包底下共用 `@runko/persist-kysely`。Kysely 是 SQL
 查询构建器，Mongo 用不上，所以**这个包直接实现三个领域接口**。
 
 ## 它顺带证明了什么
@@ -46,7 +46,7 @@ Mongo 的 `findOneAndDelete({...}, {sort})` **是数据库直接给的**。
 
 ## 它存什么
 
-三个集合：`nimbo_ledger`（账本）· `nimbo_decisions`（人工裁决留底）· `nimbo_queue`（待发队列）。
+三个集合：`agent_ledger`（账本）· `agent_decisions`（人工裁决留底）· `agent_queue`（待发队列）。
 
 集合名固定，不提供前缀开关——**要隔离请用另一个 database**，那在 Mongo 里是一等公民，
 比集合名前缀干净得多。
@@ -54,7 +54,7 @@ Mongo 的 `findOneAndDelete({...}, {sort})` **是数据库直接给的**。
 `migrate()` 只建索引（Mongo 的集合是隐式创建的）。但它**不是可选的**：账本与裁决表的
 幂等写入靠唯一索引兜底，没有它并发写会写出两行。
 
-**它不存你的东西。** nimbo 只认一个不透明的 `conversationId`，会话叫什么、属于谁，
+**它不存你的东西。** runko 只认一个不透明的 `conversationId`，会话叫什么、属于谁，
 全归你自己存。
 
 ## 要求 MongoDB 5.0+
@@ -80,7 +80,7 @@ Mongo 在「匹配到但新值与旧值完全相同」时报 `matched=1, modifie
 ## 测试
 
 ```sh
-NIMBO_TEST_MONGO_URL=mongodb://127.0.0.1:27018 pnpm --filter @nimbo/persist-mongo test
+RUNKO_TEST_MONGO_URL=mongodb://127.0.0.1:27018 pnpm --filter @runko/persist-mongo test
 ```
 
 跟其余三个持久化包**跑同一套一致性用例**。不给连接串时整档跳过并说明原因——
@@ -89,10 +89,10 @@ Mongo 没有 pglite 那样的进程内替身（`mongodb-memory-server` 是下载
 ## 不是只有这一条路
 
 **你的数据模型跟这三个集合对不上？那就自己实现那三个接口**——那是[头等路径，不是降级方案](../../docs/host/contract/features/persistence.md)。
-一共十来个方法。自己实现的话，装上 [`@nimbo/conformance`](../conformance/README.md) 自测：
+一共十来个方法。自己实现的话，装上 [`@runko/conformance`](../conformance/README.md) 自测：
 
 ```ts
-import { persistenceCases } from "@nimbo/conformance";
+import { persistenceCases } from "@runko/conformance";
 
 describe("我自己的实现", () => {
   for (const testCase of persistenceCases) {

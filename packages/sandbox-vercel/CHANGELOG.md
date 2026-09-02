@@ -1,4 +1,4 @@
-# @nimbo/sandbox-vercel
+# @runko/sandbox-vercel
 
 ## 0.1.0
 
@@ -23,8 +23,8 @@
 
   **新增**
 
-  - `@nimbo/core`：`NimboActivityAware`（工作区的可选能力，接收「这一轮还在干活」的信号）、`NimboKeepAliveCapable`（手动补足一次）、以及给适配器用的 `createKeepAlive` 保活引擎。会话在产出 chunk 时通知工作区，节流后推送；工作区没实现就完全不发生任何事——内存/本机工作区零影响。
-  - `@nimbo/sandbox-e2b` / `@nimbo/sandbox-vercel`：`keepAlive` 选项。**不传就完全不保活**，行为与之前一致。
+  - `@runko/core`：`RunkoActivityAware`（工作区的可选能力，接收「这一轮还在干活」的信号）、`RunkoKeepAliveCapable`（手动补足一次）、以及给适配器用的 `createKeepAlive` 保活引擎。会话在产出 chunk 时通知工作区，节流后推送；工作区没实现就完全不发生任何事——内存/本机工作区零影响。
+  - `@runko/sandbox-e2b` / `@runko/sandbox-vercel`：`keepAlive` 选项。**不传就完全不保活**，行为与之前一致。
 
   **行为要点**
 
@@ -44,5 +44,5 @@
 - Updated dependencies [3ffdf28]
 - Updated dependencies [fca6c03]
 - Updated dependencies
-  - @nimbo/core@0.1.0
-  - @nimbo/virtual-fs@0.1.0
+  - @runko/core@0.1.0
+  - @runko/virtual-fs@0.1.0

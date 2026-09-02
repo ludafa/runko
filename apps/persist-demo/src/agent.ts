@@ -7,9 +7,9 @@
  * 模型走 `createModel` 注入。生产装配可以传真模型；e2e 传一个脚本化的假模型，
  * 这样「跑一轮」是确定性的——测持久化时，模型的不确定性纯属噪音。
  */
-import type { AgentDefinition, NimboExec, NimboFS } from "@nimbo/core";
-import { miniBash } from "@nimbo/mini-bash";
-import { fromMemory } from "@nimbo/virtual-fs";
+import type { AgentDefinition, RunkoExec, RunkoFS } from "@runko/core";
+import { miniBash } from "@runko/mini-bash";
+import { fromMemory } from "@runko/virtual-fs";
 import type { LanguageModel } from "ai";
 
 export interface DemoAgentOptions {
@@ -19,8 +19,8 @@ export interface DemoAgentOptions {
 }
 
 export interface DemoWorkspace {
-  fs: NimboFS;
-  exec: NimboExec;
+  fs: RunkoFS;
+  exec: RunkoExec;
 }
 
 /**

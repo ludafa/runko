@@ -1,5 +1,5 @@
 {
-  "name": "@nimbo/persist-mysql",
+  "name": "@runko/persist-mysql",
   "version": "0.1.0",
   "description": "持久化实现：MySQL（mysql2）—— 你只有一个连接池时装这个",
   "type": "module",
@@ -37,15 +37,15 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@nimbo/agent": "workspace:*",
-    "@nimbo/persist-kysely": "workspace:*",
+    "@runko/agent": "workspace:*",
+    "@runko/persist-kysely": "workspace:*",
     "kysely": "catalog:"
   },
   "peerDependencies": {
     "mysql2": "^3"
   },
   "devDependencies": {
-    "@nimbo/conformance": "workspace:*",
+    "@runko/conformance": "workspace:*",
     "@types/node": "catalog:",
     "kysely": "catalog:",
     "mysql2": "catalog:",

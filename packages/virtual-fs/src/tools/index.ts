@@ -3,7 +3,7 @@
  * `createFileTools(opts)` 是 P4（core session/ToolRuntime）落地前的可注入接缝——
  * 设计理由见 `shared.ts` 顶部注释。
  */
-import type { BuiltinToolName, Tool } from "@nimbo/core";
+import type { BuiltinToolName, Tool } from "@runko/core";
 import { createDeleteFileTool } from "./delete-file.js";
 import { createEditFileTool } from "./edit-file.js";
 import { createGlobTool } from "./glob.js";

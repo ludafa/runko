@@ -4,7 +4,7 @@ slug: arbitration-impl
 view: 技术
 layer: 逻辑层
 module: 归属仲裁
-packages: ["@nimbo/agent", "@nimbo/persist-kysely", "@nimbo/durable-object"]
+packages: ["@runko/agent", "@runko/persist-kysely", "@runko/durable-object"]
 tags: ["归属仲裁机制", "租约", "租期标识", "CAS", "心跳"]
 related: ["logic/arbitration/features/arbitration-impl.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -57,7 +57,7 @@ flowchart LR
 | **`holder` / 心跳落库吗** | ❌ | ✅ | ❌ |
 | **有租约表吗** | ❌ | ✅ | ❌ |
 | **独占是什么保证** | **真保证** | **尽力 + 可检测** | **真保证** |
-| **落在哪个包** | `@nimbo/agent`（内置） | `@nimbo/persist-*`（与持久化同包） | `@nimbo/durable-object` |
+| **落在哪个包** | `@runko/agent`（内置） | `@runko/persist-*`（与持久化同包） | `@runko/durable-object` |
 
 ## 4. 租约版：三个关键取舍
 
@@ -119,7 +119,7 @@ flowchart LR
 
 ## 8. 四个待定项：**全部定案**
 
-原来这里列了四条「未定」。前两条在 `@nimbo/agent` 落地时（K2）就由代码答了，后两条
+原来这里列了四条「未定」。前两条在 `@runko/agent` 落地时（K2）就由代码答了，后两条
 2026-09-01 由构建者拍板。**施工前请以本节为准，别再照着旧的 TODO 重新设计一遍。**
 
 ### 8.1 接口方法签名 —— ✅ 已答（K2）
@@ -157,5 +157,5 @@ flowchart LR
 
 ### 8.4 交权宽限期 —— ✅ 定案 2026-09-01
 
-**15 秒**，直接复用 `@nimbo/agent` 的 `DEFAULT_SHUTDOWN_GRACE_MS`。两处用同一个数才不会
+**15 秒**，直接复用 `@runko/agent` 的 `DEFAULT_SHUTDOWN_GRACE_MS`。两处用同一个数才不会
 互相打架（k8s 的 `terminationGracePeriodSeconds` 默认 30 秒，留一半余量给连接关闭与进程退出）。

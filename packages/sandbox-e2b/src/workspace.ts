@@ -1,11 +1,11 @@
 /**
  * `e2bWorkspace(sandbox, opts?)`：把一个已创建好的 e2b 沙盒包成
- * `NimboFS & NimboExec`，供 `createSession(agent, { workspace })` 一次注入
+ * `RunkoFS & RunkoExec`，供 `createSession(agent, { workspace })` 一次注入
  * （docs/tech/core-sdk.md §4.5a 模式 A；docs/tech/sandbox.md §5.2/§8.2）。
  *
  * BYO 实例是唯一入口：本函数不创建、不销毁沙盒——沙盒的生命周期（创建、
  * 暂停/恢复、销毁）完全由宿主自己管理，`e2bWorkspace()` 只是给一个已经
- * 存在的沙盒包一层 NimboFS/NimboExec 的视图（docs/tech/sandbox.md §5.2 "nimbo 不关心沙盒
+ * 存在的沙盒包一层 RunkoFS/RunkoExec 的视图（docs/tech/sandbox.md §5.2 "runko 不关心沙盒
  * 长什么样"）。
  *
  * **唯一的例外是[保活](../../../docs/terms.md)**（docs/features/sandbox-keepalive.md）：
@@ -13,7 +13,7 @@
  * 建盒销盒仍归宿主，开不开保活也是宿主一行配置决定的，下沉的只是「续期动作怎么执行」。
  * 不传就一次网络调用都不会发生，行为与没有这个功能时完全一致。
  */
-import type { KeepAliveOptions, NimboActivityAware, NimboExec, NimboFS, NimboKeepAliveCapable } from "@nimbo/core";
+import type { KeepAliveOptions, RunkoActivityAware, RunkoExec, RunkoFS, RunkoKeepAliveCapable } from "@runko/core";
 import { createE2bExec } from "./exec.js";
 import { createE2bFs } from "./fs.js";
 import { createE2bKeepAlive } from "./keepalive.js";
@@ -36,7 +36,7 @@ export interface E2bWorkspaceOptions {
 }
 
 /** `e2bWorkspace()` 的返回形状：工作区两面 + 两个可选的保活面（只在开了 `keepAlive` 时真的存在）。 */
-export type E2bWorkspace = NimboFS & NimboExec & NimboActivityAware & NimboKeepAliveCapable;
+export type E2bWorkspace = RunkoFS & RunkoExec & RunkoActivityAware & RunkoKeepAliveCapable;
 
 export function e2bWorkspace(sandbox: E2bSandboxLike, opts: E2bWorkspaceOptions = {}): E2bWorkspace {
   const anchor = createPathAnchor(opts.root ?? DEFAULT_ROOT);

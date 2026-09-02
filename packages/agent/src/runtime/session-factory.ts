@@ -1,10 +1,10 @@
 /**
  * 「怎么造出这一轮的 `Session`」这个接缝。
  *
- * 默认实现就是 `@nimbo/core` 的 `createSession` 外加**文件工具八件套的默认装配**
- * ——与 `@nimbo/sdk` 的门面版同款（同一段 `createFileTools({ readState, onFileChange })`
- * 预构造 + 注入）。为什么在这里再写一遍而不是 `import { createSession } from "@nimbo/sdk"`：
- * `@nimbo/sdk` 是**门面包**（它 re-export core + virtual-fs + mini-bash），让逻辑层的
+ * 默认实现就是 `@runko/core` 的 `createSession` 外加**文件工具八件套的默认装配**
+ * ——与 `@runko/sdk` 的门面版同款（同一段 `createFileTools({ readState, onFileChange })`
+ * 预构造 + 注入）。为什么在这里再写一遍而不是 `import { createSession } from "@runko/sdk"`：
+ * `@runko/sdk` 是**门面包**（它 re-export core + virtual-fs + mini-bash），让逻辑层的
  * 轮编排反过来依赖门面，会把依赖图从「一棵指向 core 的树」变成「有一条回边」。
  * 这里付出的代价是三十行装配代码要跟 sdk 保持一致——改动 sdk 的默认装配时记得同步。
  *
@@ -15,16 +15,16 @@ import type {
   AgentDefinition,
   BuiltinToolName,
   DerivedDataCollector,
-  NimboChunk,
+  RunkoChunk,
   SessionOptions,
   SessionReadState,
   SessionState,
   Tool,
   TurnResult,
-} from "@nimbo/core";
-import { createDerivedDataCollector, createSession as createCoreSession, createSessionReadState } from "@nimbo/core";
-import type { FileChange, FileToolName } from "@nimbo/virtual-fs";
-import { createFileTools } from "@nimbo/virtual-fs";
+} from "@runko/core";
+import { createDerivedDataCollector, createSession as createCoreSession, createSessionReadState } from "@runko/core";
+import type { FileChange, FileToolName } from "@runko/virtual-fs";
+import { createFileTools } from "@runko/virtual-fs";
 
 /**
  * 轮编排真正用到的那一小块 `Session` 表面——**刻意比真类型窄**，于是测试可以塞一个
@@ -32,7 +32,7 @@ import { createFileTools } from "@nimbo/virtual-fs";
  * 不认具体类」的纪律）。
  */
 export interface DrivenSession {
-  stream(input: string, opts?: { signal?: AbortSignal }): AsyncGenerator<NimboChunk, TurnResult>;
+  stream(input: string, opts?: { signal?: AbortSignal }): AsyncGenerator<RunkoChunk, TurnResult>;
   toJSON(): SessionState;
   steer?(input: string): boolean;
 }
@@ -42,7 +42,7 @@ export type SessionFactory = (
   options: SessionOptions,
 ) => DrivenSession | Promise<DrivenSession>;
 
-/** 八件套的全部工具名（与 `@nimbo/sdk` 的 `ALL_FILE_TOOL_NAMES` 同源）。 */
+/** 八件套的全部工具名（与 `@runko/sdk` 的 `ALL_FILE_TOOL_NAMES` 同源）。 */
 const ALL_FILE_TOOL_NAMES = [
   "read-file",
   "write-file",

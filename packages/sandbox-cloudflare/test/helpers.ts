@@ -5,7 +5,7 @@
  *
  * 内部路径全部是"沙盒相对路径"（沙盒自身默认 cwd 记作 "."，子路径不带前导斜杠，
  * 如 "a/b.txt"）——正是 `src/worker.ts` 里 `toSandboxPath()` 换算之后送进
- * `CfSandboxLike` 各方法的那种形状，与 NimboFS 那套 "/" 开头的虚拟绝对路径是两个
+ * `CfSandboxLike` 各方法的那种形状，与 RunkoFS 那套 "/" 开头的虚拟绝对路径是两个
  * 独立的坐标系，测试断言时不要混用。
  */
 import type {

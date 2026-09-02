@@ -4,15 +4,15 @@
  * docs/plans/core-sdk.md P10). This one wraps a Vercel Sandbox — a real
  * Amazon Linux 2023 Firecracker microVM — instead of an E2B one.
  *
- * `@nimbo/sandbox-vercel` is, like `@nimbo/sandbox-e2b`, **not** re-exported
- * by `@nimbo/sdk` — install it explicitly (`pnpm add @nimbo/sandbox-vercel
+ * `@runko/sandbox-vercel` is, like `@runko/sandbox-e2b`, **not** re-exported
+ * by `@runko/sdk` — install it explicitly (`pnpm add @runko/sandbox-vercel
  * @vercel/sandbox`).
  *
  * Same structural-interface story as 09 (docs/tech/sandbox.md §8.1): `vercelWorkspace(sandbox,
  * opts?)` accepts anything shaped like `VercelSandboxLike` (the `fs`/`runCommand`
  * subset it actually calls) — it never imports "@vercel/sandbox" at runtime.
  * The deterministic section below hands it an in-process fake and proves the
- * whole `NimboFS & NimboExec` contract with zero credentials, zero network.
+ * whole `RunkoFS & RunkoExec` contract with zero credentials, zero network.
  *
  * BYO instance: `vercelWorkspace()` never creates or destroys a sandbox — the
  * real-sandbox section below creates one with `Sandbox.create({ token, teamId,
@@ -36,7 +36,7 @@
  *     notes.txt`) for the same reason as 09 — see
  *     `packages/sandbox-vercel/README.md` "已知限制" (a trait shared by all
  *     three sandbox adapters, not vercel-specific);
- *   - each NimboFS file-tool call is a network round trip — prefer a single
+ *   - each RunkoFS file-tool call is a network round trip — prefer a single
  *     bash command for scan-heavy work over many individual `glob`/`read-file`
  *     calls.
  *
@@ -58,8 +58,8 @@
  *      compiles and reads correctly but is untested end-to-end here; results
  *      get backfilled into docs/plans/verification.md once a user supplies the three variables.
  */
-import { createSession, defineAgent } from "@nimbo/sdk";
-import { vercelWorkspace } from "@nimbo/sandbox-vercel";
+import { createSession, defineAgent } from "@runko/sdk";
+import { vercelWorkspace } from "@runko/sandbox-vercel";
 import type {
   VercelCommandResultLike,
   VercelDirentLike,
@@ -67,7 +67,7 @@ import type {
   VercelRunCommandParams,
   VercelSandboxLike,
   VercelStatsLike,
-} from "@nimbo/sandbox-vercel";
+} from "@runko/sandbox-vercel";
 import { Sandbox } from "@vercel/sandbox";
 import { resolveModel } from "./shared/model.ts";
 
@@ -160,7 +160,7 @@ async function realSandboxSection(): Promise<void> {
   const projectId = process.env.VERCEL_PROJECT_ID?.trim();
   if (token === undefined || token.length === 0 || teamId === undefined || teamId.length === 0 || projectId === undefined || projectId.length === 0) {
     console.log(
-      "[nimbo example] VERCEL_TOKEN/VERCEL_TEAM_ID/VERCEL_PROJECT_ID are not fully set — skipping the real-sandbox section.\n" +
+      "[runko example] VERCEL_TOKEN/VERCEL_TEAM_ID/VERCEL_PROJECT_ID are not fully set — skipping the real-sandbox section.\n" +
         'See the "Vercel Sandbox" section of .env.template for where to get each value. No sandbox is ' +
         "created and no model call is made while any of the three is missing.",
     );

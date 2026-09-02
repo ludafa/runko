@@ -1,7 +1,7 @@
 /**
  * 04-mini-bash — the "same-origin workspace" story from docs/tech/core-sdk.md
  * §4.5a mode A: `createSession({ fs, exec: miniBash(fs) })` gives the file
- * tools and the `bash` tool the *same* NimboFS instance, so there is nothing
+ * tools and the `bash` tool the *same* RunkoFS instance, so there is nothing
  * to keep in sync — a file written through `write-file` is immediately
  * visible to `cat`, because there's only ever one copy of the data.
  *
@@ -19,22 +19,22 @@
  *
  * Expected output shape:
  *   1. A deterministic section (no model, no env vars needed): writes a file
- *      through the NimboFS interface, then calls miniBash(fs).exec(...)
+ *      through the RunkoFS interface, then calls miniBash(fs).exec(...)
  *      directly (bypassing the agent loop entirely) to `cat` it and to run
  *      a `&&`/`|` pipeline — proving the interpreter reads the same data the
  *      file tools would have written.
- *   2. If NIMBO_MODEL is set: a full session with both the file tools and
+ *   2. If RUNKO_MODEL is set: a full session with both the file tools and
  *      `bash` wired to the same fs; the agent is asked to write a file and
- *      then shell out to inspect it. If NIMBO_MODEL is unset, this section
+ *      then shell out to inspect it. If RUNKO_MODEL is unset, this section
  *      is skipped with a clean exit.
  */
-import { createSession, defineAgent, miniBash, NimboFS } from "@nimbo/sdk";
+import { createSession, defineAgent, miniBash, RunkoFS } from "@runko/sdk";
 import { resolveModel } from "./shared/model.ts";
 
 async function deterministicSection(): Promise<void> {
-  console.log("--- 1. same fs, no sync needed: write via NimboFS, read via mini-bash ---");
+  console.log("--- 1. same fs, no sync needed: write via RunkoFS, read via mini-bash ---");
 
-  const fs = NimboFS.fromMemory({});
+  const fs = RunkoFS.fromMemory({});
   await fs.writeFile("/notes/todo.txt", "buy milk\nwrite docs\nship it\n");
 
   const exec = miniBash(fs);
@@ -55,7 +55,7 @@ async function modelDrivenSection(): Promise<void> {
 
   console.log("\n--- 2. agent writes a file, then shells out to inspect it (same session) ---");
 
-  const fs = NimboFS.fromMemory({});
+  const fs = RunkoFS.fromMemory({});
   const agent = defineAgent({ model });
   const session = createSession(agent, { fs, exec: miniBash(fs) });
 

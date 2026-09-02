@@ -1,11 +1,11 @@
 /**
  * `.`：Cloudflare Sandbox 网关的纯 fetch 客户端（任意 Node ≥20 进程）——`cloudflareWorkspace(opts)`
- * 返回 `NimboFS & NimboExec`，供 `createSession({ workspace })` 一次注入（docs/tech/core-sdk.md §4.5a 模式 A）。
+ * 返回 `RunkoFS & RunkoExec`，供 `createSession({ workspace })` 一次注入（docs/tech/core-sdk.md §4.5a 模式 A）。
  * 本文件与 `./worker`（`src/worker.ts`）通过 `src/protocol.ts` 的 zod schema 共用同一份 wire 契约；
  * 不 import `@cloudflare/sandbox`——这一侧只说 HTTP，不知道也不需要知道对面跑的是不是真沙盒。
  */
-import { DirectoryNotEmptyError, NotFoundError, normalizePath } from "@nimbo/virtual-fs";
-import type { DirEntry, ExecOptions, ExecRequest, ExecResult, FileStat, NimboExec, NimboFS } from "@nimbo/core";
+import { DirectoryNotEmptyError, NotFoundError, normalizePath } from "@runko/virtual-fs";
+import type { DirEntry, ExecOptions, ExecRequest, ExecResult, FileStat, RunkoExec, RunkoFS } from "@runko/core";
 import {
   AUTH_HEADER,
   DEFAULT_SANDBOX_ID,
@@ -48,7 +48,7 @@ export interface CloudflareWorkspaceOptions {
 
 const DESCRIBE = [
   'cloudflareWorkspace: Cloudflare Sandbox accessed through a self-deployed HTTP gateway ("./worker"\'s',
-  "createSandboxGateway, running in the host's own wrangler project) — every NimboFS/NimboExec call is one",
+  "createSandboxGateway, running in the host's own wrangler project) — every RunkoFS/RunkoExec call is one",
   "HTTP round trip (tens to hundreds of ms), not an in-process operation.",
   "Real Linux container (Cloudflare Containers). Same-origin workspace (mode A): bash and the file tools read",
   "and write the exact same filesystem, so a bash redirect write is immediately visible to read-file and",
@@ -343,7 +343,7 @@ async function execImpl(ctx: ClientContext, req: ExecRequest, opts: ExecOptions 
   }
 }
 
-export function cloudflareWorkspace(opts: CloudflareWorkspaceOptions): NimboFS & NimboExec {
+export function cloudflareWorkspace(opts: CloudflareWorkspaceOptions): RunkoFS & RunkoExec {
   const ctx: ClientContext = {
     fetchImpl: opts.fetch ?? globalThis.fetch,
     baseUrl: opts.url.endsWith("/") ? opts.url.slice(0, -1) : opts.url,
@@ -352,7 +352,7 @@ export function cloudflareWorkspace(opts: CloudflareWorkspaceOptions): NimboFS &
   };
 
   return {
-    // docs/tech/single-ledger.md §6.1（@nimbo/core 审批三值重构，P13-5-2c）：旧 "never" → "allow"（沙盒实现，隔离即边界）。
+    // docs/tech/single-ledger.md §6.1（@runko/core 审批三值重构，P13-5-2c）：旧 "never" → "allow"（沙盒实现，隔离即边界）。
     defaultApproval: "allow",
     describe(): string {
       return DESCRIBE;

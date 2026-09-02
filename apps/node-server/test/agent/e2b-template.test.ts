@@ -45,11 +45,11 @@ describe('e2b template spec', () => {
   });
 
   it('reads all three from env', () => {
-    process.env.E2B_TEMPLATE = 'nimbo-chat-fat';
+    process.env.E2B_TEMPLATE = 'runko-chat-fat';
     process.env.E2B_TEMPLATE_MEMORY_MB = '4096';
     process.env.E2B_TEMPLATE_CPU_COUNT = '4';
 
-    expect(resolveE2bTemplate()).toBe('nimbo-chat-fat');
+    expect(resolveE2bTemplate()).toBe('runko-chat-fat');
     expect(resolveE2bTemplateMemoryMB()).toBe(4096);
     expect(resolveE2bTemplateCpuCount()).toBe(4);
   });

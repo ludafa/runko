@@ -1,6 +1,6 @@
 /**
  * HTTP 层。**本文件只做翻译**：把请求变成 `runtime.*` 的一次调用，把 `Frame` 序列化
- * 成 SSE。排队、插话、竞态、崩溃恢复全在 `@nimbo/agent` 里，这里一行都没有。
+ * 成 SSE。排队、插话、竞态、崩溃恢复全在 `@runko/agent` 里，这里一行都没有。
  *
  * 端点形状**刻意对齐 `apps/node-server`**（去掉认证/沙盒/推送/遥测这些跟持久化无关的）：
  *
@@ -20,7 +20,7 @@
  * 对齐一个**已经写死的**契约是刻意的：demo 是我们自己写的，天然有「不自觉迁就包的
  * 能力」的风险；照着别人定好的形状写，包做不到的地方会当场暴露。
  */
-import type { AgentRuntime, Frame } from "@nimbo/agent";
+import type { AgentRuntime, Frame } from "@runko/agent";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 

@@ -9,7 +9,7 @@ import type { Persistence } from "../persistence.js";
 import type { TurnPreparer } from "../prepare.js";
 import type { StreamFanout } from "../stream.js";
 import type { TurnInput, TurnStatus } from "../types.js";
-import type { AgentDefinition } from "@nimbo/core";
+import type { AgentDefinition } from "@runko/core";
 
 import type { ApprovalPendingEvent, HumanBridge, QuestionPendingEvent } from "./human.js";
 import type { TurnRegistry } from "./registry.js";

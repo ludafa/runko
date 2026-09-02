@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { z } from "zod";
-import { fromMemory } from "@nimbo/virtual-fs";
+import { fromMemory } from "@runko/virtual-fs";
 import { createLoadSkillTool } from "../src/tools/builtin/load-skill.js";
 import { defineAgent } from "../src/agent.js";
 import { defineSkill } from "../src/skill.js";
@@ -19,7 +19,7 @@ import { createSession } from "../src/session.js";
 import type { AgentDefinition } from "../src/agent.js";
 import type { Skill } from "../src/skill.js";
 import type { Tool, ToolContext } from "../src/types.js";
-import { allToolParts, chunksOfType, drainTurn } from "./helpers/nimbo-chunks.js";
+import { allToolParts, chunksOfType, drainTurn } from "./helpers/runko-chunks.js";
 
 // ---- shared mock-model helpers (same shape as session.test.ts / loop.test.ts) ----
 
@@ -232,7 +232,7 @@ describe("session wiring: attached-file mounting to /.skills/<name>/", () => {
 
   it("fs left unconfigured + a skill WITH files → session.send() rejects with guidance pointing at injecting fs", async () => {
     const session = createSession(baseAgent(stopModel("ok"), { skills: [pdfFillSkill] })); // fs intentionally left unconfigured
-    await expect(session.send("hi")).rejects.toThrow(/NimboFS|createSession/);
+    await expect(session.send("hi")).rejects.toThrow(/RunkoFS|createSession/);
   });
 });
 

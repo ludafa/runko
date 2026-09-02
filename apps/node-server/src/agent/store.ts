@@ -4,7 +4,7 @@
  *
  * **[账本](../../../../docs/terms.md)、[裁决表](../../../../docs/terms.md)、
  * [待发队列](../../../../docs/terms.md)、[起轮标记](../../../../docs/terms.md)不在这里**
- * ——它们是 `@nimbo/agent` 的宿主能力接口，实现落在 `persistence.ts`。本文件只剩
+ * ——它们是 `@runko/agent` 的宿主能力接口，实现落在 `persistence.ts`。本文件只剩
  * chat 应用自己的那些列：标题、仓库、分支、沙盒 provider/名字、[skill 清单](../../../../docs/terms.md)缓存。
  */
 import type { InferSelectModel } from 'drizzle-orm';
@@ -118,9 +118,9 @@ export interface ConversationPatch {
   /** E2B 的[重连令牌](docs/terms.md) sandboxId——首建落库、或过期重建后换了新 sandbox 时由路由回写（docs/tech/sandbox-provider.md §3.1）。 */
   sandboxId?: string;
   /**
-   * The nimbo session-scalar header (docs/tech/single-ledger.md §5 单-3, schema.ts's own doc
+   * The runko session-scalar header (docs/tech/single-ledger.md §5 单-3, schema.ts's own doc
    * comment) — all three always written together, at the end of every turn
-   * that finishes gracefully (`@nimbo/agent`'s `finalize`).
+   * that finishes gracefully (`@runko/agent`'s `finalize`).
    * There is no partial-update case, so this is one combined optional group
    * rather than three independent optional fields.
    */

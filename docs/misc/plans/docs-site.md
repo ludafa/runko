@@ -32,7 +32,7 @@ related: ["misc/features/docs-site.md", "misc/tech/docs-site.md", "architecture/
 | 8 | **front matter 校验**：`docs:check` —— 每份文档字段齐全、取值合法、不会漏进侧栏 | `docs/.vitepress/check.ts` | ✅ |
 | 9 | CI 接上文档站的质量门 | `.github/workflows/ci.yml` | ✅ |
 | 10 | 回填本文档与 `CLAUDE.md`「文档规范」 | 文档 | ✅ |
-| **11** | **`docs/` 独立成 workspace 成员**（`@nimbo/docs`）：自己的 `package.json`/`tsconfig.json`/`README.md`，依赖从根挪进来，接上 `typecheck`，`base` 走 `DOCS_BASE` 环境变量以支持子路径部署 | `pnpm-workspace.yaml` · `docs/package.json` 等 | ✅ |
+| **11** | **`docs/` 独立成 workspace 成员**（`@runko/docs`）：自己的 `package.json`/`tsconfig.json`/`README.md`，依赖从根挪进来，接上 `typecheck`，`base` 走 `DOCS_BASE` 环境变量以支持子路径部署 | `pnpm-workspace.yaml` · `docs/package.json` 等 | ✅ |
 
 **顺序**：1 → 2/3 → 4/5/6 → 7 → 8 → 9 → 10 → 11。
 
@@ -45,11 +45,11 @@ related: ["misc/features/docs-site.md", "misc/tech/docs-site.md", "architecture/
 | V3 | `pnpm docs:check` | front matter 字段齐全、取值合法 | ✅ 75 份通过 |
 | V4 | mermaid 渲染 | 每张图都出来，明暗两主题都可读 | ✅ 产物含 mermaid（app chunk 637 KB） |
 | V5 | 中文搜索 | 「归属仲裁」「租期标识」「挂起」能命中 | ✅ 索引含这些二元组 |
-| V6 | 出站链接 | 指向 `packages/` `apps/` `examples/` `CLAUDE.md` 的链接跳 GitHub | ✅ 产物里已是 `github.com/ludafa/nimbo/blob/main/…` |
+| V6 | 出站链接 | 指向 `packages/` `apps/` `examples/` `CLAUDE.md` 的链接跳 GitHub | ✅ 产物里已是 `github.com/ludafa/runko/blob/main/…` |
 | V7 | 新增文档零配置 | 放对目录 + 写好 front matter 即自动进侧栏 | ✅ 由 V2 的计数一致性覆盖 |
-| V8 | 独立成员 | `pnpm ls -r` 认得 `@nimbo/docs`；`pnpm -r build`/`typecheck` 覆盖到它 | ✅ 14 个成员，两条 `-r` 都跑到 `docs` |
-| V9 | 子路径部署 | `DOCS_BASE=/nimbo/ pnpm docs:build` 后资源与站内链接都带前缀 | ✅ `href="/nimbo/assets/…"`、`/nimbo/logic/engine/features/core-sdk` |
-| V10 | `pnpm --filter @nimbo/docs typecheck` | `.vitepress/` 下配置与脚本类型正确 | ✅ 通过（修掉 6 处后） |
+| V8 | 独立成员 | `pnpm ls -r` 认得 `@runko/docs`；`pnpm -r build`/`typecheck` 覆盖到它 | ✅ 14 个成员，两条 `-r` 都跑到 `docs` |
+| V9 | 子路径部署 | `DOCS_BASE=/runko/ pnpm docs:build` 后资源与站内链接都带前缀 | ✅ `href="/runko/assets/…"`、`/runko/logic/engine/features/core-sdk` |
+| V10 | `pnpm --filter @runko/docs typecheck` | `.vitepress/` 下配置与脚本类型正确 | ✅ 通过（修掉 6 处后） |
 
 ### 施工中发现并处理的三件事
 
@@ -59,7 +59,7 @@ related: ["misc/features/docs-site.md", "misc/tech/docs-site.md", "architecture/
 
 ## 明确不做
 
-- **不接托管**。形态已经可独立部署、子路径也验过了（V9），**真要上线只差一个 workflow**：构建命令 `pnpm --filter @nimbo/docs run build`、输出目录 `docs/.vitepress/dist`；GitHub Pages 这类子路径托管额外设 `DOCS_BASE=/nimbo/`。托管到哪儿由你定。
+- **不接托管**。形态已经可独立部署、子路径也验过了（V9），**真要上线只差一个 workflow**：构建命令 `pnpm --filter @runko/docs run build`、输出目录 `docs/.vitepress/dist`；GitHub Pages 这类子路径托管额外设 `DOCS_BASE=/runko/`。托管到哪儿由你定。
 - **不做多语言**（站点只有中文，英文入口仍是根 `README.md`）。
 - **不做版本化文档**。包还没稳定到要为旧版本留一套。
 - **不改文档内容**。站点是 `docs/` 的一层皮。
@@ -68,5 +68,5 @@ related: ["misc/features/docs-site.md", "misc/tech/docs-site.md", "architecture/
 
 | 日期 | 变更 |
 | --- | --- |
-| 2026-08-15 | 追加第 11 项：**`docs/` 独立成 workspace 成员 `@nimbo/docs`**，为的是能单独部署。依赖从根挪进 `docs/package.json`；顺带接上 `typecheck`——**它一接上就抓出 6 处类型问题**（5 处 `noUncheckedIndexedAccess` 下的空值漏判 + 1 处 `markdown-it` 内部类型路径在 NodeNext 下解析不到，改用 VitePress 自己的 `MarkdownRenderer` 类型推导）。CI 相应简化：`docs:build` 那步删了，因为 `pnpm -r build` 现在会构建它、构建时就做死链检查；只留 `docs:check`（脚本名不在 `-r` 跑的三个里） |
+| 2026-08-15 | 追加第 11 项：**`docs/` 独立成 workspace 成员 `@runko/docs`**，为的是能单独部署。依赖从根挪进 `docs/package.json`；顺带接上 `typecheck`——**它一接上就抓出 6 处类型问题**（5 处 `noUncheckedIndexedAccess` 下的空值漏判 + 1 处 `markdown-it` 内部类型路径在 NodeNext 下解析不到，改用 VitePress 自己的 `MarkdownRenderer` 类型推导）。CI 相应简化：`docs:build` 那步删了，因为 `pnpm -r build` 现在会构建它、构建时就做死链检查；只留 `docs:check`（脚本名不在 `-r` 跑的三个里） |
 | 2026-08-15 | 建档并完成全部 10 项，验收 V1–V7 全绿。**与技术方案的偏差一处**：导航落地页原打算取「该层第一份 features 文档」，实际是字母序（执行引擎会落到 `approval-grant-split`），改成在 `structure.ts` 里给每层显式指定 `landing`（执行引擎 → `core-sdk`、轮编排 → `single-ledger` 等）。另加了两样技术方案里没写的：术语表进顶部导航；每篇正文上方一行归位标签（层 · 模块 · 包 · tags，走 `doc-before` 主题槽，数据直接读 front matter，不另存一份） |

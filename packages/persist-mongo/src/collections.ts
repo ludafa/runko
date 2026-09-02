@@ -1,14 +1,14 @@
 /**
  * 三个集合的文档形状，以及**唯一一处需要小心的类型边界**：BSON ↔ JSON。
  *
- * 集合名固定：`nimbo_ledger` / `nimbo_decisions` / `nimbo_queue`。理由同 SQL 那几家
+ * 集合名固定：`agent_ledger` / `agent_decisions` / `agent_queue`。理由同 SQL 那几家
  * ——要隔离请用**另一个 database**（Mongo 里那是一等公民，比表名前缀干净得多）。
  */
-import type { JsonValue } from "@nimbo/core";
+import type { JsonValue } from "@runko/core";
 
-export const LEDGER_COLLECTION = "nimbo_ledger";
-export const DECISIONS_COLLECTION = "nimbo_decisions";
-export const QUEUE_COLLECTION = "nimbo_queue";
+export const LEDGER_COLLECTION = "agent_ledger";
+export const DECISIONS_COLLECTION = "agent_decisions";
+export const QUEUE_COLLECTION = "agent_queue";
 
 /**
  * [账本](../../../docs/terms.md)文档。
@@ -21,7 +21,7 @@ export interface LedgerDoc {
   conversationId: string;
   /** 每会话递增，由[归属仲裁](../../../docs/terms.md)分配。**允许有空洞**。 */
   seq: number;
-  /** `NimboUIMessage`。以 BSON 文档存（不是字符串）——Mongo 的原生形态，工具里看得见。 */
+  /** `RunkoUIMessage`。以 BSON 文档存（不是字符串）——Mongo 的原生形态，工具里看得见。 */
   payload: JsonValue;
   ts: number;
 }
@@ -56,7 +56,7 @@ export interface QueueDoc {
  *
  * 这一步不是多余的，它修的是一个实测出来的行为差异：BSON 会把 `undefined` **存成
  * `null`**，而 SQL 那几家走的是 `JSON.stringify`（**直接把这个键丢掉**）。同一个
- * `NimboUIMessage` 存进去、读出来，Mongo 给 `{cachedInputTokens: null}`、SQLite 给
+ * `RunkoUIMessage` 存进去、读出来，Mongo 给 `{cachedInputTokens: null}`、SQLite 给
  * `{}`——一致性套件的「原样往返」当场就会红。
  *
  * 修法有两条，选了这条：

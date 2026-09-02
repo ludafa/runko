@@ -5,7 +5,7 @@
  * docs/plans/sandbox-keepalive.md KA-2。
  *
  * [续期闸门](../../../docs/terms.md)本身（补足语义、审批状态机、两个上限）已在
- * `@nimbo/core` 的 `test/keepalive.test.ts` 里测透，这里只覆盖 E2B 这一层：
+ * `@runko/core` 的 `test/keepalive.test.ts` 里测透，这里只覆盖 E2B 这一层：
  * 开关是否真的可选、`setTimeout` 是不是按**重置**语义直接传目标值（不算差额）、
  * exec 期间有没有自打点、沙盒不支持时是否提前失败。
  *

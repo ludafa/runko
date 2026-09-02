@@ -18,7 +18,7 @@ import { skillMountPath } from "../../skills/registry.js";
 /**
  * docs/tech/builtin-tools.md §0.5 的"错误即指导"横切规则对全部工具生效（不止文件
  * 八件套）：失败返回 `{ isError: true, content }`，`content` 带下一步建议。
- * 索引签名的显式声明理由同 `@nimbo/virtual-fs` 的 `ToolErrorResult`（具名
+ * 索引签名的显式声明理由同 `@runko/virtual-fs` 的 `ToolErrorResult`（具名
  * interface 要落进 `ToolReturn` 的 `JsonValue` 对象分支，必须显式声明索引签名，
  * 否则 tsc 报"Index signature ... is missing"）——这里独立定义一份而不是从
  * virtual-fs 导入，因为 core 不能依赖 virtual-fs（见 `session.ts` 顶部注释

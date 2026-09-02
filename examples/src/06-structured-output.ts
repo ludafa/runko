@@ -11,11 +11,11 @@
  * `result.finalResponse` are unaffected, `result.structuredOutput` is
  * additive. Validation failures are retried against the model (up to 2
  * extra calls); exhausting the retry budget throws
- * `NimboStructuredOutputError` rather than silently returning something
+ * `RunkoStructuredOutputError` rather than silently returning something
  * that doesn't match the schema.
  *
  * Demonstrates: `session.send<T>(input, { outputSchema })`,
- * `NimboStructuredOutputError`.
+ * `RunkoStructuredOutputError`.
  *
  * Run: `node examples/06-structured-output.ts` (see examples/README.md for setup).
  *
@@ -24,14 +24,14 @@
  *      zod schema this example asks the model to fill in, and parses a
  *      hand-written sample object against it — showing the exact shape
  *      `result.structuredOutput` will have, independent of any model call.
- *   2. If NIMBO_MODEL is set: the agent reads a short changelog entry from
+ *   2. If RUNKO_MODEL is set: the agent reads a short changelog entry from
  *      an in-memory file and is asked to extract it as structured data;
  *      `result.structuredOutput` is printed and is a `ReleaseNote` value, not
- *      a string. If NIMBO_MODEL is unset, this section is skipped with a
+ *      a string. If RUNKO_MODEL is unset, this section is skipped with a
  *      clean exit.
  */
 import { z } from "zod";
-import { createSession, defineAgent, NimboFS } from "@nimbo/sdk";
+import { createSession, defineAgent, RunkoFS } from "@runko/sdk";
 import { resolveModel } from "./shared/model.ts";
 
 const releaseNoteSchema = z.object({
@@ -65,7 +65,7 @@ async function modelDrivenSection(): Promise<void> {
 
   console.log("\n--- 2. agent reads the changelog, returns typed structured output ---");
 
-  const fs = NimboFS.fromMemory({ "CHANGELOG.md": CHANGELOG_ENTRY });
+  const fs = RunkoFS.fromMemory({ "CHANGELOG.md": CHANGELOG_ENTRY });
   const agent = defineAgent({ model });
   const session = createSession(agent, { fs });
 

@@ -1,11 +1,11 @@
 /**
- * `createVercelExec(sandbox, root)`：NimboExec 在 `sandbox.runCommand` 上的实现
+ * `createVercelExec(sandbox, root)`：RunkoExec 在 `sandbox.runCommand` 上的实现
  * （docs/tech/sandbox.md §3.2 / §8.2 Vercel 列）。
  *
  * ---- argv 语义：整段脚本是单个 argv，零字符串拼接 ----
  *
  * `runCommand` 不是 shell——`cmd`/`args` 是 argv 数组，不经过任何 shell 展开。
- * 管道/重定向/变量展开等 nimbo `ExecRequest.command`（一段 shell 脚本字符串）
+ * 管道/重定向/变量展开等 runko `ExecRequest.command`（一段 shell 脚本字符串）
  * 依赖的语法，靠把整段脚本原样塞进 `bash -lc` 的第二个 argv 元素得到：
  * `runCommand({ cmd: "bash", args: ["-lc", req.command], ... })`——`args` 数组
  * 恒为两个元素，`req.command` 从不被拆分/拼接/转义，bash 自己解析这段脚本。
@@ -33,7 +33,7 @@
  * 副作用是我们的 `VercelSandboxLike.runCommand` 返回类型只需要 `exitCode`，
  * 结构面更小、离真实 SDK 的耦合更低。
  */
-import type { ExecOptions, ExecRequest, ExecResult, KeepAlive, NimboExec } from "@nimbo/core";
+import type { ExecOptions, ExecRequest, ExecResult, KeepAlive, RunkoExec } from "@runko/core";
 import { Writable } from "node:stream";
 import { execFailureGuidance } from "./errors.js";
 import { resolveCwd } from "./path.js";
@@ -105,9 +105,9 @@ function collectorStream(stream: "stdout" | "stderr", onOutput: ExecOptions["onO
   });
 }
 
-export function createVercelExec(sandbox: VercelSandboxLike, root: string, keepAlive?: KeepAlive): NimboExec {
+export function createVercelExec(sandbox: VercelSandboxLike, root: string, keepAlive?: KeepAlive): RunkoExec {
   return {
-    // docs/tech/single-ledger.md §6.1（@nimbo/core 审批三值重构，P13-5-2c）：旧 "never" → "allow"（沙盒实现，隔离即边界）。
+    // docs/tech/single-ledger.md §6.1（@runko/core 审批三值重构，P13-5-2c）：旧 "never" → "allow"（沙盒实现，隔离即边界）。
     defaultApproval: "allow",
     describe(): string {
       return DESCRIBE;
@@ -131,7 +131,7 @@ export function createVercelExec(sandbox: VercelSandboxLike, root: string, keepA
 
       /**
        * [保活](../../../docs/terms.md)的第二个信号源（docs/tech/sandbox-keepalive.md §3.1）：
-       * 命令跑起来之后 core **一个 chunk 都不会产出**——`@nimbo/core` 的 `loop.ts`
+       * 命令跑起来之后 core **一个 chunk 都不会产出**——`@runko/core` 的 `loop.ts`
        * 把工具进度先缓冲、等命令 resolve 之后才重放。所以一条跑十分钟的命令，这十分钟
        * 里 core 侧的活动信号是零，而这恰恰是最容易把沙盒跑没的场景。
        *

@@ -28,8 +28,8 @@ import type {
   QueueStore,
   TurnInput,
   WriteResult,
-} from "@nimbo/agent";
-import type { JsonValue, NimboUIMessage } from "@nimbo/core";
+} from "@runko/agent";
+import type { JsonValue, RunkoUIMessage } from "@runko/core";
 import type { Db, Filter } from "mongodb";
 
 import type { DecisionDoc, LedgerDoc, QueueDoc } from "./collections.js";
@@ -111,7 +111,7 @@ export function createLedgerStore(db: Db): LedgerStore {
         { conversationId: entry.conversationId, seq: entry.seq },
         { projection: { _id: 0 } },
       );
-      if (existing !== null && fromBson<NimboUIMessage>(existing.payload).id === entry.message.id) {
+      if (existing !== null && fromBson<RunkoUIMessage>(existing.payload).id === entry.message.id) {
         return OK;
       }
       return { ok: false, reason: "rejected" };
@@ -132,7 +132,7 @@ export function createLedgerStore(db: Db): LedgerStore {
       return docs.map((doc) => ({
         conversationId: doc.conversationId,
         seq: doc.seq,
-        message: fromBson<NimboUIMessage>(doc.payload),
+        message: fromBson<RunkoUIMessage>(doc.payload),
         ts: doc.ts,
       }));
     },

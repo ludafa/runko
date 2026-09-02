@@ -1,21 +1,21 @@
 /**
  * 09-sandbox-e2b — the first of three "BYO cloud sandbox" examples
  * (docs/tech/sandbox.md §8, docs/plans/core-sdk.md P10):
- * instead of `NimboFS.fromMemory()`/`fromDirectory()` or the in-process
+ * instead of `RunkoFS.fromMemory()`/`fromDirectory()` or the in-process
  * `miniBash`/`justBash` exec implementations, an agent's files and bash
  * commands can live in a real E2B cloud sandbox (a Firecracker microVM) —
  * one line of `createSession({ workspace })` away.
  *
- * `@nimbo/sandbox-e2b` is, like `@nimbo/just-bash` (see 08), **not**
- * re-exported by `@nimbo/sdk` — it's an optional integration, installed
- * explicitly (`pnpm add @nimbo/sandbox-e2b e2b`).
+ * `@runko/sandbox-e2b` is, like `@runko/just-bash` (see 08), **not**
+ * re-exported by `@runko/sdk` — it's an optional integration, installed
+ * explicitly (`pnpm add @runko/sandbox-e2b e2b`).
  *
  * Structural interface, not a hard dependency on the `e2b` package (docs/06
  * §8.1): `e2bWorkspace(sandbox, opts?)` accepts anything shaped like
  * `E2bSandboxLike` (a `files`/`commands` method subset) — it never imports
  * "e2b" at runtime. That means the deterministic section below can hand it a
- * few dozen lines of an in-process fake and prove the whole `NimboFS &
- * NimboExec` contract works with zero credentials, zero network, and zero
+ * few dozen lines of an in-process fake and prove the whole `RunkoFS &
+ * RunkoExec` contract works with zero credentials, zero network, and zero
  * real e2b package import. `e2b` itself is only ever needed by the *host*
  * (this script), to actually create a real sandbox instance — the adapter
  * doesn't care.
@@ -27,7 +27,7 @@
  * Known, as-documented limitations (the adapter's own `describe()` / docs/03
  * P10-1 "实际改动"):
  *   - **cancellation abandons waiting, it does not kill the remote
- *     process**: aborting/timing out an `exec()` call makes nimbo stop
+ *     process**: aborting/timing out an `exec()` call makes runko stop
  *     *waiting* for the result (return 124/130 promptly), but the command
  *     may keep running inside the sandbox to completion — actually killing
  *     it needs e2b's separate `background: true` + `CommandHandle.kill()`
@@ -43,7 +43,7 @@
  *     the file tools see — see `packages/sandbox-e2b/README.md` "已知限制"
  *     for the full writeup (this is a "real FS + root anchor" trait shared by
  *     all three sandbox adapters, not e2b-specific);
- *   - each NimboFS file-tool call is a network round trip — prefer a single
+ *   - each RunkoFS file-tool call is a network round trip — prefer a single
  *     bash command for scan-heavy work (grep/find over many files) instead of
  *     many individual `glob`/`read-file` calls.
  *
@@ -67,9 +67,9 @@
  *      untested end-to-end here; results get backfilled into docs/plans/verification.md once a
  *      user supplies E2B_API_KEY.
  */
-import { createSession, defineAgent } from "@nimbo/sdk";
-import { e2bWorkspace } from "@nimbo/sandbox-e2b";
-import type { E2bEntryInfo, E2bSandboxLike } from "@nimbo/sandbox-e2b";
+import { createSession, defineAgent } from "@runko/sdk";
+import { e2bWorkspace } from "@runko/sandbox-e2b";
+import type { E2bEntryInfo, E2bSandboxLike } from "@runko/sandbox-e2b";
 import { Sandbox } from "e2b";
 import { resolveModel } from "./shared/model.ts";
 
@@ -162,7 +162,7 @@ async function realSandboxSection(): Promise<void> {
   const apiKey = process.env.E2B_API_KEY?.trim();
   if (apiKey === undefined || apiKey.length === 0) {
     console.log(
-      "[nimbo example] E2B_API_KEY is not set — skipping the real-sandbox section.\n" +
+      "[runko example] E2B_API_KEY is not set — skipping the real-sandbox section.\n" +
         "Get a free API key at https://e2b.dev (Dashboard -> API Keys) and set it in the repo-root .env " +
         '(see the "E2B" section of .env.template) or export it directly. No sandbox is created ' +
         "and no model call is made when this variable is missing.",

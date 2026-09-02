@@ -4,7 +4,7 @@ slug: turn-abort
 view: 技术
 layer: 逻辑层
 module: 轮编排
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["中断", "停止本轮", "收尾"]
 related: ["logic/orchestration/features/turn-abort.md", "logic/orchestration/plans/turn-abort.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -16,13 +16,13 @@ related: ["logic/orchestration/features/turn-abort.md", "logic/orchestration/pla
 
 ## 1. 方案总览
 
-一句话：**复用 `@nimbo/core` 已有的 `TurnOptions.signal`**，chat 服务端为每一轮持有一个 `AbortController`，`POST .../abort` 触发它；core 的 loop 在 step 边界看到 abort 就走**优雅收尾**（`status: 'interrupted'` + `NimboError.code: 'aborted'`），于是账本、GC、直播流全部按既有路径跑完。
+一句话：**复用 `@runko/core` 已有的 `TurnOptions.signal`**，chat 服务端为每一轮持有一个 `AbortController`，`POST .../abort` 触发它；core 的 loop 在 step 边界看到 abort 就走**优雅收尾**（`status: 'interrupted'` + `RunkoError.code: 'aborted'`），于是账本、GC、直播流全部按既有路径跑完。
 
 三个关键结论（也是本方案能这么小的原因）：
 
 1. **不需要新的账本条目类型、不需要 DB 迁移。** 被停止的一轮走的是 core 既有的「优雅中途降级」路径（`loop.ts` 的 `finalizeTurn` 产出一条带 `status: 'interrupted'` 的 `message-metadata` chunk 后正常 `return TurnResult`），因此 `turn-runner/persistence.ts` 的 `finalizeTurnPersistence` 照常执行：这一轮的消息落 `kind = 'message'` 行、`kind = 'chunk'` 行 GC、会话 header 更新。刷新页面的回放与正常收尾的一轮**走同一段代码**。
 2. **「停止」的可见性不需要新的 wire 帧。** 界面靠那条 `message-metadata`（`status: 'interrupted'`、`error.code: 'aborted'`）认出「已停止」，与它认「已失败」是同一个机制。
-3. **`@nimbo/core` 只需要一处小改**：在 `runTurn` 的 step 循环开头显式检查 `abortSignal.aborted`。不加这一处也能停（AI SDK 的 `streamText` 遇到已 abort 的 signal 会 reject，落进 loop 既有的 catch → `code: 'aborted'`），但那要多打**一次**模型调用才停得下来，而且把停止时机的确定性外包给了第三方库的行为细节。见 §6.1。
+3. **`@runko/core` 只需要一处小改**：在 `runTurn` 的 step 循环开头显式检查 `abortSignal.aborted`。不加这一处也能停（AI SDK 的 `streamText` 遇到已 abort 的 signal 会 reject，落进 loop 既有的 catch → `code: 'aborted'`），但那要多打**一次**模型调用才停得下来，而且把停止时机的确定性外包给了第三方库的行为细节。见 §6.1。
 
 ### 1.1 改动落点
 
@@ -47,7 +47,7 @@ related: ["logic/orchestration/features/turn-abort.md", "logic/orchestration/pla
 
 ```ts
 if (abortSignal.aborted) {
-  const error: NimboError = { code: "aborted", message: "Turn aborted before this step began (host abort signal)." };
+  const error: RunkoError = { code: "aborted", message: "Turn aborted before this step began (host abort signal)." };
   yield finalizeTurn({ ..., status: statusForError(error), error });
   return { finalResponse, usage };
 }
@@ -83,7 +83,7 @@ export function abortTurn(conversationId: string): boolean;
 4. 结掉**已经挂起**的审批与提问：`pendingReviews` 全部按 `deny`（理由文案说明是被停止）、`pendingQuestions` 全部按 `{ outcome: 'timeout' }`。不做这一步的话，一轮停在审批卡片上时 core 正 `await onReview`，abort 信号对它毫无作用——要等 `CHAT_APPROVAL_TIMEOUT_MS`（默认 240 秒）才动。**这是本功能唯一一处「abort 信号本身不够」的地方。**
 5. `abortController.abort(new Error('Turn stopped by the user.'))`。
 
-`TurnDrivenSession.stream` 的签名随之放宽为 `stream(input: string, opts?: { signal?: AbortSignal }): AsyncGenerator<NimboChunk, TurnResult>`——`@nimbo/core` 的 `Session.stream` 本就是这个形状（`TurnOptions`），测试用的 fake 忽略第二个参数也仍然满足接口（向后兼容，既有 fake 不改也能编译）。
+`TurnDrivenSession.stream` 的签名随之放宽为 `stream(input: string, opts?: { signal?: AbortSignal }): AsyncGenerator<RunkoChunk, TurnResult>`——`@runko/core` 的 `Session.stream` 本就是这个形状（`TurnOptions`），测试用的 fake 忽略第二个参数也仍然满足接口（向后兼容，既有 fake 不改也能编译）。
 
 ### 3.2 `routes/chat.ts`：`POST .../abort`
 
@@ -198,7 +198,7 @@ export function isTurnPreparing(conversationId: string): boolean;
 
 ### 4.3 「已停止」的样子（`turn-marker.tsx`）
 
-`TurnFailedBar` 目前把四种 `NimboError.code` 一律渲染成 destructive Alert（`aborted` 的标题已经是「已中止」）。改为 `aborted` 走**中性 Alert + 标题「已停止」**，正文用固定的中文文案，不把 core 那句英文 message 抛给用户（那是给日志看的）。其余三种 code 不变。
+`TurnFailedBar` 目前把四种 `RunkoError.code` 一律渲染成 destructive Alert（`aborted` 的标题已经是「已中止」）。改为 `aborted` 走**中性 Alert + 标题「已停止」**，正文用固定的中文文案，不把 core 那句英文 message 抛给用户（那是给日志看的）。其余三种 code 不变。
 
 ## 5. 时序图
 
@@ -294,7 +294,7 @@ sequenceDiagram
 
 ### 6.1 为什么要改 core，而不是只靠 AI SDK 的 abort 行为
 
-不改 core 也能停：abort 后当前 step 的 `streamText` 会 reject（或工具收到 signal 后本步正常收尾），loop 既有的 catch 会把它归成 `code: 'aborted'`。但「工具执行中被停止」这条路径下，本步是**正常收尾**的，loop 会照常进入下一步、再打一次模型调用，靠那次调用因 already-aborted 而抛错才停下来——多花一次钱，且停止时机取决于第三方库对已 abort signal 的处理细节。step 边界显式检查把这件事变成 nimbo 自己的确定性行为。这处改动不动任何 API，属 `patch`。
+不改 core 也能停：abort 后当前 step 的 `streamText` 会 reject（或工具收到 signal 后本步正常收尾），loop 既有的 catch 会把它归成 `code: 'aborted'`。但「工具执行中被停止」这条路径下，本步是**正常收尾**的，loop 会照常进入下一步、再打一次模型调用，靠那次调用因 already-aborted 而抛错才停下来——多花一次钱，且停止时机取决于第三方库对已 abort signal 的处理细节。step 边界显式检查把这件事变成 runko 自己的确定性行为。这处改动不动任何 API，属 `patch`。
 
 ### 6.2 停止不是原子的
 

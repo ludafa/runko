@@ -4,17 +4,17 @@
  * `mountSkillFiles`）。Session-level 接线（system prompt 注入、`load-skill`
  * 条件内置、挂载后 fs 可读、`getSkill` 端到端）在 `test/load-skill.test.ts`。
  *
- * `@nimbo/virtual-fs`（devDependency，非运行时依赖，同 `test/integration.test.ts`
- * 先例）用来构造 `Skill.fromFS` 的输入 FS——不需要为此手搓一个 `NimboFS` 假实现。
+ * `@runko/virtual-fs`（devDependency，非运行时依赖，同 `test/integration.test.ts`
+ * 先例）用来构造 `Skill.fromFS` 的输入 FS——不需要为此手搓一个 `RunkoFS` 假实现。
  */
 import { mkdtemp, rm, writeFile, mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { fromMemory } from "@nimbo/virtual-fs";
+import { fromMemory } from "@runko/virtual-fs";
 import { defineSkill, Skill } from "../src/skill.js";
 import { buildAvailableSkillsBlock, createGetSkill, mountSkillFiles, skillMountPath } from "../src/skills/registry.js";
-import type { NimboFS } from "../src/types.js";
+import type { RunkoFS } from "../src/types.js";
 
 const FIXTURES_DIR = join(import.meta.dirname, "fixtures", "skills");
 
@@ -38,7 +38,7 @@ describe("Skill.fromDirectory (packaged, real disk)", () => {
   });
 
   it("rejects with a guidance error when SKILL.md is missing the required description frontmatter", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "nimbo-skill-"));
+    const dir = await mkdtemp(join(tmpdir(), "runko-skill-"));
     try {
       await writeFile(join(dir, "SKILL.md"), "---\nname: broken\n---\n\n# Broken\n");
       await expect(Skill.fromDirectory(dir)).rejects.toThrow(/description/i);
@@ -48,7 +48,7 @@ describe("Skill.fromDirectory (packaged, real disk)", () => {
   });
 
   it("rejects with a guidance error when the directory has no SKILL.md at all", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "nimbo-skill-"));
+    const dir = await mkdtemp(join(tmpdir(), "runko-skill-"));
     try {
       await expect(Skill.fromDirectory(dir)).rejects.toThrow(/SKILL\.md/);
     } finally {
@@ -57,7 +57,7 @@ describe("Skill.fromDirectory (packaged, real disk)", () => {
   });
 
   it("recurses into subdirectories for attached files", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "nimbo-skill-"));
+    const dir = await mkdtemp(join(tmpdir(), "runko-skill-"));
     try {
       await writeFile(join(dir, "SKILL.md"), "---\ndescription: nested files test\n---\n\nbody\n");
       await mkdir(join(dir, "scripts"));
@@ -71,7 +71,7 @@ describe("Skill.fromDirectory (packaged, real disk)", () => {
   });
 });
 
-describe("Skill.fromFS (packaged, on NimboFS)", () => {
+describe("Skill.fromFS (packaged, on RunkoFS)", () => {
   it("loads the same pdf-fill content, byte for byte, over a MemoryFS", async () => {
     const skillMd = await readFile(join(FIXTURES_DIR, "pdf-fill", "SKILL.md"), "utf8");
     const referenceMd = await readFile(join(FIXTURES_DIR, "pdf-fill", "reference.md"), "utf8");
@@ -102,7 +102,7 @@ describe("Skill.fromFS (packaged, on NimboFS)", () => {
 
   it("recurses into subdirectories for attached files, same as fromDirectory", async () => {
     const fs = fromMemory({
-      "/skills/nested/SKILL.md": "---\ndescription: nested files over NimboFS\n---\n\nbody\n",
+      "/skills/nested/SKILL.md": "---\ndescription: nested files over RunkoFS\n---\n\nbody\n",
       "/skills/nested/scripts/run.py": "print('hi')",
     });
     const skill = await Skill.fromFS(fs, "/skills/nested");
@@ -236,7 +236,7 @@ describe("mountSkillFiles", () => {
 
   it("is a no-op (never touches the FS) when no skill declares files", async () => {
     const calls: string[] = [];
-    const fs: NimboFS = {
+    const fs: RunkoFS = {
       readFile: async () => new Uint8Array(),
       writeFile: async (path) => {
         calls.push(path);
@@ -252,7 +252,7 @@ describe("mountSkillFiles", () => {
   });
 
   it("wraps a write failure with skill name + target path context, preserving the underlying guidance", async () => {
-    const failingFs: NimboFS = {
+    const failingFs: RunkoFS = {
       readFile: async () => new Uint8Array(),
       writeFile: async () => {
         throw new Error("disk is full");

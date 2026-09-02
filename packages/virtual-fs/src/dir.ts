@@ -4,7 +4,7 @@
  */
 import * as nodeFs from "node:fs/promises";
 import * as nodePath from "node:path";
-import type { DirEntry, FileStat, NimboFS } from "@nimbo/core";
+import type { DirEntry, FileStat, RunkoFS } from "@runko/core";
 import { inferMimeType } from "./mime.js";
 import { globToRegExp, normalizePath } from "./path.js";
 import { NotFoundError } from "./memory.js";
@@ -32,7 +32,7 @@ function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
 }
 
-export class DirFS implements NimboFS {
+export class DirFS implements RunkoFS {
   readonly rootDir: string;
   private readonly ignorePatterns: RegExp[];
 

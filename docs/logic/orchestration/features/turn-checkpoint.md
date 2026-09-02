@@ -4,7 +4,7 @@ slug: turn-checkpoint
 view: 功能
 layer: 逻辑层
 module: 轮编排
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["轮检查点", "代码快照", "沙盒生命周期"]
 related: ["logic/orchestration/plans/turn-checkpoint.md", "logic/orchestration/tech/turn-checkpoint.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -30,7 +30,7 @@ related: ["logic/orchestration/plans/turn-checkpoint.md", "logic/orchestration/t
 
 现状：agent 在沙盒里改的文件，如果还没 `git push`，全靠 Vercel 的[平台快照](../../../terms.md)兜底。平台快照是**加速缓存**、会过期——一旦过期，沙盒重建就只能重新 clone 分支，agent 这一段没 push 的改动（含未 commit 的改动、新建文件）全部消失。用户的感受是「我明明让它写了半天，怎么回来全没了」。
 
-代码快照把这段工作搬到**持久层**：每轮收尾把工作区完整状态推到用户仓库的一个隐藏 git 引用（`refs/nimbo/wip/<sessionId>`），不依赖平台快照是否还在。
+代码快照把这段工作搬到**持久层**：每轮收尾把工作区完整状态推到用户仓库的一个隐藏 git 引用（`refs/runko/wip/<sessionId>`），不依赖平台快照是否还在。
 
 ### 1.2 保活解决的问题
 
@@ -48,7 +48,7 @@ related: ["logic/orchestration/plans/turn-checkpoint.md", "logic/orchestration/t
 代码快照平时用户和模型都察觉不到：
 
 - **不动会话分支的提交历史**——快照不 commit 到你的分支，agent「不主动 commit」的承诺不被破坏。
-- **GitHub UI 看不到**——快照存在 `refs/nimbo/*` 下，不在 `refs/heads/*` 分支命名空间里，GitHub 网页、PR 列表都不显示，也**不触发 CI / preview 部署**。
+- **GitHub UI 看不到**——快照存在 `refs/runko/*` 下，不在 `refs/heads/*` 分支命名空间里，GitHub 网页、PR 列表都不显示，也**不触发 CI / preview 部署**。
 - **仓库管理员可见但不算后门**——`git ls-remote` 能列出这些引用（如实记录，不藏）。
 
 保活平时也无感：turn 一结束心跳立刻停，用户离开 5 分钟后照常[休眠](../../../terms.md)、照常存平台快照，唤醒体验完全不变。

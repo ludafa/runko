@@ -1,22 +1,22 @@
-# @nimbo/mini-bash
+# @runko/mini-bash
 
-`NimboExec` 的纯 TypeScript 解释器实现：不 fork 子进程、不碰真实磁盘与网络，六个只读命令直接跑在任意 `NimboFS` 上——"模式 A 同源工作区"（bash 与文件工具共享同一份虚拟文件系统，一致性是结构性的，无需同步）的纯内存实证。
+`RunkoExec` 的纯 TypeScript 解释器实现：不 fork 子进程、不碰真实磁盘与网络，六个只读命令直接跑在任意 `RunkoFS` 上——"模式 A 同源工作区"（bash 与文件工具共享同一份虚拟文件系统，一致性是结构性的，无需同步）的纯内存实证。
 
-> 一般用户装 [`@nimbo/sdk`](../sdk/README.md) 即可（re-export 本包）。定位是安全默认与测试/演示载体；要真实命令执行用 `@nimbo/core` 的 `localExec`，或注入宿主自己的沙盒实现（见 [core-sdk · 技术方案 §4.5a](../../docs/logic/engine/tech/core-sdk.md)）。
+> 一般用户装 [`@runko/sdk`](../sdk/README.md) 即可（re-export 本包）。定位是安全默认与测试/演示载体；要真实命令执行用 `@runko/core` 的 `localExec`，或注入宿主自己的沙盒实现（见 [core-sdk · 技术方案 §4.5a](../../docs/logic/engine/tech/core-sdk.md)）。
 >
-> **分档说明**：本包是**零依赖极简档**——六个只读命令 + 四个控制操作符，随 `@nimbo/sdk` 一起装，无需额外安装。Claude 系模型高频产出的 `if`/`for`/`while`/`case` 控制流脚本超出这个语法面时，换 **`@nimbo/just-bash`**（[README](../just-bash/README.md)）——全语法档，基于 vercel-labs/just-bash，因依赖树含 wasm 大件而不随 `@nimbo/sdk` 一起装，需显式 `pnpm add @nimbo/just-bash`。两者都是 `NimboExec` 接口的实现，一行代码互换（`exec: miniBash(fs)` ↔ `exec: justBash(fs)`），loop/session 代码零改动（见 [core-sdk · 技术方案 §4.5b](../../docs/logic/engine/tech/core-sdk.md)）。
+> **分档说明**：本包是**零依赖极简档**——六个只读命令 + 四个控制操作符，随 `@runko/sdk` 一起装，无需额外安装。Claude 系模型高频产出的 `if`/`for`/`while`/`case` 控制流脚本超出这个语法面时，换 **`@runko/just-bash`**（[README](../just-bash/README.md)）——全语法档，基于 vercel-labs/just-bash，因依赖树含 wasm 大件而不随 `@runko/sdk` 一起装，需显式 `pnpm add @runko/just-bash`。两者都是 `RunkoExec` 接口的实现，一行代码互换（`exec: miniBash(fs)` ↔ `exec: justBash(fs)`），loop/session 代码零改动（见 [core-sdk · 技术方案 §4.5b](../../docs/logic/engine/tech/core-sdk.md)）。
 
 ## 安装
 
 ```sh
-pnpm add @nimbo/mini-bash
+pnpm add @runko/mini-bash
 ```
 
 ## 最小用例
 
 ```ts
-import { miniBash } from "@nimbo/mini-bash";
-import { fromMemory } from "@nimbo/virtual-fs";   // 任何 NimboFS 实现都行
+import { miniBash } from "@runko/mini-bash";
+import { fromMemory } from "@runko/virtual-fs";   // 任何 RunkoFS 实现都行
 
 const fs = fromMemory({ "notes/todo.txt": "buy milk\nwrite docs\nship it\n" });
 const exec = miniBash(fs);
@@ -31,9 +31,9 @@ console.log(result);   // { exitCode: 0, stdout: "2:write docs\n", stderr: "", d
 接进 session（同源工作区，`bash` 工具随 `exec` 注入自动出现）：
 
 ```ts
-import { createSession, defineAgent, miniBash, NimboFS } from "@nimbo/sdk";
+import { createSession, defineAgent, miniBash, RunkoFS } from "@runko/sdk";
 
-const fs = NimboFS.fromMemory({});
+const fs = RunkoFS.fromMemory({});
 const session = createSession(defineAgent({ model: "anthropic/claude-sonnet-5" }), {
   fs,
   exec: miniBash(fs),   // 同一个 fs：write_file 写的文件，cat 立即可见
@@ -46,7 +46,7 @@ const session = createSession(defineAgent({ model: "anthropic/claude-sonnet-5" }
 
 | 导出 | 说明 |
 |---|---|
-| `miniBash(fs: NimboFS): NimboExec` | 返回跑在 `fs` 上的解释器。`defaultApproval: "never"`（全只读、零副作用，无需审批）；`describe()` 返回命令清单与语义说明（自动拼进 `bash` 工具描述） |
+| `miniBash(fs: RunkoFS): RunkoExec` | 返回跑在 `fs` 上的解释器。`defaultApproval: "never"`（全只读、零副作用，无需审批）；`describe()` 返回命令清单与语义说明（自动拼进 `bash` 工具描述） |
 
 ## 命令语言
 

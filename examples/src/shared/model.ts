@@ -4,7 +4,7 @@
  * when nothing is configured. Each example is split into two parts:
  *
  *   1. A deterministic section that needs no network access and no model —
- *      it exercises nimbo's VirtualFS/NimboExec/skills mechanics directly
+ *      it exercises runko's VirtualFS/RunkoExec/skills mechanics directly
  *      and always prints the same shape of output.
  *   2. A model-driven section (the actual agent loop) that requires a model
  *      to be configured. Without one, `resolveModel()` prints setup
@@ -25,9 +25,9 @@
  *      something re-implemented here. Both variables must be set and
  *      non-empty for this path to activate — either missing falls through
  *      to path 2, treated the same as neither being configured. The model
- *      id defaults to `"deepseek-chat"`; set `NIMBO_MODEL` to override it
+ *      id defaults to `"deepseek-chat"`; set `RUNKO_MODEL` to override it
  *      (e.g. `"deepseek-reasoner"`) when this path is the one that ends up
- *      active. Note the overload: here `NIMBO_MODEL` means a bare DeepSeek
+ *      active. Note the overload: here `RUNKO_MODEL` means a bare DeepSeek
  *      model id, not a gateway `"provider/model"` string as it does for
  *      path 2 below — the two paths are mutually exclusive per run (the
  *      DeepSeek vars being present is what decides which reading applies),
@@ -38,13 +38,13 @@
  *      SDK Gateway model id such as `"anthropic/claude-sonnet-5"` is a
  *      first-class `LanguageModel` value, no provider package required (see
  *      docs/tech/core-sdk.md §4.3 and the root README's five-line example).
- *      Requires `NIMBO_MODEL` + `AI_GATEWAY_API_KEY`.
+ *      Requires `RUNKO_MODEL` + `AI_GATEWAY_API_KEY`.
  *
  * Neither path configured → setup instructions covering both, then a clean
  * exit.
  *
  * Prefer a different provider entirely (e.g. `@ai-sdk/anthropic`)? Edit
- * `resolveModel()`'s body directly — nimbo's `AgentDefinition.model` accepts
+ * `resolveModel()`'s body directly — runko's `AgentDefinition.model` accepts
  * any AI SDK `LanguageModel`; the two paths above are just the
  * zero-extra-setup options these examples default to.
  */
@@ -54,18 +54,18 @@ import type { LanguageModel } from "ai";
 import { createDeepSeek } from "@ai-sdk/deepseek";
 
 const SETUP_INSTRUCTIONS = `
-[nimbo example] No model configured — skipping the model-driven part of this example.
+[runko example] No model configured — skipping the model-driven part of this example.
 
 To run it against DeepSeek directly:
 
   Create the repo-root .env (gitignored, never committed) with:
     DEEPSEEK_API_BASE_URL=https://your-deepseek-endpoint/v1
     DEEPSEEK_API_TOKEN=...
-  Optionally: export NIMBO_MODEL="deepseek-reasoner"   # overrides the default "deepseek-chat"
+  Optionally: export RUNKO_MODEL="deepseek-reasoner"   # overrides the default "deepseek-chat"
 
 ...or run it against the AI SDK Gateway:
 
-  export NIMBO_MODEL="anthropic/claude-sonnet-5"   # any AI SDK Gateway model id
+  export RUNKO_MODEL="anthropic/claude-sonnet-5"   # any AI SDK Gateway model id
   export AI_GATEWAY_API_KEY="..."                  # https://vercel.com/ai-gateway
 
 ...or edit examples/shared/model.ts to construct a provider instance directly
@@ -119,13 +119,13 @@ function resolveDeepSeekModel(): LanguageModel | undefined {
   }
 
   const deepseek = createDeepSeek({ baseURL, apiKey });
-  const modelId = process.env.NIMBO_MODEL?.trim();
+  const modelId = process.env.RUNKO_MODEL?.trim();
   return deepseek(modelId === undefined || modelId.length === 0 ? DEEPSEEK_DEFAULT_MODEL_ID : modelId);
 }
 
 /** AI SDK Gateway path (see header comment, point 2) — `undefined` when not configured. */
 function resolveGatewayModel(): LanguageModel | undefined {
-  const spec = process.env.NIMBO_MODEL;
+  const spec = process.env.RUNKO_MODEL;
   if (spec === undefined || spec.trim().length === 0) {return undefined;}
   return spec;
 }

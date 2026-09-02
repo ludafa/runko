@@ -4,7 +4,7 @@ slug: steer-and-queue
 view: 施工
 layer: 逻辑层
 module: 轮编排
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["待发队列", "插话", "排队", "conversation-drained"]
 related: ["logic/orchestration/features/steer-and-queue.md", "logic/orchestration/tech/steer-and-queue.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -15,7 +15,7 @@ related: ["logic/orchestration/features/steer-and-queue.md", "logic/orchestratio
 
 ## 状态
 
-**已交付**（2026-07-25）：代码完成，自动化验证全绿，真机端到端（真沙盒 + 真模型）通过。[steer](../../../terms.md) 侧未改 `@nimbo/core`（它本就具备 `Session.steer()`）。
+**已交付**（2026-07-25）：代码完成，自动化验证全绿，真机端到端（真沙盒 + 真模型）通过。[steer](../../../terms.md) 侧未改 `@runko/core`（它本就具备 `Session.steer()`）。
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
@@ -41,7 +41,7 @@ related: ["logic/orchestration/features/steer-and-queue.md", "logic/orchestratio
 ### Q1 队列存储（无行为变化）
 
 - `db/schema.ts`：`conversations` 加 `queuedMessagesJson: text('queued_messages_json').notNull().default('[]')`。
-- `pnpm --filter @nimbo-chat/node-server db:generate` 生成 `drizzle/0007_*.sql`，`db:migrate` 应用。
+- `pnpm --filter @runko-chat/node-server db:generate` 生成 `drizzle/0007_*.sql`，`db:migrate` 应用。
 - `agent/store.ts`：`listQueuedMessages` / `enqueueMessage`（含上限）/ `removeQueuedMessage` / `clearQueuedMessages` / `dequeueMessage`（取队首并移除）/ `requeueFront`（起轮失败回写）。读回一律 zod `parse`，**不用类型断言**。
 - 产出：`store.test.ts` 覆盖增删清空与上限。
 
@@ -109,9 +109,9 @@ related: ["logic/orchestration/features/steer-and-queue.md", "logic/orchestratio
 
 ### 端到端（真机）
 
-> **前置**：`.env` 需备齐 `NIMBO_MODEL` + 模型凭据、`GITHUB_REPO`/`GITHUB_PAT`、沙盒 provider 凭据（Vercel 或 E2B）。
+> **前置**：`.env` 需备齐 `RUNKO_MODEL` + 模型凭据、`GITHUB_REPO`/`GITHUB_PAT`、沙盒 provider 凭据（Vercel 或 E2B）。
 > **跑法**：`pnpm chat:bootstrap`（首次或改过 schema 后必跑——本期新增 `0007` migration）→ 两个终端分别 `pnpm chat:server`、`pnpm chat:web` → 浏览器登录后按下面 6 条走。
-> **注意**：每建一个会话都会真的开一个云沙盒并在 `GITHUB_REPO` 上建一条 `nimbo/chat-<id>` 分支，验证完记得清理。
+> **注意**：每建一个会话都会真的开一个云沙盒并在 `GITHUB_REPO` 上建一条 `runko/chat-<id>` 分支，验证完记得清理。
 
 1. 起一轮长任务（让 agent 跑一个多步任务），进行中连发 3 条排队消息 → 待发区显示 3 条，当前轮输出不受影响。
 2. 该轮收尾 → 第 1 条自动作为新一轮发出，时间线顺序正确；随后第 2、3 条依次发出。

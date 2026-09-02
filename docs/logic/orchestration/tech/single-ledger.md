@@ -4,7 +4,7 @@ slug: single-ledger
 view: 技术
 layer: 逻辑层
 module: 轮编排
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["账本", "UIMessage", "seq", "断线续传", "数据模型"]
 related: ["logic/orchestration/features/single-ledger.md", "logic/orchestration/plans/single-ledger.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -15,14 +15,14 @@ related: ["logic/orchestration/features/single-ledger.md", "logic/orchestration/
 
 ## 0. 命题
 
-nimbo 的 [loop](../../../terms.md) 改用「[UIMessage](../../../terms.md) 数组」作为工作格式与唯一存档，每次调模型前用[官方转换器（`convertToModelMessages`）](../../../terms.md)现场推导 [ModelMessage](../../../terms.md)——从此全系统只有一种落盘数据，模型视图永远是推导的、从不单独存储。「当时喂给模型的」与「恢复后推导出的」出自同一段官方转换代码，一致性是**结构保证**而非写入纪律。
+runko 的 [loop](../../../terms.md) 改用「[UIMessage](../../../terms.md) 数组」作为工作格式与唯一存档，每次调模型前用[官方转换器（`convertToModelMessages`）](../../../terms.md)现场推导 [ModelMessage](../../../terms.md)——从此全系统只有一种落盘数据，模型视图永远是推导的、从不单独存储。「当时喂给模型的」与「恢复后推导出的」出自同一段官方转换代码，一致性是**结构保证**而非写入纪律。
 
 ## 1. 方案总览
 
-- **工作态 = 存档**：loop 的工作状态是 `NimboUIMessage[]`（不再是 `ModelMessage[]`）；[`SessionState`](../../../terms.md) 的 `messages` 也是 `NimboUIMessage[]`。每步调模型前 `convertToModelMessages(messages)` 现场推导请求消息（`packages/core/src/loop.ts` 的 `runOneStep`）。
+- **工作态 = 存档**：loop 的工作状态是 `RunkoUIMessage[]`（不再是 `ModelMessage[]`）；[`SessionState`](../../../terms.md) 的 `messages` 也是 `RunkoUIMessage[]`。每步调模型前 `convertToModelMessages(messages)` 现场推导请求消息（`packages/core/src/loop.ts` 的 `runOneStep`）。
 - **单一落盘**：一个 [会话（session）](../../../terms.md) 只有一张按 [seq（序号）](../../../terms.md) 递增的 [账本（ledger）](../../../terms.md)（`conversation_events` 表），既供界面[回放（replay）](../../../terms.md)、又供[模型上下文](../../../terms.md)恢复。旧的 `nimbo_state_json` 字段删除。
-- **过程数据用 data 部件**：nimbo 特有的过程数据（文件变更、计划更新、轮内错误、工具进度）用 [data 部件（data part）](../../../terms.md) 表达，官方转换器转 ModelMessage 时自动丢弃，模型永远看不见。
-- **实时传输 = 官方 UI 消息流协议**：`session.stream()` 吐 AI SDK 的 [chunk（`UIMessageChunk` 词汇表）](../../../terms.md)（`NimboChunk`），任意 AI SDK 兼容客户端可直接消费。
+- **过程数据用 data 部件**：runko 特有的过程数据（文件变更、计划更新、轮内错误、工具进度）用 [data 部件（data part）](../../../terms.md) 表达，官方转换器转 ModelMessage 时自动丢弃，模型永远看不见。
+- **实时传输 = 官方 UI 消息流协议**：`session.stream()` 吐 AI SDK 的 [chunk（`UIMessageChunk` 词汇表）](../../../terms.md)（`RunkoChunk`），任意 AI SDK 兼容客户端可直接消费。
 - **`SessionEvent`/`SessionItem` 退役**：宿主改为消费 UIMessage 部件流。
 
 ## 2. 关键数据结构
@@ -31,21 +31,21 @@ nimbo 的 [loop](../../../terms.md) 改用「[UIMessage](../../../terms.md) 数�
 
 ### 2.1 core 侧类型
 
-- `NimboUIMessage = UIMessage<NimboMessageMetadata, NimboDataParts>`——TOOLS 类型参数刻意留默认 `UITools`（nimbo 工具集编译期完全动态，没有字面量工具名联合可精确刻画；工具部件的 `input`/`output` 因此落在 `unknown`，这是既有约束，非本方案新引入）。
-- `NimboChunk = InferUIMessageChunk<NimboUIMessage>`——`session.stream()` 的产出类型。
-- `NimboMessageMetadata`——[元数据（metadata）](../../../terms.md)，不参与官方转换（模型永远看不到）：`{ turn?, usage?, status?: 'completed'|'failed'|'interrupted', durationMs?, toolDurationMs?, error?, steered? }`。`status` 三态由 `NimboError.code` 四态折叠而来（`aborted` → `interrupted`，其余三个 → `failed`，见 `loop.ts` 的 `statusForError()`）；`durationMs` 是全 turn 墙钟耗时（`runTurn` 入口到收尾，成功/失败/中断皆有，`finalizeTurn` 统一写入；web 的轮结果条领头展示，2026-07-16 增补）；`toolDurationMs` 是本轮工具执行墙钟（全部 `data-tool-timing` 的 `[executionStartedAt, completedAt]` **区间并集**——并行批重叠只计一次，恒 ≤ `durationMs`；`durationMs - toolDurationMs` 即 agent/模型自身时间，web 轮结果条按「耗时 · 工具 · agent」拆分展示，同日增补）。
-- `NimboDataParts`——五个 data 部件：`file-change`、`plan-update`、`error`、`tool-progress`、`tool-timing`；其中 `tool-progress` 是 [transient](../../../terms.md)（写入期分流，绝不进 `UIMessage.parts`），`tool-timing` 与之相反是**持久**部件（工具调用起止时间戳，随消息存档、随会话回放，见 §3.2）。
-- `SessionState = { id, turn, messages: NimboUIMessage[], createdAt, fsSnapshot? }`——恢复用可序列化快照。
+- `RunkoUIMessage = UIMessage<RunkoMessageMetadata, RunkoDataParts>`——TOOLS 类型参数刻意留默认 `UITools`（runko 工具集编译期完全动态，没有字面量工具名联合可精确刻画；工具部件的 `input`/`output` 因此落在 `unknown`，这是既有约束，非本方案新引入）。
+- `RunkoChunk = InferUIMessageChunk<RunkoUIMessage>`——`session.stream()` 的产出类型。
+- `RunkoMessageMetadata`——[元数据（metadata）](../../../terms.md)，不参与官方转换（模型永远看不到）：`{ turn?, usage?, status?: 'completed'|'failed'|'interrupted', durationMs?, toolDurationMs?, error?, steered? }`。`status` 三态由 `RunkoError.code` 四态折叠而来（`aborted` → `interrupted`，其余三个 → `failed`，见 `loop.ts` 的 `statusForError()`）；`durationMs` 是全 turn 墙钟耗时（`runTurn` 入口到收尾，成功/失败/中断皆有，`finalizeTurn` 统一写入；web 的轮结果条领头展示，2026-07-16 增补）；`toolDurationMs` 是本轮工具执行墙钟（全部 `data-tool-timing` 的 `[executionStartedAt, completedAt]` **区间并集**——并行批重叠只计一次，恒 ≤ `durationMs`；`durationMs - toolDurationMs` 即 agent/模型自身时间，web 轮结果条按「耗时 · 工具 · agent」拆分展示，同日增补）。
+- `RunkoDataParts`——五个 data 部件：`file-change`、`plan-update`、`error`、`tool-progress`、`tool-timing`；其中 `tool-progress` 是 [transient](../../../terms.md)（写入期分流，绝不进 `UIMessage.parts`），`tool-timing` 与之相反是**持久**部件（工具调用起止时间戳，随消息存档、随会话回放，见 §3.2）。
+- `SessionState = { id, turn, messages: RunkoUIMessage[], createdAt, fsSnapshot? }`——恢复用可序列化快照。
 - 恢复校验分两层：`sessionStateSchema`（zod，浅层结构判别）+ `validateSessionMessages()`（ai 的 `validateUIMessages()`，深层语义校验 part/metadata/data 部件形状）。
 
 ### 2.2 落盘 schema（`apps/node-server/src/db/schema.ts`）
 
-`conversations`（2026-07-17 由 `chat_sessions` 更名，解开 "session" 三重超载；同批 `agent_events` → `conversation_events`、`nimbo_*` 列 → `agent_session_*`——库表命名不带产品名）：一行一个对话，1:1 绑定沙盒（`sandboxName`）与专用 git 分支（`branchName`）。SDK 的 `SessionState` 不整块存 JSON——它的 `messages` 落到 `conversation_events` 的 `message` 条目，它的三个标量（`id`/`createdAt`/`turn`）落到三个 `agent_session_*` 列，是一个小小的**「agent 会话 header」**，不是整份账本。三个 `agent_session_*` 值在本对话第一轮真正完成前都是 `null`。
+`conversations`（2026-07-17 由 `chat_sessions` 更名，解开 "session" 三重超载；同批 `agent_events` → `conversation_events`、`runko_*` 列 → `agent_session_*`——库表命名不带产品名）：一行一个对话，1:1 绑定沙盒（`sandboxName`）与专用 git 分支（`branchName`）。SDK 的 `SessionState` 不整块存 JSON——它的 `messages` 落到 `conversation_events` 的 `message` 条目，它的三个标量（`id`/`createdAt`/`turn`）落到三个 `agent_session_*` 列，是一个小小的**「agent 会话 header」**，不是整份账本。三个 `agent_session_*` 值在本对话第一轮真正完成前都是 `null`。
 
 `conversation_events`：单账本，两类条目（`kind`）共享一套 per-session 单调递增的 `seq` 空间（进程重启后从 `MAX(seq)` 续，不是全局自增）：
 
-- `kind = 'message'`：一条**完工的** `NimboUIMessage`，`payloadJson` 逐字节等同 `Session.toJSON().messages` 会产出的形状——**会话恢复只读它**（`store.ts` 的 `loadResumeState`），也是**永久历史供回放**（永不删、永不改）。
-- `kind = 'chunk'`：进行中那一轮的一个**耐久块** `NimboChunk`（工具态含 `approval-requested`/`approval-responded`、data 部件、步标记、消息 start/finish/metadata；**不含** text-delta/reasoning-delta/transient data 部件——那些只活在 SSE 线上）。它存在的唯一目的是**让刷新页面能重建挂起中的审批/提问**；本轮优雅收尾时被整批删除（被本轮的 `message` 条目取代，`deleteChunkEventsAfter`）。收尾后仍残留的 `chunk` 条目只可能是本轮中途崩溃、没走优雅收尾——属**可接受残留**，不再清理。概念定位（为什么它是「生成过程中的临时记录」、与 `message` 条目如何[折叠](../../../terms.md)）见 §2.4。
+- `kind = 'message'`：一条**完工的** `RunkoUIMessage`，`payloadJson` 逐字节等同 `Session.toJSON().messages` 会产出的形状——**会话恢复只读它**（`store.ts` 的 `loadResumeState`），也是**永久历史供回放**（永不删、永不改）。
+- `kind = 'chunk'`：进行中那一轮的一个**耐久块** `RunkoChunk`（工具态含 `approval-requested`/`approval-responded`、data 部件、步标记、消息 start/finish/metadata；**不含** text-delta/reasoning-delta/transient data 部件——那些只活在 SSE 线上）。它存在的唯一目的是**让刷新页面能重建挂起中的审批/提问**；本轮优雅收尾时被整批删除（被本轮的 `message` 条目取代，`deleteChunkEventsAfter`）。收尾后仍残留的 `chunk` 条目只可能是本轮中途崩溃、没走优雅收尾——属**可接受残留**，不再清理。概念定位（为什么它是「生成过程中的临时记录」、与 `message` 条目如何[折叠](../../../terms.md)）见 §2.4。
 
 ### 2.3 领域图
 
@@ -58,7 +58,7 @@ erDiagram
     conversation_events ||..|| chunk_row : "kind = 'chunk'"
 
     conversations {
-        text id PK "chat 会话 id，非 nimbo SessionState.id"
+        text id PK "chat 会话 id，非 runko SessionState.id"
         text user_id FK "所属用户"
         text branch_name "专用 git 分支"
         text sandbox_name "1:1 绑定的 Vercel 沙盒"
@@ -77,12 +77,12 @@ erDiagram
         text payload_json "落盘载荷，两类见下（旧 type 冗余列已删，临时查询用 json_extract）"
     }
     message_row {
-        json payload "完工的 NimboUIMessage 整条"
+        json payload "完工的 RunkoUIMessage 整条"
         string purpose "供模型恢复 loadResumeState + 界面回放"
         string lifecycle "永不删改，永久历史"
     }
     chunk_row {
-        json payload "耐久 NimboChunk 审批态 工具输入输出 data部件 步标记"
+        json payload "耐久 RunkoChunk 审批态 工具输入输出 data部件 步标记"
         string purpose "仅供界面回放，刷新页面重建挂起的审批与提问"
         string lifecycle "本轮优雅收尾即 GC，崩溃残留可接受"
     }
@@ -92,7 +92,7 @@ erDiagram
 
 > 一句话：chunk 不是与 message 并列的第二种「内容」，而是 message 的**传输形态**；`kind = 'chunk'` 条目是消息生成过程中的临时记录，收尾时被它一直在描述的 `message` 条目取代。两类条目在表里平级，只是时间差造成的存储姿势，不是语义姿势。
 
-**语义层：chunk 流就是 message 在线上流动的样子。** [chunk（流块）](../../../terms.md) 词汇表自带消息边界——`start`（携带 `messageId`，宣告一条新消息开始生成）与 `finish`（这条消息完工）；夹在一对 `start`/`finish` 之间的内容 chunk（`text-*`、`tool-*`、`data-*`、步标记）全部是**这条正在生成的消息内部[部件](../../../terms.md)的增量**。core 的 loop 每 yield 一个 `start`，就同步在账本工作态里新建一条 assistant `NimboUIMessage`（`loop.ts` 的 `runOneStep`），后续每个内容 chunk 对应这条消息 `parts` 的一次追加/更新——chunk 流与成品消息是**同一份数据的两种形态**：前者是操作流，后者是[折叠](../../../terms.md)结果。[steer](../../../terms.md) 插话的 user 消息同样以一小段 `start → text-* → finish` 序列进入直播流（`loop.ts` 的 `drainSteerMessages`；消息在注入时已是完整形态，发 chunk 序列只为让实时消费方跟着落地）。
+**语义层：chunk 流就是 message 在线上流动的样子。** [chunk（流块）](../../../terms.md) 词汇表自带消息边界——`start`（携带 `messageId`，宣告一条新消息开始生成）与 `finish`（这条消息完工）；夹在一对 `start`/`finish` 之间的内容 chunk（`text-*`、`tool-*`、`data-*`、步标记）全部是**这条正在生成的消息内部[部件](../../../terms.md)的增量**。core 的 loop 每 yield 一个 `start`，就同步在账本工作态里新建一条 assistant `RunkoUIMessage`（`loop.ts` 的 `runOneStep`），后续每个内容 chunk 对应这条消息 `parts` 的一次追加/更新——chunk 流与成品消息是**同一份数据的两种形态**：前者是操作流，后者是[折叠](../../../terms.md)结果。[steer](../../../terms.md) 插话的 user 消息同样以一小段 `start → text-* → finish` 序列进入直播流（`loop.ts` 的 `drainSteerMessages`；消息在注入时已是完整形态，发 chunk 序列只为让实时消费方跟着落地）。
 
 一个 step 的 chunk 流分帧示意（工具结算 chunk 落在 `finish-step` 之后、`finish` 之前，仍属同一条消息）：
 
@@ -107,7 +107,7 @@ start(A) · start-step · text-* / tool-input-available … · finish-step · �
 
 - 1 条轮起始 user 消息（turn-runner 合成，轮开始即落盘，见 §6）；
 - n 条 steer 插话 user 消息（`metadata.steered: true`）；
-- **每个 [step（步）](../../../terms.md)一条 assistant 消息**——`runTurn` 的 step 循环每次 `runOneStep` 都新建一条（各自以一个 `step-start` 部件领头），多步工具循环一轮产出多条；轮级[元数据](../../../terms.md)（usage/status/durationMs 等，§2.1）落在其中最后一条上。AI SDK `useChat` 的默认习惯是一条 assistant 消息内装多个 step（以 `step-start` 部件分段）；nimbo 选每 step 独立成条——两种形态对官方转换器等价（都按 `step-start` 切分，P13-5a 验证项 3 已真机验证）。
+- **每个 [step（步）](../../../terms.md)一条 assistant 消息**——`runTurn` 的 step 循环每次 `runOneStep` 都新建一条（各自以一个 `step-start` 部件领头），多步工具循环一轮产出多条；轮级[元数据](../../../terms.md)（usage/status/durationMs 等，§2.1）落在其中最后一条上。AI SDK `useChat` 的默认习惯是一条 assistant 消息内装多个 step（以 `step-start` 部件分段）；runko 选每 step 独立成条——两种形态对官方转换器等价（都按 `step-start` 切分，P13-5a 验证项 3 已真机验证）。
 
 ## 3. 部件清单：loop 的全部表达
 
@@ -151,7 +151,7 @@ start(A) · start-step · text-* / tool-input-available … · finish-step · �
 - **落盘** = 「UIMessage 及其部件」的按 seq 追加式条目（`conversation_events`）。
 - **实时推送** = 官方 UI 消息流协议（文本增量、部件更新、transient 部件）。
 - **断线重连** = 从 seq 续传落盘条目（`after=<seq>`）+ 接上直播。
-- **恢复模型记忆** = 读 `NimboUIMessage[]` → 官方转换器。没有第二条路径。
+- **恢复模型记忆** = 读 `RunkoUIMessage[]` → 官方转换器。没有第二条路径。
 - [transient / persistent 分层](../../../terms.md)：文本/推理增量与 transient 部件只直播、不落盘；其余耐久块落盘可回放。
 
 ## 5. 审批三值重构（P13-5-2c 定案）
@@ -269,7 +269,7 @@ sequenceDiagram
     Note over TR,DB: core 自己的 stream 会另 push 一条结构相同 id 不同的 user 消息进账本，收尾时按 priorMessageCount+1 跳过，避免二次落盘
 
     loop 每个 chunk（session.stream）
-        Core-->>TR: yield NimboChunk
+        Core-->>TR: yield RunkoChunk
         alt 耐久 chunk（isDurableChunk）
             TR->>DB: emitChunk → seq+1, kind='chunk'（审批态/工具态/data部件/步标记）
             TR-->>SSE: ChunkEnvelope 带 seq 广播
@@ -280,9 +280,9 @@ sequenceDiagram
 
     Note over Core,TR: session.stream 返回 TurnResult（优雅收尾，含 status:failed/interrupted 的优雅降级）
     TR->>TR: finalizeTurnPersistence(state, priorMessageCount, turnStartSeq)
-    TR->>DB: 逐条 append 本轮新增 message（完工 NimboUIMessage，与 toJSON 字节一致）
+    TR->>DB: 逐条 append 本轮新增 message（完工 RunkoUIMessage，与 toJSON 字节一致）
     TR->>DB: deleteChunkEventsAfter(turnStartSeq) — GC 本轮 chunk 条目
-    TR->>DB: updateChatSession → 写 nimbo 标量 header（id / turn / createdAt）
+    TR->>DB: updateChatSession → 写 runko 标量 header（id / turn / createdAt）
 ```
 
 > **崩溃路径**：若 `session.stream()` 的 generator 自己抛错（真正意外，非优雅降级），`driveTurn` 的 `catch` 只补发一个合成的 `message-metadata`（`status: 'failed'`）chunk，`finalizeTurnPersistence` **不执行**——本轮 `chunk` 条目因此不被 GC，是与「进程中途重启」同款的可接受残留。进程重启中途掉 `activeTurns`（纯内存）也是同款残留：下次 `GET .../stream` 找不到活跃轮，就回放到崩溃点为止。
@@ -294,7 +294,7 @@ sequenceDiagram
 - **进度非严格实时交错**：`ctx.update()` 是同步回调，生成器不能从回调内部 yield，因此 `settleExecution` 先缓冲进度、`executeToolCall` resolve 后按到达顺序重放——效果是「进度确实以 chunk 到达」，但不与执行过程严格实时交错（沿用 P13-1 的既有取舍）。
 - **跨轮 reasoning 不回传**（实验发现 A/推理往返限制条款）：DeepSeek 的 OpenAI 兼容协议不要求携带历史推理，第二轮请求体会省略历史 reasoning——这是服务商协议行为，非账本损失（账本里 reasoning 部件完整保存，界面回放不受影响）。
 - **前缀缓存要把 system 纳入不变前缀**（方法论教训）：两轮 instructions 不同会直接毁掉前缀缓存，system 消息必须包含在「不变前缀」内。
-- **工具部件 input/output 落 unknown**：nimbo 工具集编译期完全动态，`NimboUIMessage` 的 TOOLS 类型参数取默认 `UITools`——与 `model/convert.ts` 的 `convertTool()`/`ToolSet` 是同一既有约束。
+- **工具部件 input/output 落 unknown**：runko 工具集编译期完全动态，`RunkoUIMessage` 的 TOOLS 类型参数取默认 `UITools`——与 `model/convert.ts` 的 `convertTool()`/`ToolSet` 是同一既有约束。
 - **崩溃残留不清理**：见 §6 崩溃路径。这是 v1 的既定取舍，不是待修 bug。启动时会给这类[孤儿轮](../../../terms.md)补一条「已中断」收尾标记（[graceful-shutdown §5](./graceful-shutdown.md)），但那些 `kind='chunk'` 行本身仍然留着——它们是那一轮唯一的内容记录。
 - **前端物化的顺序按 wire 到达先后定，不按「谁先物化完」**（2026-07-27 修的实现教训）：`materialize.ts` 的 `MessageLedger` 里，两种帧的物化时机差着一个微任务——`MessageFrame` 同步 `upsert` 落位，`ChunkEnvelope` 要经 `readUIMessageStream()` **异步**吐出消息才 upsert。所以渲染顺序**不能**由「upsert 到达的先后」决定：一段「先是崩溃轮的 chunk 行、后是后续轮的 message 行」的历史回放下来，同步那批会先占满顺序表，异步物化的旧轮消息排到末尾——界面上就是旧轮跑到新轮下面去（用户实测撞到）。正确做法是在**同步**可见的 `start` chunk（它已带 `messageId`）那一刻就把位子占下（`ensureOrder`），异步的 upsert 只填内容。这个洞此前一直没暴露，是因为崩溃的轮总是账本里的最后一轮；[优雅关闭](./graceful-shutdown.md)让崩溃轮之后还能继续对话，它才浮出来。
 

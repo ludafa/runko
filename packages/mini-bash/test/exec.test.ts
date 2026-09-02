@@ -1,4 +1,4 @@
-import { fromMemory } from "@nimbo/virtual-fs";
+import { fromMemory } from "@runko/virtual-fs";
 import { describe, expect, it } from "vitest";
 import { miniBash } from "../src/index.js";
 import { collectOutput, makeHangingFs, run } from "./helpers.js";
@@ -242,7 +242,7 @@ describe("miniBash().exec", () => {
       expect(description).toContain(cmd);
     }
     expect(description).toContain("管道");
-    expect(description).toContain("NimboFS");
+    expect(description).toContain("RunkoFS");
     expect(description).toMatch(/只读/);
     expect(description).toContain("重定向");
     expect(description).toContain("变量展开");

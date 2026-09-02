@@ -1,8 +1,8 @@
 import type {
   VercelFileSystemLike,
   VercelSandboxLike,
-} from '@nimbo/sandbox-vercel';
-import { vercelWorkspace } from '@nimbo/sandbox-vercel';
+} from '@runko/sandbox-vercel';
+import { vercelWorkspace } from '@runko/sandbox-vercel';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type {
@@ -22,7 +22,7 @@ import { createLogger } from '../../src/logger.js';
 // A structurally-injected fake SandboxProvider (no @vercel/sandbox import, no
 // network) — same style as examples/10/12's fakes. The underlying fake
 // `VercelSandboxLike` is wrapped by the *real* `vercelWorkspace()` adapter, so
-// tests exercise the actual NimboExec→runCommand path. `runCommand` records
+// tests exercise the actual RunkoExec→runCommand path. `runCommand` records
 // every script it was asked to run (so tests can assert exactly what
 // sandbox-manager.ts did/skipped) and special-cases `git symbolic-ref` to
 // answer with a stubbed default-branch ref.
@@ -123,9 +123,9 @@ function acquireInput(overrides: Partial<AcquireInput> = {}): AcquireInput {
   return {
     conversationId: 'session-1',
     provider: 'vercel',
-    sandboxName: 'nimbo-chat-session-1',
-    resumeToken: 'nimbo-chat-session-1',
-    branchName: 'nimbo/chat-session-1',
+    sandboxName: 'runko-chat-session-1',
+    resumeToken: 'runko-chat-session-1',
+    branchName: 'runko/chat-session-1',
     repoCloneUrl: 'https://github.com/acme/demo.git',
     repoOwner: 'acme',
     repoName: 'demo',
@@ -168,7 +168,7 @@ function managerWithLog(fake: FakeProvider, idleTimeoutMs = 1000) {
 
 describe('sandbox-manager', () => {
   it('acquire(): resumes via SandboxProvider.resume() without re-running the init plan', async () => {
-    const preExisting = createFakeProvisioned('nimbo-chat-session-1');
+    const preExisting = createFakeProvisioned('runko-chat-session-1');
     const fake = createFakeProvider({
       resumeResult: async () => ({ kind: 'ok', sandbox: preExisting }),
     });
@@ -176,10 +176,10 @@ describe('sandbox-manager', () => {
 
     const result = await manager.acquire(acquireInput());
 
-    expect(fake.resumeCalls).toEqual(['nimbo-chat-session-1']);
+    expect(fake.resumeCalls).toEqual(['runko-chat-session-1']);
     expect(fake.createCalls).toHaveLength(0);
     expect(result.defaultBranch).toBe('main');
-    expect(result.resumeToken).toBe('nimbo-chat-session-1');
+    expect(result.resumeToken).toBe('runko-chat-session-1');
     // Only the default-branch detection ran — no skill install/git identity/branch checkout on the resumed path.
     expect(preExisting.commands).toEqual([
       'git symbolic-ref refs/remotes/origin/HEAD',
@@ -204,7 +204,7 @@ describe('sandbox-manager', () => {
 
     expect(fake.resumeCalls).toHaveLength(0); // never attempted — nothing to resume yet
     expect(fake.createCalls).toHaveLength(1);
-    expect(result.resumeToken).toBe('nimbo-chat-session-1'); // provisioned token (= sandbox name here)
+    expect(result.resumeToken).toBe('runko-chat-session-1'); // provisioned token (= sandbox name here)
   });
 
   it('acquire(): (re)creates + reinstalls + recovers the branch when resume() reports unavailable (expired snapshot)', async () => {
@@ -295,7 +295,7 @@ describe('sandbox-manager', () => {
     const resuming = createFakeProvider({
       resumeResult: async () => ({
         kind: 'ok',
-        sandbox: createFakeProvisioned('nimbo-chat-session-1'),
+        sandbox: createFakeProvisioned('runko-chat-session-1'),
       }),
     });
     expect((await managerWith(resuming).acquire(input)).mode).toBe('resume');
@@ -542,7 +542,7 @@ describe('sandbox-manager', () => {
   });
 
   it('acquire(): resume 成功后显式保活一次，让缓存的截止时间可信', async () => {
-    const resumed = createFakeProvisioned('nimbo-chat-session-1');
+    const resumed = createFakeProvisioned('runko-chat-session-1');
     const fake = createFakeProvider({
       resumeResult: async () => ({ kind: 'ok', sandbox: resumed }),
     });
@@ -553,7 +553,7 @@ describe('sandbox-manager', () => {
   });
 
   it('acquire(): resume 回来的句柄在保活时就已经没了 → 退回 create', async () => {
-    const resumed = createFakeProvisioned('nimbo-chat-session-1');
+    const resumed = createFakeProvisioned('runko-chat-session-1');
     resumed.ensureLifetimeError = fakeGoneError();
     const fake = createFakeProvider({
       resumeResult: async () => ({ kind: 'ok', sandbox: resumed }),

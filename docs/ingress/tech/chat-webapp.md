@@ -4,14 +4,14 @@ slug: chat-webapp
 view: 技术
 layer: 接入层
 module: —
-packages: ["@nimbo-chat/node-server", "@nimbo-chat/web"]
+packages: ["@runko-chat/node-server", "@runko-chat/web"]
 tags: ["chat 应用", "SSE", "会话", "示例应用"]
 related: ["ingress/features/chat-webapp.md", "ingress/plans/chat-webapp.md", "architecture/tech/agent-kernel.md"]
 ---
 # Chat Webapp（技术方案）
 
 > 相关：[产品视角](../features/chat-webapp.md) · [施工进展](../plans/chat-webapp.md) · 可观测性（工具计时 + server 日志，§11）拆单见 [plans/chat-observability](../plans/chat-observability.md)
-> 依赖：[core-sdk](../../logic/engine/features/core-sdk.md)（`@nimbo/sdk`/`@nimbo/core`：[agent](../../terms.md)/[loop](../../terms.md)/[session](../../terms.md)/[chunk](../../terms.md)）· [sandbox](../../host/contract/features/sandbox.md)（`@nimbo/sandbox-vercel`：[工作区](../../terms.md) = [NimboFS / NimboExec](../../terms.md)）
+> 依赖：[core-sdk](../../logic/engine/features/core-sdk.md)（`@runko/sdk`/`@runko/core`：[agent](../../terms.md)/[loop](../../terms.md)/[session](../../terms.md)/[chunk](../../terms.md)）· [sandbox](../../host/contract/features/sandbox.md)（`@runko/sandbox-vercel`：[工作区](../../terms.md) = [RunkoFS / RunkoExec](../../terms.md)）
 > 被增强：[turn-checkpoint](../../logic/orchestration/features/turn-checkpoint.md)（[代码快照](../../terms.md)/[保活](../../terms.md)）· [single-ledger](../../logic/orchestration/features/single-ledger.md)（[UIMessage 单账本](../../terms.md)，P13-5 已落地）· [compaction](../../logic/engine/features/compaction.md)（[上下文压缩](../../terms.md)）
 
 本文档以 **P13-5 迁移后的现状**（UIMessage 单[账本](../../terms.md) + [chunk](../../terms.md) 帧流）为准。文末保留 P13-5 之前的 wire 事件模型作为历史与动机记录（`SessionEvent` 镜像 / `user.message`·`turn.result` 哨兵 / `nimbo_state_json` 独立存档等，均已被取代）。
@@ -20,14 +20,14 @@ related: ["ingress/features/chat-webapp.md", "ingress/plans/chat-webapp.md", "ar
 
 ## 1. 布局与工作区（结构性决策）
 
-- seed 的 `apps/client` 更名为 **`apps/web`**，seed 的 `apps/server` 保留（2026-07-20 更名为 **`apps/node-server`**，与 [`apps/cloudflare-worker-server`](../../host/cloudflare/tech/cloudflare-worker-server.md) 形成 node/worker 两个服务端形态的对称命名）；`apps/docs` 不引入。包名 `@nimbo-chat/web`、`@nimbo-chat/node-server`。
-- **apps/\* 并入 nimbo 根 pnpm workspace**（`packages: ["packages/*", "apps/*"]`）——server 依赖 `@nimbo/sdk`/`@nimbo/sandbox-vercel`（`workspace:*`）。独立子 workspace 无法解析 workspace 协议（`file:` 安装会因包内 `workspace:*` 依赖失败），examples 的纯符号链接方案又与 apps 必需的 `pnpm install` 冲突——并入根 workspace 是唯一自洽解。
-- **根管线保持不变**：根 `package.json` 的 build/typecheck/test/coverage 脚本 filter 收窄为 `./packages/*`——CI 与 885 用例基线零扰动；apps 用自己的脚本（`pnpm -F @nimbo-chat/node-server dev` 等）。root vitest projects 本就只收 `packages/*`。
-- seed 的 `pnpm.overrides`（vite→rolldown-vite）与原生构建放行（better-sqlite3/esbuild/msw）合入根 workspace 配置。**零二进制原则的边界澄清**：它约束的是发布的 `@nimbo/*` 包，apps 是消费侧产品代码，不受限。
+- seed 的 `apps/client` 更名为 **`apps/web`**，seed 的 `apps/server` 保留（2026-07-20 更名为 **`apps/node-server`**，与 [`apps/cloudflare-worker-server`](../../host/cloudflare/tech/cloudflare-worker-server.md) 形成 node/worker 两个服务端形态的对称命名）；`apps/docs` 不引入。包名 `@runko-chat/web`、`@runko-chat/node-server`。
+- **apps/\* 并入 runko 根 pnpm workspace**（`packages: ["packages/*", "apps/*"]`）——server 依赖 `@runko/sdk`/`@runko/sandbox-vercel`（`workspace:*`）。独立子 workspace 无法解析 workspace 协议（`file:` 安装会因包内 `workspace:*` 依赖失败），examples 的纯符号链接方案又与 apps 必需的 `pnpm install` 冲突——并入根 workspace 是唯一自洽解。
+- **根管线保持不变**：根 `package.json` 的 build/typecheck/test/coverage 脚本 filter 收窄为 `./packages/*`——CI 与 885 用例基线零扰动；apps 用自己的脚本（`pnpm -F @runko-chat/node-server dev` 等）。root vitest projects 本就只收 `packages/*`。
+- seed 的 `pnpm.overrides`（vite→rolldown-vite）与原生构建放行（better-sqlite3/esbuild/msw）合入根 workspace 配置。**零二进制原则的边界澄清**：它约束的是发布的 `@runko/*` 包，apps 是消费侧产品代码，不受限。
 
 ## 2. 业务数据领域图
 
-两张应用表（`apps/node-server/src/db/schema.ts`），外加 better-auth 的 `user` 表。字段与 P13-5 后的形态一致：`conversations` 携带 **nimbo 标量 header**（`agent_session_id`/`agent_session_created_at`/`agent_session_turn`，取代旧的 `nimbo_state_json` 整块 JSON），`conversation_events` 用 **`kind`** 区分 `message`/`chunk` 两类条目、共享一条按会话单调递增的 `seq`。
+两张应用表（`apps/node-server/src/db/schema.ts`），外加 better-auth 的 `user` 表。字段与 P13-5 后的形态一致：`conversations` 携带 **runko 标量 header**（`agent_session_id`/`agent_session_created_at`/`agent_session_turn`，取代旧的 `nimbo_state_json` 整块 JSON），`conversation_events` 用 **`kind`** 区分 `message`/`chunk` 两类条目、共享一条按会话单调递增的 `seq`。
 
 ```mermaid
 erDiagram
@@ -59,17 +59,17 @@ erDiagram
         int  seq PK "会话内单调递增，跨进程重启从 MAX(seq) 续"
         int  ts "timestamp"
         text kind "message | chunk"
-        text type "message 固定 'message'；chunk 为 NimboChunk.type"
-        text payload_json "message=完工 NimboUIMessage；chunk=耐久 NimboChunk"
+        text type "message 固定 'message'；chunk 为 RunkoChunk.type"
+        text payload_json "message=完工 RunkoUIMessage；chunk=耐久 RunkoChunk"
     }
 ```
 
 **两类条目的含义（docs/logic/orchestration/tech/single-ledger.md §5 单-3）**：
 
-- `kind = 'message'`：一条**完工**的 `NimboUIMessage`，`payload_json` 逐字节等同 `Session.toJSON().messages` 会产出的形状。这是 session resume 读回的东西（`store.ts` 的 `loadResumeState`），也是永久回放历史——**永不删、永不改写**。
-- `kind = 'chunk'`：**进行中**这一轮的**耐久** `NimboChunk`（工具状态含 approval-requested/responded、data 部件、step 标记、message start/finish/metadata；**不含** text-delta/reasoning-delta/[transient](../../terms.md) data 部件——那些只活在 SSE 线上）。存它是为了「刷新页面时仍能重建挂起中的审批/提问」。一轮优雅收尾时，本轮的 chunk 条目会被删掉（被本轮的 `message` 条目取代，`store.ts` 的 `deleteChunkEventsAfter`）。**残留的 chunk 条目只意味着那一轮崩溃中断（无收尾）**——被接受的残渣，不做后续清理。
+- `kind = 'message'`：一条**完工**的 `RunkoUIMessage`，`payload_json` 逐字节等同 `Session.toJSON().messages` 会产出的形状。这是 session resume 读回的东西（`store.ts` 的 `loadResumeState`），也是永久回放历史——**永不删、永不改写**。
+- `kind = 'chunk'`：**进行中**这一轮的**耐久** `RunkoChunk`（工具状态含 approval-requested/responded、data 部件、step 标记、message start/finish/metadata；**不含** text-delta/reasoning-delta/[transient](../../terms.md) data 部件——那些只活在 SSE 线上）。存它是为了「刷新页面时仍能重建挂起中的审批/提问」。一轮优雅收尾时，本轮的 chunk 条目会被删掉（被本轮的 `message` 条目取代，`store.ts` 的 `deleteChunkEventsAfter`）。**残留的 chunk 条目只意味着那一轮崩溃中断（无收尾）**——被接受的残渣，不做后续清理。
 
-**`nimbo` 标量 header 的语义**：`agent_session_id`/`agent_session_created_at`/`agent_session_turn` 是 nimbo 自己的 [SessionState](../../terms.md)「会话头」的三个标量（不是整份账户）。四者（含 header）在本会话**首轮真正完成前全为 null**（此时 nimbo 还没生成 session id）。恢复时：消息史从 `kind = 'message'` 行读回、三标量从 header 读回，拼回一份 `SessionState`（`routes/chat.ts` 的 `loadResumeState`，复用 core 导出的 `sessionStateSchema` 校验）。沙盒文件态（含分支代码）**另走** Vercel 快照恢复——两条恢复通路正交。
+**`runko` 标量 header 的语义**：`agent_session_id`/`agent_session_created_at`/`agent_session_turn` 是 runko 自己的 [SessionState](../../terms.md)「会话头」的三个标量（不是整份账户）。四者（含 header）在本会话**首轮真正完成前全为 null**（此时 runko 还没生成 session id）。恢复时：消息史从 `kind = 'message'` 行读回、三标量从 header 读回，拼回一份 `SessionState`（`routes/chat.ts` 的 `loadResumeState`，复用 core 导出的 `sessionStateSchema` 校验）。沙盒文件态（含分支代码）**另走** Vercel 快照恢复——两条恢复通路正交。
 
 > 关键取舍：`loadResumeState` 是否 resume，判据是「有没有 `kind = 'message'` 行」，**不是** header 是否为 null。因为首轮若崩溃（header 没写成，但 turn 起始的用户消息行已落），仍要把这条用户消息回放给 UI、并让模型下轮记得它。以 header 为闸会漏掉这条。
 
@@ -82,7 +82,7 @@ sequenceDiagram
     participant Msg as POST .../messages
     participant SM as SandboxManager
     participant TR as turn-runner (startTurn/driveTurn)
-    participant S as nimbo Session
+    participant S as runko Session
     participant DB as conversation_events
     participant Stream as GET .../stream?after
 
@@ -105,7 +105,7 @@ sequenceDiagram
         TR->>DB: emitMessage(turn 起始用户消息) 落 kind=message(seq++)
         TR->>TR: 广播 MessageFrame（本轮首帧）
         loop session.stream(text) 逐 chunk
-            S-->>TR: yield NimboChunk
+            S-->>TR: yield RunkoChunk
             alt 耐久 chunk
                 TR->>DB: append kind=chunk(seq++)
                 TR->>TR: 广播 {seq, chunk}
@@ -113,7 +113,7 @@ sequenceDiagram
                 TR->>TR: 只广播 {chunk}（无 seq）
             end
         end
-        TR->>DB: finalizeTurnPersistence：append 本轮新消息为 kind=message；deleteChunkEventsAfter GC 本轮 chunk；写 nimbo header + lastActiveAt
+        TR->>DB: finalizeTurnPersistence：append 本轮新消息为 kind=message；deleteChunkEventsAfter GC 本轮 chunk；写 runko header + lastActiveAt
         TR->>TR: emit('done')，从 activeTurns 摘除
     end
 
@@ -130,18 +130,18 @@ sequenceDiagram
 - **订阅先于回放**：`subscribeTurn` 同步注册后才跑回放查询，保证「回放查询与订阅之间」产生的帧不丢（先缓冲、后 flush）。
 - **过程帧不占 seq**：`isDurableChunk` 为 false 的 chunk（text-delta/reasoning-delta/`transient:true`）既不落库也不消耗 seq——持久流无空洞，`after=` 续传语义、和「进程崩溃后内存 seq 从 DB `MAX(seq)` 续起」的一致性都不需要任何特判。
 - **回放期 ephemeral 丢弃（tail 的回归竞态）**：`GET /stream` 缓冲里可能出现「比回放已送出的耐久 chunk 更旧的 ephemeral tick」——转发它会把该消息打回半截且不再有耐久帧收尾。规则：**回放阶段结束前到达的 ephemeral 一律丢弃**（对该连接只有 live 价值，丢弃无损）；回放结束后到达的必属仍在进行的消息，照常转发。
-- **turn-start 用户消息只落一次**：`driveTurn` 在消费 `session.stream()` 之前先合成一条用户 `NimboUIMessage`（自己的 id、单 text 部件）落盘+广播为本轮首帧；nimbo core 自己的 `Session.stream()` 也会往内部账本推一条结构相同、id 不同的副本——`finalizeTurnPersistence` 用 `priorMessageCount + 1` 跳过 core 的那份，保证只写一次。
+- **turn-start 用户消息只落一次**：`driveTurn` 在消费 `session.stream()` 之前先合成一条用户 `RunkoUIMessage`（自己的 id、单 text 部件）落盘+广播为本轮首帧；runko core 自己的 `Session.stream()` 也会往内部账本推一条结构相同、id 不同的副本——`finalizeTurnPersistence` 用 `priorMessageCount + 1` 跳过 core 的那份，保证只写一次。
 
 ## 4. 服务端模块（apps/node-server/src/agent/ + routes/）
 
 在 seed 骨架上叠加：
 
-- **`model.ts`**：DeepSeek 直连（默认 `deepseek-v4-pro`，`NIMBO_MODEL` 覆盖）——同 07 示例。
-- **`store.ts`**：`conversations` + `conversation_events` 的纯函数读写（注入 `Db`，测试可指向内存库）。刻意不认 `NimboUIMessage`/`NimboChunk` 具体类型，只吞吐 `payloadJson` 字符串 + `kind`；typed 解析/序列化是调用方的事（`turn-runner/` 写、`routes/chat.ts` 读）。关键函数：`getMaxEventSeq`（seq 续接点，跨两 kind 共一条计数器）、`appendAgentEvent`、`listAgentEvents(afterSeq)`、`deleteChunkEventsAfter`（收尾 GC）、`loadResumeState` 用到的 `nimboHeader` 组合更新。
-- **`sandbox-manager.ts`**（核心生命周期）：全服务里唯一碰 `@vercel/sandbox`/`@nimbo/sandbox-vercel` 的模块，其余只见结构接口 `SandboxClient`/`ManagedSandbox`（可 fake，测试零网络/凭证）。进程内 `Map<sessionId, ActiveSandbox>` + `inflight` 去重：
+- **`model.ts`**：DeepSeek 直连（默认 `deepseek-v4-pro`，`RUNKO_MODEL` 覆盖）——同 07 示例。
+- **`store.ts`**：`conversations` + `conversation_events` 的纯函数读写（注入 `Db`，测试可指向内存库）。刻意不认 `RunkoUIMessage`/`RunkoChunk` 具体类型，只吞吐 `payloadJson` 字符串 + `kind`；typed 解析/序列化是调用方的事（`turn-runner/` 写、`routes/chat.ts` 读）。关键函数：`getMaxEventSeq`（seq 续接点，跨两 kind 共一条计数器）、`appendAgentEvent`、`listAgentEvents(afterSeq)`、`deleteChunkEventsAfter`（收尾 GC）、`loadResumeState` 用到的 `runkoHeader` 组合更新。
+- **`sandbox-manager.ts`**（核心生命周期）：全服务里唯一碰 `@vercel/sandbox`/`@runko/sandbox-vercel` 的模块，其余只见结构接口 `SandboxClient`/`ManagedSandbox`（可 fake，测试零网络/凭证）。进程内 `Map<sessionId, ActiveSandbox>` + `inflight` 去重：
   - `acquire(input)`：三态——① 内存命中 → 直接复用，零 Vercel 调用；② `SandboxClient.get()` 成功（Vercel 从快照恢复，**分支代码含未提交改动原样还原**）→ 原样复用；③ `get()` 失败（404「从未建过」或 410「停机后无法从快照恢复=快照过期」）→ `create()`（`persistent:true` + `runtime:node24` + git source）+ 重跑 init 计划（装 skill、git identity、remote auth、git exclude）+ `recoverSessionBranch`（`git fetch origin <branch> && git checkout`，失败则 `git checkout -b` 重建——一条路径覆盖「全新」与「过期」两子情形）。
   - `touch(sessionId)`：**沙盒「休眠」机制本体**——只调 Vercel 的 `extendTimeout(idleTimeoutMs)`，无服务端定时器。会话空闲超过 `SANDBOX_IDLE_TIMEOUT_MS`（默认 5 分钟，env 可调）时 Vercel 自己 stop + 快照；下条消息的 `acquire`（态 ② 或 ③）恢复。进程重启也不漏。无内存态时 `touch` 抛错（须先 `acquire`）。
-- **`chat-agent.ts`**：`buildSession(opts)`——`Skill.fromFS(workspace, "/.agents/skills/frontend-design")` + instructions（owner/repo/分支/默认分支烤进去，模型不用猜；分支固定为会话 `branchName`，多轮在同一分支累积，且明确要求「用户没让改就只读」）+ 调 **`@nimbo/sdk`** 的 `createSession`（不是 `@nimbo/core` 的——只有 sdk facade 版打包了八件套文件工具默认装配，才让 agent 真能改沙盒里 checkout 的仓库）。**每轮 fresh 重建**，无跨请求长驻 `Session`；消息史经 `conversation_events` 的 `kind='message'` 行 + `nimbo` 标量 header round-trip（`resume`），沙盒文件态另走快照。
+- **`chat-agent.ts`**：`buildSession(opts)`——`Skill.fromFS(workspace, "/.agents/skills/frontend-design")` + instructions（owner/repo/分支/默认分支烤进去，模型不用猜；分支固定为会话 `branchName`，多轮在同一分支累积，且明确要求「用户没让改就只读」）+ 调 **`@runko/sdk`** 的 `createSession`（不是 `@runko/core` 的——只有 sdk facade 版打包了八件套文件工具默认装配，才让 agent 真能改沙盒里 checkout 的仓库）。**每轮 fresh 重建**，无跨请求长驻 `Session`；消息史经 `conversation_events` 的 `kind='message'` 行 + `runko` 标量 header round-trip（`resume`），沙盒文件态另走快照。
 - **`web-search.ts`**：[联网搜索](../../terms.md)工具（`web-search`，后端 Exa `/search`）——应用级工具，**条件注册**：`EXA_API_KEY` 有值才进 `agent.tools`，没配则模型看不见它。与 `ask-user` 同构、core 零改动，详见 [tech/web-search](../../logic/engine/tech/web-search.md)。
 - **`turn-runner/`**：turn 执行/连接解耦的核心（详见 §5）。按「一轮的生命周期」拆成一个目录，`index.ts` 只做门面（re-export，不放实现）：
   - `registry.ts`——「进行中的轮」登记表（`activeTurns`/`ActiveTurn`）+ 查询/订阅/广播/[插话](../../terms.md)。
@@ -151,7 +151,7 @@ sequenceDiagram
   - `persistence.ts`——落盘：`createTurnEmitter`（过程中）/ `finalizeTurnPersistence`（收尾）/ `isDurableChunk`。
   - `human-bridge.ts`——[人审通道](../../terms.md)与 ask-user 两条人在环上的通道（§6）。
   - `abort.ts` / `shutdown.ts` / `abort-reasons.ts`——[停止](../../terms.md)本轮 / [优雅关闭](../../terms.md) / 跨模块共用的停止文案常量。
-  - `session.ts` / `log.ts`——`TurnDrivenSession` 接缝（对接 `@nimbo/sdk`）/ 日志旁路 tap。
+  - `session.ts` / `log.ts`——`TurnDrivenSession` 接缝（对接 `@runko/sdk`）/ 日志旁路 tap。
 - **`approval-policy.ts`**：审批放行/拦截策略的纯函数（`classifyApproval`/`resolveApprovalMode`），三档 `CHAT_APPROVAL_MODE`（详见 §6）。
 - **`routes/chat.ts`**（`@hono/zod-openapi`，十二个端点，全登录态强制）：见 §7 契约。本页只写其中的会话/直播流/审批那几个；[待发队列](../../terms.md)的三个见 [tech/steer-and-queue §4.2](../../logic/orchestration/tech/steer-and-queue.md)，`POST .../abort`（[停止](../../terms.md)本轮）见 [tech/turn-abort §3.2](../../logic/orchestration/tech/turn-abort.md)。
 
@@ -165,8 +165,8 @@ sequenceDiagram
 - **`driveTurn` 落盘时序**：先合成并落 turn-start 用户消息（`kind=message`，本轮首帧）；再逐 chunk——耐久的落 `kind=chunk`(seq++) 并广播、过程帧只广播；优雅收尾走 `finalizeTurnPersistence`（append 本轮新消息为 `kind=message` → GC 本轮 chunk → 写 header/lastActiveAt），emit `done` 后摘除。生成器**抛错**（真正意外失败，区别于 `session.stream()` 自身的优雅降级 return）时，广播一条合成的 `message-metadata` chunk（复用 core 优雅失败同款 `status:'failed'` 形状，前端无需单独分支），**不**走 finalize（本轮 chunk 不 GC——同「进程崩溃残渣」取舍）。
 - **`GET /api/chat/conversations/{id}/stream?after=<seq>`**（可续传 tail）：先 `subscribeTurn` 订阅到缓冲、再回放 DB 中 `seq > after` 的行（记 `maxSentSeq`）、再 flush 缓冲里 `seq > maxSentSeq` 的实时帧（回放期到达的 ephemeral 丢弃）、随后持续转发直至 `done` 才关闭；若无进行中轮（`isTurnActive` false）则回放完即关。
 - **客户端**（`apps/web` 的 `use-chat-messages.ts`，「命令/订阅分离」）：`sendMessage` = 乐观插入 + `POST messages`（起轮/steer）+ 打开 tail；**组件挂载时总是打开 tail**（`after=lastSeq`）以续接刷新前遗留的进行中轮；tail 断开时若本轮尚未收尾就带 `after=lastSeq` 重开（指数退避、限次）。seq 去重 / `lastSeq` 推进 / 重连 `after=` **只看有 seq 的帧**；ephemeral 帧照常喂时间线（live 打字机），不进 seq 记账。回放流里天然不含 ephemeral，重连后由完工消息收敛终态。
-- **边界（v1 已知取舍）**：进程重启丢失内存态 turn（沙盒仍在跑但 nimbo loop 停）——DB 事件保留至崩溃点，重启后 tail 回放发现无进行中轮即静默收尾。界面侧的收敛靠下面 §5.1 那帧。
-- **持久化恢复语义**：nimbo `SessionState`（消息史）与沙盒快照（文件态）分别恢复，模式 A 下天然一致（文件真身在沙盒里）。
+- **边界（v1 已知取舍）**：进程重启丢失内存态 turn（沙盒仍在跑但 runko loop 停）——DB 事件保留至崩溃点，重启后 tail 回放发现无进行中轮即静默收尾。界面侧的收敛靠下面 §5.1 那帧。
+- **持久化恢复语义**：runko `SessionState`（消息史）与沙盒快照（文件态）分别恢复，模式 A 下天然一致（文件真身在沙盒里）。
 
 ### 5.1 [轮状态快照](../../terms.md)：别让前端猜「有没有轮在跑」（2026-07-27 修）
 
@@ -202,14 +202,14 @@ data: {"turnActive": false}
 
 ## 6. 人在环上：bash 审批链与 ask-user 提问
 
-**动机**：沙盒 exec 本身声明 `defaultApproval: "allow"`（隔离即边界），chat 应用因此从不产生审批请求；但产品面需要外发动作（`git push` / 开 PR / 破坏性删除）经人确认，且 agent 需要能在 turn 中途向用户提问。两者同构：**工具执行挂起 → 会话注入的通道 → web 卡片 → HTTP 裁决 → resolve Promise 继续**。nimbo core 零改动。
+**动机**：沙盒 exec 本身声明 `defaultApproval: "allow"`（隔离即边界），chat 应用因此从不产生审批请求；但产品面需要外发动作（`git push` / 开 PR / 破坏性删除）经人确认，且 agent 需要能在 turn 中途向用户提问。两者同构：**工具执行挂起 → 会话注入的通道 → web 卡片 → HTTP 裁决 → resolve Promise 继续**。runko core 零改动。
 
 P13-5 后的现行机制（三值审批 + 原生 chunk，取代旧的四对 wire 事件）：
 
 - **触发面（bash 审批）**：`buildSession` 用 `gateWorkspace` 包装沙盒 workspace（**逐方法显式委托** + `defaultApproval: "review"`，不用对象展开——沙盒 workspace 是类实例，方法在原型链上，浅展开会丢方法只剩 `undefined`）。这把内置 bash 的 per-tool approval 升到 `"review"`，每次调用都升级到会话级的[审批分类器](../../terms.md)。
 - **[审批分类器](../../terms.md)（`onApproval`，`ApprovalPolicy`，三值）**：`approval-policy.ts` 的 `classifyApproval(mode, toolName, input)` 当场判「`allow` 直接跑 / `review` 需要人」。`CHAT_APPROVAL_MODE` 三档——`dangerous`（默认：`git push`、GitHub API curl（引 api.github.com 或 `$GH_TOKEN`）、`rm -r/-f`、`git reset --hard`、`git clean -f` 判 `review`，其余 `allow`；input 形状不符一律升级 `review`，宁严勿松）/ `all`（全量 `review`）/ `off`（不包装 workspace，零行为变化）。
 - **[人审通道](../../terms.md)（`onReview`，`ApprovalReviewer`）**：分类器返 `review` 后，core 的 loop **先 yield 一个 `tool-approval-request` chunk**（审批可见性=这条 chunk，人一需要就已在线上）、再 `await onReview`。`onReview` → `turn-runner/human-bridge.ts` 的 `requestReview(id, {callId, toolName, input})`：注册一条 pending review、挂起直到 `POST .../approvals/:callId` 的[人工裁决](../../terms.md)（或超时自动 deny）经 `resolveReview` settle。settle 后 loop 自己 yield `tool-approval-response` chunk——**turn-runner 不再 emit 任何桥事件**（纯内存 Promise 路由）。超时默认 `CHAT_APPROVAL_TIMEOUT_MS=240s`（沙盒 idle 300s 的 80%），走同一条 resolve 通路保证多 tab/回放一致。
-- **人工裁决纯两值**：允许 / 拒绝（可带拒绝理由回填模型），映射 `@nimbo/core` 的 `HumanDecision`。「改参数」口子已于 2026-07-15 定案删除。
+- **人工裁决纯两值**：允许 / 拒绝（可带拒绝理由回填模型），映射 `@runko/core` 的 `HumanDecision`。「改参数」口子已于 2026-07-15 定案删除。
 - **ask-user 工具**：`BuildSessionOptions.onAskUser` 存在时注册进 `agent.tools`（kebab-case `ask-user`）；`execute` 经 `requestUserAnswer`/`resolveUserAnswer` 同款桥挂起（`pendingQuestions`，独立于 `pendingReviews`）。可见性=`tool-ask-user` 部件自身的 `input-available`/`output-available` 状态（普通工具调用）。超时（`CHAT_ASK_USER_TIMEOUT_MS` 默认 240s）返回固定提示文案（`status:"completed"`，不抛错，模型自行继续）。**与 approvalMode 无关恒注册**（产品能力，不是安全闸）。
 - **裁决路由**：`POST .../approvals/:callId` `{behavior:"allow"|"deny", message?}`、`POST .../questions/:callId` `{answer}`——属主校验同其余路由；404 覆盖「session 不存在/非属主」与「callId 无 pending」；allow/answer 先 `touch` 续沙盒且**失败不阻断裁决**（挂到超时比 exec 失败更糟）。
 - **[会话级授权](../../terms.md)（`allow-session`）**：卡片第三个按钮「会话内都允许」。wire 上是 `POST .../approvals/:callId` 的 `behavior:'allow-session'`——`resolveReview` 除了按 `allow` 放行本次，还调 `conversation-grants.ts` 的 `grantConversationApproval(id, userId, toolName, input)` 记放行（`pendingReviews` 项带着 `toolName`/`input`，路由只知 `callId` 也够用）。此后 `onApproval` 分类前先查 `hasConversationGrant(db, id, userId, tool, input)`：命中即短路 `allow`、不弹卡片；没记过的仍照常分类。刻意按**具体命令**而非按工具名——授权 `rm -rf build` 不等于放行之后任意 bash（`git push -f` 仍拦）。纯 chat 层、core 不感知（`HumanDecision` 仍只 allow/deny）。
@@ -259,11 +259,11 @@ turnLive = 会话里有轮在跑（status === 'streaming'）
 **wire 帧（`schemas/chat.ts`）**——两种 `ChatReplayFrame`，靠结构区分（`chunk` 键 vs `message` 键，无共享判别字段）：
 
 - `ChunkEnvelope` = `{ seq?, chunk }`：**有 seq ⇔ 已持久化、回放可见；无 seq ⇔ 仅存在于 live 流的过程帧**（ephemeral）。直播 tail 主要是它。
-- `MessageFrame` = `{ seq, message }`：一条完工 `NimboUIMessage`，回放读回。唯一例外是 turn-start 合成用户消息——它也**直播**（本轮首帧），好让前端不必猜自己刚发消息的最终形状。
+- `MessageFrame` = `{ seq, message }`：一条完工 `RunkoUIMessage`，回放读回。唯一例外是 turn-start 合成用户消息——它也**直播**（本轮首帧），好让前端不必猜自己刚发消息的最终形状。
 - SSE `event:` 名：`message` / `chunk`（结构决定，非共享字面字段）。
 - 回放算法天然不需过滤：得益于每轮收尾 `deleteChunkEventsAfter` 的 GC，剩下的行已恰好是「完工消息史 + 进行中（或崩溃）轮的耐久 chunk」。
 
-> zod/OpenAPI 取舍：`NimboChunk`/`NimboUIMessage`（ai 的 `UIMessageChunk`/`UIMessage` 在 core 的实例化）没有可复用的 zod schema 供 `zod-to-openapi` 走（ai@7 只导出 `LazySchema` 且是泛型形状），故用 `z.any()` + `z.ZodType<T>` 注解（`any` 不外泄，消费方仍见精确 TS 类型）——这两处只解析已 `JSON.parse` 过、已 `JsonValue` 形状的值。
+> zod/OpenAPI 取舍：`RunkoChunk`/`RunkoUIMessage`（ai 的 `UIMessageChunk`/`UIMessage` 在 core 的实例化）没有可复用的 zod schema 供 `zod-to-openapi` 走（ai@7 只导出 `LazySchema` 且是泛型形状），故用 `z.any()` + `z.ZodType<T>` 注解（`any` 不外泄，消费方仍见精确 TS 类型）——这两处只解析已 `JSON.parse` 过、已 `JsonValue` 形状的值。
 
 ## 8. 前端（apps/web，在 seed 骨架上叠加）
 
@@ -358,7 +358,7 @@ logger 经 `StartTurnParams` 可选注入（默认单例，现有调用方不传
 
 ### 11.4 [遥测（telemetry）](../../terms.md)落库 → 独立成篇
 
-遥测已拆为独立功能文档（2026-07-17）：完整技术方案（存储/ER 图/有效期/时序图/接口/取舍）见 **[tech/telemetry](./telemetry.md)**，产品行为与数据清单见 [features/telemetry](../features/telemetry.md)。与本页相关的落位一句话版：core loop 每次 `streamText` 恒注入 `functionId="<nimbo 会话 id>#<turn>"` 关联键并补发工具执行事件，server 经 `ChatRouteDeps.telemetry`（写）/`telemetryStore`（读）装配 SQLite 集成（`src/telemetry.ts`，独立 `telemetry.db`），读侧端点 `GET .../turns/{turn}/telemetry` 供 `TurnStatsButton`（完成轮末尾的「统计」按钮，点开「本轮统计」弹窗）的明细按需拉取——**弹窗概览值仍来自账本 metadata（产品数据），遥测只做增强**，关闭遥测产品功能零损失。
+遥测已拆为独立功能文档（2026-07-17）：完整技术方案（存储/ER 图/有效期/时序图/接口/取舍）见 **[tech/telemetry](./telemetry.md)**，产品行为与数据清单见 [features/telemetry](../features/telemetry.md)。与本页相关的落位一句话版：core loop 每次 `streamText` 恒注入 `functionId="<runko 会话 id>#<turn>"` 关联键并补发工具执行事件，server 经 `ChatRouteDeps.telemetry`（写）/`telemetryStore`（读）装配 SQLite 集成（`src/telemetry.ts`，独立 `telemetry.db`），读侧端点 `GET .../turns/{turn}/telemetry` 供 `TurnStatsButton`（完成轮末尾的「统计」按钮，点开「本轮统计」弹窗）的明细按需拉取——**弹窗概览值仍来自账本 metadata（产品数据），遥测只做增强**，关闭遥测产品功能零损失。
 
 ---
 
@@ -368,12 +368,12 @@ logger 经 `StartTurnParams` 可选注入（默认单例，现有调用方不传
 
 **A.1 旧 `store` 形态**（当时的表名 `chat_sessions`/`agent_events`——2026-07-17 已更名为 `conversations`/`conversation_events`，历史记录保留原名）：`chat_sessions` 有 `nimbo_state_json`（`session.toJSON()` 整块，每轮结束更新）；`agent_events` 落的是 `payload_json`（`SessionEvent` 原样 JSON，`(session_id, seq)` 主键，无 `kind`）。
 
-**A.2 旧 wire 契约（P12-2 施工回填，两端定案）**：`agent_events` 落的是「信封事件」而非仅 nimbo `SessionEvent`——信封 union 在 `SessionEvent` 之上扩展 `{ type:"user.message", text }`（用户发言，POST 一进来就以下一个 seq 入库并随流推送）与 `{ type:"turn.result", finalResponse, usage }`（哨兵，同样入库）。理由：`GET events` 回放必须能重建完整对话（用户发言 + agent 时间线 + 每轮收尾），只存 SessionEvent 是真实缺口；nimbo 的 `SessionEvent` 联合保持纯净，扩展只存在于 webapp 的 wire 层。
+**A.2 旧 wire 契约（P12-2 施工回填，两端定案）**：`agent_events` 落的是「信封事件」而非仅 runko `SessionEvent`——信封 union 在 `SessionEvent` 之上扩展 `{ type:"user.message", text }`（用户发言，POST 一进来就以下一个 seq 入库并随流推送）与 `{ type:"turn.result", finalResponse, usage }`（哨兵，同样入库）。理由：`GET events` 回放必须能重建完整对话（用户发言 + agent 时间线 + 每轮收尾），只存 SessionEvent 是真实缺口；runko 的 `SessionEvent` 联合保持纯净，扩展只存在于 webapp 的 wire 层。
 
-**A.3 旧断线可续（P12-4）**：`turn.result`/`turn.failed` 哨兵 + `emit` 信封；`turn.failed` 镜像 nimbo 的 turn 失败。机制（turn registry + 后台驱动 + 订阅先于回放 + 可续传 tail）与现行完全一致，只是帧词汇不同。
+**A.3 旧断线可续（P12-4）**：`turn.result`/`turn.failed` 哨兵 + `emit` 信封；`turn.failed` 镜像 runko 的 turn 失败。机制（turn registry + 后台驱动 + 订阅先于回放 + 可续传 tail）与现行完全一致，只是帧词汇不同。
 
 **A.4 旧 steer（STEER-3B）**：`POST .../messages` 若已有进行中轮，先试 `session.steer(text)` 而非新起一轮；202 body 扩展 `{ ok:true, mode:"started"|"steered" }`。steered 消息不再产一条独立 `user.message` echo——core loop 会在真实注入点产一条 `user_message` 类型 `item.completed`，经既有落库+推流通路持久化，这就是它在事件流/回放里的唯一记录（回放语义正确）。此设计**平移到现行模型**（现行由 `loop.ts` 的 `drainSteerMessages` yield 真实 chunk 序列承载）。
 
-**A.5 旧审批链（P12-5）**：四对 wire-only 事件——`approval.requested/resolved`、`question.asked/answered`——均落库；`ActiveTurn` 持 `pendingApprovals` map，`requestApproval` **先注册后 emit**（同「订阅先于回放」防漏纪律）；`tool_call` item 的 id 是 loop 内部 nimboId ≠ `callId`，故审批/提问卡片是时间线上独立卡片。**现行改走 ai 原生 `tool-approval-request`/`tool-approval-response` chunk + 会话注入的 `onReview` 人审通道 + `tool-ask-user` 部件**（§6）；桥变纯内存 Promise 路由、不再 emit 桥事件，`callId` 对不上的痛点消失。
+**A.5 旧审批链（P12-5）**：四对 wire-only 事件——`approval.requested/resolved`、`question.asked/answered`——均落库；`ActiveTurn` 持 `pendingApprovals` map，`requestApproval` **先注册后 emit**（同「订阅先于回放」防漏纪律）；`tool_call` item 的 id 是 loop 内部 runkoId ≠ `callId`，故审批/提问卡片是时间线上独立卡片。**现行改走 ai 原生 `tool-approval-request`/`tool-approval-response` chunk + 会话注入的 `onReview` 人审通道 + `tool-ask-user` 部件**（§6）；桥变纯内存 Promise 路由、不再 emit 桥事件，`callId` 对不上的痛点消失。
 
 **A.6 旧 transcript 减量（P13-1，durable/ephemeral 分层，✅ 已交付）**：`item.updated` 每 tick 携累积全文 → 逐 tick 落库是消息长度平方级（实证：一轮 9861 事件中 9682 条是 updated tick，占 98%）。规则：`item.updated` 走 ephemeral（只广播、不落库、不占 seq），其余照旧。**「过程帧只直播不落盘」结论平移为现行的 [transient](../../terms.md) 分层**（`isDurableChunk`：text-delta/reasoning-delta/`transient:true` 为 ephemeral）。接受的取舍：turn 中途进程崩溃后，回放只剩 started 存根 + 已 completed 的 item，半截打字机内容不再可回放（不做抽稀持久——收益仅限崩溃窗口的回放美观，不值多一套机制）。

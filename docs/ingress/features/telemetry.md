@@ -4,7 +4,7 @@ slug: telemetry
 view: 功能
 layer: 接入层
 module: —
-packages: ["@nimbo/core", "@nimbo-chat/node-server"]
+packages: ["@runko/core", "@runko-chat/node-server"]
 tags: ["遥测", "观测", "token 统计", "耗时"]
 related: ["ingress/tech/telemetry.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -16,7 +16,7 @@ related: ["ingress/tech/telemetry.md", "architecture/tech/agent-kernel.md"]
 
 ## 一句话
 
-回答「这一轮到底慢在哪、贵在哪」：nimbo 把每次模型调用、每次工具执行的过程指标（耗时、吞吐、token 用量、成败）按轮落到本地 SQLite，随取随查——账本里的聚合值告诉你结果，遥测告诉你过程。
+回答「这一轮到底慢在哪、贵在哪」：runko 把每次模型调用、每次工具执行的过程指标（耗时、吞吐、token 用量、成败）按轮落到本地 SQLite，随取随查——账本里的聚合值告诉你结果，遥测告诉你过程。
 
 ## 解决什么问题
 
@@ -51,7 +51,7 @@ chat 的账本数据（[single-ledger](../../logic/orchestration/features/single
 | `start` / `end` | 一次模型操作（`streamText`）的边界 | 操作级 usage 汇总 |
 | `step-start` / `step-end` | 每个 step（一次 LLM 调用 + 其工具结算）的边界 | 步号、finishReason |
 | `model-call-start` / `model-call-end` | 每次模型调用的边界 | **`performance.responseTimeMs`（响应耗时）、首 token 前后的输入/输出吞吐（tok/s）、usage、finishReason、responseId** |
-| `tool-execution-start` / `tool-execution-end` | 每次工具真实执行的边界（由 nimbo loop 补发，见技术方案） | **工具名、`toolExecutionMs`（执行耗时）、成功/失败判别** |
+| `tool-execution-start` / `tool-execution-end` | 每次工具真实执行的边界（由 runko loop 补发，见技术方案） | **工具名、`toolExecutionMs`（执行耗时）、成功/失败判别** |
 | `abort` / `error` | 流式中止 / 不可恢复错误 | 错误摘要 |
 | `turn-prepare` | 这一轮第一个 chunk 抵达时（补记[起轮装配](../../terms.md)这段） | **起轮装配总时长、沙盒获取耗时与走的哪条路（缓存命中/恢复/重建）、续期、读账本、建会话，以及起轮到首个 chunk 的耗时** |
 | `turn-first-output` | 这一轮第一个可见输出（文字/推理/工具调用）抵达时 | **起轮到首个可见输出的耗时**（减去上一行的首 chunk 耗时即模型首 token 等待） |

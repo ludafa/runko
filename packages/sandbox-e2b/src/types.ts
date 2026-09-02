@@ -37,7 +37,7 @@ export interface E2bFilesystemLike {
   read(path: string, opts: { format: "bytes" }): Promise<Uint8Array>;
   /**
    * 真实 `Filesystem.write()` 接受 `string | ArrayBuffer | Blob | ReadableStream`
-   * ——**不**接受 `Uint8Array` 直接传入。`NimboFS.writeFile` 的入参是
+   * ——**不**接受 `Uint8Array` 直接传入。`RunkoFS.writeFile` 的入参是
    * `Uint8Array | string`，所以适配器（`fs.ts`）在调用这里之前把 `Uint8Array`
    * 转成 `ArrayBuffer`（拷贝一份，避免 `byteOffset`/子视图语义出错）。
    */

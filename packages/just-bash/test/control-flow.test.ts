@@ -1,9 +1,9 @@
 /**
  * 真实控制流脚本在注入 MemoryFS 上跑（工单验收点）：每类语法至少一例，断言
- * stdout/exitCode。这是 mini-bash 六命令解释器撑不住、`@nimbo/just-bash` 存在
+ * stdout/exitCode。这是 mini-bash 六命令解释器撑不住、`@runko/just-bash` 存在
  * 的理由本身（docs/tech/core-sdk.md §4.5b 开篇）。
  */
-import { fromMemory } from "@nimbo/virtual-fs";
+import { fromMemory } from "@runko/virtual-fs";
 import { describe, expect, it } from "vitest";
 import { run } from "./helpers.js";
 
@@ -70,9 +70,9 @@ describe("functions + local", () => {
 
 describe("variables and parameter expansion", () => {
   it("expands positional-style defaults and substring parameter expansion", async () => {
-    const script = 'name="nimbo"; echo "${name}" "${missing:-fallback}" "${name:0:3}"';
+    const script = 'name="runko"; echo "${name}" "${missing:-fallback}" "${name:0:3}"';
     const result = await run(fromMemory({}), script);
-    expect(result.stdout).toBe("nimbo fallback nim\n");
+    expect(result.stdout).toBe("runko fallback run\n");
     expect(result.exitCode).toBe(0);
   });
 });
@@ -87,7 +87,7 @@ describe("glob expansion", () => {
 });
 
 describe("redirections: > >> < 2>&1", () => {
-  it("> creates/overwrites a file, visible to the injected NimboFS directly (not just through bash)", async () => {
+  it("> creates/overwrites a file, visible to the injected RunkoFS directly (not just through bash)", async () => {
     const fs = fromMemory({});
     const result = await run(fs, "echo hello > /out.txt", { cwd: "/" });
     expect(result.exitCode).toBe(0);

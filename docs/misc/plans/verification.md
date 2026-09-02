@@ -10,14 +10,14 @@ related: ["architecture/tech/agent-kernel.md"]
 ---
 # verification — 施工与验收
 
-> 相关：verification 在新结构里只有**施工视角**（本文件）——它不是用户可见的产品能力、也不是一份架构设计，而是「如何端到端证明 nimbo 功能正确」的验收工程，天然只落在 plans。
+> 相关：verification 在新结构里只有**施工视角**（本文件）——它不是用户可见的产品能力、也不是一份架构设计，而是「如何端到端证明 runko 功能正确」的验收工程，天然只落在 plans。
 > 依赖 [core-sdk](../../logic/engine/features/core-sdk.md)：本方案逐条映射 core-sdk 的四条成功标准（成功标准原文见 docs/logic/engine/features/core-sdk.md §6，新结构归入 features/core-sdk.md；见 §2），并作为 [core-sdk 施工](../../logic/engine/plans/core-sdk.md) 的验收闭环。
 > 历史来源：docs/misc/plans/verification.md（旧编号，收口阶段统一清理）。
 
 > 状态：**已执行，全部通过**（2026-07-11 P8-2 由 orchitector 亲自执行并回填，方案部分为 P8-1 产出；2026-07-12 P10-4 补充 09–11 三云沙盒适配器用例——离线部分本工单执行；真机部分中，用户在本工单执行期间往 `examples/.env` 追加了真实 E2B_API_KEY/VERCEL_*，09/10 因此意外触发并验证通过真实云沙盒 + 真实 DeepSeek 调用；11 仍待用户部署网关后回填，见 §3.1/§5）
 > 相关文档（收口后新结构）：[features/core-sdk](../../logic/engine/features/core-sdk.md)（§6 成功标准为本方案的验收基准）· [tech/core-sdk](../../logic/engine/tech/core-sdk.md) · [plans/core-sdk](../../logic/engine/plans/core-sdk.md) P8/P10 · [examples/README.md](../../../examples/README.md)
 
-本文档回答一个问题：**如何端到端证明 nimbo 的功能正确**。分四部分：运行/部署步骤（§1）、逐条映射产品文档 §6 成功标准的用例表（§2）、examples 运行矩阵（§3）、回归命令清单（§4）。§2/§3 的“实际结果”列在执行验证时逐格回填（通过 ✅ / 失败 ❌ + 简述），当前均已回填。
+本文档回答一个问题：**如何端到端证明 runko 的功能正确**。分四部分：运行/部署步骤（§1）、逐条映射产品文档 §6 成功标准的用例表（§2）、examples 运行矩阵（§3）、回归命令清单（§4）。§2/§3 的“实际结果”列在执行验证时逐格回填（通过 ✅ / 失败 ❌ + 简述），当前均已回填。
 
 > 术语说明：本文频繁出现两组示例内部结构词——**确定性段**（示例中不依赖模型/网络、零 key 即可确定性跑通的那一段：打印 schema、直调 `exec`/`fs` 等）与**模型驱动段**（需真实模型、可能还需云凭证才运行、验证 [agent](../../terms.md) 端到端行为的那一段）；以及 **gate（配置闸门）**——示例在发起任何模型调用/网络请求之前按序检查所需环境变量/凭证，任一未配置就打印指引并干净退出/返回（`exit 0`）、不产生任何副作用。这三个词 terms.md 暂未收录，已在迁移返回里 flag，待收口统一定夺。
 
@@ -29,12 +29,12 @@ related: ["architecture/tech/agent-kernel.md"]
 |---|---|---|
 | Node.js | ≥ 20；**examples 与 L3 `tools/*.ts` 动态加载需 ≥ 22.18**（原生 TS type stripping） | 本仓开发环境 Node 24 |
 | pnpm | 经 corepack（根 `packageManager` 钉死 `pnpm@10.18.0`） | 全部命令用 `corepack pnpm` 前缀 |
-| 模型访问 | 模型驱动用例需 `NIMBO_MODEL` + `AI_GATEWAY_API_KEY`（或改 `examples/shared/model.ts` 直连 provider） | 纯机制用例（单测 + examples 确定性段）零网络零 key |
+| 模型访问 | 模型驱动用例需 `RUNKO_MODEL` + `AI_GATEWAY_API_KEY`（或改 `examples/shared/model.ts` 直连 provider） | 纯机制用例（单测 + examples 确定性段）零网络零 key |
 
 ### 1.2 从干净 checkout 到可验证状态
 
 ```sh
-git clone <repo> && cd nimbo
+git clone <repo> && cd runko
 corepack pnpm install --frozen-lockfile
 corepack pnpm build          # 必须先于 typecheck/test：跨包类型解析指向 dist（docs/logic/engine/plans/core-sdk.md P4-2 顺序结论）
 corepack pnpm typecheck
@@ -49,11 +49,11 @@ node examples/typecheck.mjs
 ### 1.3 模型驱动用例的环境配置
 
 ```sh
-export NIMBO_MODEL="anthropic/claude-sonnet-5"    # 任意 AI SDK Gateway model id
+export RUNKO_MODEL="anthropic/claude-sonnet-5"    # 任意 AI SDK Gateway model id
 export AI_GATEWAY_API_KEY="..."                   # https://vercel.com/ai-gateway
 ```
 
-无部署环节——nimbo 是库不是服务；“部署”即宿主 `pnpm add @nimbo/sdk ai`（发布前用 workspace 内 examples 的符号链接布局等价模拟，见 examples/README.md“为什么 examples/ 不是 workspace 包”）。
+无部署环节——runko 是库不是服务；“部署”即宿主 `pnpm add @runko/sdk ai`（发布前用 workspace 内 examples 的符号链接布局等价模拟，见 examples/README.md“为什么 examples/ 不是 workspace 包”）。
 
 ## 2. 成功标准用例表（docs/logic/engine/features/core-sdk.md §6 逐条映射，无遗漏）
 
@@ -64,7 +64,7 @@ export AI_GATEWAY_API_KEY="..."                   # https://vercel.com/ai-gatewa
 | 用例 | 步骤 | 预期结果 | 实际结果 |
 |---|---|---|---|
 | 1-1 五行示例真实跑通 | 配置 §1.3 env；把根 README“5 行上手”代码块原样复制为 `/tmp/five-line.ts`（目录换成任一含 `src/index.ts` 且其中有 `var` 的样例项目），在 examples/ 的解析环境下 `node` 执行 | 正常结束；`finalResponse` 为完成描述；`diff()` 返回含该文件 `kind: "modified"` 的数组；真实目录文件未被改动 | ✅ DeepSeek 真实执行：diff 报 `modified`（两行 var→const，patch 完整）；真实目录逐字节未变；偏差仅 import 源与 model（同 1-2 的两处允许项） |
-| 1-2 五行示例逐行对照（自动化） | `corepack pnpm -F @nimbo/sdk test`（`packages/sdk/test/five-line-example.test.ts`，mock 模型） | 用例绿：仅 import 源与 model 两处允许偏差，其余逐行一致；`session.fs.diff()` 无断言编译 | ✅ 含于全仓 697 用例 |
+| 1-2 五行示例逐行对照（自动化） | `corepack pnpm -F @runko/sdk test`（`packages/sdk/test/five-line-example.test.ts`，mock 模型） | 用例绿：仅 import 源与 model 两处允许偏差，其余逐行一致；`session.fs.diff()` 无断言编译 | ✅ 含于全仓 697 用例 |
 | 1-3 README 代码块全部可编译 | 提取根 README 与四包 README 的全部 ts 代码块为独立文件，放入 examples/ 同款解析环境，`tsc --noEmit` | 全部编译通过，零 error | ✅ 共提取 6 个 ts 代码块，独立 tsconfig（nodenext/strict）编译零 error |
 | 1-4 examples 全部类型检查通过 | `node examples/typecheck.mjs` | exit 0 | ✅ exit 0 |
 
@@ -72,15 +72,15 @@ export AI_GATEWAY_API_KEY="..."                   # https://vercel.com/ai-gatewa
 
 | 用例 | 步骤 | 预期结果 | 实际结果 |
 |---|---|---|---|
-| 2-1 纯内存端到端（真实模型） | 配置 env 后 `node examples/01-memory-diff.ts`；执行期间用 `fs_usage`/`lsof`（或简化为：核查脚本与依赖链均只用 `NimboFS.fromMemory`）确认无临时文件写入 | 模型驱动段完成：diff 报出对 `src/index.ts` 的 `modified`（var→const）；进程全程未在磁盘创建任何文件 | ✅ DeepSeek 真实执行完成（走简化核查路径：脚本与依赖链仅 `fromMemory`，无任何真实路径写面）；注：01 用 MemoryFS，diff 语义按 §4.4 报 `created`（空基线），var→const 的结果内容在 `after` 中可见——`modified` 语义由 1-1（OverlayFS）覆盖 |
+| 2-1 纯内存端到端（真实模型） | 配置 env 后 `node examples/01-memory-diff.ts`；执行期间用 `fs_usage`/`lsof`（或简化为：核查脚本与依赖链均只用 `RunkoFS.fromMemory`）确认无临时文件写入 | 模型驱动段完成：diff 报出对 `src/index.ts` 的 `modified`（var→const）；进程全程未在磁盘创建任何文件 | ✅ DeepSeek 真实执行完成（走简化核查路径：脚本与依赖链仅 `fromMemory`，无任何真实路径写面）；注：01 用 MemoryFS，diff 语义按 §4.4 报 `created`（空基线），var→const 的结果内容在 `after` 中可见——`modified` 语义由 1-1（OverlayFS）覆盖 |
 | 2-2 overlay 不落盘（机制层，零模型） | 移开 `examples/.env` 后 `node examples/02-dir-mount.ts` 的确定性段 | overlay 写入后真实磁盘文件内容不变；`diff()` 报 pending 变更；仅 `writeBack()` 后落盘 | ✅ 确定性段（缺配置矩阵）+ 配 env 全程（writeBack 后真实磁盘内容变为 `const x = 1;`）双路径实测 |
-| 2-3 file_change 实时流出 | `corepack pnpm -F @nimbo/core test`（P4-2/P6-2 集成用例：write_file → `file_change` item） | 写类工具成功后宿主经 `stream()` 收到 `file_change` item（kind: add/update/delete） | ✅ 含于全仓 697 用例；07 示例的确定性段亦实时打印了 `file_change` item |
+| 2-3 file_change 实时流出 | `corepack pnpm -F @runko/core test`（P4-2/P6-2 集成用例：write_file → `file_change` item） | 写类工具成功后宿主经 `stream()` 收到 `file_change` item（kind: add/update/delete） | ✅ 含于全仓 697 用例；07 示例的确定性段亦实时打印了 `file_change` item |
 
-### 标准 3 ·「现成的 Claude [skill](../../terms.md) 目录不改动即可被 nimbo 加载并生效」
+### 标准 3 ·「现成的 Claude [skill](../../terms.md) 目录不改动即可被 runko 加载并生效」
 
 | 用例 | 步骤 | 预期结果 | 实际结果 |
 |---|---|---|---|
-| 3-1 双形态 fixture 不改动加载（自动化） | `corepack pnpm -F @nimbo/core test`（P5-1 用例：`test/fixtures/skills/` 的 packaged `pdf-fill`（SKILL.md + 附属文件）与 flat `commit-helper.md` 原样加载） | 两 fixture 零改动加载成功；packaged 缺 `description` frontmatter 时报错、flat 首行推导 description | ✅ 含于全仓 697 用例 |
+| 3-1 双形态 fixture 不改动加载（自动化） | `corepack pnpm -F @runko/core test`（P5-1 用例：`test/fixtures/skills/` 的 packaged `pdf-fill`（SKILL.md + 附属文件）与 flat `commit-helper.md` 原样加载） | 两 fixture 零改动加载成功；packaged 缺 `description` frontmatter 时报错、flat 首行推导 description | ✅ 含于全仓 697 用例 |
 | 3-2 真实官方 skill 目录 | 取一个 Anthropic 官方 skills 仓库的 skill 目录（如 anthropics/skills 任一子目录），不做任何修改，`Skill.fromDirectory(path)` 后配进 `defineAgent({ skills })` 并 `createSession` | 加载成功；`<available_skills>` 含其 name/description；（配 env 时）模型可经 `load_skill` 取到 markdown 正文，附属文件挂载于 `/.skills/<name>/` 可被 read_file 读取 | ✅ `anthropics/skills` 浅克隆的 `skills/xlsx`（53 个附属文件）零改动加载：name/description 正确、`<available_skills>` 出现在发给模型的 system prompt、`/.skills/xlsx/` 挂载可 readdir |
 | 3-3 skills 端到端（examples） | 配置 env 后 `node examples/03-skills.ts` | 模型驱动段：`tool_call` items 中出现 `load_skill` 调用且 turn 正常完成（渐进式披露路径走通） | ✅ DeepSeek 真实执行：`load_skill({ name: "commit-style" })` tool_call `completed`，返回 skill markdown 正文，turn 正常收尾 |
 
@@ -88,16 +88,16 @@ export AI_GATEWAY_API_KEY="..."                   # https://vercel.com/ai-gatewa
 
 | 用例 | 步骤 | 预期结果 | 实际结果 |
 |---|---|---|---|
-| 4-1 自定义 NimboExec 注入（examples） | `node examples/05-custom-exec.ts`（确定性段零 env；配 env 跑模型驱动段） | 手写 `NimboExec`（whitelist stub）仅经 `createSession({ exec })` 注入即生效——示例代码不含任何 loop/工具装配改动；未知命令 exit 127、`defaultApproval` 生效 | ✅ 双路径实测：确定性段 0/127 两种 ExecResult；DeepSeek 真实段 agent 经 bash 跑 `pwd`（tool_call completed） |
+| 4-1 自定义 RunkoExec 注入（examples） | `node examples/05-custom-exec.ts`（确定性段零 env；配 env 跑模型驱动段） | 手写 `RunkoExec`（whitelist stub）仅经 `createSession({ exec })` 注入即生效——示例代码不含任何 loop/工具装配改动；未知命令 exit 127、`defaultApproval` 生效 | ✅ 双路径实测：确定性段 0/127 两种 ExecResult；DeepSeek 真实段 agent 经 bash 跑 `pwd`（tool_call completed） |
 | 4-2 三种实现互换零 loop 改动 | 对同一 agent 定义，分别以 `exec: miniBash(fs)` / `exec: localExec()` / `exec: stubSandboxExec()` 创建 [session](../../terms.md)（参照 examples 04/05 与 core 的 `exec/local.ts`） | 三者只改 `createSession` 的 `exec` 实参一处；bash 工具描述随各自 `describe()` 变化、审批默认值随 `defaultApproval` 变化；loop/session/工具代码零修改 | ✅ examples 04（miniBash）与 05（自定义 stub）对同构 agent 仅 `exec` 实参不同且均真实跑通；localExec 的 describe()/defaultApproval/双模式由 core `test/exec/local.test.ts`（含于 697 用例）覆盖——三实现互换零 loop 改动成立 |
-| 4-3 条件激活与审批链（自动化） | `corepack pnpm -F @nimbo/core test`（P6-2 用例） | 未注入 exec 时工具列表无 bash；注入后出现且审批默认值来自实现声明（未声明兜底 `"always"`）；非零退出码作为正常 tool 结果回填 | ✅ 含于全仓 697 用例 |
+| 4-3 条件激活与审批链（自动化） | `corepack pnpm -F @runko/core test`（P6-2 用例） | 未注入 exec 时工具列表无 bash；注入后出现且审批默认值来自实现声明（未声明兜底 `"always"`）；非零退出码作为正常 tool 结果回填 | ✅ 含于全仓 697 用例 |
 | 4-4 全语法档 bash 换挡（examples，P9-2 新增） | `node examples/08-just-bash.ts`（确定性段零 env；配 env 跑模型驱动段） | 确定性段：`justBash(fromMemory({...}))` 直调跑通一段含 `if`/`for`/函数（`local`）/重定向（`>>`）的真实脚本，打印的 `ExecResult.exitCode` 为 0 且 `stdout` 与脚本逻辑一致；`onOutput` 全程仅触发 1 次（非流式契约，§4.5b）。模型驱动段：`createSession({ fs, exec: justBash(fs) })` 与 04（`exec: miniBash(fs)`）相比仅 `exec` 实参不同，agent 经 `bash` 工具完成一个需要 `for` 循环的任务（mini-bash 六命令语法面表达不了）；loop/session/工具装配代码零改动 | ✅（2026-07-11 orchitector 亲测）确定性段：脚本 exit 0、stdout 与逻辑一致（`flagged: 1`）、onOutput 恰 1 次、describe() 如实声明非流式/无 symlink/无网络/cwd 持久；模型段：DeepSeek 真实产出 for+if+算术扩展脚本经 bash 工具执行，统计 3 个 .txt 文件，tool_call completed——mini-bash 语法面确实表达不了该脚本，换挡仅一处实参 |
 | 4-5 三云沙盒 workspace 换挡（examples，P10-4 新增） | `node examples/09-sandbox-e2b.ts` / `10-sandbox-vercel.ts` / `11-sandbox-cloudflare.ts`（确定性段零凭证；真机段需模型 + 对应云厂商凭证） | 三者与 04/08 同一族“只换 `exec`/`workspace` 实参”故事的云沙盒版本：`createSession({ workspace })` 里的 [工作区](../../terms.md) `workspace` 分别替换成 `e2bWorkspace(sandbox)`/`vercelWorkspace(sandbox)`/`cloudflareWorkspace(opts)`，loop/session/工具装配代码零改动；确定性段各自用一个几十行的进程内 fake（实现对应 `*SandboxLike` 结构接口）证明“[BYO 实例](../../terms.md) + 结构化接口”不需要真实网络即可跑通 `describe()`/一次 `exec()`/一次文件读写；11 号额外演示 client→网关→fake 沙盒的完整协议在同一进程内往返 | ✅ 确定性段三者均实测通过（见 §3.1）。真机段：09（E2B）/10（Vercel）在本工单执行期间用户往 `examples/.env` 追加了真实凭证，两者均**真实**创建云沙盒、真实驱动 DeepSeek 完成“写文件 + bash cat 验证”任务、`finalResponse` 内容与写入一致，`sandbox.kill()`/`sandbox.stop()` 正常收尾（见 §3.1 状态 C）；11（Cloudflare）需要先部署网关，仍待用户凭证回填 |
 | 4-6 真实项目端到端：设计优化 + 完整 Git 工作流（examples/12，P11 新增） | `node examples/12-vercel-sandbox-real-project.e2e.test.ts`（确定性段零凭证；真机段需 DeepSeek + `GITHUB_REPO`/`GITHUB_PAT` + 三个 `VERCEL_*`，四项按序 gate） | 04/08/09/10/11 同一族“只换 workspace/exec 实参”故事的终局形态：`createSession({ workspace: vercelWorkspace(sandbox) })` 之上，agent 自主完成 `load_skill(frontend-design)` → 通读代码 → 一次聚焦的设计优化 → 构建验证 → `git checkout -b`/commit/push → `curl` 开 PR，全程 loop/session/工具装配代码零改动；`finalResponse` 须含改动清单+设计意图、分支名、PR `html_url` | ✅ 确定性段（URL 规范化自测 + 初始化命令清单打印 + `Skill.fromFS` 对 fake 沙盒装载）本工单实测通过（见 §3.2）。真机段：**本工单原计划应停在 `GITHUB_REPO` 缺失的指引（本工单开工时 `examples/.env` 只有 DeepSeek + Vercel Sandbox 三变量），但执行期间用户往 `examples/.env` 追加了真实 `GITHUB_REPO`/`GITHUB_PAT`**（本工单全程未触碰该文件），复测因此直接进入四项 gate 全部通过的真机路径：真实创建 Vercel Sandbox（`ludafa/Schulte-Grid`，`runtime: node24`/`persistent: false`），host 侧六步初始化全部成功（`npx skills` 主路径装出 `frontend-design`，未触发 git-clone fallback；默认分支探测为 `main`），`Skill.fromFS` 装载沙盒里的真实官方 skill，DeepSeek（`deepseek-v4-pro`）驱动 agent 读代码 → 决定并执行一处聚焦的视觉设计优化（网格单元格去阴影改描边、主色系粉→冷蓝青、计时器 `tabular-nums`）→ `next build` 通过 → `git checkout -b nimbo/design-2026-07-12T03-18-01-631Z` → commit → push → `curl` 建 PR 成功；`finalResponse` 含改动清单+设计意图/分支名/PR 链接三项俱全；`sandbox.stop()` 正常收尾（`Sandbox.list()` 复核状态为 `stopped`、`persistent:false`，无残留）。PR 已用 GitHub API 独立核实真实存在：`https://github.com/ludafa/Schulte-Grid/pull/2`，`state: open`，`head: nimbo/design-2026-07-12T03-18-01-631Z`，`base: main`——**这是一个真实的、留在用户仓库里待人工 review 的 PR，本工单未合并/关闭它**。未额外用一次干净的 `.env`（即 `GITHUB_REPO`/`GITHUB_PAT` 仍缺失）重新验证“停在该 gate”的路径——重新验证需要改动 `.env`，与硬性约束冲突；该分支就是一条简单的“读 env→为空则打印指引并 `return`”早退逻辑，与 09/10/11 已反复验证过的同构 gate 代码路径一致，且本次真机运行本身已经证明了它之前的三个 gate（DeepSeek/`GITHUB_REPO`/`GITHUB_PAT`）分支在其“已配置”一侧被正确执行到底（未在任何一个提前 return） |
 
 ## 3. examples 运行矩阵
 
-每个示例 × 两种环境状态，共 16 格。“缺 env”一行验证干净退出路径（P8-1 验收项）。“配 env”二选一（examples/README.md“运行方式”）：DeepSeek 直连（`examples/.env` 的 `DEEPSEEK_API_BASE_URL`/`DEEPSEEK_API_TOKEN`，P8-1c）或 AI SDK Gateway（`NIMBO_MODEL`+`AI_GATEWAY_API_KEY`）——`shared/model.ts` 的 `resolveModel()` 按此顺序尝试，任一配好即视为“配 env”。
+每个示例 × 两种环境状态，共 16 格。“缺 env”一行验证干净退出路径（P8-1 验收项）。“配 env”二选一（examples/README.md“运行方式”）：DeepSeek 直连（`examples/.env` 的 `DEEPSEEK_API_BASE_URL`/`DEEPSEEK_API_TOKEN`，P8-1c）或 AI SDK Gateway（`RUNKO_MODEL`+`AI_GATEWAY_API_KEY`）——`shared/model.ts` 的 `resolveModel()` 按此顺序尝试，任一配好即视为“配 env”。
 
 | 示例 | 缺 env（两条路径都未配置）：预期 | 实际 | 配 env：预期 | 实际 |
 |---|---|---|---|---|
@@ -116,9 +116,9 @@ export AI_GATEWAY_API_KEY="..."                   # https://vercel.com/ai-gatewa
 
 ```sh
 # 缺 env 全表（应全部 exit 0；仅 01–08，09–11 见下方专属流程）：
-for f in examples/0[1-8]-*.ts; do env -u NIMBO_MODEL -u DEEPSEEK_API_BASE_URL -u DEEPSEEK_API_TOKEN -u AI_GATEWAY_API_KEY node "$f"; echo "$f -> $?"; done
+for f in examples/0[1-8]-*.ts; do env -u RUNKO_MODEL -u DEEPSEEK_API_BASE_URL -u DEEPSEEK_API_TOKEN -u AI_GATEWAY_API_KEY node "$f"; echo "$f -> $?"; done
 
-# 配 env 全表（examples/.env 已配置 DeepSeek，或已 export NIMBO_MODEL/AI_GATEWAY_API_KEY 均可；仅 01–08）：
+# 配 env 全表（examples/.env 已配置 DeepSeek，或已 export RUNKO_MODEL/AI_GATEWAY_API_KEY 均可；仅 01–08）：
 for f in examples/0[1-8]-*.ts; do node "$f"; echo "$f -> $?"; done
 ```
 
@@ -128,9 +128,9 @@ for f in examples/0[1-8]-*.ts; do node "$f"; echo "$f -> $?"; done
 
 | 状态 | 触发条件 | 预期 | 09-sandbox-e2b 实际 | 10-sandbox-vercel 实际 | 11-sandbox-cloudflare 实际 |
 |---|---|---|---|---|---|
-| A. 模型未配置 | `DEEPSEEK_API_BASE_URL`/`DEEPSEEK_API_TOKEN`/`NIMBO_MODEL`+`AI_GATEWAY_API_KEY` 均未配置 | `resolveModel()` 打印指引，`process.exit(0)`——与 01–08 共用同一份 `shared/model.ts` 代码路径，已在 §3 主表验证过，此处不重复移开 `.env` 单独重测（重测需要移开 `.env`，与本节“不移开 `.env`”的要求矛盾） | 同一份 `resolveModel()`，不重复验证 | 同上 | 同上 |
-| B. 模型已配置，云凭证未配置 | 见 A 的反面 + `E2B_API_KEY`/`VERCEL_TOKEN`+`VERCEL_TEAM_ID`+`VERCEL_PROJECT_ID`/`NIMBO_CF_GATEWAY_URL`+`NIMBO_CF_GATEWAY_TOKEN` 未配置 | 确定性段照常打印（`describe()`/一次 `exec()`/一次文件读写）；随后云凭证检查未通过，打印指引（指向 `.env.template` 对应小节 / 11 额外指向 `apps/cloudflare-worker-server/README.md`）并**干净 `return`**，脚本正常跑到文件末尾，`exit 0`；全程不创建沙盒、不发起任何模型调用、不产生任何网络请求 | ✅（本工单实测：`examples/.env` 起初只有 DeepSeek，三个云厂商变量均为空——确定性段三行输出齐全，E2B_API_KEY 指引后 exit 0） | ✅（同一次实测，起始状态同上：确定性段三行输出齐全，VERCEL_* 三变量指引后 exit 0） | ✅（本工单实测：确定性段含 client→网关→fake 沙盒完整往返三行输出，NIMBO_CF_GATEWAY_* 全程未配置，指引后 exit 0） |
-| C. 模型 + 云凭证均已配置（真机） | 三者环境变量齐全 | 创建/连接真实 [沙盒](../../terms.md)（`Sandbox.create()` 或已部署网关），`e2bWorkspace`/`vercelWorkspace`/`cloudflareWorkspace` 接入 `createSession`，模型写文件 + bash 验证，`finalResponse` 有意义；09/10 收尾 `sandbox.kill()`/`sandbox.stop()`（11 无需，沙盒生命周期由宿主 wrangler 项目管理） | ✅**真实验证通过**——本工单执行期间，用户往 `examples/.env` 追加了真实 `E2B_API_KEY`，随后的复测自然进入状态 C：`Sandbox.create()` 建真实 microVM，DeepSeek 经 `write_file`+`bash cat` 完成“写问候语并用相对路径验证”任务，`finalResponse` 内容与写入一致，`sandbox.kill()` 正常收尾，脚本 exit 0，全程两次独立真实运行均通过 | ✅**真实验证通过**——同一时机，用户追加了真实 `VERCEL_TOKEN`/`VERCEL_TEAM_ID`/`VERCEL_PROJECT_ID`：`Sandbox.create({token,teamId,projectId,runtime:"node24"})` 建真实 Vercel Sandbox，DeepSeek 完成同一任务，`finalResponse` 确认内容一致，`sandbox.stop()` 正常收尾，exit 0 | **待用户凭证回填**（需自备 CF 环境（Workers Paid），部署独立 workspace 成员 `apps/cloudflare-worker-server`（原 BYO 参考料 `examples/cloudflare-gateway-ref/` 已并入此项目，见 [plans/sandbox 变更记录 2026-07-20](../../host/contract/plans/sandbox.md)），配好 secret `NIMBO_GATEWAY_TOKEN` 后其 `ALL /gateway/*` 路由即为对外网关端点；再填 `examples/.env.template` “Cloudflare Sandbox gateway” 节的 `NIMBO_CF_GATEWAY_URL`（需带 `/gateway` 前缀）与 `NIMBO_CF_GATEWAY_TOKEN`——本工单执行期间用户未提供网关部署，状态 C 未触发） |
+| A. 模型未配置 | `DEEPSEEK_API_BASE_URL`/`DEEPSEEK_API_TOKEN`/`RUNKO_MODEL`+`AI_GATEWAY_API_KEY` 均未配置 | `resolveModel()` 打印指引，`process.exit(0)`——与 01–08 共用同一份 `shared/model.ts` 代码路径，已在 §3 主表验证过，此处不重复移开 `.env` 单独重测（重测需要移开 `.env`，与本节“不移开 `.env`”的要求矛盾） | 同一份 `resolveModel()`，不重复验证 | 同上 | 同上 |
+| B. 模型已配置，云凭证未配置 | 见 A 的反面 + `E2B_API_KEY`/`VERCEL_TOKEN`+`VERCEL_TEAM_ID`+`VERCEL_PROJECT_ID`/`RUNKO_CF_GATEWAY_URL`+`RUNKO_CF_GATEWAY_TOKEN` 未配置 | 确定性段照常打印（`describe()`/一次 `exec()`/一次文件读写）；随后云凭证检查未通过，打印指引（指向 `.env.template` 对应小节 / 11 额外指向 `apps/cloudflare-worker-server/README.md`）并**干净 `return`**，脚本正常跑到文件末尾，`exit 0`；全程不创建沙盒、不发起任何模型调用、不产生任何网络请求 | ✅（本工单实测：`examples/.env` 起初只有 DeepSeek，三个云厂商变量均为空——确定性段三行输出齐全，E2B_API_KEY 指引后 exit 0） | ✅（同一次实测，起始状态同上：确定性段三行输出齐全，VERCEL_* 三变量指引后 exit 0） | ✅（本工单实测：确定性段含 client→网关→fake 沙盒完整往返三行输出，RUNKO_CF_GATEWAY_* 全程未配置，指引后 exit 0） |
+| C. 模型 + 云凭证均已配置（真机） | 三者环境变量齐全 | 创建/连接真实 [沙盒](../../terms.md)（`Sandbox.create()` 或已部署网关），`e2bWorkspace`/`vercelWorkspace`/`cloudflareWorkspace` 接入 `createSession`，模型写文件 + bash 验证，`finalResponse` 有意义；09/10 收尾 `sandbox.kill()`/`sandbox.stop()`（11 无需，沙盒生命周期由宿主 wrangler 项目管理） | ✅**真实验证通过**——本工单执行期间，用户往 `examples/.env` 追加了真实 `E2B_API_KEY`，随后的复测自然进入状态 C：`Sandbox.create()` 建真实 microVM，DeepSeek 经 `write_file`+`bash cat` 完成“写问候语并用相对路径验证”任务，`finalResponse` 内容与写入一致，`sandbox.kill()` 正常收尾，脚本 exit 0，全程两次独立真实运行均通过 | ✅**真实验证通过**——同一时机，用户追加了真实 `VERCEL_TOKEN`/`VERCEL_TEAM_ID`/`VERCEL_PROJECT_ID`：`Sandbox.create({token,teamId,projectId,runtime:"node24"})` 建真实 Vercel Sandbox，DeepSeek 完成同一任务，`finalResponse` 确认内容一致，`sandbox.stop()` 正常收尾，exit 0 | **待用户凭证回填**（需自备 CF 环境（Workers Paid），部署独立 workspace 成员 `apps/cloudflare-worker-server`（原 BYO 参考料 `examples/cloudflare-gateway-ref/` 已并入此项目，见 [plans/sandbox 变更记录 2026-07-20](../../host/contract/plans/sandbox.md)），配好 secret `RUNKO_GATEWAY_TOKEN` 后其 `ALL /gateway/*` 路由即为对外网关端点；再填 `examples/.env.template` “Cloudflare Sandbox gateway” 节的 `RUNKO_CF_GATEWAY_URL`（需带 `/gateway` 前缀）与 `RUNKO_CF_GATEWAY_TOKEN`——本工单执行期间用户未提供网关部署，状态 C 未触发） |
 
 执行方式：
 
@@ -165,7 +165,7 @@ node examples/12-vercel-sandbox-real-project.e2e.test.ts; echo "12 -> $?"
 ```sh
 corepack pnpm build          # 1. 全包构建（tsdown，ESM+CJS+d.ts）
 corepack pnpm typecheck      # 2. 全包 tsc --noEmit（tsgo）
-corepack pnpm test           # 3. 全包 vitest（当前基线：72 文件 885 用例，2026-07-12 P10-4 实测——新增 @nimbo/sandbox-{e2b,vercel,cloudflare} 9 文件 121 用例：e2b 3/33、vercel 3/40、cloudflare 3/48）
+corepack pnpm test           # 3. 全包 vitest（当前基线：72 文件 885 用例，2026-07-12 P10-4 实测——新增 @runko/sandbox-{e2b,vercel,cloudflare} 9 文件 121 用例：e2b 3/33、vercel 3/40、cloudflare 3/48）
 corepack pnpm coverage       # 4. 根聚合覆盖率，门槛 lines ≥ 90%（当前 97.89%，2026-07-12 P10-4 实测）
 node examples/typecheck.mjs  # 5. examples 类型检查（独立于 workspace，见 examples/README.md）
 ```
@@ -186,4 +186,4 @@ CI（`.github/workflows/`）跑 1–3 与 5（P8-2 起，examples typecheck 入 
 | 2026-07-12 | 主线程（P12-3 集成真机验收，亲自执行） | chat agent webapp 全链路（apps/node-server :3900 + 真实 Vercel 沙盒 + 真实 DeepSeek）：register→login→建会话→只读消息 SSE→[回放](../../terms.md)→[休眠](../../terms.md)→唤醒→清理 | **全部通过**。流式：只读消息 19.5s 整轮，SSE 首事件 user.message、764 事件、末 turn.result；持久化：sqlite agent_events [seq](../../terms.md) 1–764 无缺口，GET events 回放与直播逐事件一致；休眠：idle 60s 测试档下最后活动约 60s 后沙盒自动 stopped + [快照](../../terms.md)；唤醒：第二条消息 8s 完成，会话分支与工作区状态原样还原（git branch --show-current 实证）、seq 续至 870、跨休眠多轮续聊成立。当场修复：status 读取时推导 sleeping；dev 脚本移除根 ../../.env 引用（与 .env/ transcript 目录冲突）。清理：idle 阈值还原、测试沙盒删除、Sandbox.list()=0 |
 | 2026-07-12 | 主线程（P12 浏览器端到端回归，agent-browser 亲测） | chat webapp 全功能真实浏览器回归（Chrome via agent-browser，前端 5273 + server 3900 + 真沙盒 + 真 DeepSeek）：注册→登录→建会话→发只读消息→流式时间线→刷新回放→深色切换→登出→重登会话列表持久 | **全部通过，揪出并修复 2 个 curl/fake 测不到的真 bug**。① 注册被 better-auth 403「Invalid origin」——trustedOrigins 默认 5173 与实跑端口 5273 错配，注入 CLIENT_URL 修复（配置类，端口腾挪引入）；② 会话详情永久卡「加载会话失败：signal is aborted without reason」——chat-session.tsx useEffect 把 StrictMode 双挂载的 AbortError 当真错误、晚到的 abort 覆盖成功态，catch 加 `controller.signal.aborted` 守卫吞掉（代码 bug，仅真实浏览器 StrictMode 暴露）。修复后：流式时间线渲染完整（用户气泡/reasoning/两个 bash 工具卡片/agent markdown/usage 汇总条 7142 tokens）；刷新从 SQLite 完整回放含用户发言（user.message 契约真机验证）；深色切换、登出重定向、重登会话列表持久均通过。web 37 用例+typecheck+lint 全绿；测试沙盒回收 Sandbox.list()=0 |
 | 2026-07-12 | 主线程（P12-4 断线可续 + markdown 渲染真机验证，agent-browser + curl） | ① reasoning/agent_message streamdown 渲染；② composer 错位布局；③ SSE 断线可续实时流 | **全部通过**。① markdown：agent_message 与 reasoning 均经 streamdown 渲染（**bold**/代码块/表格/标题正确，节点 75→329，原始 ``` 消失，控制台零错误）；② 布局：盒模型实锤 scroller 2891px→314px、OVERLAP=false，composer 钉底；③ 断线可续：curl 协议级证明 tail 从 after=870 接入运行中 turn→回放缺口→实时流至 turn.result（首 user.message 末 turn.result）；浏览器证明刷新后客户端自动开 `stream?after=N` tail、完整 turn 内容+结果渲染（修复前刷新不开任何流）。POST /messages 返 202、turn 后台独立于连接。server 33 + web 49 用例 + 两端 tsc/lint/build 全绿；测试沙盒回收 Sandbox.list()=0 |
-| 2026-07-12 | 主线程（缓存 token 统计+展示，真机验证） | chat 每轮统计并展示 cached prompt 长度（DeepSeek 缓存命中）：nimbo core Usage 加 cachedInputTokens 透传 + server/web wire schema + turn-result-bar 展示 | **全部通过**。实测 DeepSeek 经 @ai-sdk/deepseek 报 inputTokenDetails.cacheReadTokens（同前缀二次调用 0→1408 确认自动缓存）；改动：core events.ts Usage+loop.ts mergeUsage 映射 cacheReadTokens、server+web usageSchema 加字段、turn-result-bar 加「缓存命中」。真机两轮只读消息：turn1 cachedInputTokens 2944、turn2 6400（前缀累积增长），web 每轮 bar 渲染「输入 X · 缓存命中 Y · 输出 Z · 共计 W tokens」并随 turn.result 存入 agent_events。全仓 885 + server 33 + web 49 全绿；测试沙盒回收 list()=0 |
+| 2026-07-12 | 主线程（缓存 token 统计+展示，真机验证） | chat 每轮统计并展示 cached prompt 长度（DeepSeek 缓存命中）：runko core Usage 加 cachedInputTokens 透传 + server/web wire schema + turn-result-bar 展示 | **全部通过**。实测 DeepSeek 经 @ai-sdk/deepseek 报 inputTokenDetails.cacheReadTokens（同前缀二次调用 0→1408 确认自动缓存）；改动：core events.ts Usage+loop.ts mergeUsage 映射 cacheReadTokens、server+web usageSchema 加字段、turn-result-bar 加「缓存命中」。真机两轮只读消息：turn1 cachedInputTokens 2944、turn2 6400（前缀累积增长），web 每轮 bar 渲染「输入 X · 缓存命中 Y · 输出 Z · 共计 W tokens」并随 turn.result 存入 agent_events。全仓 885 + server 33 + web 49 全绿；测试沙盒回收 list()=0 |

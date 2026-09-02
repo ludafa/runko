@@ -3,8 +3,8 @@
  * `replace_all`；未命中/多命中返回指导性错误；要求先读且 mtime 一致（§0.4）。
  */
 import { z } from "zod";
-import { defineTool } from "@nimbo/core";
-import type { Tool, ToolReturn } from "@nimbo/core";
+import { defineTool } from "@runko/core";
+import type { Tool, ToolReturn } from "@runko/core";
 import { NotFoundError, ReferenceNotResolvable } from "../memory.js";
 import { checkReadBeforeWrite, type CreateFileToolsOptions, decode, describeError, errorResult, registerWrite } from "./shared.js";
 

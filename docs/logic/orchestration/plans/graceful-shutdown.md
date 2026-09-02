@@ -4,7 +4,7 @@ slug: graceful-shutdown
 view: 施工
 layer: 逻辑层
 module: 轮编排
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["优雅关闭", "崩溃恢复", "交权", "SIGTERM"]
 related: ["logic/orchestration/features/graceful-shutdown.md", "logic/orchestration/tech/graceful-shutdown.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -36,10 +36,10 @@ related: ["logic/orchestration/features/graceful-shutdown.md", "logic/orchestrat
 
 ```bash
 pnpm build && pnpm typecheck && pnpm test        # packages/*：core 459 全绿（含 abort reason 两条）
-pnpm --filter @nimbo-chat/node-server test       # 556 全绿（含 shutdownTurns 5 条 + crash-recovery 6 条 + 503 路由 1 条）
-pnpm --filter @nimbo-chat/node-server typecheck  # 干净
-pnpm --filter @nimbo-chat/web test               # 271 全绿（含两档文案 1 条）
-pnpm --filter @nimbo-chat/web typecheck / lint   # 干净
+pnpm --filter @runko-chat/node-server test       # 556 全绿（含 shutdownTurns 5 条 + crash-recovery 6 条 + 503 路由 1 条）
+pnpm --filter @runko-chat/node-server typecheck  # 干净
+pnpm --filter @runko-chat/web test               # 271 全绿（含两档文案 1 条）
+pnpm --filter @runko-chat/web typecheck / lint   # 干净
 ```
 
 **实盘探针（跑完即退，不留常驻进程）**
@@ -67,10 +67,10 @@ pnpm --filter @nimbo-chat/web typecheck / lint   # 干净
 
 ### C1 core：透传宿主的中止原因
 
-- `packages/core/src/loop.ts`：新增 `abortMessage(signal, fallback)`（实现见 [tech §2](../tech/graceful-shutdown.md)），step 边界检查与 catch 分支两处的 `NimboError.message` 都改用它。
+- `packages/core/src/loop.ts`：新增 `abortMessage(signal, fallback)`（实现见 [tech §2](../tech/graceful-shutdown.md)），step 边界检查与 catch 分支两处的 `RunkoError.message` 都改用它。
 - 关键边界：`abort()` **不带参数**时 `reason` 是运行时自造的 `AbortError`，要当作「宿主没给理由」回落到 fallback——否则界面会显示 "This operation was aborted" 这种第三方措辞。
 - 产出：`packages/core/test/` 一条用例——`abort(new Error('custom reason'))` 后收尾 metadata 的 `error.message` 等于 `'custom reason'`；另一条 `abort()` 无参数时回落默认文案。
-- changeset：`@nimbo/core` **patch**（不动 API、不动类型，只让 `message` 更有信息量）。**刻意不给 `NimboError.code` 加新值**，理由见 [tech §2](../tech/graceful-shutdown.md)。
+- changeset：`@runko/core` **patch**（不动 API、不动类型，只让 `message` 更有信息量）。**刻意不给 `RunkoError.code` 加新值**，理由见 [tech §2](../tech/graceful-shutdown.md)。
 
 ### C2 server：turn-runner 的关闭入口
 

@@ -9,12 +9,12 @@
  * `skills/registry.js`、`tools/builtin/load-skill.js`）。P6-2 追加 `bash`
  * 条件内置工具（`tools/builtin/bash.js`）+ `SessionOptions.exec`/`workspace`
  * 接线（`session.js`）。P7-2 追加结构化输出 `generateStructuredOutput`/
- * `NimboStructuredOutputError`（`structured.js`）+ `Session.send<T>`/
+ * `RunkoStructuredOutputError`（`structured.js`）+ `Session.send<T>`/
  * `toJSON`/`SessionOptions.resume`（`session.js`）。原生搜索能力接缝
- * （docs/tech/sandbox.md §4）追加 `NimboFS.searchFiles?`/`searchContent?` 与配套
+ * （docs/tech/sandbox.md §4）追加 `RunkoFS.searchFiles?`/`searchContent?` 与配套
  * 查询/结果类型（`types.js`）+ `SearchUnsupportedError`（`search.js`）。
  */
-export const NIMBO_CORE_VERSION = "0.0.0" as const;
+export const RUNKO_CORE_VERSION = "0.0.0" as const;
 
 export * from "./types.js";
 export * from "./search.js";

@@ -8,15 +8,15 @@
  * 结构/多行值——这与 Anthropic 官方 SKILL.md 和 eve 的实际用法（仅
  * name/description/license 等标量字段）相符，够用即止。
  *
- * 两个 packaged 加载器（fromDirectory 读真实磁盘、fromFS 读 NimboFS）共享同一套
+ * 两个 packaged 加载器（fromDirectory 读真实磁盘、fromFS 读 RunkoFS）共享同一套
  * frontmatter 解析与"缺 description 即报错"规则，只是取文件内容/枚举附属文件的
  * I/O 后端不同——因此下方把两者的"解析 SKILL.md 正文"部分收敛成一个共享函数
  * `parsePackagedSkillMarkdown`，读文件与遍历目录的部分各自实现（分别用
- * `node:fs/promises` 与 `NimboFS`，无法共享）。
+ * `node:fs/promises` 与 `RunkoFS`，无法共享）。
  */
 import * as nodeFs from "node:fs/promises";
 import * as nodePath from "node:path";
-import type { NimboFS } from "../types.js";
+import type { RunkoFS } from "../types.js";
 import type { Skill } from "../skill.js";
 
 // ---- frontmatter：--- 块 + 简单 key: value，无第三方依赖 ----
@@ -146,7 +146,7 @@ export async function loadSkillFromDirectory(path: string): Promise<Skill> {
   return { name, description, markdown, ...(files !== undefined ? { files } : {}) };
 }
 
-// ---- fromFS：packaged skill 跑在 NimboFS 上（同语义，I/O 后端换成 fs） ----
+// ---- fromFS：packaged skill 跑在 RunkoFS 上（同语义，I/O 后端换成 fs） ----
 
 function joinVirtualPath(base: string, segment: string): string {
   const trimmedBase = base === "/" ? "" : base.replace(/\/+$/, "");
@@ -158,7 +158,7 @@ function virtualBasename(path: string): string {
   return segments[segments.length - 1] ?? path;
 }
 
-async function collectFSFiles(fs: NimboFS, rootPath: string, exclude: string): Promise<Record<string, Uint8Array>> {
+async function collectFSFiles(fs: RunkoFS, rootPath: string, exclude: string): Promise<Record<string, Uint8Array>> {
   const files: Record<string, Uint8Array> = {};
   const normalizedRoot = rootPath === "/" ? "/" : rootPath.replace(/\/+$/, "");
 
@@ -182,8 +182,8 @@ async function collectFSFiles(fs: NimboFS, rootPath: string, exclude: string): P
   return files;
 }
 
-/** packaged skill，同语义跑在 `NimboFS` 上（docs/tech/core-sdk.md §4.1）。 */
-export async function loadSkillFromFS(fs: NimboFS, path: string): Promise<Skill> {
+/** packaged skill，同语义跑在 `RunkoFS` 上（docs/tech/core-sdk.md §4.1）。 */
+export async function loadSkillFromFS(fs: RunkoFS, path: string): Promise<Skill> {
   const name = virtualBasename(path);
   const skillMdPath = joinVirtualPath(path, SKILL_MD_FILENAME);
 

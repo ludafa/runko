@@ -5,8 +5,8 @@
  * 建 session 全链路（core loop 注入 functionId → 集成落 SQLite →
  * 按 (session_id, turn) 查回）的端到端验证。
  */
-import { defaultSessionFactory } from '@nimbo/agent';
-import { MemoryFS } from '@nimbo/sdk';
+import { defaultSessionFactory } from '@runko/agent';
+import { MemoryFS } from '@runko/sdk';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { buildInstructions } from '../src/agent/chat-agent.js';
@@ -19,7 +19,7 @@ import {
   parseFunctionId,
 } from '../src/telemetry.js';
 import { stopOnlyModel, toolCallThenStopModel } from './helpers/mock-model.js';
-import { drainTurn } from './helpers/nimbo-chunks.js';
+import { drainTurn } from './helpers/runko-chunks.js';
 import { silentLogger } from './helpers/silent-logger.js';
 
 describe('parseFunctionId', () => {
@@ -135,7 +135,7 @@ describe('耗材式 schema 演化（2026-07-17 列更名）', () => {
     const { join } = await import('node:path');
     const Database = (await import('better-sqlite3')).default;
 
-    const dir = await mkdtemp(join(tmpdir(), 'nimbo-telemetry-'));
+    const dir = await mkdtemp(join(tmpdir(), 'runko-telemetry-'));
     const path = join(dir, 'telemetry.db');
     try {
       // 造一个更名前的旧库（session_id 列 + 一行旧数据）。
@@ -191,7 +191,7 @@ describe('端到端：建 session → core loop 注入 functionId → SQLite 可
       exec: () =>
         Promise.resolve({ exitCode: 0, stdout: '', stderr: '', durationMs: 1 }),
     };
-    // `@nimbo/agent` 的默认工厂——与 `agent/runtime.ts` 每一轮真正用的是同一段装配
+    // `@runko/agent` 的默认工厂——与 `agent/runtime.ts` 每一轮真正用的是同一段装配
     // （文件工具八件套 + core 的 `createSession`），所以这条 e2e 验的是生产那条路。
     const session = await defaultSessionFactory(
       {
@@ -201,7 +201,7 @@ describe('端到端：建 session → core loop 注入 functionId → SQLite 可
           repoOwner: 'acme',
           repoName: 'demo',
           defaultBranch: 'main',
-          branchName: 'nimbo/chat-t1',
+          branchName: 'runko/chat-t1',
           hasWebSearch: false,
         }),
       },
@@ -254,7 +254,7 @@ describe('端到端：建 session → core loop 注入 functionId → SQLite 可
           repoOwner: 'acme',
           repoName: 'demo',
           defaultBranch: 'main',
-          branchName: 'nimbo/chat-tool',
+          branchName: 'runko/chat-tool',
           hasWebSearch: false,
         }),
       },

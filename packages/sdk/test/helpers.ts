@@ -1,10 +1,10 @@
 /**
- * Test-only model fixtures — same shape as `@nimbo/core`'s `test/integration.test.ts`
+ * Test-only model fixtures — same shape as `@runko/core`'s `test/integration.test.ts`
  * (the "host assembly" file this ticket's default wiring formalizes): a `MockLanguageModelV4`
  * scripted via raw AI SDK stream chunks, one `doStream` entry per assistant step.
  *
  * P13-5-2（docs/tech/single-ledger.md）迁移：`drainStream` 改收集
- * `NimboChunk`（`session.stream()` 的产出类型，SessionEvent 已退役）；
+ * `RunkoChunk`（`session.stream()` 的产出类型，SessionEvent 已退役）；
  * `isItemCompleted`/`toolCallItems`/`fileChangeItems` 改为从最终账本
  * （`session.toJSON().messages`）的部件里取——同一 toolCallId 在账本里只记
  * 结算态（docs/tech/single-ledger.md §4.1 实现教训），因此按工具部件类型/data 部件类型 flatMap
@@ -13,7 +13,7 @@
 import { isToolUIPart, simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import type { DataUIPart, ToolUIPart, UITools } from "ai";
-import type { FileChangeData, NimboChunk, NimboUIMessage, TurnResult } from "../src/index.js";
+import type { FileChangeData, RunkoChunk, RunkoUIMessage, TurnResult } from "../src/index.js";
 
 export function mockModel(buildOptions: () => ConstructorParameters<typeof MockLanguageModelV4>[0]): MockLanguageModelV4 {
   return new MockLanguageModelV4(buildOptions());
@@ -54,9 +54,9 @@ export function stopChunk(text: string) {
   };
 }
 
-/** 排空一个 `session.stream(...)` 生成器，收集其 `NimboChunk` 序列并保留最终 `TurnResult`。 */
-export async function drainStream(gen: AsyncGenerator<NimboChunk, TurnResult>): Promise<NimboChunk[]> {
-  const chunks: NimboChunk[] = [];
+/** 排空一个 `session.stream(...)` 生成器，收集其 `RunkoChunk` 序列并保留最终 `TurnResult`。 */
+export async function drainStream(gen: AsyncGenerator<RunkoChunk, TurnResult>): Promise<RunkoChunk[]> {
+  const chunks: RunkoChunk[] = [];
   let next = await gen.next();
   while (!next.done) {
     chunks.push(next.value);
@@ -66,8 +66,8 @@ export async function drainStream(gen: AsyncGenerator<NimboChunk, TurnResult>): 
 }
 
 /** 同上，但连生成器的返回值（`TurnResult`）一起要——需要 `finalResponse`/`usage` 的用例用这个。 */
-export async function drainStreamFull(gen: AsyncGenerator<NimboChunk, TurnResult>): Promise<{ chunks: NimboChunk[]; result: TurnResult }> {
-  const chunks: NimboChunk[] = [];
+export async function drainStreamFull(gen: AsyncGenerator<RunkoChunk, TurnResult>): Promise<{ chunks: RunkoChunk[]; result: TurnResult }> {
+  const chunks: RunkoChunk[] = [];
   let next = await gen.next();
   while (!next.done) {
     chunks.push(next.value);
@@ -77,7 +77,7 @@ export async function drainStreamFull(gen: AsyncGenerator<NimboChunk, TurnResult
 }
 
 /** 一条消息里全部工具部件（`tool-<名字>`，排除理论上不会出现的 `dynamic-tool`）。 */
-export function toolPartsOf(message: NimboUIMessage): ToolUIPart<UITools>[] {
+export function toolPartsOf(message: RunkoUIMessage): ToolUIPart<UITools>[] {
   const result: ToolUIPart<UITools>[] = [];
   for (const part of message.parts) {
     if (isToolUIPart<UITools>(part) && part.type !== "dynamic-tool") {result.push(part);}
@@ -86,12 +86,12 @@ export function toolPartsOf(message: NimboUIMessage): ToolUIPart<UITools>[] {
 }
 
 /** 账本级查找：全部消息里的全部工具部件 flatMap——同一 toolCallId 只记结算态,理应各出现一次。 */
-export function toolCallItems(messages: NimboUIMessage[]): ToolUIPart<UITools>[] {
+export function toolCallItems(messages: RunkoUIMessage[]): ToolUIPart<UITools>[] {
   return messages.flatMap(toolPartsOf);
 }
 
 /** 账本级查找：全部消息里的全部 `data-file-change` 部件（每次工具执行各一条，不 upsert）。 */
-export function fileChangeItems(messages: NimboUIMessage[]): DataUIPart<{ "file-change": FileChangeData }>[] {
+export function fileChangeItems(messages: RunkoUIMessage[]): DataUIPart<{ "file-change": FileChangeData }>[] {
   const result: DataUIPart<{ "file-change": FileChangeData }>[] = [];
   for (const message of messages) {
     for (const part of message.parts) {

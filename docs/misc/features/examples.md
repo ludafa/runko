@@ -4,22 +4,22 @@ slug: examples
 view: 功能
 layer: 周边
 module: —
-packages: ["@nimbo/examples"]
+packages: ["@runko/examples"]
 tags: ["示例", "实验田", "上手"]
 related: ["misc/plans/examples.md", "misc/tech/examples.md", "architecture/tech/agent-kernel.md"]
 ---
 # 示例集 examples（实验田）— 功能手册
 
 > **相关**：技术方案见 [tech/examples](../tech/examples.md)；施工进展见 [plans/examples](../plans/examples.md)。
-> **依赖**：示例演示 [core-sdk](../../logic/engine/features/core-sdk.md) 的各项能力（VirtualFS / NimboExec / skills / 结构化输出 / streaming）与 [sandbox](../../host/contract/features/sandbox.md) 三家云沙盒适配器；模型驱动段的验证语义与 [plans/verification](../plans/verification.md) 一脉相承。
+> **依赖**：示例演示 [core-sdk](../../logic/engine/features/core-sdk.md) 的各项能力（VirtualFS / RunkoExec / skills / 结构化输出 / streaming）与 [sandbox](../../host/contract/features/sandbox.md) 三家云沙盒适配器；模型驱动段的验证语义与 [plans/verification](../plans/verification.md) 一脉相承。
 
 本文面向使用者：讲清楚 [示例集（examples，实验田）](../../terms.md) 给开发者解决了什么问题、怎么上手运行、边界在哪、怎样算成功。实现细节（workspace 成员化、runner 机制、依赖解析）见 [tech/examples](../tech/examples.md)。
 
 ## 1. 解决什么问题
 
-想快速判断「nimbo 能不能干我要的事」的开发者，需要一块**打开即用**的地方：不用读源码、不用搭脚手架，一条命令就能看到某个能力真的跑起来。
+想快速判断「runko 能不能干我要的事」的开发者，需要一块**打开即用**的地方：不用读源码、不用搭脚手架，一条命令就能看到某个能力真的跑起来。
 
-`examples/` 就是这块地——一个 pnpm workspace 成员，十二个可独立运行的脚本，每个聚焦 nimbo 的一块核心能力（纯内存工作区 / 目录挂载 / skills / 自定义执行器 / 结构化输出 / streaming / 全语法档 bash / 三家云沙盒 / 真实项目端到端）。它面向用户的定位是**实验田**：低门槛、可改、跑坏了也不影响主项目。
+`examples/` 就是这块地——一个 pnpm workspace 成员，十二个可独立运行的脚本，每个聚焦 runko 的一块核心能力（纯内存工作区 / 目录挂载 / skills / 自定义执行器 / 结构化输出 / streaming / 全语法档 bash / 三家云沙盒 / 真实项目端到端）。它面向用户的定位是**实验田**：低门槛、可改、跑坏了也不影响主项目。
 
 此前 `examples/` 靠一个手工符号链接脚本（`setup-node-modules.mjs`）伪装「发布后消费姿态」，上手要 `pnpm build` + 跑脚本建链接，且脚手架与真实 workspace 布局貌合神离、易坏。现在它就是**真正的 workspace 成员**：根目录 `pnpm install` 一次，依赖自动就位，`pnpm example <编号>` 直接跑。
 
@@ -29,7 +29,7 @@ related: ["misc/plans/examples.md", "misc/tech/examples.md", "architecture/tech/
 
 ```sh
 pnpm install                                    # 仓库根，搭好整个 workspace（含 examples）
-pnpm --filter @nimbo/examples example 01        # 跑 01 号（或 cd examples && pnpm example 01）
+pnpm --filter @runko/examples example 01        # 跑 01 号（或 cd examples && pnpm example 01）
 ```
 
 - **按编号或名字前缀选**：`pnpm example 01`、`pnpm example dir-mount` 都行；[runner（示例分发器）](../../terms.md) 按前缀在 `src/` 下唯一匹配。命中多个会列候选，命中零个打印全部可用示例。
@@ -51,10 +51,10 @@ pnpm --filter @nimbo/examples example 01        # 跑 01 号（或 cd examples &
 
 ## 3. 范围与非目标
 
-- **是什么**：一块给人**手动把玩**的实验田；一份「nimbo 各能力长什么样」的可运行参照。
+- **是什么**：一块给人**手动把玩**的实验田；一份「runko 各能力长什么样」的可运行参照。
 - **不是什么**：
-  - **不是自动化测试套件**。示例脚本不进 vitest、不做断言式回归——它们的价值是「跑起来看效果」。（真正的回归测试在各包 `test/` 下。原 13 号是唯一一个 e2e 测试，已迁至 `@nimbo-chat/node-server`，见 [tech/examples §5](../tech/examples.md)。）
-  - **不再追求「发布后消费姿态」的严格复刻**。旧 `setup-node-modules.mjs` 想用手工符号链接模拟 `pnpm add @nimbo/sdk` 的最终布局；现放弃这个目标，换成真实 workspace 成员化——import 语句本身仍是裸名 `@nimbo/sdk`（消费姿态在 import 层面保留），但依赖搭建交给 pnpm。
+  - **不是自动化测试套件**。示例脚本不进 vitest、不做断言式回归——它们的价值是「跑起来看效果」。（真正的回归测试在各包 `test/` 下。原 13 号是唯一一个 e2e 测试，已迁至 `@runko-chat/node-server`，见 [tech/examples §5](../tech/examples.md)。）
+  - **不再追求「发布后消费姿态」的严格复刻**。旧 `setup-node-modules.mjs` 想用手工符号链接模拟 `pnpm add @runko/sdk` 的最终布局；现放弃这个目标，换成真实 workspace 成员化——import 语句本身仍是裸名 `@runko/sdk`（消费姿态在 import 层面保留），但依赖搭建交给 pnpm。
   - **不在 examples 内维护 Cloudflare 网关**。11 号真机段要连真实 CF 沙盒确实得先立一个 Worker（CF 沙盒只能从 Worker 内访问）；这部分能力现已整体搬到独立 workspace 成员 [`apps/cloudflare-worker-server`](../../../apps/cloudflare-worker-server/README.md)——一个**完整可 `wrangler deploy` 的示例项目**（同时扮演「进程内驱动真实 CF 沙盒」与「对外 BYO 网关端点 `ALL /gateway/*`，供任意 Node 机器的 `cloudflareWorkspace({ url, token })` 连入」两个角色），不再是 examples 下一份不完整的参考料。「拎走即部署的网关模板」这个非目标因此不再成立，但用它仍需**自备 CF 账号 + Workers Paid 计划**（CF 沙盒无免费层）——它是一个完整示例项目，不是由我们代管的托管服务。边界说明见 [tech/examples §6](../tech/examples.md)。
 
 ## 4. 成功标准

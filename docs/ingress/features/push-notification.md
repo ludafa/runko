@@ -4,7 +4,7 @@ slug: push-notification
 view: 功能
 layer: 接入层
 module: —
-packages: ["@nimbo-chat/node-server", "@nimbo-chat/web"]
+packages: ["@runko-chat/node-server", "@runko-chat/web"]
 tags: ["推送通知", "Web Push", "等人提醒"]
 related: ["ingress/plans/push-notification.md", "ingress/tech/push-notification.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -40,11 +40,11 @@ chat 里的一轮是**后台跑的**——你发完消息，浏览器关了、�
 
 ### 3.1 开启：点一下铃铛
 
-页面右上角有个铃铛。第一次点它，浏览器弹出「是否允许 nimbo chat 发送通知」，点允许就完成了。
+页面右上角有个铃铛。第一次点它，浏览器弹出「是否允许 runko chat 发送通知」，点允许就完成了。
 
 ```
 ┌──────────────────────────────────────────────┐
-│ nimbo / chat        Chat      🔔  ☀  Sign out│
+│ runko / chat        Chat      🔔  ☀  Sign out│
 │                     ↑                        │
 │                     点这个                     │
 └──────────────────────────────────────────────┘
@@ -132,7 +132,7 @@ chat 里的一轮是**后台跑的**——你发完消息，浏览器关了、�
 | **Android**（Chrome） | ✅ 直接在浏览器里开就能收 |
 | **iPhone / iPad**（Safari） | ❌ 收不到，铃铛显示为「这台设备不支持」 |
 
-**为什么 iPhone 收不到**：iOS 的网页推送只对"添加到主屏幕"装成独立应用的网页开放，而 nimbo chat **有意不做 PWA 独立应用**（2026-07-27 定）。这不是 bug，是一个明确的取舍——想要 iPhone 通知的话，补一个 `manifest.webmanifest` 加两个图标即可，见[技术方案附录 B.5](../tech/push-notification.md)。
+**为什么 iPhone 收不到**：iOS 的网页推送只对"添加到主屏幕"装成独立应用的网页开放，而 runko chat **有意不做 PWA 独立应用**（2026-07-27 定）。这不是 bug，是一个明确的取舍——想要 iPhone 通知的话，补一个 `manifest.webmanifest` 加两个图标即可，见[技术方案附录 B.5](../tech/push-notification.md)。
 
 ### 3.8 通知内容会带上你的命令和问题——但外人看不到
 
@@ -150,7 +150,7 @@ chat 里的一轮是**后台跑的**——你发完消息，浏览器关了、�
 - 服务端一次推送都不发，一行错都不报。
 - 其它功能完全照常。
 
-这是有意的——自部署 nimbo chat 的人不该被一个没配好的可选功能拦住。
+这是有意的——自部署 runko chat 的人不该被一个没配好的可选功能拦住。
 
 ## 4. 范围与非目标
 

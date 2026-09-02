@@ -4,7 +4,7 @@ slug: turn-abort
 view: 功能
 layer: 逻辑层
 module: 轮编排
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["中断", "停止本轮", "收尾"]
 related: ["logic/orchestration/plans/turn-abort.md", "logic/orchestration/tech/turn-abort.md", "architecture/tech/agent-kernel.md"]
 ---

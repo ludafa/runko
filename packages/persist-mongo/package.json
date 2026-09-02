@@ -1,5 +1,5 @@
 {
-  "name": "@nimbo/persist-mongo",
+  "name": "@runko/persist-mongo",
   "version": "0.1.0",
   "description": "持久化实现：MongoDB —— 第一个非关系型实现，直接落在三个领域接口上",
   "type": "module",
@@ -37,14 +37,14 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@nimbo/agent": "workspace:*",
-    "@nimbo/core": "workspace:*"
+    "@runko/agent": "workspace:*",
+    "@runko/core": "workspace:*"
   },
   "peerDependencies": {
     "mongodb": "^7"
   },
   "devDependencies": {
-    "@nimbo/conformance": "workspace:*",
+    "@runko/conformance": "workspace:*",
     "@types/node": "catalog:",
     "mongodb": "catalog:",
     "tsdown": "catalog:",

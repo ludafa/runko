@@ -25,12 +25,12 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
-import type { NimboToolPart } from '../timeline';
+import type { RunkoToolPart } from '../timeline';
 import { askUserAnswerFromOutput, askUserInputFrom } from '../timeline';
 
 /** The two states this card ever renders (see file header) — `message-entry.tsx` only ever dispatches an `ask-user` part here in one of these two. */
 export type QuestionPart = Extract<
-  NimboToolPart,
+  RunkoToolPart,
   { state: 'input-available' | 'output-available' }
 >;
 

@@ -1,22 +1,22 @@
 /**
  * SessionState（P13-5-2，docs/tech/single-ledger.md §5 单-2）：会话恢复用
- * 的可序列化快照。`messages` 从 AI SDK 的 `ModelMessage[]` 换成 `NimboUIMessage[]`
+ * 的可序列化快照。`messages` 从 AI SDK 的 `ModelMessage[]` 换成 `RunkoUIMessage[]`
  * ——"UIMessage 单账本"：loop 的工作状态与 session 的存档是同一份数据，每次调
  * 模型前用官方 `convertToModelMessages()` 现场推导 `ModelMessage[]`，不再单独
  * 存一份模型视图（docs/tech/single-ledger.md §0 TL;DR）。
  *
- * 本文件同时是 `NimboUIMessage`/`NimboChunk`（UIMessageChunk 词汇表，对
- * `NimboUIMessage` 实例化）的唯一定义点——`loop.ts`/`session.ts` 都从这里导入，
+ * 本文件同时是 `RunkoUIMessage`/`RunkoChunk`（UIMessageChunk 词汇表，对
+ * `RunkoUIMessage` 实例化）的唯一定义点——`loop.ts`/`session.ts` 都从这里导入，
  * 不各自重新声明。
  */
 import { z } from "zod";
 import { validateUIMessages } from "ai";
 import type { InferUIMessageChunk, UIMessage } from "ai";
 import { jsonValueSchema, type JsonValue } from "./types.js";
-import type { NimboError, Usage } from "./events.js";
+import type { RunkoError, Usage } from "./events.js";
 
 // ============================================================================
-// NimboMessageMetadata（docs/tech/single-ledger.md §5-2 目标架构 1）：
+// RunkoMessageMetadata（docs/tech/single-ledger.md §5-2 目标架构 1）：
 // assistant 收尾元数据（turn/usage/status/error）+ user 消息的 steer 标记。
 // metadata 不参与 `convertToModelMessages()`（官方转换器天然丢弃 metadata），
 // 因此这些字段只给宿主/界面看，模型永远看不到。
@@ -29,15 +29,15 @@ const usageMetadataSchema = z.object({
   cachedInputTokens: z.number().optional(),
 });
 
-const nimboErrorMetadataSchema = z.object({
+const runkoErrorMetadataSchema = z.object({
   code: z.enum(["max_turns", "context_overflow", "provider_error", "aborted"]),
   message: z.string(),
 });
 
 /**
  * `status: 'completed' | 'failed' | 'interrupted' | 'suspended'`——`'interrupted'`
- * 对应 `NimboError.code === 'aborted'`（signal abort，宿主主动中断，不是模型/工具
- * 出错），其余三个 `NimboError.code`（max_turns/context_overflow/
+ * 对应 `RunkoError.code === 'aborted'`（signal abort，宿主主动中断，不是模型/工具
+ * 出错），其余三个 `RunkoError.code`（max_turns/context_overflow/
  * provider_error）都归 `'failed'`——四态错误码折叠进三态 status 的映射见
  * `loop.ts` 的 `statusForError()`。
  *
@@ -51,7 +51,7 @@ const nimboErrorMetadataSchema = z.object({
  * 时才补上；先加进这里是为了让宿主/界面提前把渲染分支占好，避免 K3 落地那天
  * 前后端不同步。
  */
-export interface NimboMessageMetadata {
+export interface RunkoMessageMetadata {
   turn?: number;
   usage?: Usage;
   status?: "completed" | "failed" | "interrupted" | "suspended";
@@ -64,23 +64,23 @@ export interface NimboMessageMetadata {
    * 同落点写入；`durationMs - toolDurationMs` 即模型/agent 自身的时间。
    */
   toolDurationMs?: number;
-  error?: NimboError;
+  error?: RunkoError;
   /** turn 进行中经 `Session.steer()` 注入的 user 消息标记（docs/tech/single-ledger.md §2.2a）。 */
   steered?: boolean;
 }
 
-export const nimboMessageMetadataSchema: z.ZodType<NimboMessageMetadata> = z.object({
+export const runkoMessageMetadataSchema: z.ZodType<RunkoMessageMetadata> = z.object({
   turn: z.number().optional(),
   usage: usageMetadataSchema.optional(),
   status: z.enum(["completed", "failed", "interrupted", "suspended"]).optional(),
   durationMs: z.number().optional(),
   toolDurationMs: z.number().optional(),
-  error: nimboErrorMetadataSchema.optional(),
+  error: runkoErrorMetadataSchema.optional(),
   steered: z.boolean().optional(),
 });
 
 // ============================================================================
-// NimboDataParts（docs/tech/single-ledger.md §5-2 目标架构 1 / §2.2b，deny 分支已转用 ai 原生审批
+// RunkoDataParts（docs/tech/single-ledger.md §5-2 目标架构 1 / §2.2b，deny 分支已转用 ai 原生审批
 // 状态机，`data-approval` 因此作废——见 docs/tech/single-ledger.md §5 引言"§2.2b 相应条目作废"）：
 // 五个 data 部件，类型名即 `data-file-change` 等。`tool-progress` 是
 // transient——只在写入期经 `emitTransientDataPart`（loop.ts）分流出流，绝不
@@ -141,7 +141,7 @@ export type ToolTimingData = z.infer<typeof toolTimingDataSchema>;
  * `Record<string,T>` 之间这条已知的结构检查差异），改成 `type` 字面量对象
  * 类型即可，字段集合、精确度不变（不需要显式加一条会放宽未知键的索引签名）。
  */
-export type NimboDataParts = {
+export type RunkoDataParts = {
   "file-change": FileChangeData;
   "plan-update": PlanUpdateData;
   error: ErrorData;
@@ -150,7 +150,7 @@ export type NimboDataParts = {
 };
 
 /** `validateUIMessages()`/`safeValidateUIMessages()` 的 `dataSchemas`——按 data 部件名索引。 */
-export const nimboDataPartSchemas: { [NAME in keyof NimboDataParts & string]: z.ZodType<NimboDataParts[NAME]> } = {
+export const runkoDataPartSchemas: { [NAME in keyof RunkoDataParts & string]: z.ZodType<RunkoDataParts[NAME]> } = {
   "file-change": fileChangeDataSchema,
   "plan-update": planUpdateDataSchema,
   error: errorDataSchema,
@@ -159,12 +159,12 @@ export const nimboDataPartSchemas: { [NAME in keyof NimboDataParts & string]: z.
 };
 
 // ============================================================================
-// NimboUIMessage / NimboChunk（docs/tech/single-ledger.md §5-2 目标架构 1/2）
+// RunkoUIMessage / RunkoChunk（docs/tech/single-ledger.md §5-2 目标架构 1/2）
 // ============================================================================
 
 /**
  * TOOLS 类型参数刻意留默认（`UITools` = `Record<string, {input:unknown,
- * output:unknown|undefined}>`）——nimbo 的工具集在编译期是完全动态的
+ * output:unknown|undefined}>`）——runko 的工具集在编译期是完全动态的
  * （`AgentDefinition.tools?: Record<string, Tool>`，运行时才知道有哪些
  * 工具名，见 `types.ts` 的 `Tool`/`agent.ts` 的 `AgentDefinition.tools`），
  * 没有一个编译期已知的字面量工具名联合可供 `UITools` 精确刻画——这与
@@ -173,10 +173,10 @@ export const nimboDataPartSchemas: { [NAME in keyof NimboDataParts & string]: z.
  * 部件的 `input`/`output` 落在 `unknown`）已按本仓"受控例外"惯例在这里
  * 集中记录一次，不逐处重复。
  */
-export type NimboUIMessage = UIMessage<NimboMessageMetadata, NimboDataParts>;
+export type RunkoUIMessage = UIMessage<RunkoMessageMetadata, RunkoDataParts>;
 
-/** ai 的 `UIMessageChunk` 词汇表，对 `NimboUIMessage` 实例化——`session.stream()` 的产出类型。 */
-export type NimboChunk = InferUIMessageChunk<NimboUIMessage>;
+/** ai 的 `UIMessageChunk` 词汇表，对 `RunkoUIMessage` 实例化——`session.stream()` 的产出类型。 */
+export type RunkoChunk = InferUIMessageChunk<RunkoUIMessage>;
 
 // ============================================================================
 // SessionState + envelope 级 zod 校验（§4.8）：`messages` 深层校验（part/
@@ -199,7 +199,7 @@ const UI_MESSAGE_ROLES = new Set(["system", "user", "assistant"]);
  * 合法值之一、`parts` 是数组且每个元素至少有一个字符串 `type` 字段——不深入
  * 校验每种 part 各自的字段形状（那正是 `validateUIMessages()` 的职责）。
  */
-function isUIMessageShape(value: unknown): value is NimboUIMessage {
+function isUIMessageShape(value: unknown): value is RunkoUIMessage {
   if (!isRecord(value)) {return false;}
   const { id, role, parts } = value;
   if (typeof id !== "string") {return false;}
@@ -208,16 +208,16 @@ function isUIMessageShape(value: unknown): value is NimboUIMessage {
   return parts.every((part) => isRecord(part) && typeof part.type === "string");
 }
 
-const nimboUIMessageEnvelopeSchema: z.ZodType<NimboUIMessage> = z.custom<NimboUIMessage>(isUIMessageShape, {
+const runkoUIMessageEnvelopeSchema: z.ZodType<RunkoUIMessage> = z.custom<RunkoUIMessage>(isUIMessageShape, {
   message:
-    "invalid NimboUIMessage: expected { id: string, role: 'system'|'user'|'assistant', parts: array } — " +
+    "invalid RunkoUIMessage: expected { id: string, role: 'system'|'user'|'assistant', parts: array } — " +
     "deep part/metadata/data-part validation happens via validateSessionMessages() (ai's validateUIMessages()), not this envelope-level check.",
 });
 
 export interface SessionState {
   id: string;
   turn: number;
-  messages: NimboUIMessage[];
+  messages: RunkoUIMessage[];
   createdAt: number;
   fsSnapshot?: JsonValue;
 }
@@ -225,7 +225,7 @@ export interface SessionState {
 export const sessionStateSchema: z.ZodType<SessionState> = z.object({
   id: z.string(),
   turn: z.number(),
-  messages: z.array(nimboUIMessageEnvelopeSchema),
+  messages: z.array(runkoUIMessageEnvelopeSchema),
   createdAt: z.number(),
   fsSnapshot: jsonValueSchema.optional(),
 });
@@ -235,18 +235,18 @@ export const sessionStateSchema: z.ZodType<SessionState> = z.object({
  * validateUIMessages 替代现在的 ModelMessage 结构判别"）：`raw` 通常是
  * `sessionStateSchema` 校验后的 `SessionState.messages`（已经过上面的浅层
  * 判别），这里再用 ai 官方校验器做深层语义校验（metadata 形状、data 部件
- * 形状、工具部件状态机形状）并按 `NimboUIMessage` 收窄返回——失败时 reject
+ * 形状、工具部件状态机形状）并按 `RunkoUIMessage` 收窄返回——失败时 reject
  * （`validateUIMessages()` 的既有语义：不合法即 throw），调用方（`session.ts`
  * 的 resume 路径）据此决定如何降级/报错。
  */
-export async function validateSessionMessages(raw: unknown): Promise<NimboUIMessage[]> {
-  return validateUIMessages<NimboUIMessage>({
+export async function validateSessionMessages(raw: unknown): Promise<RunkoUIMessage[]> {
+  return validateUIMessages<RunkoUIMessage>({
     messages: raw,
     // `validateUIMessages()`/`safeValidateUIMessages()` 对每条消息的 metadata
     // 无条件校验，哪怕该消息压根没有 metadata 字段（即 undefined）——单独
-    // `.optional()` 一份只给这次调用用，不改 `nimboMessageMetadataSchema`
-    // 本身对 `NimboMessageMetadata` 的类型推导（同 examples/13 的既有写法）。
-    metadataSchema: nimboMessageMetadataSchema.optional(),
-    dataSchemas: nimboDataPartSchemas,
+    // `.optional()` 一份只给这次调用用，不改 `runkoMessageMetadataSchema`
+    // 本身对 `RunkoMessageMetadata` 的类型推导（同 examples/13 的既有写法）。
+    metadataSchema: runkoMessageMetadataSchema.optional(),
+    dataSchemas: runkoDataPartSchemas,
   });
 }

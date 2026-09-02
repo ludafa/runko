@@ -4,21 +4,21 @@ slug: chat-webapp
 view: 功能
 layer: 接入层
 module: —
-packages: ["@nimbo-chat/node-server", "@nimbo-chat/web"]
+packages: ["@runko-chat/node-server", "@runko-chat/web"]
 tags: ["chat 应用", "SSE", "会话", "示例应用"]
 related: ["ingress/plans/chat-webapp.md", "ingress/tech/chat-webapp.md", "architecture/tech/agent-kernel.md"]
 ---
 # Chat Webapp（产品视角 · 使用手册）
 
 > 相关：[技术方案](../tech/chat-webapp.md) · [施工进展](../plans/chat-webapp.md)
-> 依赖：[core-sdk](../../logic/engine/features/core-sdk.md)（nimbo agent SDK，驱动对话的 [agent](../../terms.md)/[loop](../../terms.md)/[turn](../../terms.md)）· [sandbox](../../host/contract/features/sandbox.md)（Vercel 沙盒，代码真身所在）
+> 依赖：[core-sdk](../../logic/engine/features/core-sdk.md)（runko agent SDK，驱动对话的 [agent](../../terms.md)/[loop](../../terms.md)/[turn](../../terms.md)）· [sandbox](../../host/contract/features/sandbox.md)（Vercel 沙盒，代码真身所在）
 > 被增强：[turn-checkpoint](../../logic/orchestration/features/turn-checkpoint.md)（每轮代码快照保活）· [single-ledger](../../logic/orchestration/features/single-ledger.md)（UIMessage 单账本，P13-5 已落地）· [compaction](../../logic/engine/features/compaction.md)（长会话上下文压缩）· [chat-ui](./chat-ui.md)（chat 页面的界面语言，2026-07-25 改版）
 
 > **界面呈现细节看 [chat-ui](./chat-ui.md)**：本文讲这个应用**做什么**（端点、生命周期、人在回路的行为语义），chat-ui 讲它**长什么样**（[轨道](../../terms.md)、[打断](../../terms.md)、[信号色](../../terms.md)、[指令块](../../terms.md)）。下文出现的界面描述若与 chat-ui 冲突，以 chat-ui 为准。
 
 ## 一句话
 
-一个 chat agent 网页应用：用户在对话里驱动 nimbo [agent](../../terms.md) 在 Vercel [沙盒](../../terms.md)中修改真实仓库代码、开 PR、触发 Vercel 部署。它把 [sandbox 端到端示例](../../host/contract/features/sandbox.md) 的「沙盒里跑完整设计任务」示例产品化成一个可注册、可登录、可持续多轮对话的 Web 应用（apps/web + apps/node-server）。
+一个 chat agent 网页应用：用户在对话里驱动 runko [agent](../../terms.md) 在 Vercel [沙盒](../../terms.md)中修改真实仓库代码、开 PR、触发 Vercel 部署。它把 [sandbox 端到端示例](../../host/contract/features/sandbox.md) 的「沙盒里跑完整设计任务」示例产品化成一个可注册、可登录、可持续多轮对话的 Web 应用（apps/web + apps/node-server）。
 
 Seed 骨架：https://github.com/ludafa/hono-mono-starter （Hono + zod-openapi + better-auth + drizzle/better-sqlite3；React + TanStack Router + shadcn + kubb）。
 
@@ -66,7 +66,7 @@ Seed 骨架：https://github.com/ludafa/hono-mono-starter （Hono + zod-openapi 
 ## 范围与非目标
 
 - **单仓库**：仓库由 env `GITHUB_REPO` 配置，一个部署服务一个仓库。多仓库是产品化下一步，本期不做。
-- **单模型**：DeepSeek 直连（`NIMBO_MODEL` 可覆盖），不做多模型选择。
+- **单模型**：DeepSeek 直连（`RUNKO_MODEL` 可覆盖），不做多模型选择。
 - **部署走 Git 集成 preview**：沿 07 定案，PR 即部署（Vercel Git 集成），不在应用内自建部署编排。
 - **非目标**：不做多租户配额/计费；不做移动端。
 
@@ -84,14 +84,14 @@ Seed 骨架：https://github.com/ludafa/hono-mono-starter （Hono + zod-openapi 
 
 全部配置收进**仓库根 `.env`**（唯一事实来源，`.env.template` 全量列出）：
 
-`DEEPSEEK_API_BASE_URL` / `DEEPSEEK_API_TOKEN` / `NIMBO_MODEL?` / `GITHUB_REPO` / `GITHUB_PAT` / `SANDBOX_IDLE_TIMEOUT_MS?=300000` / `VERCEL_TOKEN` / `VERCEL_TEAM_ID` / `VERCEL_PROJECT_ID` / `BETTER_AUTH_SECRET`。
+`DEEPSEEK_API_BASE_URL` / `DEEPSEEK_API_TOKEN` / `RUNKO_MODEL?` / `GITHUB_REPO` / `GITHUB_PAT` / `SANDBOX_IDLE_TIMEOUT_MS?=300000` / `VERCEL_TOKEN` / `VERCEL_TEAM_ID` / `VERCEL_PROJECT_ID` / `BETTER_AUTH_SECRET`。
 
 人在回路相关可调项：`CHAT_APPROVAL_MODE`（`dangerous`（默认）/ `all` / `off`）、`CHAT_APPROVAL_TIMEOUT_MS?=240000`、`CHAT_ASK_USER_TIMEOUT_MS?=240000`。
 
 ## 已知取舍与限制（用户可感知的）
 
 1. **恢复兜底链有一档会丢未提交工作**：唤醒优先走快照恢复（快、含未提交改动）；快照过期则重 clone + checkout 已 push 的会话分支；若分支从未 push 过，则重建空分支——这一档下**未提交的工作会丢失**，UI 如实提示。这是 Vercel 快照 TTL 的客观约束。（turn-checkpoint 功能会用「每轮代码快照推到隐藏 ref」来补掉这个窗口。）
-2. **turn 起始的用户消息在直播里可能先由前端本地乐观渲染兜底**：nimbo 的账本要到真实注入点才落这条消息，刷新后从账本回放自愈。
+2. **turn 起始的用户消息在直播里可能先由前端本地乐观渲染兜底**：runko 的账本要到真实注入点才落这条消息，刷新后从账本回放自愈。
 3. **ask-user 的「超时」与「真实回答」在界面不再区分**：两者都物化为「已作答」终态，超时只是作为一段提示文案出现在输出里。
 4. **进程重启会中断进行中的一轮**：沙盒还在，但驱动这一轮的内存态停了；已落库的内容保留到中断点，重连回放发现无进行中轮即静默收尾。这是 v1 内存态 runner 的已知取舍。**界面不会因此卡住**（2026-07-27 修）：重新打开这个会话时，服务端会明确告知「没有轮在跑」，输入框回到空闲形态、发消息照常起新一轮。此前它会一直显示成「正在跑」，于是发的消息全被排进待发队列却永远发不出去，按停止也没有反应。
 5. **不再有「第 N 轮」分割线**：单账本是连续的消息/帧序列，界面不再按轮切分渲染出显式边界。

@@ -2,12 +2,12 @@
  * chat 应用为**每一轮**贡献的那两块 agent 装配：系统提示词（`buildInstructions`）与
  * 「把 bash 卡进[审批链](../../../../docs/terms.md)」的工作区包装（`gateWorkspace`）。
  *
- * 建 `Session` 这件事已经不在这里了——它归 `@nimbo/agent` 的[轮编排](../../../../docs/terms.md)
+ * 建 `Session` 这件事已经不在这里了——它归 `@runko/agent` 的[轮编排](../../../../docs/terms.md)
  * （框架要读[账本](../../../../docs/terms.md)重建 `SessionState`、要注入自己的
  * [人审通道](../../../../docs/terms.md)，这些 chat 层都不该碰）。本文件因此只剩两个纯函数，
  * 由 `runtime.ts` 的 `prepareTurn` 调用。
  */
-import type { NimboExec, NimboFS } from '@nimbo/core';
+import type { RunkoExec, RunkoFS } from '@runko/core';
 
 /**
  * Chinese instructions (this repo's convention for task-facing prose, same
@@ -46,7 +46,7 @@ export function buildInstructions(opts: {
  * Forces `workspace`'s `bash` tool to always require approval (docs/tech/chat-webapp.md §2.2c
  * （审批链）, docs/tech/single-ledger.md §6.4): `createBashTool` (packages/core/src/tools/builtin/bash.ts)
  * picks its per-tool `ApprovalPolicy` from `exec.defaultApproval`, and the
- * Vercel sandbox's own `NimboExec` implementation declares `"allow"` there
+ * Vercel sandbox's own `RunkoExec` implementation declares `"allow"` there
  * (it has no notion of a human in the loop) — left as-is, every bash command
  * would run unattended regardless of `approvalMode`. Overriding it to
  * `"review"` is what actually makes `packages/core/src/approval.ts`'s
@@ -59,17 +59,17 @@ export function buildInstructions(opts: {
  * `MemoryFS`-backed fake in tests) whose methods live on its prototype chain
  * — a shallow object spread only copies *own* enumerable properties, which
  * for a class instance is none of its methods, silently producing an object
- * with `undefined` where every `NimboFS`/`NimboExec` method should be.
+ * with `undefined` where every `RunkoFS`/`RunkoExec` method should be.
  *
- * 显式逐方法转发的对价：`NimboFS` 的**可选能力方法**（`searchFiles`/
+ * 显式逐方法转发的对价：`RunkoFS` 的**可选能力方法**（`searchFiles`/
  * `searchContent`，原生搜索快路径——docs/tech/builtin-tools.md §3.7/§3.8）也必须
  * 在这里显式跟上，否则会被这层包装静默剥掉、grep/glob 永远走 JS 逐文件回退
  * （在远端沙盒上是每文件一次网络往返的慢路径）——这正是 2026-07-16 线上
- * "grep 依旧十几秒"的事故根因。往 `NimboFS` 再加可选方法时，这里要同步。
+ * "grep 依旧十几秒"的事故根因。往 `RunkoFS` 再加可选方法时，这里要同步。
  */
 export function gateWorkspace(
-  workspace: NimboFS & NimboExec,
-): NimboFS & NimboExec {
+  workspace: RunkoFS & RunkoExec,
+): RunkoFS & RunkoExec {
   const describe = workspace.describe?.bind(workspace);
   const searchFiles = workspace.searchFiles?.bind(workspace);
   const searchContent = workspace.searchContent?.bind(workspace);

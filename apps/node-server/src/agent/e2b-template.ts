@@ -9,7 +9,7 @@
  * repo (the kernel OOM-kills it), so the server runs on a template we build
  * ourselves from the *same* base image with only the memory raised:
  *
- *     pnpm --filter @nimbo-chat/node-server e2b:template
+ *     pnpm --filter @runko-chat/node-server e2b:template
  *
  * All three knobs come from env with the constants below as defaults, but they
  * are read at **two different times**, and conflating them is the trap here:
@@ -25,7 +25,7 @@
  */
 
 /** Default template name — what `scripts/build-e2b-template.ts` publishes and `Sandbox.create` asks for. */
-export const DEFAULT_E2B_TEMPLATE_NAME = 'nimbo-chat-base';
+export const DEFAULT_E2B_TEMPLATE_NAME = 'runko-chat-base';
 
 /** Default memory, raised from base's 512 MiB — `npm install` on a real repo OOMs at 512. */
 export const DEFAULT_E2B_TEMPLATE_MEMORY_MB = 1024;
@@ -58,7 +58,7 @@ function resolvePositiveIntEnv(name: string, fallback: number): number {
 
 /**
  * Which template to create sandboxes from (`E2B_TEMPLATE`, default
- * `nimbo-chat-base`). Also the escape hatch back to stock `base` or to a
+ * `runko-chat-base`). Also the escape hatch back to stock `base` or to a
  * differently-sized variant without a code change. Read lazily, same "never
  * read env at import time" discipline as `model.ts` / `github-repo.ts`.
  */

@@ -1,5 +1,5 @@
 /**
- * chat 路由的集成用例——**迁移到 `@nimbo/agent` 之后的版本**。
+ * chat 路由的集成用例——**迁移到 `@runko/agent` 之后的版本**。
  *
  * 分工变了，测法也跟着变：一轮的一生、[排队](../../../../docs/terms.md)与
  * [出队](../../../../docs/terms.md)、[停止](../../../../docs/terms.md)、
@@ -15,7 +15,7 @@
  * 绝大多数用例用假 session（`helpers/fake-turn-session.ts`）驱动，零模型、零沙盒；
  * 少数几条走真模型 mock，验证「框架 + core + 文件工具」这条真装配是通的。
  */
-import type { NimboChunk, NimboUIMessage } from '@nimbo/core';
+import type { RunkoChunk, RunkoUIMessage } from '@runko/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createChatPersistence } from '../../src/agent/persistence.js';
@@ -44,7 +44,7 @@ import type {
 } from '../helpers/fake-turn-session.js';
 import { createFakeSessions } from '../helpers/fake-turn-session.js';
 import { capturingModel, stopOnlyModel } from '../helpers/mock-model.js';
-import { collectText } from '../helpers/nimbo-chunks.js';
+import { collectText } from '../helpers/runko-chunks.js';
 import { silentLogger } from '../helpers/silent-logger.js';
 import { createTestDb, seedUser } from '../helpers/test-db.js';
 
@@ -98,7 +98,7 @@ function turnStateFrames(frames: ChatReplayFrame[]): TurnStateFrame[] {
     (frame): frame is TurnStateFrame => 'turnActive' in frame,
   );
 }
-function chunksOnly(frames: ChatReplayFrame[]): NimboChunk[] {
+function chunksOnly(frames: ChatReplayFrame[]): RunkoChunk[] {
   return chunkFrames(frames).map((frame) => frame.chunk);
 }
 
@@ -256,7 +256,7 @@ describe('routes/chat', () => {
     });
   }
 
-  async function ledgerMessages(id: string): Promise<NimboUIMessage[]> {
+  async function ledgerMessages(id: string): Promise<RunkoUIMessage[]> {
     const entries = await createChatPersistence(db, silentLogger).ledger.read(
       id,
     );

@@ -37,7 +37,7 @@
  *    短路成 `allow`、不弹卡片；未命中回落到现有危险命令分类。产品功能不依赖它——
  *    清空只是「又开始问了」，不影响任何账本数据。
  */
-import type { JsonValue } from '@nimbo/core';
+import type { JsonValue } from '@runko/core';
 import { and, eq, inArray } from 'drizzle-orm';
 
 import { conversationGrants } from '../db/schema.js';

@@ -19,18 +19,18 @@ import type {
   ConformanceCase,
   MultiNodeConformanceSetup,
   TakeoverConformanceSetup,
-} from "@nimbo/conformance";
+} from "@runko/conformance";
 import {
   arbitrationCases,
   arbitrationMultiNodeCases,
   arbitrationTakeoverCases,
-} from "@nimbo/conformance";
+} from "@runko/conformance";
 import Database from "better-sqlite3";
 import { Kysely, MysqlDialect, PostgresDialect, SqliteDialect } from "kysely";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { traitsOf } from "../src/flavor.js";
-import type { Flavor, NimboDatabase } from "../src/index.js";
+import type { Flavor, RunkoDatabase } from "../src/index.js";
 import { leaseArbitration, migrate } from "../src/index.js";
 import type { FaultyDialect } from "./helpers/faulty-dialect.js";
 import { faultySqlite } from "./helpers/faulty-dialect.js";
@@ -60,7 +60,7 @@ function runCases<S extends { cleanup?: () => Promise<void> | void }>(
 }
 
 /** 一档的完整装配：两个「节点」+ 一个让持有者看起来死掉的钩子。 */
-function setupFor(db: Kysely<NimboDatabase>, flavor: Flavor): TakeoverConformanceSetup {
+function setupFor(db: Kysely<RunkoDatabase>, flavor: Flavor): TakeoverConformanceSetup {
   const traits = traitsOf(flavor);
   // **心跳调到 40ms / 判死 200ms**（仍满足「阈值 ≥ 3× 心跳」那条硬规矩）：默认的
   // 5s/60s 让「心跳自己发现被接管」那条用例要等一分钟。语义不变，只是把时间轴压扁。
@@ -77,7 +77,7 @@ function setupFor(db: Kysely<NimboDatabase>, flavor: Flavor): TakeoverConformanc
     expire: async (conversationId: string): Promise<void> => {
       holderSkew = timings.takeoverMs * 10;
       await db
-        .updateTable("nimbo_leases")
+        .updateTable("agent_leases")
         .set({ heartbeat_at: holderNow() })
         .where("conversation_id", "=", conversationId)
         .execute();
@@ -86,7 +86,7 @@ function setupFor(db: Kysely<NimboDatabase>, flavor: Flavor): TakeoverConformanc
 }
 
 /** 一条用例一个库的那几档：跑完把库关掉。共用库的那档不用它。 */
-function closing(db: Kysely<NimboDatabase>): { cleanup: () => Promise<void> } {
+function closing(db: Kysely<RunkoDatabase>): { cleanup: () => Promise<void> } {
   return {
     cleanup: async (): Promise<void> => {
       await db.destroy();
@@ -113,7 +113,7 @@ function runAllGroups(title: string, make: () => Promise<TakeoverConformanceSetu
 
 runAllGroups("lease · sqlite", async () => {
   const sqlite = new Database(":memory:");
-  const db = new Kysely<NimboDatabase>({ dialect: new SqliteDialect({ database: sqlite }) });
+  const db = new Kysely<RunkoDatabase>({ dialect: new SqliteDialect({ database: sqlite }) });
   await migrate(db, { flavor: "sqlite" });
   return { ...setupFor(db, "sqlite"), ...closing(db) };
 });
@@ -130,11 +130,11 @@ runAllGroups("lease · sqlite", async () => {
  * 新用例的行又是新令牌——它打中的行数是 0，下一拍就自己 `lose()` 停表，**碰不到新
  * 用例的租约**。两个「真库」档本来就是所有用例共用同一个库，形状完全一样。
  */
-let pglite: Promise<Kysely<NimboDatabase>> | undefined;
+let pglite: Promise<Kysely<RunkoDatabase>> | undefined;
 
-function sharedPglite(): Promise<Kysely<NimboDatabase>> {
+function sharedPglite(): Promise<Kysely<RunkoDatabase>> {
   pglite ??= (async () => {
-    const db = new Kysely<NimboDatabase>({ dialect: pgliteDialect(new PGlite()) });
+    const db = new Kysely<RunkoDatabase>({ dialect: pgliteDialect(new PGlite()) });
     await migrate(db, { flavor: "postgres" });
     return db;
   })();
@@ -157,25 +157,25 @@ runAllGroups("lease · postgres (pglite)", async () => {
 // 给了连接串才跑的两档
 // ---------------------------------------------------------------------------
 
-const POSTGRES_URL = process.env["NIMBO_TEST_POSTGRES_URL"];
-const MYSQL_URL = process.env["NIMBO_TEST_MYSQL_URL"];
+const POSTGRES_URL = process.env["RUNKO_TEST_POSTGRES_URL"];
+const MYSQL_URL = process.env["RUNKO_TEST_MYSQL_URL"];
 
-async function clearLeases(db: Kysely<NimboDatabase>): Promise<void> {
-  await db.deleteFrom("nimbo_leases").execute();
+async function clearLeases(db: Kysely<RunkoDatabase>): Promise<void> {
+  await db.deleteFrom("agent_leases").execute();
 }
 
 if (POSTGRES_URL !== undefined) {
   runAllGroups("lease · postgres (真库)", async () => {
     const { Pool } = await import("pg");
     const pool = new Pool({ connectionString: POSTGRES_URL });
-    const db = new Kysely<NimboDatabase>({ dialect: new PostgresDialect({ pool }) });
+    const db = new Kysely<RunkoDatabase>({ dialect: new PostgresDialect({ pool }) });
     await migrate(db, { flavor: "postgres" });
     await clearLeases(db);
     return { ...setupFor(db, "postgres"), ...closing(db) };
   });
 } else {
   describe.skip("lease · postgres (真库)", () => {
-    it("没给 NIMBO_TEST_POSTGRES_URL，跳过", () => undefined);
+    it("没给 RUNKO_TEST_POSTGRES_URL，跳过", () => undefined);
   });
 }
 
@@ -183,14 +183,14 @@ if (MYSQL_URL !== undefined) {
   runAllGroups("lease · mysql (真库)", async () => {
     const { createPool } = await import("mysql2");
     const pool = createPool(MYSQL_URL);
-    const db = new Kysely<NimboDatabase>({ dialect: new MysqlDialect({ pool }) });
+    const db = new Kysely<RunkoDatabase>({ dialect: new MysqlDialect({ pool }) });
     await migrate(db, { flavor: "mysql" });
     await clearLeases(db);
     return { ...setupFor(db, "mysql"), ...closing(db) };
   });
 } else {
   describe.skip("lease · mysql (真库)", () => {
-    it("没给 NIMBO_TEST_MYSQL_URL，跳过", () => undefined);
+    it("没给 RUNKO_TEST_MYSQL_URL，跳过", () => undefined);
   });
 }
 
@@ -199,7 +199,7 @@ if (MYSQL_URL !== undefined) {
 // ---------------------------------------------------------------------------
 
 describe("leaseArbitration 的配置校验", () => {
-  const db = new Kysely<NimboDatabase>({ dialect: new SqliteDialect({ database: new Database(":memory:") }) });
+  const db = new Kysely<RunkoDatabase>({ dialect: new SqliteDialect({ database: new Database(":memory:") }) });
 
   it("阈值不足心跳的 3 倍 → **构造时就抛**，不等线上误接管", () => {
     expect(() =>
@@ -226,10 +226,10 @@ describe("leaseArbitration 的配置校验", () => {
 async function faultyLease(timings: { heartbeatMs: number; takeoverMs: number }): Promise<{
   arbitration: ReturnType<typeof leaseArbitration>;
   faulty: FaultyDialect;
-  db: Kysely<NimboDatabase>;
+  db: Kysely<RunkoDatabase>;
 }> {
   const faulty = faultySqlite(new Database(":memory:"));
-  const db = new Kysely<NimboDatabase>({ dialect: faulty.dialect });
+  const db = new Kysely<RunkoDatabase>({ dialect: faulty.dialect });
   await migrate(db, { flavor: "sqlite" });
   return {
     db,

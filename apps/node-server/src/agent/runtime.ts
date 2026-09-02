@@ -1,5 +1,5 @@
 /**
- * chat 应用的 `@nimbo/agent` 装配——**取代了原先的 `turn-launcher.ts` + `turn-runner/`
+ * chat 应用的 `@runko/agent` 装配——**取代了原先的 `turn-launcher.ts` + `turn-runner/`
  * 那九个文件**。
  *
  * 现在这里只剩下真正属于 chat 应用的东西：
@@ -18,16 +18,16 @@ import type {
   RuntimeHooks,
   SessionFactory,
   TurnPreparation,
-} from '@nimbo/agent';
-import { createAgentRuntime } from '@nimbo/agent';
+} from '@runko/agent';
+import { createAgentRuntime } from '@runko/agent';
 import type {
   ApprovalPolicy,
-  NimboExec,
-  NimboFS,
+  RunkoExec,
+  RunkoFS,
   SessionTelemetry,
   Tool,
-} from '@nimbo/core';
-import { defineAgent } from '@nimbo/sdk';
+} from '@runko/core';
+import { defineAgent } from '@runko/sdk';
 import type { LanguageModel } from 'ai';
 
 import type { Logger } from '../logger.js';
@@ -57,7 +57,7 @@ import { createWebSearchToolFromEnv } from './web-search.js';
 const LOG_SCOPE = 'runtime';
 
 /** 见下方 `agent:` 处的注释——永远会被 `prepareTurn` 覆盖，不会被解析。 */
-const PLACEHOLDER_MODEL = 'nimbo/overridden-per-turn';
+const PLACEHOLDER_MODEL = 'runko/overridden-per-turn';
 
 // ---------------------------------------------------------------------------
 // 起轮装配打点（docs/ingress/tech/telemetry.md §2.4）
@@ -65,7 +65,7 @@ const PLACEHOLDER_MODEL = 'nimbo/overridden-per-turn';
 
 /**
  * 一次[起轮装配](../../../../docs/terms.md)的分段耗时（毫秒，墙钟）。就地量出来、攒着，
- * 等这一轮第一个 chunk 抵达时才落库——那一刻 nimbo 会话 id 与轮号才确定（遥测的关联键
+ * 等这一轮第一个 chunk 抵达时才落库——那一刻 runko 会话 id 与轮号才确定（遥测的关联键
  * 是 `"<sessionId>#<turn>"`）。
  */
 interface LaunchTimings {
@@ -345,7 +345,7 @@ export function createChatRuntime(deps: ChatRuntimeDeps): AgentRuntime {
         launchMs: launchStopwatch(),
       });
 
-      const workspace: NimboFS & NimboExec =
+      const workspace: RunkoFS & RunkoExec =
         approvalMode === 'off' ?
           acquired.workspace
         : gateWorkspace(acquired.workspace);

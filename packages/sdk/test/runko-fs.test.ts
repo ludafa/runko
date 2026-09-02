@@ -1,23 +1,23 @@
 /**
- * P7-1 acceptance: `NimboFS.fromMemory`/`NimboFS.fromDirectory` value-namespace calls
- * (docs/features/core-sdk.md §4.1: `NimboFS.fromDirectory("./project")`).
+ * P7-1 acceptance: `RunkoFS.fromMemory`/`RunkoFS.fromDirectory` value-namespace calls
+ * (docs/features/core-sdk.md §4.1: `RunkoFS.fromDirectory("./project")`).
  */
 import * as nodeFs from "node:fs/promises";
 import * as nodePath from "node:path";
 import * as os from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { NimboFS } from "../src/index.js";
-import type { NimboFS as NimboFSType } from "../src/index.js";
+import { RunkoFS } from "../src/index.js";
+import type { RunkoFS as RunkoFSType } from "../src/index.js";
 
-describe("NimboFS value namespace", () => {
+describe("RunkoFS value namespace", () => {
   it("fromMemory builds a working in-memory FS from a plain object", async () => {
-    const fs = NimboFS.fromMemory({ "a.txt": "hello", "src/index.ts": "export {}" });
+    const fs = RunkoFS.fromMemory({ "a.txt": "hello", "src/index.ts": "export {}" });
     expect(new TextDecoder().decode(await fs.readFile("/a.txt"))).toBe("hello");
     expect(new TextDecoder().decode(await fs.readFile("/src/index.ts"))).toBe("export {}");
   });
 
-  it("fromMemory's return type is usable wherever the NimboFS type is expected, without a cast", () => {
-    const fs: NimboFSType = NimboFS.fromMemory({});
+  it("fromMemory's return type is usable wherever the RunkoFS type is expected, without a cast", () => {
+    const fs: RunkoFSType = RunkoFS.fromMemory({});
     expect(typeof fs.readFile).toBe("function");
   });
 
@@ -25,7 +25,7 @@ describe("NimboFS value namespace", () => {
     let tmpDir: string;
 
     beforeEach(async () => {
-      tmpDir = await nodeFs.mkdtemp(nodePath.join(os.tmpdir(), "nimbo-sdk-fromDirectory-"));
+      tmpDir = await nodeFs.mkdtemp(nodePath.join(os.tmpdir(), "runko-sdk-fromDirectory-"));
       await nodeFs.mkdir(nodePath.join(tmpDir, "src"), { recursive: true });
       await nodeFs.writeFile(nodePath.join(tmpDir, "src", "index.ts"), "var x = 1;\n");
     });
@@ -35,9 +35,9 @@ describe("NimboFS value namespace", () => {
     });
 
     it("mounts a real directory read-through, zero-copy overlay (OverlayFS, has diff()/writeBack())", async () => {
-      const fs = NimboFS.fromDirectory(tmpDir);
+      const fs = RunkoFS.fromDirectory(tmpDir);
       expect(new TextDecoder().decode(await fs.readFile("/src/index.ts"))).toBe("var x = 1;\n");
-      // OverlayFS-only capabilities (not on the plain NimboFS interface) prove the concrete
+      // OverlayFS-only capabilities (not on the plain RunkoFS interface) prove the concrete
       // return type is preserved, not widened to the bare interface.
       expect(typeof fs.diff).toBe("function");
       expect(typeof fs.writeBack).toBe("function");
@@ -45,7 +45,7 @@ describe("NimboFS value namespace", () => {
     });
 
     it("writes land in the overlay, never on real disk (§4.4)", async () => {
-      const fs = NimboFS.fromDirectory(tmpDir);
+      const fs = RunkoFS.fromDirectory(tmpDir);
       await fs.writeFile("/src/index.ts", "const x = 1;\n");
       const diff = await fs.diff();
       expect(diff).toEqual([{ path: "/src/index.ts", kind: "modified", before: "var x = 1;\n", after: "const x = 1;\n", patch: expect.any(String) }]);

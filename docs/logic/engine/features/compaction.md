@@ -4,7 +4,7 @@ slug: compaction
 view: 功能
 layer: 逻辑层
 module: 执行引擎
-packages: ["@nimbo/core"]
+packages: ["@runko/core"]
 tags: ["上下文压缩", "token 预算", "历史裁剪"]
 related: ["logic/engine/plans/compaction.md", "logic/engine/tech/compaction.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -17,7 +17,7 @@ related: ["logic/engine/plans/compaction.md", "logic/engine/tech/compaction.md",
 
 ## 这是什么
 
-[上下文压缩（compaction）](../../../terms.md)让**会话可以无限聊下去**。会话变长后，nimbo 把较早那段对话换成一条[摘要](../../../terms.md)再喂给模型，从而把发给模型那份[模型上下文](../../../terms.md)的体量压住。代价是：模型对较早的历史只保留摘要级记忆，但**界面上你能看到的完整历史一行不少**——压缩只动模型看的那份推导结果，不动你看的那份。
+[上下文压缩（compaction）](../../../terms.md)让**会话可以无限聊下去**。会话变长后，runko 把较早那段对话换成一条[摘要](../../../terms.md)再喂给模型，从而把发给模型那份[模型上下文](../../../terms.md)的体量压住。代价是：模型对较早的历史只保留摘要级记忆，但**界面上你能看到的完整历史一行不少**——压缩只动模型看的那份推导结果，不动你看的那份。
 
 一句话：**长会话不再撞墙而死，换来的是模型对早期细节的记忆变粗。**
 

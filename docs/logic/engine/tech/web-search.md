@@ -4,7 +4,7 @@ slug: web-search
 view: 技术
 layer: 逻辑层
 module: 执行引擎
-packages: ["@nimbo/core"]
+packages: ["@runko/core"]
 tags: ["联网搜索", "工具", "provider"]
 related: ["logic/engine/features/web-search.md", "logic/engine/plans/web-search.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -15,7 +15,7 @@ related: ["logic/engine/features/web-search.md", "logic/engine/plans/web-search.
 
 ## 1. 落点：为什么在 `apps/node-server`，不在 `packages/*`
 
-`@nimbo/core` 的[内置工具](../../../terms.md)有一条隐含契约：**零凭证、零网络、宿主什么都不配也能用**（文件八件套、`update-plan`）；`bash`/`load-skill` 是[条件内置](../../../terms.md)，条件也只是「宿主注入了 `NimboExec` / 配了 skills」这种进程内能力，不是外部账号。联网搜索要一个第三方 API key、按次计费、要走公网——把它塞进 core，等于让每个 SDK 用户被动继承一个外部依赖和一份账单面。
+`@runko/core` 的[内置工具](../../../terms.md)有一条隐含契约：**零凭证、零网络、宿主什么都不配也能用**（文件八件套、`update-plan`）；`bash`/`load-skill` 是[条件内置](../../../terms.md)，条件也只是「宿主注入了 `RunkoExec` / 配了 skills」这种进程内能力，不是外部账号。联网搜索要一个第三方 API key、按次计费、要走公网——把它塞进 core，等于让每个 SDK 用户被动继承一个外部依赖和一份账单面。
 
 所以它落在 chat 应用侧，形态与 `ask-user` 完全同构（[chat-webapp §6](../../../ingress/tech/chat-webapp.md)）：
 

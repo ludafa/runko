@@ -1,15 +1,15 @@
 ---
-title: "轮编排运行时 `@nimbo/agent`（施工进展）"
+title: "轮编排运行时 `@runko/agent`（施工进展）"
 slug: agent-runtime
 view: 施工
 layer: 逻辑层
 module: 轮编排
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["轮编排", "运行时", "施工拆单", "chat 迁移"]
 related: ["logic/orchestration/features/agent-runtime.md", "logic/orchestration/tech/agent-runtime.md", "architecture/plans/agent-kernel.md"]
 ---
 
-# 轮编排运行时 `@nimbo/agent`（施工进展）
+# 轮编排运行时 `@runko/agent`（施工进展）
 
 > 相关：[功能](../features/agent-runtime.md)，[技术方案](../tech/agent-runtime.md)。
 > 上位拆单：[agent 内核包 · 施工进展](../../../architecture/plans/agent-kernel.md) 的 K0–K9。**本文是其中 K1 + K2 + K4 + K7 这一批的落地记录**。
@@ -26,7 +26,7 @@ related: ["logic/orchestration/features/agent-runtime.md", "logic/orchestration/
 |---|---|
 | **K3 挂起与恢复** | 卡在一个未定的上游问题：core 的「恢复开轮」入口怎么加（扩展 `stream` 入参 vs 并列 `settleAndRun`）。定案前动 core 的 loop 很可能返工 |
 | **K5/K6 `persist-sql` + 租约版仲裁** | `apps/node-server` 已有 drizzle schema，让它自己实现领域接口反而是对接口更真实的检验；硬塞一个 `persist-sql` 会造出第二套数据访问方式 |
-| **K8 `@nimbo/cli` · K9 其余实现包** | 依赖 K2 接口先定型 |
+| **K8 `@runko/cli` · K9 其余实现包** | 依赖 K2 接口先定型 |
 
 ## 阶段拆单
 
@@ -70,7 +70,7 @@ related: ["logic/orchestration/features/agent-runtime.md", "logic/orchestration/
 | 2026-08-16 | `packages/agent` 落地：四种宿主能力接口 + 三样内置实现 + 一轮的一生 + 队列编排 + 人在回路桥 + 停止/交权/崩溃恢复，61 个单测跑绿 |
 | 2026-08-16 | `apps/node-server` 迁移完成：删 `turn-runner/`（9 文件）、`turn-launcher.ts`、`crash-recovery.ts`，换成 `agent/runtime.ts` + `agent/persistence.ts`；`routes/chat.ts` 全部端点改走 runtime；账本从此只写 `kind='message'` 行 |
 | 2026-08-16 | `apps/web` 对齐：`lastFrameIsChunk` 猜测退役（历史里不再有 chunk 行，那个猜测恒为假），会话详情新增 `turnInProgress` 字段——服务端读[起轮标记](../../../terms.md)那一列直接给出答案，零额外查询 |
-| 2026-08-16 | 顺带修 `@nimbo/core`：`createSession({ resume })` 现在接受空账本（`messages: []`）。此前被 ai 的 `validateUIMessages()` 拒掉，而这正是「让会话 id 从第一轮起就稳定」所需要的形态 |
+| 2026-08-16 | 顺带修 `@runko/core`：`createSession({ resume })` 现在接受空账本（`messages: []`）。此前被 ai 的 `validateUIMessages()` 拒掉，而这正是「让会话 id 从第一轮起就稳定」所需要的形态 |
 
 ## 验证方案与实测结果
 
@@ -78,9 +78,9 @@ related: ["logic/orchestration/features/agent-runtime.md", "logic/orchestration/
 
 | 跑什么 | 结果 |
 |---|---|
-| `pnpm --filter @nimbo/agent test` | **61 passed**（行覆盖 93.5%）——零配置跑通一个会话、`enqueue` 三路分流、自动出队、停止（含装配窗口内停止）、交权、崩溃恢复、失去独占权、人在回路两条通道、驱动器的两条失败路径 |
-| `pnpm --filter @nimbo-chat/node-server test` | **395 passed** |
-| `pnpm --filter @nimbo-chat/web test` | **278 passed** |
+| `pnpm --filter @runko/agent test` | **61 passed**（行覆盖 93.5%）——零配置跑通一个会话、`enqueue` 三路分流、自动出队、停止（含装配窗口内停止）、交权、崩溃恢复、失去独占权、人在回路两条通道、驱动器的两条失败路径 |
+| `pnpm --filter @runko-chat/node-server test` | **395 passed** |
+| `pnpm --filter @runko-chat/web test` | **278 passed** |
 | `pnpm -r build` · `pnpm -r typecheck` | 全绿（14 个成员）；`docs:check` + `docs:build`（含全站死链检查）通过 |
 
 ### 2. 端到端实测（2026-08-16，真 E2B 沙盒 + 真模型）
@@ -291,7 +291,7 @@ related: ["logic/orchestration/features/agent-runtime.md", "logic/orchestration/
 | # | 问题 | 定案 | 落在哪 |
 |---|---|---|---|
 | **Q2** | `queue.steer` 的形态（两份文档打架） | **两个都要**：`'never' \| 'always' \| 'onRequest' \| ((input) => boolean)` | `SteerPolicy`（`runtime/context.ts`）；回调拿整条 `TurnInput`，抛错回落成排队 |
-| **Q3** | 收尾状态加不加第四种 `suspended` | **现在就加**，不等 K3 | core `NimboMessageMetadata.status` + zod；`@nimbo/agent` `TurnStatus`；node-server `TurnEndStatus` |
+| **Q3** | 收尾状态加不加第四种 `suspended` | **现在就加**，不等 K3 | core `RunkoMessageMetadata.status` + zod；`@runko/agent` `TurnStatus`；node-server `TurnEndStatus` |
 | **Q4** | 「会话内都允许」怎么表达 | **`scope: 'once' \| 'conversation'`**，框架只**记**、不执行 | 见下方「Q4 为什么不叫 session」 |
 | **Q7** | `events` → `messages` 改名 | **做**——「没发布过，名义对齐更重要」 | `GET .../messages`，与既有的 `POST .../messages` 配成一对；openapi + kubb client 已重生成 |
 | **Q9** | `workspaceRetention` 做不做 | **不做，并从 runtime 配置里删掉**，改记进[沙盒契约 §4.6](../../../host/contract/tech/sandbox.md) | 留存期归适配器：E2B 暂停后无限期保存，统一开关会骗人 |
@@ -302,7 +302,7 @@ related: ["logic/orchestration/features/agent-runtime.md", "logic/orchestration/
 |---|---|---|
 | **Q1** | core 的「恢复开轮」入口 | **选 B：并列一个 `settleAndRun(callId, decision)`**，`stream()` 签名不动。K3 的前置就此解开 |
 | **Q5** | `reportPresence` 现在补还是等 K3 | **等 K3**——现在补是空壳，接口形状要等真做挂起才知道 |
-| **Q6** | K5 `@nimbo/persist-sql` | **推翻「取消」，现在就做**，并把 node-server 改造过去（用 drizzle，是搬家不是重写）。单列一批走完整三文档流程 |
+| **Q6** | K5 `@runko/persist-sql` | **推翻「取消」，现在就做**，并把 node-server 改造过去（用 drizzle，是搬家不是重写）。单列一批走完整三文档流程 |
 | **Q8** | `kind='chunk'` 垃圾行真删吗 | **不删**——都是测试数据。（顺带纠正：施工文档原先写的「几十万行」是错的，dev 库实测 **425 行**，全表 860 行） |
 | **Q10** | turn-checkpoint 排期 | **往后延** |
 | **Q11** | 总纲「还没定的」第 1、2 条 | **都关闭**；第 2 条改写成一条独立待办（见总纲施工进展） |
@@ -328,5 +328,5 @@ related: ["logic/orchestration/features/agent-runtime.md", "logic/orchestration/
 
 ### 连带的两处
 
-- **数据迁移 `0011_decision_scope_conversation.sql`**：把存量 `scope='broader'` 刷成 `'conversation'`。`scope` 列没有 CHECK 约束（drizzle 的 `enum` 只是类型级），所以不用重建表；本表是纯审计表，刷是为了让库里的值别跟 TS 类型对不上。**尚未在 dev 库上执行**（跑 `pnpm --filter @nimbo-chat/node-server db:migrate`）。
+- **数据迁移 `0011_decision_scope_conversation.sql`**：把存量 `scope='broader'` 刷成 `'conversation'`。`scope` 列没有 CHECK 约束（drizzle 的 `enum` 只是类型级），所以不用重建表；本表是纯审计表，刷是为了让库里的值别跟 TS 类型对不上。**尚未在 dev 库上执行**（跑 `pnpm --filter @runko-chat/node-server db:migrate`）。
 - **`suspended` 目前没有产出方**：core 的 `finalizeTurn` 至今只产出前三态，K3 落地才会真写出来。先进联合类型是为了让宿主/界面提前占好渲染分支；core 的穷尽性测试会保证它不被遗漏。

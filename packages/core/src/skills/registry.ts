@@ -1,12 +1,12 @@
 /**
  * Skills 注入三件事（docs/tech/core-sdk.md §4.6）：① `<available_skills>` system prompt 段
  * ② `ctx.getSkill(name)` 的真实现（读 skill 定义自带的 `files`，非 FS）
- * ③ 附属文件挂载到 `/.skills/<name>/`（经 `NimboFS.writeFile`）。三者都只消费
+ * ③ 附属文件挂载到 `/.skills/<name>/`（经 `RunkoFS.writeFile`）。三者都只消费
  * `Skill[]`，不关心 skill 是程序化 `defineSkill` 出来的还是 `loader.ts` 三加载器
  * 产出的——因此收在这个文件而不是 `loader.ts`（loader 管"怎么得到一个 Skill"，
  * registry 管"session 怎么用一批 Skill"），由 `session.ts` 接线。
  */
-import type { NimboFS, SkillHandle } from "../types.js";
+import type { RunkoFS, SkillHandle } from "../types.js";
 import type { Skill } from "../skill.js";
 
 const textDecoder = new TextDecoder();
@@ -79,9 +79,9 @@ function describeError(error: unknown): string {
 
 /**
  * 附属文件挂载（docs/tech/core-sdk.md §4.6 第 3 点）：把每个 skill 的 `files` 经
- * `NimboFS.writeFile` 写入 `/.skills/<name>/`。"只读层"语义（挂载后 agent 不该
+ * `RunkoFS.writeFile` 写入 `/.skills/<name>/`。"只读层"语义（挂载后 agent 不该
  * 能改写它）留给 P7 的门面（OverlayFS base 层）——这里只负责把字节写进去，用的
- * 是普通 `NimboFS` 接口，不假设具体实现。
+ * 是普通 `RunkoFS` 接口，不假设具体实现。
  *
  * fs 未注入（`session.ts` 的占位 FS）且某个 skill 带 `files` 时，第一次
  * `writeFile` 调用本身就会以"注入 fs"为指引的错误 reject（占位 FS 的
@@ -91,7 +91,7 @@ function describeError(error: unknown): string {
  * 带 `files` 时，这个函数完全不触碰 `fs`（不 `import`/不调用任何 FS 方法），因此
  * 占位 FS + 无附属文件的 skills 不受影响，与既有"fs 缺省"测试零冲突。
  */
-export async function mountSkillFiles(fs: NimboFS, skills: readonly Skill[]): Promise<void> {
+export async function mountSkillFiles(fs: RunkoFS, skills: readonly Skill[]): Promise<void> {
   for (const skill of skills) {
     if (skill.files === undefined) {continue;}
     for (const [relPath, content] of Object.entries(skill.files)) {

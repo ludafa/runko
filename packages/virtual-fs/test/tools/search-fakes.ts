@@ -1,11 +1,11 @@
 /**
  * grep/glob 双路径自适应测试用的"原生底座"替身（不是 *.test.ts，vitest 不会当测试文件收集）。
  *
- * `NativeSearchFake` 包一层任意 NimboFS（通常是 `fromMemory(...)`），把 7 个基础方法原样委托
+ * `NativeSearchFake` 包一层任意 RunkoFS（通常是 `fromMemory(...)`），把 7 个基础方法原样委托
  * 给内层，`searchFiles`/`searchContent` 则**不**复用 grep.ts/glob.ts 里的 `fallbackSearchFiles`/
  * `fallbackSearchContent`（那样对拍就是同一份代码跟自己比，测不出工具层传参错误）——改用
  * `readdir()` 递归遍历取代 `glob()` 作为候选集来源，独立算出结果，只在"按文档约定的输出契约"
- * （`FileSearchQuery`/`ContentSearchQuery` 在 `@nimbo/core` types.ts 的字段注释）这一层与
+ * （`FileSearchQuery`/`ContentSearchQuery` 在 `@runko/core` types.ts 的字段注释）这一层与
  * grep.ts/glob.ts 保持一致——这是任何合规的原生实现都必须满足的契约，不是抄实现细节。
  *
  * 同时记录每次调用收到的 query，供测试断言"工具确实把 scope/ignore/limit/maxFiles/maxLines
@@ -20,8 +20,8 @@ import type {
   FileSearchQuery,
   FileSearchResult,
   FileStat,
-  NimboFS,
-} from "@nimbo/core";
+  RunkoFS,
+} from "@runko/core";
 import { globToRegExp, isIgnoredPath } from "../../src/path.js";
 import { isTextMimeType } from "../../src/tools/shared.js";
 
@@ -72,11 +72,11 @@ function capResult(groups: ContentSearchGroup[], maxFiles: number, maxLines: num
   return { groups: boundedGroups, totalFiles, lineCapped };
 }
 
-export class NativeSearchFake implements NimboFS {
+export class NativeSearchFake implements RunkoFS {
   readonly fileSearchCalls: FileSearchQuery[] = [];
   readonly contentSearchCalls: ContentSearchQuery[] = [];
 
-  constructor(private readonly inner: NimboFS) {}
+  constructor(private readonly inner: RunkoFS) {}
 
   readFile(path: string): Promise<Uint8Array> {
     return this.inner.readFile(path);
@@ -154,9 +154,9 @@ export class NativeSearchFake implements NimboFS {
 }
 
 /** searchFiles/searchContent 都抛同一个错误的替身——用来测 `SearchUnsupportedError` 静默回退，或普通 Error 走 errorResult 通道。 */
-export class ThrowingSearchFake implements NimboFS {
+export class ThrowingSearchFake implements RunkoFS {
   constructor(
-    private readonly inner: NimboFS,
+    private readonly inner: RunkoFS,
     private readonly error: Error,
   ) {}
 

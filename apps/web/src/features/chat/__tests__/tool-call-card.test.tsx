@@ -2,7 +2,7 @@
  * `ToolCallCard`'s tool-timing strip (chat 可观测性：启动/完成时间 + 耗时,
  * `timing?: ToolTimingData` prop, `message-entry.tsx`'s `findToolTiming`
  * join) — display states driven entirely by `timing`/`part.state`,围绕
- * `@nimbo/core` 三段生命周期（startedAt 入队 → executionStartedAt 真实执行 →
+ * `@runko/core` 三段生命周期（startedAt 入队 → executionStartedAt 真实执行 →
  * completedAt 结算）：queued（等待中徽标 + 已等待跳动）、running（执行起点 +
  * 逐秒跳动）、settled（静态，耗时 = 真实执行时长）、denied（未执行）、legacy
  * fallback（无 executionStartedAt 的存量记录退回全程口径）、crash residue
@@ -15,9 +15,9 @@ import { act, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ToolCallCard } from '../components/tool-call-card';
-import type { NimboToolPart } from '../timeline';
+import type { RunkoToolPart } from '../timeline';
 
-function runningPart(): NimboToolPart {
+function runningPart(): RunkoToolPart {
   return {
     type: 'tool-bash',
     toolCallId: 'call-1',
@@ -26,7 +26,7 @@ function runningPart(): NimboToolPart {
   };
 }
 
-function settledPart(): NimboToolPart {
+function settledPart(): RunkoToolPart {
   return {
     type: 'tool-bash',
     toolCallId: 'call-1',
@@ -36,7 +36,7 @@ function settledPart(): NimboToolPart {
   };
 }
 
-function erroredPart(): NimboToolPart {
+function erroredPart(): RunkoToolPart {
   return {
     type: 'tool-bash',
     toolCallId: 'call-1',
@@ -293,7 +293,7 @@ describe('ToolCallCard — crash residue (part.state already settled, but comple
   });
 
   it('output-denied is also a settled state for this purpose — same crash-residue rendering', () => {
-    const deniedPart: NimboToolPart = {
+    const deniedPart: RunkoToolPart = {
       type: 'tool-bash',
       toolCallId: 'call-1',
       state: 'output-denied',

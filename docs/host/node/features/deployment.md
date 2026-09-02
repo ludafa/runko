@@ -4,7 +4,7 @@ slug: deployment
 view: 功能
 layer: 宿主层
 module: —
-packages: ["@nimbo/agent", "@nimbo/persist-sql", "@nimbo/persist-drizzle", "@nimbo/persist-prisma"]
+packages: ["@runko/agent", "@runko/persist-sql", "@runko/persist-drizzle", "@runko/persist-prisma"]
 tags: ["Node", "单进程", "cluster", "Docker", "k8s", "部署形态", "零配置"]
 related: ["host/node/tech/deployment.md", "architecture/features/agent-kernel.md", "host/contract/features/persistence.md"]
 ---

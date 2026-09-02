@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
 
     # 三个真库。**没有它们的话 `persist-mysql` / `persist-mongo` 在 CI 里一条测试都不跑**
-    # （两个包都靠 `NIMBO_TEST_*_URL` 开关，没给就整档 skip），而 `persist-mongo` 是 700 多行
+    # （两个包都靠 `RUNKO_TEST_*_URL` 开关，没给就整档 skip），而 `persist-mongo` 是 700 多行
     # 的**独立实现**、跟 kysely 那条路一行代码都不共享，MySQL 那一档也有自己的
     # 幂等插入与排序规则分支——不跑等于「CI 绿说明不了任何事」。
     # 起容器是几行 YAML 的成本，换的是这两档不再靠人肉记得手动验。
@@ -19,21 +19,21 @@ jobs:
       postgres:
         image: postgres:18-alpine
         env:
-          POSTGRES_USER: nimbo
-          POSTGRES_PASSWORD: nimbo
-          POSTGRES_DB: nimbo
+          POSTGRES_USER: runko
+          POSTGRES_PASSWORD: runko
+          POSTGRES_DB: runko
         ports: ['5432:5432']
         options: >-
-          --health-cmd "pg_isready -U nimbo"
+          --health-cmd "pg_isready -U runko"
           --health-interval 5s --health-timeout 5s --health-retries 20
       mysql:
         image: mysql:9
         env:
-          MYSQL_ROOT_PASSWORD: nimbo
-          MYSQL_DATABASE: nimbo
+          MYSQL_ROOT_PASSWORD: runko
+          MYSQL_DATABASE: runko
         ports: ['3306:3306']
         options: >-
-          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pnimbo"
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -prunko"
           --health-interval 5s --health-timeout 5s --health-retries 30
       mongo:
         image: mongo:8
@@ -43,9 +43,9 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 20
 
     env:
-      NIMBO_TEST_POSTGRES_URL: postgres://nimbo:nimbo@127.0.0.1:5432/nimbo
-      NIMBO_TEST_MYSQL_URL: mysql://root:nimbo@127.0.0.1:3306/nimbo
-      NIMBO_TEST_MONGO_URL: mongodb://127.0.0.1:27017
+      RUNKO_TEST_POSTGRES_URL: postgres://runko:runko@127.0.0.1:5432/runko
+      RUNKO_TEST_MYSQL_URL: mysql://root:runko@127.0.0.1:3306/runko
+      RUNKO_TEST_MONGO_URL: mongodb://127.0.0.1:27017
 
     steps:
       - uses: actions/checkout@v4
@@ -59,9 +59,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # 顺序为 build → typecheck → test（P4-2 施工回填）：@nimbo/core 的测试
-      # devDep 了 @nimbo/virtual-fs（集成测试），跨包 `exports` 都指向各自的
-      # `dist`——typecheck/test 若先于 build 跑，core 对 "@nimbo/virtual-fs"
+      # 顺序为 build → typecheck → test（P4-2 施工回填）：@runko/core 的测试
+      # devDep 了 @runko/virtual-fs（集成测试），跨包 `exports` 都指向各自的
+      # `dist`——typecheck/test 若先于 build 跑，core 对 "@runko/virtual-fs"
       # 的类型/模块解析会先于 virtual-fs 产出 dist 而失败。build 先行使三步
       # 都能在干净 checkout 上稳定通过。
       - run: pnpm -r build
@@ -71,7 +71,7 @@ jobs:
       - run: pnpm -r test
 
       # 文档站的死链检查与 typecheck 已经被上面三步覆盖了——docs/ 是 workspace
-      # 成员（@nimbo/docs），`pnpm -r build` 会构建它、构建时做全站死链检查，
+      # 成员（@runko/docs），`pnpm -r build` 会构建它、构建时做全站死链检查，
       # `pnpm -r typecheck` 会查 .vitepress/ 下的配置。这里只补 front matter 体检：
       # 它的脚本名是 `check`，不在 `pnpm -r` 跑的那三个里，写错字段会让文档
       # 静默漏出侧栏，必须单列一步。

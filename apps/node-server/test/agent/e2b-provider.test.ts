@@ -1,7 +1,7 @@
 /**
  * Contract tests for `createE2bProvider()` (docs/plans/sandbox-provider.md
  * SP-2). The `e2b` package's static `Sandbox.create`/`Sandbox.connect` are
- * mocked — no network, no credentials — and the *real* `@nimbo/sandbox-e2b`
+ * mocked — no network, no credentials — and the *real* `@runko/sandbox-e2b`
  * `e2bWorkspace()` wraps a structural fake sandbox. Asserts the three
  * provider-specific things Vercel does differently: post-create `git clone`
  * into the workspace root, sandboxId as the resume token, and `setTimeout`
@@ -82,7 +82,7 @@ function createParams(
   overrides: Partial<CreateSandboxParams> = {},
 ): CreateSandboxParams {
   return {
-    name: 'nimbo-chat-conv-1',
+    name: 'runko-chat-conv-1',
     cloneUrl: 'https://github.com/acme/demo.git',
     githubPat: 'PAT123',
     timeoutMs: 1000,
@@ -129,7 +129,7 @@ describe('createE2bProvider', () => {
       timeoutMs: 1000,
       lifecycle: { onTimeout: 'pause', autoResume: true },
       envs: { GH_TOKEN: 'PAT123' },
-      metadata: { name: 'nimbo-chat-conv-1' },
+      metadata: { name: 'runko-chat-conv-1' },
     });
 
     const cloneCmd = fake.runCalls.find((c) => c.cmd.includes('git clone'));

@@ -1,5 +1,5 @@
 {
-  "name": "@nimbo/virtual-fs",
+  "name": "@runko/virtual-fs",
   "version": "0.1.0",
   "description": "MemoryFS/OverlayFS/DirFS、mime 推断、diff/writeBack、reference 条目、文件工具八件套",
   "type": "module",
@@ -37,7 +37,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@nimbo/core": "workspace:*",
+    "@runko/core": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {

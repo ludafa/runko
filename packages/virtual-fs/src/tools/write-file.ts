@@ -3,8 +3,8 @@
  * 已保证，工具层不重复实现——§0.2）；覆盖已存在且未读过的文件 → 拒绝（§0.4）。
  */
 import { z } from "zod";
-import { defineTool } from "@nimbo/core";
-import type { Tool, ToolReturn } from "@nimbo/core";
+import { defineTool } from "@runko/core";
+import type { Tool, ToolReturn } from "@runko/core";
 import { NotFoundError } from "../memory.js";
 import { byteLength, checkReadBeforeWrite, type CreateFileToolsOptions, describeError, errorResult, registerWrite } from "./shared.js";
 import type { FileChange } from "./shared.js";

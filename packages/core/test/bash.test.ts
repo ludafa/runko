@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createBashTool } from "../src/tools/builtin/bash.js";
-import type { ExecOptions, ExecRequest, ExecResult, NimboExec, ToolContext } from "../src/types.js";
+import type { ExecOptions, ExecRequest, ExecResult, RunkoExec, ToolContext } from "../src/types.js";
 
 function makeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
   return {
@@ -26,15 +26,15 @@ function resultOf(exitCode: number, stdout: string, stderr: string): ExecResult 
   return { exitCode, stdout, stderr, durationMs: 1 };
 }
 
-/** A `NimboExec` fake whose `exec()` is fully controllable per test (result, output chunks, or a reject). */
+/** A `RunkoExec` fake whose `exec()` is fully controllable per test (result, output chunks, or a reject). */
 function fakeExec(opts: {
   result?: ExecResult | (() => Promise<ExecResult>);
   onOutputChunks?: { stream: "stdout" | "stderr"; data: string }[];
   rejectWith?: unknown;
   describe?: () => string;
-  defaultApproval?: NimboExec["defaultApproval"];
+  defaultApproval?: RunkoExec["defaultApproval"];
   captureRequest?: (req: ExecRequest) => void;
-}): NimboExec {
+}): RunkoExec {
   return {
     describe: opts.describe,
     defaultApproval: opts.defaultApproval,
@@ -207,7 +207,7 @@ describe("createBashTool", () => {
     });
   });
 
-  describe("exec() reject fallback (orchitector 接缝 a: 第三方 NimboExec 可能不守'失败即 ExecResult'契约)", () => {
+  describe("exec() reject fallback (orchitector 接缝 a: 第三方 RunkoExec 可能不守'失败即 ExecResult'契约)", () => {
     it("does not throw when exec() rejects — resolves a structured isError result instead", async () => {
       const tool = createBashTool({ exec: fakeExec({ rejectWith: new Error("sandbox is down") }) });
 

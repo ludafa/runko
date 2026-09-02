@@ -4,7 +4,7 @@ slug: steer-and-queue
 view: 技术
 layer: 逻辑层
 module: 轮编排
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["待发队列", "插话", "排队", "conversation-drained"]
 related: ["logic/orchestration/features/steer-and-queue.md", "logic/orchestration/plans/steer-and-queue.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -19,7 +19,7 @@ related: ["logic/orchestration/features/steer-and-queue.md", "logic/orchestratio
 
 | 层 | 现状 | 本期改动 |
 |---|---|---|
-| `@nimbo/core` | `Session.steer(input)`、loop 的 `drainSteerMessages`（step 边界 A/B 两个 checkpoint） | **不动** |
+| `@runko/core` | `Session.steer(input)`、loop 的 `drainSteerMessages`（step 边界 A/B 两个 checkpoint） | **不动** |
 | `apps/node-server` | `turn-runner/registry.ts` 的 `steerTurn()`；`POST .../messages` 有活跃轮就无条件 steer | 改为按 `intent` 分流，新增[排队](../../../terms.md)/[出队](../../../terms.md) |
 | `apps/web` | 流式中发送即 steer（隐式，无 UI 表达） | 默认排队 + 显式插话入口 + 待发区 |
 

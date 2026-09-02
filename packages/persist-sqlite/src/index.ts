@@ -1,9 +1,9 @@
 /**
- * `@nimbo/persist-sqlite`——[持久化](../../../docs/host/contract/features/persistence.md)
+ * `@runko/persist-sqlite`——[持久化](../../../docs/host/contract/features/persistence.md)
  * 的 SQLite（better-sqlite3） 实现。
  *
  * **你只有一个驱动实例、没在用任何 ORM 时装这个。** 它是个薄壳：把你的驱动包成一个
- * Kysely 实例，转交给 `@nimbo/persist-kysely`。
+ * Kysely 实例，转交给 `@runko/persist-kysely`。
  *
  * ```ts
  * import Database from "better-sqlite3";
@@ -13,28 +13,28 @@
  * createAgentRuntime(agent, { persistence: sqlitePersistence(db) });
  * ```
  *
- * **已经在用 Kysely 了？** 别用这个包——直接装 `@nimbo/persist-kysely`，把你自己的
- * 实例给它，nimbo 的四张表和你的表就在同一个实例、同一套迁移之下。
+ * **已经在用 Kysely 了？** 别用这个包——直接装 `@runko/persist-kysely`，把你自己的
+ * 实例给它，runko 的四张表和你的表就在同一个实例、同一套迁移之下。
  */
-import type { Persistence } from "@nimbo/agent";
-import type { NimboDatabase } from "@nimbo/persist-kysely";
-import { kyselyPersistence, migrate as migrateKysely } from "@nimbo/persist-kysely";
+import type { Persistence } from "@runko/agent";
+import type { RunkoDatabase } from "@runko/persist-kysely";
+import { kyselyPersistence, migrate as migrateKysely } from "@runko/persist-kysely";
 import { Kysely, SqliteDialect } from "kysely";
 import type { Database as SqliteDatabase } from "better-sqlite3";
 
-export const NIMBO_PERSIST_SQLITE_VERSION = "0.0.0" as const;
+export const RUNKO_PERSIST_SQLITE_VERSION = "0.0.0" as const;
 
 export type {
   DecisionsTable,
   LedgerTable,
-  NimboDatabase,
+  RunkoDatabase,
   QueueTable,
-} from "@nimbo/persist-kysely";
-export { DECISIONS_TABLE, LEDGER_TABLE, QUEUE_TABLE } from "@nimbo/persist-kysely";
+} from "@runko/persist-kysely";
+export { DECISIONS_TABLE, LEDGER_TABLE, QUEUE_TABLE } from "@runko/persist-kysely";
 
 /** 驱动 → Kysely。本包唯一做的事。 */
-function toKysely(database: SqliteDatabase): Kysely<NimboDatabase> {
-  return new Kysely<NimboDatabase>({ dialect: new SqliteDialect({ database: database }) });
+function toKysely(database: SqliteDatabase): Kysely<RunkoDatabase> {
+  return new Kysely<RunkoDatabase>({ dialect: new SqliteDialect({ database: database }) });
 }
 
 /**

@@ -12,7 +12,7 @@
  * durationMs / toolDurationMs`），不额外请求：它随直播流免费到达、永久保存。
  * 遥测那条线（可关闭、可清空的耗材）只喂单轮明细，不参与这里的汇总。
  */
-import type { NimboUIMessage } from '@nimbo/core';
+import type { RunkoUIMessage } from '@runko/core';
 import { InfoIcon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -75,7 +75,7 @@ function addOptional(
 }
 
 export function summarizeConversation(
-  messages: readonly NimboUIMessage[],
+  messages: readonly RunkoUIMessage[],
 ): ConversationStats {
   const stats: ConversationStats = {
     completedTurns: 0,
@@ -219,7 +219,7 @@ export function ConversationDetailsDialog({
 }: {
   conversation: Conversation;
   /** 账本里已加载的消息——会话级统计的唯一数据源。缺席（如设计工作台）就只有详情 tab 有内容。 */
-  messages?: readonly NimboUIMessage[];
+  messages?: readonly RunkoUIMessage[];
 }) {
   const stats = summarizeConversation(messages ?? []);
 

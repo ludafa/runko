@@ -1,9 +1,9 @@
 /**
  * 08-just-bash — the "full-syntax bash" upgrade path from
- * docs/tech/core-sdk.md §4.5b: `@nimbo/mini-bash`'s six read-only commands
+ * docs/tech/core-sdk.md §4.5b: `@runko/mini-bash`'s six read-only commands
  * can't carry a Claude-style model's high-frequency `if`/`for`/`while`/
- * `case` scripts, so nimbo ships a second, *optional* `NimboExec`
- * implementation — `@nimbo/just-bash`, an adapter over
+ * `case` scripts, so runko ships a second, *optional* `RunkoExec`
+ * implementation — `@runko/just-bash`, an adapter over
  * vercel-labs/just-bash — instead of trying to grow mini-bash's interpreter
  * into a full shell. It is a one-line swap for `miniBash(fs)`
  * (`createSession({ fs, exec: justBash(fs) })`) but supports the real
@@ -11,7 +11,7 @@
  * case, functions with `local`, variable/parameter expansion, glob
  * expansion, pipes, `&&`/`||`, and redirections (`>`, `>>`, `<`, `2>&1`).
  *
- * `@nimbo/just-bash` is **not** re-exported by `@nimbo/sdk` (§4.5b "包关系":
+ * `@runko/just-bash` is **not** re-exported by `@runko/sdk` (§4.5b "包关系":
  * just-bash's own dependency tree carries optional wasm bits — sql.js,
  * quickjs-emscripten — that the sdk's batteries-included default shouldn't
  * force on every consumer), so unlike `miniBash` in 04-mini-bash.ts, this
@@ -20,7 +20,7 @@
  * table).
  *
  * Same mode-A "same-source workspace" story as 04: `justBash(fs)` and the
- * file tools share one `NimboFS`, so a file the agent writes through
+ * file tools share one `RunkoFS`, so a file the agent writes through
  * `write-file` is immediately visible to the script, and vice versa —
  * nothing to keep in sync (§4.5a mode A).
  *
@@ -43,7 +43,7 @@
  *
  * Run: `pnpm example 08` (or `node examples/src/08-just-bash.ts`; see
  * examples/README.md for setup — this example additionally needs
- * `@nimbo/just-bash`, which `pnpm install` sets up for you).
+ * `@runko/just-bash`, which `pnpm install` sets up for you).
  *
  * Expected output shape:
  *   1. A deterministic section (no model, no env vars needed): prints
@@ -53,14 +53,14 @@
  *      `>>` redirection, and `cat`s the result — printing the full
  *      `ExecResult` (`{ exitCode: 0, stdout: "...", stderr: "", durationMs }`)
  *      plus proof that `onOutput` fired exactly once.
- *   2. If NIMBO_MODEL is set: a full session with both the file tools and
+ *   2. If RUNKO_MODEL is set: a full session with both the file tools and
  *      `bash` wired to the same fs; the agent is asked to write a `for`-loop
  *      script that counts `.txt` files under a directory — a task
- *      `@nimbo/mini-bash` has no syntax to express. If NIMBO_MODEL is
+ *      `@runko/mini-bash` has no syntax to express. If RUNKO_MODEL is
  *      unset, this section is skipped with a clean exit.
  */
-import { createSession, defineAgent, NimboFS } from "@nimbo/sdk";
-import { justBash } from "@nimbo/just-bash";
+import { createSession, defineAgent, RunkoFS } from "@runko/sdk";
+import { justBash } from "@runko/just-bash";
 import { resolveModel } from "./shared/model.ts";
 
 const CONTROL_FLOW_SCRIPT = `
@@ -89,7 +89,7 @@ cat /reports/log.txt
 async function deterministicSection(): Promise<void> {
   console.log("--- 1. full-syntax script (for + if/else + function/local + redirection), run directly ---");
 
-  const fs = NimboFS.fromMemory({});
+  const fs = RunkoFS.fromMemory({});
   const exec = justBash(fs);
   console.log("describe():\n" + exec.describe?.());
 
@@ -109,7 +109,7 @@ async function modelDrivenSection(): Promise<void> {
 
   console.log("\n--- 2. agent drives a for-loop script through bash (same session) ---");
 
-  const fs = NimboFS.fromMemory({});
+  const fs = RunkoFS.fromMemory({});
   const agent = defineAgent({ model });
   const session = createSession(agent, { fs, exec: justBash(fs) });
 

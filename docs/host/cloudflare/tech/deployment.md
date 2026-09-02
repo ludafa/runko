@@ -4,7 +4,7 @@ slug: deployment
 view: 技术
 layer: 宿主层
 module: —
-packages: ["@nimbo/durable-object", "@nimbo/sandbox-cloudflare"]
+packages: ["@runko/durable-object", "@runko/sandbox-cloudflare"]
 tags: ["Cloudflare", "Durable Object", "workerd", "网关形态", "NDJSON", "部署形态"]
 related: ["host/cloudflare/features/deployment.md", "host/cloudflare/tech/cloudflare-worker-server.md", "logic/arbitration/tech/arbitration-impl.md"]
 ---
@@ -25,9 +25,9 @@ related: ["host/cloudflare/features/deployment.md", "host/cloudflare/tech/cloudf
 | 归属仲裁机制 | 平凡实现（什么都不做） | 独占是**真保证**，跟单进程一档同级 |
 | 持久化 | `ctx.storage.sql`（DO 自带 SQLite） | 没有租约表——这一档根本没有那个概念 |
 | 流分发 | 平台自带 | `stub` 本身就是通道，订阅方直连该实例 |
-| 沙盒 | `@nimbo/sandbox-cloudflare` | [网关形态](../../../terms.md)，见 §4 |
+| 沙盒 | `@runko/sandbox-cloudflare` | [网关形态](../../../terms.md)，见 §4 |
 
-**三样打包在 `@nimbo/durable-object` 一个包里**，因为它们全是平台自带、总是一起用。打包原则是「一次装什么」，不是「有几个模块」。
+**三样打包在 `@runko/durable-object` 一个包里**，因为它们全是平台自带、总是一起用。打包原则是「一次装什么」，不是「有几个模块」。
 
 ### 2.1 为什么持久化接口接得进 DO 的 KV
 
@@ -49,7 +49,7 @@ DO 的存储跟着对象走，会话之间互相看不见。「列出这个用�
 
 ### 4.2 协议
 
-全部 POST + JSON body；`Authorization: Bearer <token>` 与网关 token 比对；沙盒选择用请求头 `x-nimbo-sandbox: <id>`（缺省 `"default"`）；二进制经 base64；错误统一 `{ code, message }` 配相应 HTTP 状态（400/401/404/409/500），客户端翻译回 `NotFoundError` 这类结构化错误。
+全部 POST + JSON body；`Authorization: Bearer <token>` 与网关 token 比对；沙盒选择用请求头 `x-runko-sandbox: <id>`（缺省 `"default"`）；二进制经 base64；错误统一 `{ code, message }` 配相应 HTTP 状态（400/401/404/409/500），客户端翻译回 `NotFoundError` 这类结构化错误。
 
 | 端点 | 请求 | 响应 |
 |---|---|---|
@@ -73,7 +73,7 @@ sequenceDiagram
     participant S as Cloudflare Sandbox
 
     T->>C: exec("npm test", { timeoutMs })
-    C->>G: POST /exec（Bearer token + x-nimbo-sandbox）
+    C->>G: POST /exec（Bearer token + x-runko-sandbox）
     G->>S: sandbox.exec(cmd, { stream:true, onOutput })
     loop 命令跑着
         S-->>G: 输出增量
@@ -112,9 +112,9 @@ agent 循环的墙钟大头全是 I/O 等待——等模型流式返回、等沙
 
 # 附录
 
-## 附录 A：nimbo 能不能整个跑在 Workers 里（实测结论）
+## 附录 A：runko 能不能整个跑在 Workers 里（实测结论）
 
-> 立项时选的是**网关形态**，因为目标是「agent 跑在任意电脑上」。但施工前的可行性实测证明「nimbo 核心零改动可跑在 workerd 上」这条路也成立，结论留作技术储备。
+> 立项时选的是**网关形态**，因为目标是「agent 跑在任意电脑上」。但施工前的可行性实测证明「runko 核心零改动可跑在 workerd 上」这条路也成立，结论留作技术储备。
 
 **Node API 使用面审计**（compat date ≥ 2026-03-17，开 `nodejs_compat`）：
 
@@ -129,4 +129,4 @@ agent 循环的墙钟大头全是 I/O 等待——等模型流式返回、等沙
 
 **实测**：`wrangler deploy --dry-run` 全量打包一次通过（1316 KB / gzip 220 KB，含 `ai`）；`wrangler dev` 真实请求走 `fromMemory` + `createSession` + `miniBash().exec` 全部正常，5ms 返回。
 
-**含义**：长会话 / 断连续跑放 Durable Objects 或 Workflows 即可——nimbo「无全局状态、session 可序列化」的设计原则在这里兑现。
+**含义**：长会话 / 断连续跑放 Durable Objects 或 Workflows 即可——runko「无全局状态、session 可序列化」的设计原则在这里兑现。

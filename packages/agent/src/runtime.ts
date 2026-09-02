@@ -1,7 +1,7 @@
 /**
  * `createAgentRuntime` —— 本包的门面。
  *
- * `@nimbo/core` 的 `Session` 管「跑一轮」，这里管「**一轮接一轮**」：起、[停止](../../docs/terms.md)、
+ * `@runko/core` 的 `Session` 管「跑一轮」，这里管「**一轮接一轮**」：起、[停止](../../docs/terms.md)、
  * 收尾、[排队](../../docs/terms.md)与[插话](../../docs/terms.md)、人在回路、[交权](../../docs/terms.md)、
  * [崩溃恢复](../../docs/terms.md)。四样宿主能力全部可替换，**都带内置的平凡实现**，所以
  * 零配置就能跑。
@@ -9,7 +9,7 @@
  * 框架**不碰 HTTP**：`subscribe` 给的是中立的 `AsyncIterable`，序列化成 SSE / WebSocket
  * 是[接入层](../../docs/terms.md)的事。
  */
-import type { AgentDefinition, NimboUIMessage } from "@nimbo/core";
+import type { AgentDefinition, RunkoUIMessage } from "@runko/core";
 
 import type { Arbitration } from "./arbitration.js";
 import { inProcessArbitration } from "./builtin/in-process-arbitration.js";
@@ -57,7 +57,7 @@ export interface AgentRuntimeOptions {
   prepareTurn: TurnPreparer;
   /** 缺省 = 内存实现（进程一重启历史就没了，够跑通够写测试）。 */
   persistence?: Persistence;
-  /** 缺省 = 进程内 fan-out。跨实例时换 `@nimbo/stream-redis`。 */
+  /** 缺省 = 进程内 fan-out。跨实例时换 `@runko/stream-redis`。 */
   stream?: StreamFanout;
   /** 缺省 = 进程内一个 Map。多进程共享 DB 时换租约版。 */
   arbitration?: Arbitration;
@@ -125,7 +125,7 @@ export interface AgentRuntime {
   removeQueued(conversationId: string, id: string): Promise<{ removed: boolean; queue: QueuedInput[] }>;
   clearQueue(conversationId: string): Promise<QueuedInput[]>;
   /** 读[账本](../../docs/terms.md)（回放历史用；`subscribe` 已经包含回放，这个给「只要历史」的端点）。 */
-  readLedger(conversationId: string, opts?: { afterSeq?: number }): Promise<{ seq: number; message: NimboUIMessage }[]>;
+  readLedger(conversationId: string, opts?: { afterSeq?: number }): Promise<{ seq: number; message: RunkoUIMessage }[]>;
   /** 启动扫描：给[孤儿轮](../../docs/terms.md)补「已停止」收尾。只在进程启动、开始服务之前跑一次。 */
   recover(): Promise<RecoveryResult>;
   /** [交权](../../docs/terms.md)：停掉在跑的轮并等它们收尾。**不退进程**——那是宿主的事。 */
@@ -404,7 +404,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
             // 界面据 `status` 显示「已停止」。
             // **不能写空 parts**：ai 的 `validateUIMessages()` 拒绝它，而每一轮起轮都要拿
             // 整个账本过一次校验——写进去一条空的，这个会话此后永远起不了新轮。
-            const message: NimboUIMessage = {
+            const message: RunkoUIMessage = {
               id: `turn-interrupted-${String(allocated.seq)}`,
               role: "assistant",
               parts: [{ type: "step-start" }],

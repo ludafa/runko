@@ -3,9 +3,9 @@
  * 转正"）与超时/中止语义。`exec.ts` 头注释记录了一个实测发现：这套持久化
  * 不是 just-bash 自带的（`Bash.exec()` 每次调用互不影响状态），是适配器自己
  * 用 `instanceCwd` 维护的——这里的用例直接对应那份实现推理，与
- * `@nimbo/mini-bash` 的 `test/cwd-state.test.ts` 同款场景对照。
+ * `@runko/mini-bash` 的 `test/cwd-state.test.ts` 同款场景对照。
  */
-import { fromMemory } from "@nimbo/virtual-fs";
+import { fromMemory } from "@runko/virtual-fs";
 import { describe, expect, it } from "vitest";
 import { justBash } from "../src/index.js";
 import { makeHangingFs, run } from "./helpers.js";

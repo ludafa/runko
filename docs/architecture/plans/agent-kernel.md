@@ -1,25 +1,25 @@
 ---
-title: "agent 内核包 `@nimbo/agent`（施工进展）"
+title: "agent 内核包 `@runko/agent`（施工进展）"
 slug: agent-kernel
 view: 施工
 layer: 总纲
 module: —
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["架构分层", "会话生命周期", "部署形态", "包拆分", "归属仲裁"]
 related: ["architecture/features/agent-kernel.md", "architecture/tech/agent-kernel.md"]
 ---
-# agent 内核包 `@nimbo/agent`（施工进展）
+# agent 内核包 `@runko/agent`（施工进展）
 
 > 相关：[功能](../features/agent-kernel.md)，[技术方案](../tech/agent-kernel.md)。
-> 设计讨论的完整记录（含被推翻的路线）在 [issue #2](https://github.com/ludafa/nimbo/issues/2)。
+> 设计讨论的完整记录（含被推翻的路线）在 [issue #2](https://github.com/ludafa/runko/issues/2)。
 
 ## 状态
 
-**K1 + K2 + K4 + K7 已交付**（2026-08-16）——`@nimbo/agent` 落地，chat 应用完成迁移。
+**K1 + K2 + K4 + K7 已交付**（2026-08-16）——`@runko/agent` 落地，chat 应用完成迁移。
 **K5 已交付**（2026-08-23）——持久化实现落地，但产出物与原计划不同（单包 `persist-sql` 被推翻，改成 Kysely 核心 + 一种库一个薄壳），见[持久化 · 施工](../../host/contract/plans/persistence.md)。
 **K3 前置已解**（2026-08-22，core 入口定为 `settleAndRun`），主体未开工；**K6 / K8 / K9 未开工**。
 
-**起因**：`apps/node-server` 只绑 SQLite、只跑单进程。作为 demo 够用，作为框架不够——别人拿 nimbo 建产品，得把「会话怎么接下去 / 等人怎么办 / 崩了怎么办 / 多进程怎么办」四件事重写一遍，而其中第四件很难写对，写错是静默的数据损坏。
+**起因**：`apps/node-server` 只绑 SQLite、只跑单进程。作为 demo 够用，作为框架不够——别人拿 runko 建产品，得把「会话怎么接下去 / 等人怎么办 / 崩了怎么办 / 多进程怎么办」四件事重写一遍，而其中第四件很难写对，写错是静默的数据损坏。
 
 ## 阶段拆单
 
@@ -27,13 +27,13 @@ related: ["architecture/features/agent-kernel.md", "architecture/tech/agent-kern
 |---|---|---|---|---|
 | **K0** | 三份文档 + 术语登记 | `docs/*` | 本三件套 + `terms.md` 新词条 | 🟡 文档已落，术语待登记 |
 | **K1** | 进行中草稿放内存 + 起轮标记 | node-server | 库里只剩成品消息；孤儿轮判据换成起轮标记 | ✅ 已交付 |
-| **K2** | 接口定型：四种宿主能力 + 全套内置实现 | 新包 `@nimbo/agent` | 零配置能跑通一个会话 | ✅ 已交付 |
-| **K3** | 挂起与恢复 | `@nimbo/agent` + core | 等人超时挂起、人回来在任意节点恢复 | ⬜ **可开工**——2026-08-22 前置解开：core 入口定为 `settleAndRun(callId, decision)`（下面第 3 条）。`suspended` 收尾态与 `TurnStatus` 已先行落地 |
-| **K4** | 队列与插话回到框架 | `@nimbo/agent` | `enqueue` + `conversation-drained`，竞态框架内处理一次 | ✅ 已交付 |
+| **K2** | 接口定型：四种宿主能力 + 全套内置实现 | 新包 `@runko/agent` | 零配置能跑通一个会话 | ✅ 已交付 |
+| **K3** | 挂起与恢复 | `@runko/agent` + core | 等人超时挂起、人回来在任意节点恢复 | ⬜ **可开工**——2026-08-22 前置解开：core 入口定为 `settleAndRun(callId, decision)`（下面第 3 条）。`suspended` 收尾态与 `TurnStatus` 已先行落地 |
+| **K4** | 队列与插话回到框架 | `@runko/agent` | `enqueue` + `conversation-drained`，竞态框架内处理一次 | ✅ 已交付 |
 | **K5** | 持久化实现 | `persist-kysely` + `-sqlite` / `-postgres` / `-mysql` | 三个方言跑绿 | ✅ **已交付**（2026-08-23，见[持久化 · 施工](../../host/contract/plans/persistence.md)）。**产出物与原计划不同**：单包 `persist-sql` 被推翻，改成「Kysely 核心 + 一种库一个薄壳」 |
 | **K6** | 租约版归属仲裁 | `persist-sql` | 多进程 cluster 端到端 | ⬜ 未开工（接口已按它定形） |
 | **K7** | chat 应用迁移到新包 | `apps/node-server` | 行为不变，代码减少 | ✅ 已交付 |
-| **K8** | `@nimbo/cli` | 新包 | `npx` 一条命令可用 | ⬜ 未开工 |
+| **K8** | `@runko/cli` | 新包 | `npx` 一条命令可用 | ⬜ 未开工 |
 | **K9** | 其余实现包 | `persist-drizzle` / `persist-prisma` / `stream-redis` / `durable-object` | 四档部署各自跑通 | ⬜ 未开工 |
 
 ### 排序依据
@@ -60,7 +60,7 @@ related: ["architecture/features/agent-kernel.md", "architecture/tech/agent-kern
 
 | 文档 | 改什么 | 状态 |
 |---|---|---|
-| [进行中草稿放内存 · 技术方案](../../logic/orchestration/tech/in-flight-draft.md) | 附录 C.1 的「nimbo 选的是第三条：在进程里等着」改成「先在进程里等一会儿，等不到就挂起」；施工清单补上「崩溃恢复判据失效与起轮标记」 | ✅ 已改（新增 §5.9 + 施工项 3b；附录 C/C.1/C.2/D 各加定案说明） |
+| [进行中草稿放内存 · 技术方案](../../logic/orchestration/tech/in-flight-draft.md) | 附录 C.1 的「runko 选的是第三条：在进程里等着」改成「先在进程里等一会儿，等不到就挂起」；施工清单补上「崩溃恢复判据失效与起轮标记」 | ✅ 已改（新增 §5.9 + 施工项 3b；附录 C/C.1/C.2/D 各加定案说明） |
 | [沙盒保活 · 技术方案](../../logic/orchestration/tech/sandbox-keepalive.md) | §7.5「E2B 有硬上限」有歧义——它说的是 `idleTimeoutMs` 的配置上界，很容易被读成恢复窗口。E2B 暂停后**无限期保存、不计费**，恢复还会重置连续运行窗口 | ✅ 已改（§7 第 5 条重写） |
 | [中途插话与排队 · 技术方案](../../logic/orchestration/tech/steer-and-queue.md) | §7.1「进程重启中断的那一轮不会自动续上队列」——队列回到框架之后这条自动关闭 | ✅ 已改（新增 §8「队列归框架，策略归构建者」，含逐条影响对照） |
 | [优雅关闭与崩溃恢复 · 技术方案](../../logic/orchestration/tech/graceful-shutdown.md) | 附录 B 的「多实例要怎么改」被本方案取代，改成指过来 | ✅ 已改 |
@@ -77,7 +77,7 @@ related: ["architecture/features/agent-kernel.md", "architecture/tech/agent-kern
 | 2026-08-07 | 从第一性原理重推分层。定 21–23：两块结构、三个角色、归属仲裁三种实现 + 租期标识用 ULID |
 | 2026-08-08 | 定 24–26：**推翻决定 17**（队列回到框架）、六档部署（Vercel 从出局改为有条件成立）、包拆成 15 个 |
 | 2026-08-09 | 三份文档落地；issue 正文重排为「架构 → 机制 → 契约与落地」三部分 |
-| 2026-08-16 | **K1+K2+K4+K7 落地**：新包 `@nimbo/agent`（轮编排运行时 + 四种宿主能力接口 + 三样内置实现，61 个单测）；`apps/node-server` 迁移完成——删掉 `turn-runner/`（9 文件）、`turn-launcher.ts`、`crash-recovery.ts`，换成 `agent/runtime.ts`（起轮装配）+ `agent/persistence.ts`（drizzle 实现四个宿主接口）；账本从此只写成品消息，孤儿轮判据换成起轮标记（`conversations.turn_holder`）。**K5 就此取消而非顺延**：chat 应用已有 drizzle schema，让它自己实现领域接口反而是对接口更真实的检验，硬塞一个 `persist-sql` 只会造出第二套数据访问方式 |
+| 2026-08-16 | **K1+K2+K4+K7 落地**：新包 `@runko/agent`（轮编排运行时 + 四种宿主能力接口 + 三样内置实现，61 个单测）；`apps/node-server` 迁移完成——删掉 `turn-runner/`（9 文件）、`turn-launcher.ts`、`crash-recovery.ts`，换成 `agent/runtime.ts`（起轮装配）+ `agent/persistence.ts`（drizzle 实现四个宿主接口）；账本从此只写成品消息，孤儿轮判据换成起轮标记（`conversations.turn_holder`）。**K5 就此取消而非顺延**：chat 应用已有 drizzle schema，让它自己实现领域接口反而是对接口更真实的检验，硬塞一个 `persist-sql` 只会造出第二套数据访问方式 |
 | 2026-08-15 | **整个 docs 按本方案的分层分包重划**：路径形状改成 `docs/<层或包>/<视角>/<feature>.md`——顶层按架构分层分包切成 `architecture` / `engine` / `orchestration` / `host` / `ingress` / `misc` 六个目录，每个目录内部再分 `features` / `tech` / `plans` 三视角（术语表与 README 留 `docs/` 根）。72 份文档归位、全量相对链接重算并校验（0 断链、0 失效锚点）；每份文档加 front matter（`view`/`layer`/`module`/`packages`/`tags`/`related`）。同批补齐宿主层三块空位文档（持久化 · 流分发 · 归属仲裁机制，features/tech 各 3 份，接口未定稿处标 TODO）、补建 `orchestration/plans/in-flight-draft.md`（此前技术方案链的施工文档一直不存在）、把上表五处既有文档按 issue #2 修订、术语表补 6 个词条并把小节标题里的文档路径挪出（锚点从此稳定） |
 
 ### 期间被推翻的判断
@@ -101,7 +101,7 @@ related: ["architecture/features/agent-kernel.md", "architecture/tech/agent-kern
 1. **阶段划分要不要按新分层再排一次** —— **关闭**。上面 K0–K9 那张表就是重排的结果，本批走掉四个（K1/K2/K4/K7），已经受过一次真实施工的检验。
 2. **`in-flight-draft.md` 附录 D（成品边跑边存）要不要并进 K1** —— **关闭，但改写成一条独立待办**（见下）。这个问法已经失效：K1 早已交付，挂在它名下没意义了。
 3. **core 的「恢复开轮」入口怎么加** —— **选 B：并列一个 `settleAndRun(callId, decision)`**，`stream()` 签名一个字不动。K3 的前置就此解开。理由（语义不同不该挤一个入口 / 纯新增 vs 破坏性）见轮编排那份的「Q1」。
-4. **收尾状态加第四种 `suspended`** —— **加，而且现在就加**，不等 K3。已落地：core `NimboMessageMetadata.status`（含 zod）、`@nimbo/agent` `TurnStatus`、node-server `TurnEndStatus`。**目前没有产出方**——`finalizeTurn` 至今只产出前三态，先加是为了让宿主/界面提前占好渲染分支。
+4. **收尾状态加第四种 `suspended`** —— **加，而且现在就加**，不等 K3。已落地：core `RunkoMessageMetadata.status`（含 zod）、`@runko/agent` `TurnStatus`、node-server `TurnEndStatus`。**目前没有产出方**——`finalizeTurn` 至今只产出前三态，先加是为了让宿主/界面提前占好渲染分支。
 5. **「会话内都允许」要不要单独成一个结局值** —— **定为 `scope: 'once' | 'conversation'`**（原落地的 `'broader'` 就此更名），**框架只记、不执行**。`session` 这个候选被否——它作为「聊天会话」的叫法 2026-07-17 已正式退役。完整理由见轮编排那份的「Q4」。
 
 ## 新开的待办

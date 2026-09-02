@@ -4,8 +4,8 @@
  * 读取后登记 readState。
  */
 import { z } from "zod";
-import { defineTool } from "@nimbo/core";
-import type { Tool, ToolReturn } from "@nimbo/core";
+import { defineTool } from "@runko/core";
+import type { Tool, ToolReturn } from "@runko/core";
 import { NotFoundError, ReferenceNotResolvable } from "../memory.js";
 import {
   READ_FILE_MAX_BYTES,

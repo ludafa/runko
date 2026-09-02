@@ -8,8 +8,8 @@
  * 放在框架里而不是让每个宿主自己写：它的另一半（把回答送回来）本来就是框架的
  * [人在回路桥](./human.js)，拆开写等于把一条通道的两头分给两个包。
  */
-import type { Tool } from "@nimbo/core";
-import { defineTool } from "@nimbo/core";
+import type { Tool } from "@runko/core";
+import { defineTool } from "@runko/core";
 import { z } from "zod";
 
 import type { AskUserOutcome } from "./registry.js";

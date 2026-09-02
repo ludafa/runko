@@ -30,7 +30,7 @@ related: ["misc/features/docs-site.md", "misc/plans/docs-site.md", "architecture
 
 ### 2.1 `docs/` 是独立的 workspace 成员
 
-`@nimbo/docs`，`private: true`，**不带 `/*`**——`docs` 根目录自身就是那个成员（同 `examples` 的写法）。
+`@runko/docs`，`private: true`，**不带 `/*`**——`docs` 根目录自身就是那个成员（同 `examples` 的写法）。
 
 理由是**它要能单独部署**：
 
@@ -91,7 +91,7 @@ VitePress 支持按路由前缀给不同侧栏。用法是：
 | `ignoreDeadLinks` 放过它们 | 站上照样 404，只是不报错——把问题藏起来 |
 | **构建时改写**（选它） | 源文件保持相对路径，站上指向 GitHub |
 
-实现是覆盖 markdown-it 的 `link_open` 规则：拿当前文件路径把 `href` 解析成绝对路径，**落在 `docs/` 外面的**换成 `https://github.com/ludafa/nimbo/blob/main/<repo 相对路径>`，其余原样放过。
+实现是覆盖 markdown-it 的 `link_open` 规则：拿当前文件路径把 `href` 解析成绝对路径，**落在 `docs/` 外面的**换成 `https://github.com/ludafa/runko/blob/main/<repo 相对路径>`，其余原样放过。
 
 ### 4.2 死链检查保持打开
 
@@ -133,8 +133,8 @@ VitePress 的本地搜索（minisearch）默认按空白和标点切词，**对�
 
 | 托管方 | 怎么配 |
 | --- | --- |
-| Cloudflare Pages / Vercel / Netlify | 构建命令 `pnpm --filter @nimbo/docs run build`，输出目录 `docs/.vitepress/dist`，不用设 `DOCS_BASE` |
-| GitHub Pages（项目页，子路径） | 同上，但要 `DOCS_BASE=/nimbo/`——**不设的话资源会去根路径找，整站白屏** |
+| Cloudflare Pages / Vercel / Netlify | 构建命令 `pnpm --filter @runko/docs run build`，输出目录 `docs/.vitepress/dist`，不用设 `DOCS_BASE` |
+| GitHub Pages（项目页，子路径） | 同上，但要 `DOCS_BASE=/runko/`——**不设的话资源会去根路径找，整站白屏** |
 
 `base` 走环境变量而不是写死在配置里，是为了同一份代码能同时供根路径和子路径两种托管，不用为部署改一次配置再改回来。
 
@@ -163,7 +163,7 @@ flowchart TB
 
 **为什么构建没事**：`vitepress build` 走 Rollup 打包，CJS 由 `@rollup/plugin-commonjs` 转换掉；`optimizeDeps` 是**开发模式专属**的预打包机制，只有 dev 才走这条路。
 
-**解法：把这几个传递依赖显式声明成 `@nimbo/docs` 的 devDependency**，版本照抄 mermaid 自己声明的 range（pnpm 因此复用同一份，不会装出第二个副本）：
+**解法：把这几个传递依赖显式声明成 `@runko/docs` 的 devDependency**，版本照抄 mermaid 自己声明的 range（pnpm 因此复用同一份，不会装出第二个副本）：
 
 | 包 | 为什么要 |
 | --- | --- |

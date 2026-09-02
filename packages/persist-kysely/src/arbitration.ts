@@ -18,13 +18,13 @@
  *    踩过一次）。读回来比对令牌是三个方言都一样的判据。
  */
 import { randomUUID } from "node:crypto";
-import type { Arbitration, AcquireContext, AcquireResult, Grant, OwnershipInfo, SeqResult, StaleOwnership } from "@nimbo/agent";
+import type { Arbitration, AcquireContext, AcquireResult, Grant, OwnershipInfo, SeqResult, StaleOwnership } from "@runko/agent";
 import type { Kysely } from "kysely";
 
 import type { FlavorTraits } from "./flavor.js";
 import { toNumber } from "./flavor.js";
 import { insertOrIgnore } from "./idempotent-insert.js";
-import type { NimboDatabase } from "./schema.js";
+import type { RunkoDatabase } from "./schema.js";
 import { LEASES_TABLE } from "./schema.js";
 
 /** 心跳间隔的默认值（毫秒）。定案见技术方案 §8.3。 */
@@ -58,7 +58,7 @@ export interface LeaseArbitrationOptions {
  * createAgentRuntime({ ..., persistence, arbitration });
  * ```
  */
-export function leaseArbitration(db: Kysely<NimboDatabase>, opts: LeaseArbitrationOptions): Arbitration {
+export function leaseArbitration(db: Kysely<RunkoDatabase>, opts: LeaseArbitrationOptions): Arbitration {
   const heartbeatMs = opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
   const takeoverMs = opts.takeoverMs ?? DEFAULT_TAKEOVER_MS;
   const now = opts.now ?? Date.now;

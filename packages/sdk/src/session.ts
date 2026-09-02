@@ -1,7 +1,7 @@
 /**
- * `@nimbo/sdk` 的默认装配版 `createSession`（docs/tech/core-sdk.md §2 门面定位 / §4.2 L2 运行层
- * / docs/tech/builtin-tools.md §3 `builtinTools` 语义）。包装 `@nimbo/core` 的原始
- * `createSession`——`@nimbo/core` 本身刻意不依赖 `@nimbo/virtual-fs`（避免
+ * `@runko/sdk` 的默认装配版 `createSession`（docs/tech/core-sdk.md §2 门面定位 / §4.2 L2 运行层
+ * / docs/tech/builtin-tools.md §3 `builtinTools` 语义）。包装 `@runko/core` 的原始
+ * `createSession`——`@runko/core` 本身刻意不依赖 `@runko/virtual-fs`（避免
  * core ↔ virtual-fs 成环，见 core `session.ts` 文件头"fs 缺省"一节），因此
  * "fs 缺省时默认 `MemoryFS`"与"文件工具八件套默认全开"这两条 batteries-included
  * 承诺只能在这个允许同时依赖 core 与 virtual-fs 的门面包里兑现。
@@ -10,28 +10,28 @@
  *
  * 本文件的 `createSession`/`Session` 与 core 同名但语义不同（默认装配 vs.
  * 无装配的原语）。`index.ts` 用具名 `export { createSession, type Session } from
- * "./session.js"` 覆盖 `export * from "@nimbo/core"` 带入的同名绑定——ECMAScript
+ * "./session.js"` 覆盖 `export * from "@runko/core"` 带入的同名绑定——ECMAScript
  * 模块规范下，同一模块内的"本地声明/具名导出"优先于 `export *` 带入的同名绑定，
  * 不产生重复导出错误（已用最小复现验证）；宿主明确需要 core 未加装配的原始
- * `createSession`/`Session` 时，可以直接 `import { createSession } from "@nimbo/core"`
+ * `createSession`/`Session` 时，可以直接 `import { createSession } from "@runko/core"`
  * ——两个包各自可独立安装，这条路径没有被这里的遮蔽切断。
- * `SessionOptions` 字段形状不变（`fs?`/`workspace?` 仍是 `NimboFS`/`NimboFS & NimboExec`，
+ * `SessionOptions` 字段形状不变（`fs?`/`workspace?` 仍是 `RunkoFS`/`RunkoFS & RunkoExec`，
  * 只是运行时默认值变了），因此直接复用 core 的类型，本文件不重新声明。
  *
  * ---- fs 的具体类型保留（工单要求 4：`session.fs.diff()` 必须能编译） ----
  *
- * core 的 `Session.fs` 类型固定为接口 `NimboFS`（七个方法，没有 `diff()`/`writeBack()`
+ * core 的 `Session.fs` 类型固定为接口 `RunkoFS`（七个方法，没有 `diff()`/`writeBack()`
  * 这类 MemoryFS/OverlayFS 的"附加能力"）。产品文档 §4.1 五行示例里
  * `session.fs.diff()` 要求 `createSession(...)` 返回值上的 `fs` 保留调用方传入的
  * 具体子类型。做法：三个重载 + 一个"擦除后"的宽实现签名——
- *   1. `opts.fs: F`（`F extends NimboFS`）→ `Session<F>`：F 从实参具体类型推导
- *      （如 `NimboFS.fromDirectory(...)` 返回 `OverlayFS`，`session.fs` 即为 `OverlayFS`）。
- *   2. `opts.workspace: W`（`W extends NimboFS & NimboExec`，§4.5a 模式 A 语法糖）→
+ *   1. `opts.fs: F`（`F extends RunkoFS`）→ `Session<F>`：F 从实参具体类型推导
+ *      （如 `RunkoFS.fromDirectory(...)` 返回 `OverlayFS`，`session.fs` 即为 `OverlayFS`）。
+ *   2. `opts.workspace: W`（`W extends RunkoFS & RunkoExec`，§4.5a 模式 A 语法糖）→
  *      `Session<W>`：同一对象既是 fs 又是 exec，`session.fs` 保留它的具体类型。
  *   3. 两者都不给 → `Session<MemoryFS>`：默认装配的 `new MemoryFS()` 有 `.diff()`，
  *      五行示例不显式传 `fs` 时同样能编译（虽然产品文档的例子用的是 `fromDirectory`）。
  * 实现体本身按最宽的擦除类型写（`opts: SessionOptions`，返回 core 原始 `Session`，
- * fs 位是接口 `NimboFS`）——TypeScript 检查重载实现时，只要求实现签名与每个重载
+ * fs 位是接口 `RunkoFS`）——TypeScript 检查重载实现时，只要求实现签名与每个重载
  * "调用兼容"（形参逆变、不逐一比对返回类型的具体实参分支），不需要在函数体内部
  * "证明"运行时省略 `fs` 就等于类型层的默认 `F = MemoryFS`（那是分支 3 单靠 TS
  * 控制流分析做不到的事，重载在这里恰好绕开了这个限制，不需要任何类型断言）。
@@ -45,14 +45,14 @@
  * （`WORKSPACE_EXCLUSIVITY_MESSAGE`），正确性由运行时兜底，类型层的这点不精确
  * 只是体验上少了一次编译期报错，不影响功能正确性。
  */
-import type { AgentDefinition, BuiltinToolName, DerivedDataCollector, NimboExec, NimboFS, SessionReadState, Tool } from "@nimbo/core";
-import { createDerivedDataCollector, createSession as createCoreSession, createSessionReadState } from "@nimbo/core";
-import type { Session as CoreSession, SessionOptions as CoreSessionOptions } from "@nimbo/core";
-import type { FileChange, FileToolName } from "@nimbo/virtual-fs";
-import { createFileTools, MemoryFS } from "@nimbo/virtual-fs";
+import type { AgentDefinition, BuiltinToolName, DerivedDataCollector, RunkoExec, RunkoFS, SessionReadState, Tool } from "@runko/core";
+import { createDerivedDataCollector, createSession as createCoreSession, createSessionReadState } from "@runko/core";
+import type { Session as CoreSession, SessionOptions as CoreSessionOptions } from "@runko/core";
+import type { FileChange, FileToolName } from "@runko/virtual-fs";
+import { createFileTools, MemoryFS } from "@runko/virtual-fs";
 
 /** sdk 门面版 `Session`：与 core 的原始 `Session` 完全一致，只是 `fs` 保留调用方传入的具体类型。 */
-export type Session<F extends NimboFS = NimboFS> = Omit<CoreSession, "fs"> & { readonly fs: F };
+export type Session<F extends RunkoFS = RunkoFS> = Omit<CoreSession, "fs"> & { readonly fs: F };
 
 /** 八件套的全部工具名，按 docs/tech/builtin-tools.md §1.1–§1.8 的声明顺序列出。 */
 const ALL_FILE_TOOL_NAMES = [
@@ -112,11 +112,11 @@ function withDefaultFs(opts: CoreSessionOptions): CoreSessionOptions {
 
 // ---- 重载：fs 具体类型的保留（见本文件头"fs 的具体类型保留"一节） ----
 
-export function createSession<F extends NimboFS>(
+export function createSession<F extends RunkoFS>(
   agent: AgentDefinition,
   opts: Omit<CoreSessionOptions, "fs" | "workspace"> & { fs: F },
 ): Session<F>;
-export function createSession<W extends NimboFS & NimboExec>(
+export function createSession<W extends RunkoFS & RunkoExec>(
   agent: AgentDefinition,
   opts: Omit<CoreSessionOptions, "fs" | "workspace"> & { workspace: W },
 ): Session<W>;

@@ -4,14 +4,14 @@ slug: sandbox-provider
 view: 功能
 layer: 宿主层
 module: 沙盒
-packages: ["@nimbo/sandbox-e2b", "@nimbo/sandbox-vercel"]
+packages: ["@runko/sandbox-e2b", "@runko/sandbox-vercel"]
 tags: ["沙盒 provider", "可选沙盒", "重连令牌", "休眠唤醒"]
 related: ["host/contract/plans/sandbox-provider.md", "host/contract/tech/sandbox-provider.md", "architecture/tech/agent-kernel.md"]
 ---
 # 沙盒 provider 可选（产品视角 · 使用手册）
 
 > 相关：[技术方案](../tech/sandbox-provider.md) · [施工进展](../plans/sandbox-provider.md)
-> 依赖 / 增强：[chat-webapp](../../../ingress/features/chat-webapp.md)（把它固定用 Vercel 沙盒的假设放开成可选）· [sandbox](./sandbox.md)（`@nimbo/sandbox-vercel` / `@nimbo/sandbox-e2b` 两个[沙盒适配器](../../../terms.md)）
+> 依赖 / 增强：[chat-webapp](../../../ingress/features/chat-webapp.md)（把它固定用 Vercel 沙盒的假设放开成可选）· [sandbox](./sandbox.md)（`@runko/sandbox-vercel` / `@runko/sandbox-e2b` 两个[沙盒适配器](../../../terms.md)）
 > 术语：[沙盒 provider](../../../terms.md) · [沙盒](../../../terms.md) · [重连令牌](../../../terms.md) · [休眠 / 唤醒](../../../terms.md) · [conversation（会话）](../../../terms.md)
 
 ## 一句话
@@ -21,7 +21,7 @@ related: ["host/contract/plans/sandbox-provider.md", "host/contract/tech/sandbox
 ## 这个功能给谁、解决什么问题
 
 - **给谁**：chat 应用的使用者；以及想对比/切换云沙盒供应商的开发者。
-- **解决什么**：现状 chat 应用的沙盒**写死 Vercel**（`chat-webapp` §2.2 `sandbox-manager.ts` 全模块只碰 `@vercel/sandbox`）。E2B 适配器包（`@nimbo/sandbox-e2b`）早已就绪但从未接进应用。本功能把「用哪家沙盒」从写死变成**每会话可选**，让用户按额度、地域、偏好自行决定，且不牺牲既有的休眠/唤醒、代码跨轮累积体验。
+- **解决什么**：现状 chat 应用的沙盒**写死 Vercel**（`chat-webapp` §2.2 `sandbox-manager.ts` 全模块只碰 `@vercel/sandbox`）。E2B 适配器包（`@runko/sandbox-e2b`）早已就绪但从未接进应用。本功能把「用哪家沙盒」从写死变成**每会话可选**，让用户按额度、地域、偏好自行决定，且不牺牲既有的休眠/唤醒、代码跨轮累积体验。
 
 ## 用户可见行为与交互
 
@@ -46,7 +46,7 @@ related: ["host/contract/plans/sandbox-provider.md", "host/contract/tech/sandbox
 
 - **只做 provider 可选**：目标仓库仍走全局 `GITHUB_REPO`/`GITHUB_PAT`（本次不做「仓库也用户可选」，见[施工进展](../plans/sandbox-provider.md)变更记录里的范围决策）。
 - **非目标：运行中切换 provider**。会话与沙盒 1:1 绑定，provider 选定即固定；想换就新建会话。
-- **非目标：Cloudflare（[网关形态](../../../terms.md)）接入**。`@nimbo/sandbox-cloudflare` 是网关形态、接入路径不同，不在本次范围。
+- **非目标：Cloudflare（[网关形态](../../../terms.md)）接入**。`@runko/sandbox-cloudflare` 是网关形态、接入路径不同，不在本次范围。
 - **非目标：为 provider 做用户级默认设置页**。默认取服务端 env，新建会话时可临时覆盖即可。
 
 ## 成功标准

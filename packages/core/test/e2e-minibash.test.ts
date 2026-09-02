@@ -1,10 +1,10 @@
 /**
- * End-to-end wiring test for the `bash` builtin tool + `@nimbo/mini-bash`
- * (docs/tech/builtin-tools.md §4 bash 验收项 / docs/tech/core-sdk.md §4.5a). `@nimbo/mini-bash`
- * is a devDependency (not a runtime dependency of `@nimbo/core` — mirrors the
- * existing `@nimbo/virtual-fs` devDep pattern documented in `session.ts`'s
+ * End-to-end wiring test for the `bash` builtin tool + `@runko/mini-bash`
+ * (docs/tech/builtin-tools.md §4 bash 验收项 / docs/tech/core-sdk.md §4.5a). `@runko/mini-bash`
+ * is a devDependency (not a runtime dependency of `@runko/core` — mirrors the
+ * existing `@runko/virtual-fs` devDep pattern documented in `session.ts`'s
  * header): this file plays the "host" role, wiring `createSession(agent, {
- * fs, exec: miniBash(fs) })` / `{ workspace }` the way `@nimbo/sdk` (P7) will
+ * fs, exec: miniBash(fs) })` / `{ workspace }` the way `@runko/sdk` (P7) will
  * formalize.
  *
  * docs/tech/builtin-tools.md §4 bash 验收项逐条对应：
@@ -21,11 +21,11 @@
 import { describe, expect, it } from "vitest";
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
-import { createFileTools, fromMemory } from "@nimbo/virtual-fs";
-import { miniBash } from "@nimbo/mini-bash";
+import { createFileTools, fromMemory } from "@runko/virtual-fs";
+import { miniBash } from "@runko/mini-bash";
 import { createDerivedDataCollector, createSession, createSessionReadState, defineAgent } from "../src/index.js";
-import type { AgentDefinition, NimboExec, NimboFS } from "../src/index.js";
-import { allToolParts, chunksOfType, drainTurn } from "./helpers/nimbo-chunks.js";
+import type { AgentDefinition, RunkoExec, RunkoFS } from "../src/index.js";
+import { allToolParts, chunksOfType, drainTurn } from "./helpers/runko-chunks.js";
 
 const usage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
@@ -113,8 +113,8 @@ describe("bash builtin + exec/workspace wiring (docs/tech/builtin-tools.md §4 /
   });
 
   describe("approval default comes from exec.defaultApproval (§1.10; docs/tech/single-ledger.md §6.1 三值重构 always→review / never→allow)", () => {
-    it("a NimboExec declaring defaultApproval:'review' is denied when no session onApproval is configured (no-arbiter deny)", async () => {
-      const exec: NimboExec = {
+    it("a RunkoExec declaring defaultApproval:'review' is denied when no session onApproval is configured (no-arbiter deny)", async () => {
+      const exec: RunkoExec = {
         defaultApproval: "review",
         exec: async () => ({ exitCode: 0, stdout: "should not run", stderr: "", durationMs: 1 }),
       };
@@ -129,7 +129,7 @@ describe("bash builtin + exec/workspace wiring (docs/tech/builtin-tools.md §4 /
     });
 
     it("the same review-approval exec runs once a session onApproval:'allow' backstop is configured", async () => {
-      const exec: NimboExec = {
+      const exec: RunkoExec = {
         defaultApproval: "review",
         exec: async () => ({ exitCode: 0, stdout: "ran", stderr: "", durationMs: 1 }),
       };
@@ -145,7 +145,7 @@ describe("bash builtin + exec/workspace wiring (docs/tech/builtin-tools.md §4 /
   });
 
   it("onOutput chunks reach the host as transient data-tool-progress chunks (buffer-then-replay, P4-2), before the tool settles to output-available", async () => {
-    const exec: NimboExec = {
+    const exec: RunkoExec = {
       defaultApproval: "allow",
       exec: async (_req, opts) => {
         opts?.onOutput?.({ stream: "stdout", data: "progress-1" });
@@ -181,7 +181,7 @@ describe("bash builtin + exec/workspace wiring (docs/tech/builtin-tools.md §4 /
     });
 
     it("a timed-out ExecResult (exit 124, mini-bash's own convention) settles output-available, not output-error", async () => {
-      const exec: NimboExec = {
+      const exec: RunkoExec = {
         defaultApproval: "allow",
         exec: async () => ({ exitCode: 124, stdout: "", stderr: "mini-bash: command timed out after 5ms", durationMs: 5 }),
       };
@@ -200,12 +200,12 @@ describe("bash builtin + exec/workspace wiring (docs/tech/builtin-tools.md §4 /
 
 describe("SessionOptions.workspace syntax sugar (§4.5a 模式 A) and its exclusivity with fs/exec", () => {
   /**
-   * A single object implementing `NimboFS & NimboExec` by delegating every method to a real
+   * A single object implementing `RunkoFS & RunkoExec` by delegating every method to a real
    * `MemoryFS` — this is the "one object translates every method faithfully" shape §4.5a mode A
    * describes for a real sandbox, kept minimal here since the point under test is session wiring
    * (which surface `workspace` feeds bash/fs from), not command semantics.
    */
-  function fakeWorkspace(): NimboFS & NimboExec {
+  function fakeWorkspace(): RunkoFS & RunkoExec {
     const fs = fromMemory({});
     return {
       readFile: (path) => fs.readFile(path),
@@ -229,7 +229,7 @@ describe("SessionOptions.workspace syntax sugar (§4.5a 模式 A) and its exclus
 
   it("workspace + exec together throws a configuration error", () => {
     const workspace = fakeWorkspace();
-    const exec: NimboExec = { exec: async () => ({ exitCode: 0, stdout: "", stderr: "", durationMs: 1 }) };
+    const exec: RunkoExec = { exec: async () => ({ exitCode: 0, stdout: "", stderr: "", durationMs: 1 }) };
     const agent: AgentDefinition = defineAgent({ model: stopModel("x") });
     expect(() => createSession(agent, { workspace, exec })).toThrow(/mutually exclusive/);
   });
@@ -249,7 +249,7 @@ describe("SessionOptions.workspace syntax sugar (§4.5a 模式 A) and its exclus
 });
 
 describe("mode A: same-source workspace, fs + exec: miniBash(fs) (docs/tech/core-sdk.md §4.5a)", () => {
-  function assembleFileToolsSession(model: MockLanguageModelV4, fs: ReturnType<typeof fromMemory>, exec: NimboExec) {
+  function assembleFileToolsSession(model: MockLanguageModelV4, fs: ReturnType<typeof fromMemory>, exec: RunkoExec) {
     const readState = createSessionReadState();
     const derivedData = createDerivedDataCollector();
     const fileTools = createFileTools({
@@ -283,12 +283,12 @@ describe("mode A: same-source workspace, fs + exec: miniBash(fs) (docs/tech/core
      * Real mini-bash is entirely read-only (§4.5a: "全部命令跑在...只读"), so it cannot itself
      * produce a bash-made write to demonstrate this rule against. Per the ticket's own guidance
      * ("mini-bash 全只读，故用测试自写的可写 fake exec 或直接改 fs 模拟"), this is a small
-     * self-authored writable `NimboExec` — its `exec()` writes straight to the shared `fs` for a
+     * self-authored writable `RunkoExec` — its `exec()` writes straight to the shared `fs` for a
      * `write <path> <content>` pseudo-command, standing in for "bash actually touched the file",
      * so the test exercises the *real* bash tool (approval chain, ExecResult backfill, etc.) and
      * not just a raw `fs.writeFile` call.
      */
-    function writableFakeExec(fs: NimboFS): NimboExec {
+    function writableFakeExec(fs: RunkoFS): RunkoExec {
       return {
         defaultApproval: "allow",
         exec: async (req) => {

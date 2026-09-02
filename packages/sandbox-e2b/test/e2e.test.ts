@@ -1,20 +1,20 @@
 /**
  * End-to-end wiring (docs/tech/core-sdk.md §4.5a "端到端两件套" 验收点，与
- * `@nimbo/just-bash`/`test/e2e.test.ts` 同款结构，换成 e2b 假沙盒):
+ * `@runko/just-bash`/`test/e2e.test.ts` 同款结构，换成 e2b 假沙盒):
  *   a) mock model 调用内置 `bash` 工具，经 `e2bWorkspace()` 真实跑通一条命令；
  *   b) bypass proof —— bash 旁路写（模拟 `echo ... > /f.txt` 的效果）让
  *      `readState` 失效（§4.5a 模式 A 规则 2），后续 `edit-file` 被拒绝直到
  *      重新 `read-file`。
  *
  * P13-5-2（docs/tech/single-ledger.md）迁移：断言从 `SessionEvent`/
- * `SessionItem`（`.status`）改为 `NimboChunk`/账本工具部件（`.state`）——同
- * `@nimbo/core`'s `test/e2e-minibash.test.ts` 与 `@nimbo/just-bash`'s
+ * `SessionItem`（`.status`）改为 `RunkoChunk`/账本工具部件（`.state`）——同
+ * `@runko/core`'s `test/e2e-minibash.test.ts` 与 `@runko/just-bash`'s
  * `test/e2e.test.ts` 的迁移，一比一对应；辅助函数就地内联（不跨包 import
  * 测试辅助，沿两包既有"各自 test 文件自包含"的风格）。
  */
-import { createFileTools } from "@nimbo/virtual-fs";
-import { createDerivedDataCollector, createSession, createSessionReadState, defineAgent } from "@nimbo/core";
-import type { AgentDefinition, NimboChunk, NimboUIMessage } from "@nimbo/core";
+import { createFileTools } from "@runko/virtual-fs";
+import { createDerivedDataCollector, createSession, createSessionReadState, defineAgent } from "@runko/core";
+import type { AgentDefinition, RunkoChunk, RunkoUIMessage } from "@runko/core";
 import { isToolUIPart, simulateReadableStream } from "ai";
 import type { ToolUIPart, UITools } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
@@ -63,8 +63,8 @@ function mockModel(steps: Step[]): MockLanguageModelV4 {
   return new MockLanguageModelV4({ doStream: steps });
 }
 
-async function drainStream(gen: AsyncGenerator<NimboChunk, unknown>): Promise<NimboChunk[]> {
-  const chunks: NimboChunk[] = [];
+async function drainStream(gen: AsyncGenerator<RunkoChunk, unknown>): Promise<RunkoChunk[]> {
+  const chunks: RunkoChunk[] = [];
   let next = await gen.next();
   while (!next.done) {
     chunks.push(next.value);
@@ -74,7 +74,7 @@ async function drainStream(gen: AsyncGenerator<NimboChunk, unknown>): Promise<Ni
 }
 
 /** 一条消息里全部工具部件（`tool-<名字>`，排除理论上不会出现的 `dynamic-tool`）。 */
-function toolPartsOf(message: NimboUIMessage): ToolUIPart<UITools>[] {
+function toolPartsOf(message: RunkoUIMessage): ToolUIPart<UITools>[] {
   const result: ToolUIPart<UITools>[] = [];
   for (const part of message.parts) {
     if (isToolUIPart<UITools>(part) && part.type !== "dynamic-tool") {result.push(part);}
@@ -83,7 +83,7 @@ function toolPartsOf(message: NimboUIMessage): ToolUIPart<UITools>[] {
 }
 
 /** 账本级查找：全部消息里的全部工具部件 flatMap——同一 toolCallId 只记结算态，理应各出现一次。 */
-function toolCallItems(messages: NimboUIMessage[]): ToolUIPart<UITools>[] {
+function toolCallItems(messages: RunkoUIMessage[]): ToolUIPart<UITools>[] {
   return messages.flatMap(toolPartsOf);
 }
 
@@ -132,7 +132,7 @@ describe("b) bypass proof: a bash-side write invalidates readState (§4.5a mode 
     const model = mockModel([
       toolCallStep("call_1", "read-file", { path: "/f.txt" }),
       // "write-file:f.txt:changed-by-bash" simulates a real shell redirect (`echo -n changed-by-bash > f.txt`)
-      // run against the sandbox's default cwd (the workspace root) — a real bypass write, not through NimboFS.
+      // run against the sandbox's default cwd (the workspace root) — a real bypass write, not through RunkoFS.
       toolCallStep("call_2", "bash", { command: "write-file:f.txt:changed-by-bash" }),
       toolCallStep("call_3", "edit-file", { path: "/f.txt", old_string: "hello", new_string: "nope" }),
       toolCallStep("call_4", "read-file", { path: "/f.txt" }),

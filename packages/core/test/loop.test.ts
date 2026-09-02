@@ -1,6 +1,6 @@
 /**
  * P13-5-2（docs/tech/single-ledger.md）迁移：`runTurn` 的工作态/产出
- * 从 `ModelMessage[]`/`SessionEvent` 换成 `NimboUIMessage[]`/`NimboChunk`——
+ * 从 `ModelMessage[]`/`SessionEvent` 换成 `RunkoUIMessage[]`/`RunkoChunk`——
  * 这个文件按 `loop.ts` 文件头的语义映射表逐条对照重写：断言 chunk 序列
  * （`tool-input-available`/`tool-output-available`/`tool-approval-*`/
  * `data-*`/`message-metadata` 等）与账本落地形态（`messages` 参数原地
@@ -16,8 +16,8 @@ import type { RunTurnOptions } from "../src/loop.js";
 import { createOnceApprovalMemory } from "../src/approval.js";
 import { createDerivedDataCollector } from "../src/runtime.js";
 import { createPlanStore, createUpdatePlanTool } from "../src/tools/builtin/update-plan.js";
-import type { ApprovalOutcome, ApprovalPolicy, ApprovalReviewer, HumanDecision, NimboFS, Tool } from "../src/types.js";
-import type { NimboUIMessage } from "../src/state.js";
+import type { ApprovalOutcome, ApprovalPolicy, ApprovalReviewer, HumanDecision, RunkoFS, Tool } from "../src/types.js";
+import type { RunkoUIMessage } from "../src/state.js";
 import {
   allToolParts,
   chunksOfType,
@@ -30,7 +30,7 @@ import {
   toolProgressParts,
   toolTimingPartFor,
   userTextMessage,
-} from "./helpers/nimbo-chunks.js";
+} from "./helpers/runko-chunks.js";
 
 /**
  * Same helper shape as `model/step.test.ts` (see that file's header comment for why
@@ -46,7 +46,7 @@ const usage = {
   outputTokens: { total: 5, text: 5, reasoning: undefined },
 } as const;
 
-function fakeFs(): NimboFS {
+function fakeFs(): RunkoFS {
   return {
     readFile: async () => new Uint8Array(),
     writeFile: async () => {},
@@ -118,7 +118,7 @@ describe("runTurn", () => {
       ],
     }));
 
-    const messages: NimboUIMessage[] = [userTextMessage("u1", "please plan")];
+    const messages: RunkoUIMessage[] = [userTextMessage("u1", "please plan")];
     const { chunks, result } = await drainTurn(
       runTurn(turnOptions(model, { messages, tools: { "update-plan": tool }, derivedData })),
     );
@@ -193,7 +193,7 @@ describe("runTurn", () => {
       ],
     }));
 
-    const messages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+    const messages: RunkoUIMessage[] = [userTextMessage("u1", "go")];
     await drainTurn(runTurn(turnOptions(model, { messages, tools: { "tool-a": toolA, "tool-b": toolB } })));
 
     const settled = allToolParts(messages);
@@ -259,12 +259,12 @@ describe("runTurn", () => {
       ],
     }));
 
-    const messages: NimboUIMessage[] = [userTextMessage("u1", "plan and write")];
+    const messages: RunkoUIMessage[] = [userTextMessage("u1", "plan and write")];
     await drainTurn(
       runTurn(turnOptions(model, { messages, tools: { "update-plan": planTool, "write-file": writeFileTool }, derivedData })),
     );
 
-    const emptyMessage: NimboUIMessage = { id: "", role: "system", parts: [] };
+    const emptyMessage: RunkoUIMessage = { id: "", role: "system", parts: [] };
     const step1Message = messages[1];
     const step2Message = messages[2];
     expect(step1Message).toBeDefined();
@@ -314,7 +314,7 @@ describe("runTurn", () => {
       },
     }));
 
-    const messages: NimboUIMessage[] = [userTextMessage("u1", "hi")];
+    const messages: RunkoUIMessage[] = [userTextMessage("u1", "hi")];
     const { chunks, result } = await drainTurn(runTurn(turnOptions(model, { messages })));
 
     expect(chunksOfType(chunks, "text-start")).toHaveLength(1);
@@ -345,7 +345,7 @@ describe("runTurn", () => {
       },
     }));
 
-    const messages: NimboUIMessage[] = [userTextMessage("u1", "hi")];
+    const messages: RunkoUIMessage[] = [userTextMessage("u1", "hi")];
     const { chunks, result } = await drainTurn(runTurn(turnOptions(model, { messages })));
 
     expect(chunksOfType(chunks, "reasoning-delta").map((c) => c.delta)).toEqual(["step 1. ", "step 2."]);
@@ -397,7 +397,7 @@ describe("runTurn", () => {
         ],
       }));
 
-      const messages: NimboUIMessage[] = [userTextMessage("u1", "do the dangerous thing")];
+      const messages: RunkoUIMessage[] = [userTextMessage("u1", "do the dangerous thing")];
       const { chunks } = await drainTurn(runTurn(turnOptions(model, { messages, tools: { danger: tool } })));
 
       expect(chunksOfType(chunks, "tool-approval-request")).toHaveLength(0);
@@ -454,7 +454,7 @@ describe("runTurn", () => {
         ],
       }));
 
-      const messages: NimboUIMessage[] = [userTextMessage("u1", "do the dangerous thing")];
+      const messages: RunkoUIMessage[] = [userTextMessage("u1", "do the dangerous thing")];
       const { chunks } = await drainTurn(runTurn(turnOptions(model, { messages, tools: { danger: tool }, onApproval })));
 
       expect(chunksOfType(chunks, "tool-approval-request")).toHaveLength(0);
@@ -492,7 +492,7 @@ describe("runTurn", () => {
         ],
       }));
 
-      const messages: NimboUIMessage[] = [userTextMessage("u1", "do the dangerous thing")];
+      const messages: RunkoUIMessage[] = [userTextMessage("u1", "do the dangerous thing")];
       // Note: no `onReview` passed at all.
       const { chunks } = await drainTurn(runTurn(turnOptions(model, { messages, tools: { danger: tool } })));
 
@@ -537,7 +537,7 @@ describe("runTurn", () => {
           },
         ],
       }));
-      const messages: NimboUIMessage[] = [userTextMessage("u1", "do the dangerous thing")];
+      const messages: RunkoUIMessage[] = [userTextMessage("u1", "do the dangerous thing")];
       return { messages, turnOpts: turnOptions(model, { messages, tools: { danger: tool }, onApproval, onReview }) };
     }
 
@@ -689,7 +689,7 @@ describe("runTurn", () => {
           },
         ],
       }));
-      const messages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+      const messages: RunkoUIMessage[] = [userTextMessage("u1", "go")];
       return turnOptions(model, { messages, tools: { gated: tool }, onApproval, onReview });
     }
 
@@ -750,7 +750,7 @@ describe("runTurn", () => {
       ],
     }));
 
-    const messages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+    const messages: RunkoUIMessage[] = [userTextMessage("u1", "go")];
     const { chunks } = await drainTurn(runTurn(turnOptions(model, { messages, tools: { safe: tool }, onApproval })));
 
     expect(chunksOfType(chunks, "tool-approval-request")).toHaveLength(0);
@@ -798,7 +798,7 @@ describe("runTurn", () => {
       ],
     }));
 
-    const messages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+    const messages: RunkoUIMessage[] = [userTextMessage("u1", "go")];
     // Deliberately no `onReview` — resolveToolCallApproval must resolve straight to "allow"
     // (never "review") since the classifier itself answers synchronously.
     const { chunks } = await drainTurn(runTurn(turnOptions(model, { messages, tools: { gated: tool }, onApproval })));
@@ -844,7 +844,7 @@ describe("runTurn", () => {
       ],
     }));
 
-    const messages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+    const messages: RunkoUIMessage[] = [userTextMessage("u1", "go")];
     const { chunks, result } = await drainTurn(runTurn(turnOptions(model, { messages, tools: {} })));
 
     // AI SDK intercepts the call before it ever becomes a pending tool execution —
@@ -891,7 +891,7 @@ describe("runTurn", () => {
       ],
     }));
 
-    const messages: NimboUIMessage[] = [userTextMessage("u1", "search")];
+    const messages: RunkoUIMessage[] = [userTextMessage("u1", "search")];
     const { chunks } = await drainTurn(runTurn(turnOptions(model, { messages, tools: { search: tool } })));
 
     expect(chunksOfType(chunks, "tool-input-available")).toHaveLength(0);
@@ -924,7 +924,7 @@ describe("runTurn", () => {
       }),
     }));
 
-    const messages: NimboUIMessage[] = [userTextMessage("u1", "hi")];
+    const messages: RunkoUIMessage[] = [userTextMessage("u1", "hi")];
     const { chunks } = await drainTurn(runTurn(turnOptions(model, { messages, signal: controller.signal })));
 
     const metadataChunks = chunksOfType(chunks, "message-metadata");
@@ -980,7 +980,7 @@ describe("runTurn", () => {
     }));
     const doStreamSpy = vi.spyOn(model, "doStream");
 
-    const messages: NimboUIMessage[] = [userTextMessage("u1", "hi")];
+    const messages: RunkoUIMessage[] = [userTextMessage("u1", "hi")];
     const { chunks } = await drainTurn(
       runTurn(turnOptions(model, { messages, tools: { slow: tool }, signal: controller.signal })),
     );
@@ -1005,7 +1005,7 @@ describe("runTurn", () => {
 
   // 宿主给的中止理由要透传进收尾 message（docs/tech/graceful-shutdown.md §2）——
   // 宿主靠它区分「用户按了停止」和「进程要关闭了」，core 自己不认识这些概念。
-  it("abort reason: the host's own `abort(reason)` message is what lands in NimboError.message", async () => {
+  it("abort reason: the host's own `abort(reason)` message is what lands in RunkoError.message", async () => {
     const controller = new AbortController();
     controller.abort(new Error("The server shut down while this turn was running."));
 
@@ -1015,7 +1015,7 @@ describe("runTurn", () => {
       },
     }));
 
-    const messages: NimboUIMessage[] = [userTextMessage("u1", "hi")];
+    const messages: RunkoUIMessage[] = [userTextMessage("u1", "hi")];
     const { chunks } = await drainTurn(runTurn(turnOptions(model, { messages, signal: controller.signal })));
 
     const metadataChunks = chunksOfType(chunks, "message-metadata");
@@ -1035,7 +1035,7 @@ describe("runTurn", () => {
       },
     }));
 
-    const messages: NimboUIMessage[] = [userTextMessage("u1", "hi")];
+    const messages: RunkoUIMessage[] = [userTextMessage("u1", "hi")];
     const { chunks } = await drainTurn(runTurn(turnOptions(model, { messages, signal: controller.signal })));
 
     const metadataChunks = chunksOfType(chunks, "message-metadata");
@@ -1053,7 +1053,7 @@ describe("runTurn", () => {
       },
     }));
 
-    const messages: NimboUIMessage[] = [userTextMessage("u1", "hi")];
+    const messages: RunkoUIMessage[] = [userTextMessage("u1", "hi")];
     const { chunks } = await drainTurn(runTurn(turnOptions(model, { messages })));
 
     const metadataChunks = chunksOfType(chunks, "message-metadata");
@@ -1061,7 +1061,7 @@ describe("runTurn", () => {
     expect(metadataChunks[0]?.messageMetadata.error?.code).toBe("provider_error");
     // AI SDK's retry layer re-wraps a synchronous doStream throw (its own message doesn't
     // necessarily survive verbatim) — assert the failure surfaced as a non-empty message
-    // rather than pin to `ai`'s internal wording, which isn't nimbo's contract to test.
+    // rather than pin to `ai`'s internal wording, which isn't runko's contract to test.
     expect(typeof metadataChunks[0]?.messageMetadata.error?.message).toBe("string");
     expect(metadataChunks[0]?.messageMetadata.error?.message.length).toBeGreaterThan(0);
 
@@ -1091,7 +1091,7 @@ describe("runTurn", () => {
       ],
     }));
 
-    const messages: NimboUIMessage[] = [userTextMessage("u1", "go forever")];
+    const messages: RunkoUIMessage[] = [userTextMessage("u1", "go forever")];
     const { chunks } = await drainTurn(runTurn(turnOptions(model, { messages, tools: { loop_tool: tool }, maxTurnsPerRun: 1 })));
 
     // 关键语义 6：预算耗尽且末步仍 tool-calls 时结算态不悬空——工具已经正常
@@ -1111,7 +1111,7 @@ describe("runTurn", () => {
     });
     const model = mockModel(() => ({ doStream }));
 
-    const messages: NimboUIMessage[] = [userTextMessage("u1", "x".repeat(1000))];
+    const messages: RunkoUIMessage[] = [userTextMessage("u1", "x".repeat(1000))];
     const { chunks } = await drainTurn(runTurn(turnOptions(model, { messages, maxContextTokens: 1 })));
 
     const metadataChunks = chunksOfType(chunks, "message-metadata");
@@ -1139,7 +1139,7 @@ describe("runTurn", () => {
       },
     }));
 
-    const messages: NimboUIMessage[] = [userTextMessage("u1", "x".repeat(1000))];
+    const messages: RunkoUIMessage[] = [userTextMessage("u1", "x".repeat(1000))];
     const { chunks } = await drainTurn(runTurn(turnOptions(model, { messages, maxContextTokens: undefined })));
 
     const metadataChunks = chunksOfType(chunks, "message-metadata");
@@ -1154,7 +1154,7 @@ describe("runTurn", () => {
       }),
     }));
 
-    const messages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+    const messages: RunkoUIMessage[] = [userTextMessage("u1", "go")];
     const { chunks } = await drainTurn(runTurn(turnOptions(model, { messages, maxTurnsPerRun: 0 })));
 
     const metadataChunks = chunksOfType(chunks, "message-metadata");
@@ -1189,7 +1189,7 @@ describe("runTurn", () => {
       ],
     }));
 
-    const messages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+    const messages: RunkoUIMessage[] = [userTextMessage("u1", "go")];
     const { chunks } = await drainTurn(runTurn(turnOptions(model, { messages, tools: { t: tool }, maxContextTokens: 100_000 })));
 
     const metadataChunks = chunksOfType(chunks, "message-metadata");
@@ -1232,7 +1232,7 @@ describe("runTurn", () => {
       ],
     }));
 
-    const messages: NimboUIMessage[] = [userTextMessage("u1", "go slowly")];
+    const messages: RunkoUIMessage[] = [userTextMessage("u1", "go slowly")];
     const { chunks } = await drainTurn(runTurn(turnOptions(model, { messages, tools: { slow_tool: tool } })));
 
     const progressChunks = chunksOfType(chunks, "data-tool-progress");
@@ -1257,9 +1257,9 @@ describe("runTurn", () => {
             { type: "stream-start", warnings: [] },
             { type: "tool-input-start", id: "call_1", toolName: "search" },
             { type: "tool-input-delta", id: "call_1", delta: '{"q":' },
-            { type: "tool-input-delta", id: "call_1", delta: '"nimbo"}' },
+            { type: "tool-input-delta", id: "call_1", delta: '"runko"}' },
             { type: "tool-input-end", id: "call_1" },
-            { type: "tool-call", toolCallId: "call_1", toolName: "search", input: '{"q":"nimbo"}' },
+            { type: "tool-call", toolCallId: "call_1", toolName: "search", input: '{"q":"runko"}' },
             { type: "finish", finishReason: { unified: "tool-calls", raw: undefined }, usage },
           ],
           initialDelayInMs: null,
@@ -1269,14 +1269,14 @@ describe("runTurn", () => {
     }));
 
     const tool: Tool = { description: "d", inputSchema: z.object({ q: z.string() }), execute: () => "ok" };
-    const messages: NimboUIMessage[] = [userTextMessage("u1", "search")];
+    const messages: RunkoUIMessage[] = [userTextMessage("u1", "search")];
     const { chunks } = await drainTurn(runTurn(turnOptions(model, { messages, tools: { search: tool }, maxTurnsPerRun: 1 })));
 
     // exactly one tool-input-available chunk for call_1 (the deltas produced none), with the
     // fully parsed input from the terminal tool-call event.
     const available = chunksOfType(chunks, "tool-input-available");
     expect(available).toHaveLength(1);
-    expect(available[0]?.input).toEqual({ q: "nimbo" });
+    expect(available[0]?.input).toEqual({ q: "runko" });
   });
 
   it("aggregates usage across steps into TurnResult.usage / message-metadata", async () => {
@@ -1316,7 +1316,7 @@ describe("runTurn", () => {
       ],
     }));
 
-    const messages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+    const messages: RunkoUIMessage[] = [userTextMessage("u1", "go")];
     const { chunks, result } = await drainTurn(runTurn(turnOptions(model, { messages, tools: { t: tool } })));
 
     // `LanguageModelUsage.totalTokens` is computed by the AI SDK per step (input+output for
@@ -1328,7 +1328,7 @@ describe("runTurn", () => {
   });
 
   /**
-   * chat 可观测性（工单："nimbo chat server 加 step / tool call 级别日志；
+   * chat 可观测性（工单："runko chat server 加 step / tool call 级别日志；
    * chat web 给每个 tool call 卡片展示启动时间、完成时间、耗时"）：`state.ts`
    * 的 `toolTimingDataSchema` + `loop.ts` 的 `startToolTiming`/
    * `completeToolTiming`——每个工具调用一条 `data-tool-timing` 持久部件，
@@ -1368,7 +1368,7 @@ describe("runTurn", () => {
         },
       };
 
-      const messages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+      const messages: RunkoUIMessage[] = [userTextMessage("u1", "go")];
       await drainTurn(
         runTurn(turnOptions(stopOnlyStream(), { messages, session: { id: "sess_42", turn: 7 }, telemetry: { integrations: [integration] } })),
       );
@@ -1381,12 +1381,12 @@ describe("runTurn", () => {
     });
 
     it("no telemetry injected: the turn runs identically (functionId alone is inert metadata)", async () => {
-      const messages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+      const messages: RunkoUIMessage[] = [userTextMessage("u1", "go")];
       const { chunks } = await drainTurn(runTurn(turnOptions(stopOnlyStream(), { messages })));
       expect(chunksOfType(chunks, "message-metadata").at(-1)?.messageMetadata).toMatchObject({ status: "completed" });
     });
 
-    it("loop 替 AI SDK 补发 onToolExecutionStart/End（nimbo 自己执行工具，SDK 没机会发），带同款 functionId 关联键与 toolExecutionMs", async () => {
+    it("loop 替 AI SDK 补发 onToolExecutionStart/End（runko 自己执行工具，SDK 没机会发），带同款 functionId 关联键与 toolExecutionMs", async () => {
       const started: unknown[] = [];
       const ended: { toolExecutionMs: number; toolOutput: { type: string }; functionId?: string }[] = [];
       const integration: Telemetry = {
@@ -1421,7 +1421,7 @@ describe("runTurn", () => {
       }));
       const tool: Tool = { description: "d", inputSchema: z.object({}), execute: () => "ok" };
 
-      const messages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+      const messages: RunkoUIMessage[] = [userTextMessage("u1", "go")];
       await drainTurn(
         runTurn(turnOptions(model, { messages, session: { id: "sess_9", turn: 2 }, tools: { t: tool }, telemetry: { integrations: [integration] } })),
       );
@@ -1467,7 +1467,7 @@ describe("runTurn", () => {
       }));
       const tool: Tool = { description: "d", inputSchema: z.object({}), approval: "deny", execute: () => "never" };
 
-      const messages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+      const messages: RunkoUIMessage[] = [userTextMessage("u1", "go")];
       const { chunks } = await drainTurn(runTurn(turnOptions(model, { messages, tools: { t: tool }, telemetry: { integrations: [integration] } })));
 
       expect(chunksOfType(chunks, "tool-output-denied")).toHaveLength(1);
@@ -1546,7 +1546,7 @@ describe("runTurn", () => {
           },
         };
 
-        const messages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+        const messages: RunkoUIMessage[] = [userTextMessage("u1", "go")];
         const { chunks } = await drainTurn(runTurn(turnOptions(singleToolCallModel(), { messages, tools: { t: tool } })));
 
         // Three data-tool-timing chunks stream out for this one call (queued,
@@ -1589,7 +1589,7 @@ describe("runTurn", () => {
             return "ok";
           },
         };
-        const messages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+        const messages: RunkoUIMessage[] = [userTextMessage("u1", "go")];
         const { chunks } = await drainTurn(runTurn(turnOptions(singleToolCallModel(), { messages, tools: { t: tool } })));
 
         const metadataChunks = chunksOfType(chunks, "message-metadata");
@@ -1637,7 +1637,7 @@ describe("runTurn", () => {
           ],
         }));
 
-        const messages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+        const messages: RunkoUIMessage[] = [userTextMessage("u1", "go")];
         const { chunks } = await drainTurn(runTurn(turnOptions(model, { messages, tools: { t: tool } })));
 
         const first = toolTimingPartFor(messages, "call_1");
@@ -1687,7 +1687,7 @@ describe("runTurn", () => {
         },
       };
 
-      const messages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+      const messages: RunkoUIMessage[] = [userTextMessage("u1", "go")];
       const { chunks } = await drainTurn(runTurn(turnOptions(twoToolCallModel(), { messages, tools: { a, b } })));
 
       const outputs = chunksOfType(chunks, "tool-output-available");
@@ -1730,7 +1730,7 @@ describe("runTurn", () => {
         },
       };
 
-      const messages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+      const messages: RunkoUIMessage[] = [userTextMessage("u1", "go")];
       await drainTurn(runTurn(turnOptions(twoToolCallModel(), { messages, tools: { a, b } })));
 
       expect(events).toEqual(["a:start", "a:end", "b:start"]);
@@ -1738,7 +1738,7 @@ describe("runTurn", () => {
 
     it("chunk ordering: data-tool-timing(start) immediately follows tool-input-available, and data-tool-timing(complete) immediately follows the settling tool-output-available chunk", async () => {
       const tool: Tool = { description: "d", inputSchema: z.object({}), execute: () => "ok" };
-      const messages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+      const messages: RunkoUIMessage[] = [userTextMessage("u1", "go")];
       const { chunks } = await drainTurn(runTurn(turnOptions(singleToolCallModel(), { messages, tools: { t: tool } })));
 
       const inputAvailableIndex = chunks.findIndex((c) => c.type === "tool-input-available");
@@ -1759,7 +1759,7 @@ describe("runTurn", () => {
           throw new Error("tool blew up");
         },
       };
-      const messages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+      const messages: RunkoUIMessage[] = [userTextMessage("u1", "go")];
       const { chunks } = await drainTurn(runTurn(turnOptions(singleToolCallModel(), { messages, tools: { t: tool } })));
 
       const errorIndex = chunks.findIndex((c) => c.type === "tool-output-error");
@@ -1774,7 +1774,7 @@ describe("runTurn", () => {
     it("output-denied (direct deny via per-tool 'deny' policy — no approval-request/response at all): data-tool-timing(complete) immediately follows tool-output-denied", async () => {
       const execute = vi.fn(() => "should not run");
       const tool: Tool = { description: "d", inputSchema: z.object({}), approval: "deny", execute };
-      const messages: NimboUIMessage[] = [userTextMessage("u1", "do the dangerous thing")];
+      const messages: RunkoUIMessage[] = [userTextMessage("u1", "do the dangerous thing")];
       const { chunks } = await drainTurn(runTurn(turnOptions(singleToolCallModel(), { messages, tools: { t: tool } })));
 
       const deniedIndex = chunks.findIndex((c) => c.type === "tool-output-denied");
@@ -1789,7 +1789,7 @@ describe("runTurn", () => {
     it("output-denied (no-arbiter: escalated to 'review' but no onReview wired up): data-tool-timing(complete) immediately follows tool-output-denied", async () => {
       const execute = vi.fn(() => "should not run");
       const tool: Tool = { description: "d", inputSchema: z.object({}), approval: (): ApprovalOutcome => "review", execute };
-      const messages: NimboUIMessage[] = [userTextMessage("u1", "do the dangerous thing")];
+      const messages: RunkoUIMessage[] = [userTextMessage("u1", "do the dangerous thing")];
       // Deliberately no onReview passed.
       const { chunks } = await drainTurn(runTurn(turnOptions(singleToolCallModel(), { messages, tools: { t: tool } })));
 
@@ -1812,7 +1812,7 @@ describe("runTurn", () => {
           return { behavior: "deny", message: "not today" };
         };
 
-        const messages: NimboUIMessage[] = [userTextMessage("u1", "do the dangerous thing")];
+        const messages: RunkoUIMessage[] = [userTextMessage("u1", "do the dangerous thing")];
         const { chunks } = await drainTurn(
           runTurn(turnOptions(singleToolCallModel(), { messages, tools: { t: tool }, onApproval, onReview })),
         );
@@ -1841,7 +1841,7 @@ describe("runTurn", () => {
       const onApproval: ApprovalPolicy = () => "review";
       const onReview = vi.fn(async (): Promise<HumanDecision> => ({ behavior: "allow" }));
 
-      const messages: NimboUIMessage[] = [userTextMessage("u1", "do the dangerous thing")];
+      const messages: RunkoUIMessage[] = [userTextMessage("u1", "do the dangerous thing")];
       const { chunks } = await drainTurn(runTurn(turnOptions(singleToolCallModel(), { messages, tools: { t: tool }, onApproval, onReview })));
 
       const responseIndex = chunks.findIndex((c) => c.type === "tool-approval-response");
@@ -1881,7 +1881,7 @@ describe("runTurn", () => {
         ],
       }));
 
-      const messages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+      const messages: RunkoUIMessage[] = [userTextMessage("u1", "go")];
       await drainTurn(runTurn(turnOptions(model, { messages, tools: { "tool-a": toolA, "tool-b": toolB } })));
 
       const timingA = toolTimingPartFor(messages, "call_1");
@@ -1916,7 +1916,7 @@ describe("runTurn", () => {
         ],
       }));
 
-      const messages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+      const messages: RunkoUIMessage[] = [userTextMessage("u1", "go")];
       const { chunks } = await drainTurn(runTurn(turnOptions(model, { messages, tools: {} })));
 
       expect(chunksOfType(chunks, "data-tool-timing")).toHaveLength(0);
@@ -1944,7 +1944,7 @@ describe("runTurn", () => {
         },
       }));
 
-      const messages: NimboUIMessage[] = [userTextMessage("u1", "go")];
+      const messages: RunkoUIMessage[] = [userTextMessage("u1", "go")];
       const { chunks } = await drainTurn(runTurn(turnOptions(model, { messages, tools: { t: tool }, onApproval })));
 
       // Both calls got their tool-input-available (and therefore startToolTiming) —

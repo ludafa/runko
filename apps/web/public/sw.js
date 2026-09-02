@@ -15,7 +15,7 @@
  * 最难发现。订阅换了 endpoint 由页面每次加载幂等重报兜底。
  */
 
-const FALLBACK_TITLE = 'nimbo chat';
+const FALLBACK_TITLE = 'runko chat';
 const FALLBACK_BODY = '有新动静。';
 const FALLBACK_URL = '/chat';
 

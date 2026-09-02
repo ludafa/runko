@@ -10,7 +10,7 @@ import type { Skill } from "./skill.js";
 /**
  * 内置工具名联合（docs/tech/builtin-tools.md §3）：九个默认全开、可经
  * `builtinTools` 裁剪的文件/计划工具。`load-skill` 由 agent 是否配置
- * `skills` 隐式控制、`bash` 由 session 是否注入 `NimboExec` 隐式控制——
+ * `skills` 隐式控制、`bash` 由 session 是否注入 `RunkoExec` 隐式控制——
  * 二者是条件内置，不在这个可裁剪列表里（§3 原文括注）。
  */
 export type BuiltinToolName =

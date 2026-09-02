@@ -8,7 +8,7 @@ import * as nodeFs from "node:fs/promises";
 import * as nodeOs from "node:os";
 import * as nodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { fromMemory } from "@nimbo/virtual-fs";
+import { fromMemory } from "@runko/virtual-fs";
 import { localExec } from "../../src/exec/local.js";
 import type { ExecOutputChunk, ExecRequest } from "../../src/types.js";
 
@@ -34,7 +34,7 @@ describe("localExec()", () => {
 
   describe("materialize: true requires fs (constructor-time guard, not exec()-time)", () => {
     it("throws synchronously when localExec() itself is called without fs", () => {
-      expect(() => localExec({ materialize: true })).toThrow(/requires a NimboFS reference/);
+      expect(() => localExec({ materialize: true })).toThrow(/requires a RunkoFS reference/);
     });
 
     it("does not throw when materialize is false/omitted, even without fs", () => {
@@ -95,14 +95,14 @@ describe("localExec()", () => {
     });
 
     it("never rejects even for a command that doesn't exist — resolves with a non-zero exit code", async () => {
-      const result = await localExec().exec(req("this-command-does-not-exist-xyz-nimbo"));
+      const result = await localExec().exec(req("this-command-does-not-exist-xyz-runko"));
       expect(result.exitCode).not.toBe(0);
       expect(result.stdout).toBeTypeOf("string");
       expect(result.stderr).toBeTypeOf("string");
     });
 
     it("never rejects even when cwd itself does not exist — resolves with a non-zero exit code and diagnostic stderr", async () => {
-      const result = await localExec().exec(req("echo hi", { cwd: nodePath.join(nodeOs.tmpdir(), "nimbo-does-not-exist-xyz") }));
+      const result = await localExec().exec(req("echo hi", { cwd: nodePath.join(nodeOs.tmpdir(), "runko-does-not-exist-xyz") }));
       expect(result.exitCode).not.toBe(0);
       expect(result.stderr.length).toBeGreaterThan(0);
     });
@@ -121,7 +121,7 @@ describe("localExec()", () => {
     let tmpDir: string;
 
     beforeEach(async () => {
-      tmpDir = await nodeFs.mkdtemp(nodePath.join(nodeOs.tmpdir(), "nimbo-local-exec-cwd-"));
+      tmpDir = await nodeFs.mkdtemp(nodePath.join(nodeOs.tmpdir(), "runko-local-exec-cwd-"));
     });
 
     afterEach(async () => {
@@ -137,7 +137,7 @@ describe("localExec()", () => {
     });
 
     it("req.cwd overrides opts.cwd for that one call", async () => {
-      const otherDir = await nodeFs.mkdtemp(nodePath.join(nodeOs.tmpdir(), "nimbo-local-exec-cwd-override-"));
+      const otherDir = await nodeFs.mkdtemp(nodePath.join(nodeOs.tmpdir(), "runko-local-exec-cwd-override-"));
       try {
         const exec = localExec({ cwd: tmpDir });
         const result = await exec.exec(req(nodeEval("console.log(process.cwd())"), { cwd: otherDir }));

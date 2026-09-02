@@ -1,6 +1,6 @@
-# @nimbo-demo/persist-demo
+# @runko-demo/persist-demo
 
-**零 ORM 的 nimbo 宿主** —— 持久化只用官方的 `@nimbo/persist-*` 包，一行 ORM 都没有。
+**零 ORM 的 runko 宿主** —— 持久化只用官方的 `@runko/persist-*` 包，一行 ORM 都没有。
 
 它存在的目的只有一个：证明「装个包 + 给它一个驱动实例」真的能跑起来一个完整的
 agent 服务。不是玩具脚本，是一个对外提供 HTTP 端点的真服务。
@@ -8,7 +8,7 @@ agent 服务。不是玩具脚本，是一个对外提供 HTTP 端点的真服�
 ## 跑起来
 
 ```sh
-pnpm --filter @nimbo-demo/persist-demo start
+pnpm --filter @runko-demo/persist-demo start
 # → persist-demo 起来了：http://localhost:3910（sqlite）
 ```
 
@@ -41,18 +41,18 @@ src/
 
 | 谁的 | 表 | 谁在写 |
 | --- | --- | --- |
-| nimbo 的 | `nimbo_ledger` / `nimbo_decisions` / `nimbo_queue` | `@nimbo/persist-*` |
+| runko 的 | `agent_ledger` / `agent_decisions` / `agent_queue` | `@runko/persist-*` |
 | demo 的 | `demo_conversations` | `src/store.ts`，裸 SQL |
 
-这正是框架的准则「nimbo 不拥有用户实体」的样子——它只认一个不透明的 `conversationId`，
+这正是框架的准则「runko 不拥有用户实体」的样子——它只认一个不透明的 `conversationId`，
 会话叫什么、属于谁，归宿主自己存。
 
 > `src/store.ts` 里有约二十行手写的「查询口」，把同步的 better-sqlite3 和异步的 pg 抹平。
-> **这是「本 demo 要同时支持两种方言」的成本，不是「当 nimbo 宿主」的成本**——真实应用
+> **这是「本 demo 要同时支持两种方言」的成本，不是「当 runko 宿主」的成本**——真实应用
 > 只挑一个数据库，直接 `db.prepare(…).run(…)` 就完了，不需要这一层。
 >
-> 而且它跟 nimbo 完全无关：这二十行伺候的是 `demo_conversations`（demo 自己的产品数据）。
-> **agent 那三张表一次都没被这里碰过**，全归 `@nimbo/persist-*`。
+> 而且它跟 runko 完全无关：这二十行伺候的是 `demo_conversations`（demo 自己的产品数据）。
+> **agent 那三张表一次都没被这里碰过**，全归 `@runko/persist-*`。
 
 ## 端点
 
@@ -87,7 +87,7 @@ curl -s localhost:3910/api/chat/conversations/$ID/messages | jq
 ## 测试
 
 ```sh
-pnpm --filter @nimbo-demo/persist-demo test
+pnpm --filter @runko-demo/persist-demo test
 ```
 
 19 条 e2e，**两种方言各跑一遍同一套**（SQLite 与 pglite），外加一条跨重启的——

@@ -1,13 +1,13 @@
 /**
  * 虚拟路径 → 沙盒内真实路径的锚定换算。虚拟路径始终先过 `normalizePath`
- * （`@nimbo/virtual-fs`）——`..` 越出虚拟根 `/` 时抛 `PathEscapesRootError`，
+ * （`@runko/virtual-fs`）——`..` 越出虚拟根 `/` 时抛 `PathEscapesRootError`，
  * 与 MemoryFS/DirFS 同一套边界语义（工单裁量：docs/tech/sandbox.md §3.1 "适配器不再模拟
  * VirtualFS 的越界拒绝" 说的是 bash 相对 FS 工具的语义差——bash 经真实 shell
  * 直达整个容器文件系统，天然越出 root，这一点已经在 `describe()` 里如实声明；
- * 但 FS 七方法仍是"锚定到 root 的一个安全视图"，与其余三个 NimboFS 实现保持
+ * 但 FS 七方法仍是"锚定到 root 的一个安全视图"，与其余三个 RunkoFS 实现保持
  * 同样的越界拒绝行为，不因为 bash 那侧守不住就连这侧的路由防呆也一起放弃）。
  */
-import { normalizePath } from "@nimbo/virtual-fs";
+import { normalizePath } from "@runko/virtual-fs";
 
 /** 去掉 root 末尾的斜杠，便于和虚拟路径拼接；root 为 "/" 时视为空前缀。 */
 function cleanRoot(root: string): string {

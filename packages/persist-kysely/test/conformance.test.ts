@@ -1,12 +1,12 @@
 /**
- * 一致性套件跑在**三个方言**上——同一套用例，`@nimbo/conformance` 导出。
+ * 一致性套件跑在**三个方言**上——同一套用例，`@runko/conformance` 导出。
  *
  * | 方言 | 跑在哪 | 要不要外部服务 |
  * |---|---|---|
  * | SQLite | `better-sqlite3` 的 `:memory:` | 不要 |
  * | Postgres | **pglite**（WASM，进程内） | 不要 |
- * | Postgres | 真 Postgres | 要，`NIMBO_TEST_POSTGRES_URL` |
- * | MySQL | 真 MySQL | 要，`NIMBO_TEST_MYSQL_URL` |
+ * | Postgres | 真 Postgres | 要，`RUNKO_TEST_POSTGRES_URL` |
+ * | MySQL | 真 MySQL | 要，`RUNKO_TEST_MYSQL_URL` |
  *
  * **前两档永远跑**：CI 不用配 service container、贡献者不用装 Docker。
  * **后两档给了连接串才跑**，没给就 `describe.skip` 掉并在输出里说明——不是静默跳过。
@@ -15,14 +15,14 @@
  * MySQL 目前不跑，得靠本地或带 service container 的流水线。
  */
 import { PGlite } from "@electric-sql/pglite";
-import type { ConformanceCase, PersistenceConformanceSetup } from "@nimbo/conformance";
-import { persistenceCases } from "@nimbo/conformance";
+import type { ConformanceCase, PersistenceConformanceSetup } from "@runko/conformance";
+import { persistenceCases } from "@runko/conformance";
 import Database from "better-sqlite3";
 import { Kysely, MysqlDialect, PostgresDialect, SqliteDialect } from "kysely";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { kyselyPersistence, migrate } from "../src/index.js";
-import type { NimboDatabase } from "../src/index.js";
+import type { RunkoDatabase } from "../src/index.js";
 import { pgliteDialect } from "./helpers/pglite-dialect.js";
 
 /**
@@ -54,7 +54,7 @@ function runCases<S extends { cleanup?: () => Promise<void> | void }>(
 
 runCases("persist-kysely · sqlite", persistenceCases, async () => {
   const sqlite = new Database(":memory:");
-  const db = new Kysely<NimboDatabase>({ dialect: new SqliteDialect({ database: sqlite }) });
+  const db = new Kysely<RunkoDatabase>({ dialect: new SqliteDialect({ database: sqlite }) });
   await migrate(db, { flavor: "sqlite" });
   return {
     persistence: kyselyPersistence(db, { flavor: "sqlite" }),
@@ -68,14 +68,14 @@ runCases("persist-kysely · sqlite", persistenceCases, async () => {
  * 跑前清表——**复用同一个库的那几档都靠它**：pglite 共用实例、真库跨两次运行，
  * 都得保证每条用例从空表开始。
  *
- * **只清持久化用的三张，不动 `nimbo_leases`。** 租约那张归 arbitration.test.ts 清
+ * **只清持久化用的三张，不动 `agent_leases`。** 租约那张归 arbitration.test.ts 清
  * （它的 `clearLeases`）；两个文件在 CI 上连的是同一个真库、还是并发跑的，各清各的
  * 才不会把对方的用例洗掉。
  */
-async function truncate(db: Kysely<NimboDatabase>): Promise<void> {
-  await db.deleteFrom("nimbo_ledger").execute();
-  await db.deleteFrom("nimbo_decisions").execute();
-  await db.deleteFrom("nimbo_queue").execute();
+async function truncate(db: Kysely<RunkoDatabase>): Promise<void> {
+  await db.deleteFrom("agent_ledger").execute();
+  await db.deleteFrom("agent_decisions").execute();
+  await db.deleteFrom("agent_queue").execute();
 }
 
 /**
@@ -92,11 +92,11 @@ async function truncate(db: Kysely<NimboDatabase>): Promise<void> {
  * 用例结束后还会继续跳，共用一个库要靠令牌 CAS 兜底才不串台——那是另一回事，
  * 那个文件保持一条用例一个实例。
  */
-let pglite: Promise<Kysely<NimboDatabase>> | undefined;
+let pglite: Promise<Kysely<RunkoDatabase>> | undefined;
 
-function sharedPglite(): Promise<Kysely<NimboDatabase>> {
+function sharedPglite(): Promise<Kysely<RunkoDatabase>> {
   pglite ??= (async () => {
-    const db = new Kysely<NimboDatabase>({ dialect: pgliteDialect(new PGlite()) });
+    const db = new Kysely<RunkoDatabase>({ dialect: pgliteDialect(new PGlite()) });
     await migrate(db, { flavor: "postgres" });
     return db;
   })();
@@ -119,14 +119,14 @@ runCases<PersistenceConformanceSetup>("persist-kysely · postgres (pglite)", per
 // 给了连接串才跑的两档
 // ---------------------------------------------------------------------------
 
-const POSTGRES_URL = process.env["NIMBO_TEST_POSTGRES_URL"];
-const MYSQL_URL = process.env["NIMBO_TEST_MYSQL_URL"];
+const POSTGRES_URL = process.env["RUNKO_TEST_POSTGRES_URL"];
+const MYSQL_URL = process.env["RUNKO_TEST_MYSQL_URL"];
 
 if (POSTGRES_URL !== undefined) {
   runCases("persist-kysely · postgres (真库)", persistenceCases, async () => {
     const { Pool } = await import("pg");
     const pool = new Pool({ connectionString: POSTGRES_URL });
-    const db = new Kysely<NimboDatabase>({ dialect: new PostgresDialect({ pool }) });
+    const db = new Kysely<RunkoDatabase>({ dialect: new PostgresDialect({ pool }) });
     await migrate(db, { flavor: "postgres" });
     await truncate(db);
     return {
@@ -138,7 +138,7 @@ if (POSTGRES_URL !== undefined) {
   });
 } else {
   describe.skip("persist-kysely · postgres (真库)", () => {
-    it("没给 NIMBO_TEST_POSTGRES_URL，跳过", () => undefined);
+    it("没给 RUNKO_TEST_POSTGRES_URL，跳过", () => undefined);
   });
 }
 
@@ -146,7 +146,7 @@ if (MYSQL_URL !== undefined) {
   runCases("persist-kysely · mysql (真库)", persistenceCases, async () => {
     const { createPool } = await import("mysql2");
     const pool = createPool(MYSQL_URL);
-    const db = new Kysely<NimboDatabase>({ dialect: new MysqlDialect({ pool }) });
+    const db = new Kysely<RunkoDatabase>({ dialect: new MysqlDialect({ pool }) });
     await migrate(db, { flavor: "mysql" });
     await truncate(db);
     return {
@@ -158,7 +158,7 @@ if (MYSQL_URL !== undefined) {
   });
 } else {
   describe.skip("persist-kysely · mysql (真库)", () => {
-    it("没给 NIMBO_TEST_MYSQL_URL，跳过 —— MySQL 没有 WASM 替身，只能对真库跑", () => undefined);
+    it("没给 RUNKO_TEST_MYSQL_URL，跳过 —— MySQL 没有 WASM 替身，只能对真库跑", () => undefined);
   });
 }
 
@@ -169,7 +169,7 @@ if (MYSQL_URL !== undefined) {
 describe("migrate", () => {
   it("幂等——跑两次不炸，结果一样", async () => {
     const sqlite = new Database(":memory:");
-    const db = new Kysely<NimboDatabase>({ dialect: new SqliteDialect({ database: sqlite }) });
+    const db = new Kysely<RunkoDatabase>({ dialect: new SqliteDialect({ database: sqlite }) });
     await migrate(db, { flavor: "sqlite" });
     await migrate(db, { flavor: "sqlite" });
 
@@ -185,9 +185,9 @@ describe("migrate", () => {
   });
 
   it("数据跨连接存活——这是「持久化」这三个字的全部意义", async () => {
-    const file = `${String(process.env["TMPDIR"] ?? "/tmp")}/nimbo-kysely-${crypto.randomUUID()}.db`;
+    const file = `${String(process.env["TMPDIR"] ?? "/tmp")}/runko-kysely-${crypto.randomUUID()}.db`;
 
-    const first = new Kysely<NimboDatabase>({
+    const first = new Kysely<RunkoDatabase>({
       dialect: new SqliteDialect({ database: new Database(file) }),
     });
     await migrate(first, { flavor: "sqlite" });
@@ -200,7 +200,7 @@ describe("migrate", () => {
     await first.destroy();
 
     // 换一个连接（模拟进程重启）再读。
-    const second = new Kysely<NimboDatabase>({
+    const second = new Kysely<RunkoDatabase>({
       dialect: new SqliteDialect({ database: new Database(file) }),
     });
     const entries = await kyselyPersistence(second, { flavor: "sqlite" }).ledger.read("c1");

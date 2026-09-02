@@ -13,7 +13,7 @@ import type { ModelMessage } from "ai";
 import { defineAgent } from "../src/agent.js";
 import { createSession } from "../src/session.js";
 import type { AgentDefinition, Input, TurnResult } from "../src/index.js";
-import { generateStructuredOutput, NimboStructuredOutputError } from "../src/structured.js";
+import { generateStructuredOutput, RunkoStructuredOutputError } from "../src/structured.js";
 
 function mockModel(buildOptions: () => ConstructorParameters<typeof MockLanguageModelV4>[0]): MockLanguageModelV4 {
   return new MockLanguageModelV4(buildOptions());
@@ -88,14 +88,14 @@ describe("generateStructuredOutput", () => {
     expect(model.doGenerateCalls[1]?.prompt.some((m) => m.role === "assistant")).toBe(true);
   });
 
-  it("throws NimboStructuredOutputError after exhausting the retry budget (still invalid on every attempt)", async () => {
+  it("throws RunkoStructuredOutputError after exhausting the retry budget (still invalid on every attempt)", async () => {
     const model = mockModel(() => ({
       doGenerate: [generateTextResult("nope"), generateTextResult("still nope"), generateTextResult("nope again")],
     }));
 
     await expect(
       generateStructuredOutput({ model, system: undefined, messages: baseMessages, outputSchema: summarySchema }),
-    ).rejects.toBeInstanceOf(NimboStructuredOutputError);
+    ).rejects.toBeInstanceOf(RunkoStructuredOutputError);
     // initial attempt + MAX_RETRIES(2) retries = 3 total calls, then it gives up.
     expect(model.doGenerateCalls).toHaveLength(3);
   });
@@ -185,14 +185,14 @@ describe("Session.send<T>(...outputSchema)", () => {
     expect(model.doGenerateCalls).toHaveLength(2);
   });
 
-  it("throws NimboStructuredOutputError (not NimboSessionError) when the extraction pass exhausts its retries", async () => {
+  it("throws RunkoStructuredOutputError (not RunkoSessionError) when the extraction pass exhausts its retries", async () => {
     const model = mockModel(() => ({
       doStream: stopStream("here is your summary"),
       doGenerate: [generateTextResult("no"), generateTextResult("no"), generateTextResult("no")],
     }));
     const session = createSession(baseAgent(model));
 
-    await expect(session.send("summarize", { outputSchema: summarySchema })).rejects.toBeInstanceOf(NimboStructuredOutputError);
+    await expect(session.send("summarize", { outputSchema: summarySchema })).rejects.toBeInstanceOf(RunkoStructuredOutputError);
   });
 
   it("does not push the extraction pass's messages into the session's persisted history", async () => {

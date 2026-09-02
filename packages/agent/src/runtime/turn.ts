@@ -11,14 +11,14 @@ import type {
   AgentDefinition,
   ApprovalPolicy,
   ApprovalReviewer,
-  NimboChunk,
-  NimboMessageMetadata,
-  NimboUIMessage,
+  RunkoChunk,
+  RunkoMessageMetadata,
+  RunkoUIMessage,
   SessionOptions,
   SessionState,
   Tool,
-} from "@nimbo/core";
-import { sessionStateSchema } from "@nimbo/core";
+} from "@runko/core";
+import { sessionStateSchema } from "@runko/core";
 
 import { describeError } from "../logger.js";
 import type { LedgerEntry } from "../persistence.js";
@@ -42,13 +42,13 @@ const LOG_SCOPE = "agent:turn";
  *   时整份重发，增量按顺序重放才有意义，而草稿是一次性整发的）。
  * - 显式标了 `transient: true` 的（今天只有 `data-tool-progress`）：同上。
  */
-function isDurableChunk(chunk: NimboChunk): boolean {
+function isDurableChunk(chunk: RunkoChunk): boolean {
   if (chunk.type === "text-delta" || chunk.type === "reasoning-delta") {return false;}
   return !("transient" in chunk && chunk.transient === true);
 }
 
 /** 「用户在界面上看得见东西了」——第一段文字、第一段推理、或第一张工具调用卡片。 */
-function isVisibleChunk(chunk: NimboChunk): boolean {
+function isVisibleChunk(chunk: RunkoChunk): boolean {
   return chunk.type === "text-start" || chunk.type === "reasoning-start" || chunk.type === "tool-input-available";
 }
 
@@ -169,7 +169,7 @@ export async function driveTurn(ctx: RuntimeContext, turn: ActiveTurn): Promise<
     // 走到这里意味着装配自己抛了（凭据、沙盒、建 session）——这一轮从没启动，core 不会
     // 为它产出任何东西，所以补一条形状与 core 优雅失败同源的收尾帧。
     ctx.logger.error(LOG_SCOPE, "turn assembly failed", { conversationId, error: describeError(error) });
-    const metadata: NimboMessageMetadata = {
+    const metadata: RunkoMessageMetadata = {
       turn: turn.turnNumber,
       usage: {},
       status: "failed",
@@ -209,7 +209,7 @@ async function finishAborted(
 ): Promise<DriveResult> {
   ctx.logger.info(LOG_SCOPE, "turn stopped before it started", { conversationId: turn.conversationId });
   await appendUserMessage(ctx, turn, publish);
-  const metadata: NimboMessageMetadata = {
+  const metadata: RunkoMessageMetadata = {
     turn: turn.turnNumber,
     usage: {},
     status: "interrupted",
@@ -237,14 +237,14 @@ async function appendSettleMessage(
   ctx: RuntimeContext,
   turn: ActiveTurn,
   publish: (frame: Frame) => void,
-  metadata: NimboMessageMetadata,
+  metadata: RunkoMessageMetadata,
 ): Promise<void> {
   const allocated = await turn.grant.nextSeq();
   if (!allocated.ok) {
     ctx.logger.warn(LOG_SCOPE, "lost ownership before persisting the settle marker", { conversationId: turn.conversationId });
     return;
   }
-  const message: NimboUIMessage = {
+  const message: RunkoUIMessage = {
     id: `turn-${metadata.status ?? "settled"}-${String(allocated.seq)}`,
     role: "assistant",
     // **必须至少有一个 part**：ai 的 `validateUIMessages()` 拒绝空 parts
@@ -273,7 +273,7 @@ async function appendUserMessage(ctx: RuntimeContext, turn: ActiveTurn, publish:
   // 幂等：装配抛错那条路会在 `consumeStream` 之外再调一次，写两遍就是重复的用户消息。
   if (userMessageWritten.has(turn)) {return;}
   userMessageWritten.add(turn);
-  const message: NimboUIMessage = {
+  const message: RunkoUIMessage = {
     id: randomUUID(),
     role: "user",
     parts: [{ type: "text", text: turn.input.text }],
@@ -318,7 +318,7 @@ async function consumeStream(
   // 副本——收尾时 `slice(priorMessageCount + 1)` 正是为了跳过那一条，不重复落盘。
   await appendUserMessage(ctx, turn, publish);
 
-  let lastMetadata: NimboMessageMetadata | undefined;
+  let lastMetadata: RunkoMessageMetadata | undefined;
   let firstChunkReported = false;
   let firstOutputReported = false;
 
@@ -374,7 +374,7 @@ async function consumeStream(
     // `session.toJSON()` 重新 slice 同一批消息、重新取号，seq 不同、账本的
     // `(conversationId, seq)` 幂等挡不住 —— 同一条回复写出两行。
     await finalizeOnce();
-    const failure: NimboMessageMetadata = {
+    const failure: RunkoMessageMetadata = {
       turn: turn.turnNumber,
       usage: {},
       status: "failed",

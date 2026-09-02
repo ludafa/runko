@@ -1,9 +1,9 @@
 /**
- * L0 模型层：nimbo `Tool` → AI SDK `tool()` / `ToolSet`（docs/tech/core-sdk.md §4.3 第 1 点）。
+ * L0 模型层：runko `Tool` → AI SDK `tool()` / `ToolSet`（docs/tech/core-sdk.md §4.3 第 1 点）。
  *
  * 刻意省略 `execute`：手动 loop 模式下 AI SDK 因此不会自动执行任何工具——
  * `finishReason === "tool-calls"` 时 tool call 原样出现在 `fullStream`/
- * `result.toolCalls` 里，交给 nimbo 的 ToolRuntime（P4/P5）完成审批链与
+ * `result.toolCalls` 里，交给 runko 的 ToolRuntime（P4/P5）完成审批链与
  * 实际执行，结果再回填为 `role: "tool"` 的 `ModelMessage` 进入下一步
  * `streamText`。这是本工单唯一的手动 loop 控制点。
  *
@@ -27,24 +27,24 @@
  */
 import { tool } from "ai";
 import type { ToolSet } from "ai";
-import type { JsonValue, Tool as NimboTool } from "../types.js";
+import type { JsonValue, Tool as RunkoTool } from "../types.js";
 
 /** 省略 `execute` 后的 AI SDK 工具形态：INPUT 精确到 JsonValue，OUTPUT 恒为 `never`。 */
 export type ConvertedTool = ReturnType<typeof convertTool>;
 
-/** 单个 nimbo `Tool` → AI SDK `tool()`，不做任何运行时校验/包装，字段按引用传递。 */
-export function convertTool(nimboTool: NimboTool) {
+/** 单个 runko `Tool` → AI SDK `tool()`，不做任何运行时校验/包装，字段按引用传递。 */
+export function convertTool(runkoTool: RunkoTool) {
   return tool<JsonValue, never, Record<string, unknown>>({
-    description: nimboTool.description,
-    inputSchema: nimboTool.inputSchema,
+    description: runkoTool.description,
+    inputSchema: runkoTool.inputSchema,
   });
 }
 
 /** `AgentDefinition.tools`（`Record<string, Tool>`）→ 可直接传给 `streamText` 的 `ToolSet`。 */
-export function convertTools(tools: Record<string, NimboTool>): ToolSet {
+export function convertTools(tools: Record<string, RunkoTool>): ToolSet {
   const toolSet: ToolSet = {};
-  for (const [name, nimboTool] of Object.entries(tools)) {
-    toolSet[name] = convertTool(nimboTool);
+  for (const [name, runkoTool] of Object.entries(tools)) {
+    toolSet[name] = convertTool(runkoTool);
   }
   return toolSet;
 }

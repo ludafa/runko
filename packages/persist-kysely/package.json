@@ -1,5 +1,5 @@
 {
-  "name": "@nimbo/persist-kysely",
+  "name": "@runko/persist-kysely",
   "version": "0.1.0",
   "description": "持久化实现：Kysely —— 你已经在用 Kysely 时把实例给它；SQLite / Postgres / MySQL 三个方言的差异只剩三处",
   "type": "module",
@@ -38,15 +38,15 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@nimbo/agent": "workspace:*",
-    "@nimbo/core": "workspace:*"
+    "@runko/agent": "workspace:*",
+    "@runko/core": "workspace:*"
   },
   "peerDependencies": {
     "kysely": "^0.29"
   },
   "devDependencies": {
     "@electric-sql/pglite": "catalog:",
-    "@nimbo/conformance": "workspace:*",
+    "@runko/conformance": "workspace:*",
     "@types/better-sqlite3": "catalog:",
     "@types/node": "catalog:",
     "@types/pg": "catalog:",

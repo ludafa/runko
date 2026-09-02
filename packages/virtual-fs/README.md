@@ -1,19 +1,19 @@
-# @nimbo/virtual-fs
+# @runko/virtual-fs
 
-nimbo 的虚拟文件系统内核（`NimboFS` 接口的三个实现 + 文件工具八件套）：agent 视角是普通文件系统，宿主视角是一个可检查、可导出 diff、可写回、可丢弃的对象——写入默认永不落真实磁盘。
+runko 的虚拟文件系统内核（`RunkoFS` 接口的三个实现 + 文件工具八件套）：agent 视角是普通文件系统，宿主视角是一个可检查、可导出 diff、可写回、可丢弃的对象——写入默认永不落真实磁盘。
 
-> 一般用户装 [`@nimbo/sdk`](../sdk/README.md) 即可（re-export 本包全部 API，且把八件套自动拼进 session）。单独装本包适合"只要一个文件沙盒、不要 agent loop"的场景——L0 单独使用是合法用法。
+> 一般用户装 [`@runko/sdk`](../sdk/README.md) 即可（re-export 本包全部 API，且把八件套自动拼进 session）。单独装本包适合"只要一个文件沙盒、不要 agent loop"的场景——L0 单独使用是合法用法。
 
 ## 安装
 
 ```sh
-pnpm add @nimbo/virtual-fs
+pnpm add @runko/virtual-fs
 ```
 
 ## 最小用例
 
 ```ts
-import { fromMemory, fromDirectory } from "@nimbo/virtual-fs";
+import { fromMemory, fromDirectory } from "@runko/virtual-fs";
 
 // 纯内存工作区
 const mem = fromMemory({ "src/index.ts": "var x = 1;\n" });
@@ -31,7 +31,7 @@ await fs.writeBack();                   // 唯一写真实磁盘的操作，只�
 
 语义细节见 [core-sdk · 技术方案 §4.4](../../docs/logic/engine/tech/core-sdk.md)、文件工具规格见 [内置工具（builtin tools） · 技术方案 §1](../../docs/logic/engine/tech/builtin-tools.md)。
 
-### 三个 NimboFS 实现与工厂
+### 三个 RunkoFS 实现与工厂
 
 | 导出 | 说明 |
 |---|---|
@@ -39,9 +39,9 @@ await fs.writeBack();                   // 唯一写真实磁盘的操作，只�
 | `OverlayFS` / `fromDirectory(dir, opts?)` | base（只读，通常 `DirFS`）+ overlay（`MemoryFS`，承接全部写入与删除墓碑）；`fromDirectory` 返回真实目录的零拷贝挂载 |
 | `DirFS` | 真实目录只读视图（`opts.ignore`: glob 命中路径或祖先目录即隐藏子树）；写方法一律抛 `ReadOnlyFileSystemError` |
 
-三者都实现 `@nimbo/core` 的 `NimboFS` 七方法接口；路径为 POSIX 风格虚拟绝对路径，`..` 越界在 FS 层直接拒绝（`PathEscapesRootError`——安全边界在 FS 不在工具）。`glob()` 只匹配文件、结果按路径排序。
+三者都实现 `@runko/core` 的 `RunkoFS` 七方法接口；路径为 POSIX 风格虚拟绝对路径，`..` 越界在 FS 层直接拒绝（`PathEscapesRootError`——安全边界在 FS 不在工具）。`glob()` 只匹配文件、结果按路径排序。
 
-### 导出能力（宿主面，非 NimboFS 接口必需）
+### 导出能力（宿主面，非 RunkoFS 接口必需）
 
 | 导出 | 说明 |
 |---|---|
@@ -60,14 +60,14 @@ await fs.writeBack();                   // 唯一写真实磁盘的操作，只�
 
 ### 错误契约
 
-`NotFoundError`（不存在路径的统一错误——第三方 `NimboFS` 作 OverlayFS base 时需遵守）、`DirectoryNotEmptyError`、`ReferenceNotResolvable`、`ReadOnlyFileSystemError`、`PathEscapesRootError`。
+`NotFoundError`（不存在路径的统一错误——第三方 `RunkoFS` 作 OverlayFS base 时需遵守）、`DirectoryNotEmptyError`、`ReferenceNotResolvable`、`ReadOnlyFileSystemError`、`PathEscapesRootError`。
 
 ### 文件工具八件套
 
 | 导出 | 说明 |
 |---|---|
-| `createFileTools(opts): Record<FileToolName, Tool>` | `read_file` / `write_file` / `edit_file` / `delete_file` / `move_file` / `list_dir` / `glob` / `grep`（规格见 docs/logic/engine/tech/builtin-tools.md §1.1–§1.8：输出预算与 `[truncated]` 标记、read-before-write 强制、错误即指导）。`opts`: `readState`（`ReadStateStore`，version = mtime）+ `onFileChange(changes)`（`FileChange.kind`: `add/update/delete`）——`@nimbo/sdk` 默认装配自动接线，直接用本包的宿主自己把这两个接缝接到 session（见 `@nimbo/core` 的 `createSessionReadState` / `createDerivedDataCollector`） |
+| `createFileTools(opts): Record<FileToolName, Tool>` | `read_file` / `write_file` / `edit_file` / `delete_file` / `move_file` / `list_dir` / `glob` / `grep`（规格见 docs/logic/engine/tech/builtin-tools.md §1.1–§1.8：输出预算与 `[truncated]` 标记、read-before-write 强制、错误即指导）。`opts`: `readState`（`ReadStateStore`，version = mtime）+ `onFileChange(changes)`（`FileChange.kind`: `add/update/delete`）——`@runko/sdk` 默认装配自动接线，直接用本包的宿主自己把这两个接缝接到 session（见 `@runko/core` 的 `createSessionReadState` / `createDerivedDataCollector`） |
 
 ### 路径工具
 
-`normalizePath` / `dirname` / `basename` / `globToRegExp` / `matchesGlob`——实现 `NimboFS` 或写自定义工具时复用。
+`normalizePath` / `dirname` / `basename` / `globToRegExp` / `matchesGlob`——实现 `RunkoFS` 或写自定义工具时复用。

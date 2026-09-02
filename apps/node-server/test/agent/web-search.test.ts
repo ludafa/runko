@@ -7,8 +7,8 @@
  * 不是 mock 出来的。请求体/请求头都在假 `fetch` 的调用记录里逐字段核对
  * （包括三个刻意不用的 Exa 过时参数）。
  */
-import type { JsonValue, NimboFS, ToolContext } from '@nimbo/core';
-import { MemoryFS } from '@nimbo/sdk';
+import type { JsonValue, RunkoFS, ToolContext } from '@runko/core';
+import { MemoryFS } from '@runko/sdk';
 import type { Mock } from 'vitest';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
@@ -26,7 +26,7 @@ const API_KEY = 'exa-test-key';
 // ---------------------------------------------------------------------------
 
 function toolContext(abortSignal?: AbortSignal): ToolContext {
-  const fs: NimboFS = new MemoryFS();
+  const fs: RunkoFS = new MemoryFS();
   return {
     fs,
     abortSignal: abortSignal ?? new AbortController().signal,

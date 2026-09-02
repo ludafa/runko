@@ -4,7 +4,7 @@ slug: deployment
 view: 技术
 layer: 宿主层
 module: —
-packages: ["@nimbo/agent", "@nimbo/persist-sql", "@nimbo/persist-drizzle", "@nimbo/persist-prisma"]
+packages: ["@runko/agent", "@runko/persist-sql", "@runko/persist-drizzle", "@runko/persist-prisma"]
 tags: ["Node", "cluster", "租约", "CAS", "应用层转发", "部署形态"]
 related: ["host/node/features/deployment.md", "logic/arbitration/tech/arbitration-impl.md", "host/contract/tech/persistence.md"]
 ---
@@ -88,7 +88,7 @@ sequenceDiagram
 | **①** | SQLite（同机文件） | 同一台机器上的多个进程，够用 |
 | **②③** | Postgres / MySQL | 跨机就必须换——SQLite 那个文件别的机器看不见 |
 
-`@nimbo/persist-sql` 是**裸驱动**实现，方言是它的参数；另外两条腿 `persist-drizzle` / `persist-prisma` 接你已有的 ORM。三条腿共用同一套接口，换腿不改业务代码。
+`@runko/persist-sql` 是**裸驱动**实现，方言是它的参数；另外两条腿 `persist-drizzle` / `persist-prisma` 接你已有的 ORM。三条腿共用同一套接口，换腿不改业务代码。
 
 **持久化和租约版归属仲裁打包在同一个包里**，因为它们共享连接与 CRUD + CAS 原语。这不是耦合，是「一次装什么」的划分。
 

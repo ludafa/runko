@@ -8,8 +8,8 @@
  * 需要直接写一段预期形状的 stdout JSON，或模拟失败/超时；`SEARCH_SCRIPT` 本身在真实 node 子进程
  * 里的行为由 `search-script.e2e.test.ts` 用真实 `child_process` 覆盖。
  */
-import { SearchUnsupportedError } from "@nimbo/core";
-import { globToRegExp } from "@nimbo/virtual-fs";
+import { SearchUnsupportedError } from "@runko/core";
+import { globToRegExp } from "@runko/virtual-fs";
 import { describe, expect, it, vi } from "vitest";
 import { vercelWorkspace } from "../src/index.js";
 import { DEFAULT_ROOT } from "../src/types.js";

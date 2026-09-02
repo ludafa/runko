@@ -1,7 +1,7 @@
 /**
  * End-to-end wiring: mock model drives a real `createSession` + `justBash`
  * bash tool (docs/tech/core-sdk.md §4.5b "端到端两件套" 验收点). Mirrors
- * `@nimbo/core`'s `test/e2e-minibash.test.ts` pattern one-for-one, swapped to
+ * `@runko/core`'s `test/e2e-minibash.test.ts` pattern one-for-one, swapped to
  * the full-syntax interpreter:
  *   a) a mock model tool-calls `bash` to run an if/for/case script, and the
  *      tool part comes back settled (`state: "output-available"`) with the
@@ -12,13 +12,13 @@
  *      subsequent `edit-file` is rejected until the path is re-read.
  *
  * P13-5-2（docs/tech/single-ledger.md）迁移：断言从 `SessionEvent`/
- * `SessionItem`（`.status`）改为 `NimboChunk`/账本工具部件（`.state`）——同
- * `@nimbo/core`'s `test/e2e-minibash.test.ts` 的迁移，一比一对应；辅助函数
+ * `SessionItem`（`.status`）改为 `RunkoChunk`/账本工具部件（`.state`）——同
+ * `@runko/core`'s `test/e2e-minibash.test.ts` 的迁移，一比一对应；辅助函数
  * 就地内联（不跨包 import 测试辅助，沿两包既有"各自 test 文件自包含"的风格）。
  */
-import { createFileTools, fromMemory } from "@nimbo/virtual-fs";
-import { createDerivedDataCollector, createSession, createSessionReadState, defineAgent } from "@nimbo/core";
-import type { AgentDefinition, NimboChunk, NimboUIMessage } from "@nimbo/core";
+import { createFileTools, fromMemory } from "@runko/virtual-fs";
+import { createDerivedDataCollector, createSession, createSessionReadState, defineAgent } from "@runko/core";
+import type { AgentDefinition, RunkoChunk, RunkoUIMessage } from "@runko/core";
 import { isToolUIPart, simulateReadableStream } from "ai";
 import type { ToolUIPart, UITools } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
@@ -66,8 +66,8 @@ function mockModel(steps: Step[]): MockLanguageModelV4 {
   return new MockLanguageModelV4({ doStream: steps });
 }
 
-async function drainStream(gen: AsyncGenerator<NimboChunk, unknown>): Promise<NimboChunk[]> {
-  const chunks: NimboChunk[] = [];
+async function drainStream(gen: AsyncGenerator<RunkoChunk, unknown>): Promise<RunkoChunk[]> {
+  const chunks: RunkoChunk[] = [];
   let next = await gen.next();
   while (!next.done) {
     chunks.push(next.value);
@@ -77,7 +77,7 @@ async function drainStream(gen: AsyncGenerator<NimboChunk, unknown>): Promise<Ni
 }
 
 /** 一条消息里全部工具部件（`tool-<名字>`，排除理论上不会出现的 `dynamic-tool`）。 */
-function toolPartsOf(message: NimboUIMessage): ToolUIPart<UITools>[] {
+function toolPartsOf(message: RunkoUIMessage): ToolUIPart<UITools>[] {
   const result: ToolUIPart<UITools>[] = [];
   for (const part of message.parts) {
     if (isToolUIPart<UITools>(part) && part.type !== "dynamic-tool") {result.push(part);}
@@ -86,7 +86,7 @@ function toolPartsOf(message: NimboUIMessage): ToolUIPart<UITools>[] {
 }
 
 /** 账本级查找：全部消息里的全部工具部件 flatMap——同一 toolCallId 只记结算态，理应各出现一次。 */
-function toolCallItems(messages: NimboUIMessage[]): ToolUIPart<UITools>[] {
+function toolCallItems(messages: RunkoUIMessage[]): ToolUIPart<UITools>[] {
   return messages.flatMap(toolPartsOf);
 }
 

@@ -1,12 +1,12 @@
 /**
- * Renders one `NimboUIMessage` (docs/tech/single-ledger.md §5/§6) —
+ * Renders one `RunkoUIMessage` (docs/tech/single-ledger.md §5/§6) —
  * the P13-5-4 replacement for the retired `ItemCard`/`SessionItem` mapping.
  * The mapping is no longer 1:1: a `SessionItem` used to render as exactly
- * one card, but one `NimboUIMessage` can carry *several* parts (text,
+ * one card, but one `RunkoUIMessage` can carry *several* parts (text,
  * reasoning, one or more tool calls, data parts) from a single step, so this
  * component iterates `message.parts` and renders each in turn, then — if
  * `message.metadata?.status` is set (the turn-ending assistant message,
- * `@nimbo/core`'s `loop.ts`'s `finalizeTurn`) — a trailing
+ * `@runko/core`'s `loop.ts`'s `finalizeTurn`) — a trailing
  * `TurnStatsButton`/`TurnFailedBar`. A "turn signal" placeholder message
  * (`materialize.ts`'s `MessageLedger`, `parts: []`, only `metadata` set —
  * the rare case a turn fails before any step ever ran) naturally renders as
@@ -23,12 +23,12 @@
  * part (`timeline.ts`'s `findToolTiming`, by `toolCallId`) and passes it
  * along — `data-tool-timing` itself has no `case` in the switch below and so
  * never renders as an independent card (falls to `default`, rejected by
- * `isNimboToolPart`).
+ * `isRunkoToolPart`).
  *
  * 呈现层用 ai-elements：`Message`/`MessageContent`/`MessageResponse` 负责气泡与
  * markdown，工具/推理/计划/审批各自的组件在 `components/` 下（都已改挂 ai-elements）。
  */
-import type { NimboUIMessage } from '@nimbo/core';
+import type { RunkoUIMessage } from '@runko/core';
 
 import {
   Message,
@@ -36,7 +36,7 @@ import {
   MessageResponse,
 } from '@/components/ai-elements/message';
 
-import { findToolTiming, isNimboToolPart, toolPartName } from '../timeline';
+import { findToolTiming, isRunkoToolPart, toolPartName } from '../timeline';
 import type { PendingApprovalPart } from './approval-card';
 import { ApprovalCard } from './approval-card';
 import { ErrorBar } from './error-bar';
@@ -52,7 +52,7 @@ import { TurnStatsButton } from './turn-stats-dialog';
 const ASK_USER_TOOL_NAME = 'ask-user';
 
 export interface MessageEntryProps {
-  message: NimboUIMessage;
+  message: RunkoUIMessage;
   submittingCallIds: ReadonlySet<string>;
   locallyExpiredCallIds: ReadonlySet<string>;
   /**
@@ -93,7 +93,7 @@ export function MessageEntry({
 }: MessageEntryProps) {
   /** 这条消息所属的轮已结束 = 它里面还没落定的卡片都已失效（见 `turnLive` 的注释）。 */
   const staleByTurnEnd = !turnLive;
-  // defensive — nimbo never pushes a system message onto the ledger (the system prompt is passed to streamText() separately, loop.ts's runOneStep)
+  // defensive — runko never pushes a system message onto the ledger (the system prompt is passed to streamText() separately, loop.ts's runOneStep)
   if (message.role === 'system') {
     return null;
   }
@@ -146,13 +146,13 @@ export function MessageEntry({
             case 'step-start':
               return null;
             default: {
-              // file/source-*/dynamic-tool/custom — never produced by nimbo (see @nimbo/core's state.ts NimboUIMessage doc comment)
-              if (!isNimboToolPart(part)) {
+              // file/source-*/dynamic-tool/custom — never produced by runko (see @runko/core's state.ts RunkoUIMessage doc comment)
+              if (!isRunkoToolPart(part)) {
                 return null;
               }
 
               // `data-tool-timing` never renders as its own card (no `case` for
-              // it above — falls through here, rejected by `isNimboToolPart`)
+              // it above — falls through here, rejected by `isRunkoToolPart`)
               // — only joined by `toolCallId` into the matching tool call's own
               // card, `timeline.ts`'s own doc comment.
               const timing = findToolTiming(message, part.toolCallId);

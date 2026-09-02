@@ -6,20 +6,20 @@
 
 ## 这是什么
 
-一个跑在 Cloudflare Worker 里的 nimbo 服务端——**一个完整可部署的示例项目**（不发布，也不是 `apps/node-server` 的 Workers 版替代品）。
+一个跑在 Cloudflare Worker 里的 runko 服务端——**一个完整可部署的示例项目**（不发布，也不是 `apps/node-server` 的 Workers 版替代品）。
 
 它同时扮演**两个角色**，共用同一套 `getSandbox` 接线、同一个 Durable Object binding、同一份 Dockerfile：
 
 | 角色 | 路由 | 谁来用 |
 |---|---|---|
-| ① 服务端自驱 | `/sandbox-check`、`/agent`、`/debug/exec` | 这个 Worker 自己（nimbo 会话就跑在里面，进程内直连沙盒） |
+| ① 服务端自驱 | `/sandbox-check`、`/agent`、`/debug/exec` | 这个 Worker 自己（runko 会话就跑在里面，进程内直连沙盒） |
 | ② 对外网关 | `ALL /gateway/*` | **任意 Node 机器**上的 `cloudflareWorkspace({ url, token })` |
 
 角色 ② 就是 [`examples/src/11-sandbox-cloudflare.ts`](../../examples/src/11-sandbox-cloudflare.ts) 真机段需要的那个网关。
 
 ## 为什么这两件事能合成一个 Worker
 
-`@nimbo/sandbox-cloudflare` 是[网关形态](../../docs/terms.md)：nimbo 的前提是「agent 跑在任意电脑」，而 CF [沙盒](../../docs/terms.md)只能从 Worker 内部经 Durable Object binding 访问，所以要自部署一个 HTTP 网关把两边接起来（[sandbox 技术方案 §6](../../docs/host/contract/tech/sandbox.md)）。角色 ② 就是那个网关。
+`@runko/sandbox-cloudflare` 是[网关形态](../../docs/terms.md)：runko 的前提是「agent 跑在任意电脑」，而 CF [沙盒](../../docs/terms.md)只能从 Worker 内部经 Durable Object binding 访问，所以要自部署一个 HTTP 网关把两边接起来（[sandbox 技术方案 §6](../../docs/host/contract/tech/sandbox.md)）。角色 ② 就是那个网关。
 
 而角色 ① 的服务端自己就在 Worker 里——客户端与网关同进程，那层 HTTP 不必真过网络：
 
@@ -38,13 +38,13 @@ cloudflareWorkspace({ fetch: req => gateway.fetch(req) })                 ← �
 | **Docker 守护进程** | `wrangler dev` 本地跑容器沙盒必需；首次构建镜像 2–3 分钟 |
 | **CF 登录** | `wrangler login`（部署必需） |
 | DeepSeek 凭证 | 仅 `POST /agent` 需要；`/sandbox-check` 不需要 |
-| 网关 token | 仅 `ALL /gateway/*` 需要（`NIMBO_GATEWAY_TOKEN`） |
+| 网关 token | 仅 `ALL /gateway/*` 需要（`RUNKO_GATEWAY_TOKEN`） |
 
 ## 本地跑起来
 
 ```bash
 # 1) 密钥（值可从仓库根 .env 抄）
-cp .dev.vars.example .dev.vars   # 然后按需填 DEEPSEEK_API_TOKEN / NIMBO_GATEWAY_TOKEN
+cp .dev.vars.example .dev.vars   # 然后按需填 DEEPSEEK_API_TOKEN / RUNKO_GATEWAY_TOKEN
 
 # 2) 起本地 Worker（需 Docker 已在跑）
 pnpm dev
@@ -71,18 +71,18 @@ curl 'http://localhost:8787/debug/exec?cmd=cat%20hello.txt'
 
 ```bash
 wrangler login                              # 首次
-wrangler secret put NIMBO_GATEWAY_TOKEN     # 输入一个强随机值
+wrangler secret put RUNKO_GATEWAY_TOKEN     # 输入一个强随机值
 pnpm deploy                                 # 首次部署后等 2–3 分钟容器 provisioning
 ```
 
 然后在**任意 Node 机器**上接入。注意 URL **必须带 `/gateway` 前缀**：
 
 ```ts
-import { cloudflareWorkspace } from '@nimbo/sandbox-cloudflare';
+import { cloudflareWorkspace } from '@runko/sandbox-cloudflare';
 
 const workspace = cloudflareWorkspace({
-  url: 'https://nimbo-cloudflare-worker-server.<your-subdomain>.workers.dev/gateway',
-  token: process.env.NIMBO_CF_GATEWAY_TOKEN,
+  url: 'https://runko-cloudflare-worker-server.<your-subdomain>.workers.dev/gateway',
+  token: process.env.RUNKO_CF_GATEWAY_TOKEN,
 });
 createSession(agent, { workspace });
 ```
@@ -92,8 +92,8 @@ createSession(agent, { workspace });
 跑 11 号示例的真机段时，把这两个值填进仓库根 `.env`：
 
 ```
-NIMBO_CF_GATEWAY_URL=https://nimbo-cloudflare-worker-server.<your-subdomain>.workers.dev/gateway
-NIMBO_CF_GATEWAY_TOKEN=<与 secret 相同的值>
+RUNKO_CF_GATEWAY_URL=https://runko-cloudflare-worker-server.<your-subdomain>.workers.dev/gateway
+RUNKO_CF_GATEWAY_TOKEN=<与 secret 相同的值>
 ```
 
 ## 路由
@@ -105,7 +105,7 @@ NIMBO_CF_GATEWAY_TOKEN=<与 secret 相同的值>
 | `GET /sandbox-check` | **探针**：exec + 文件往返 + 同源工作区校验 | 否 |
 | `GET /debug/exec?cmd=` | 调试：直接在沙盒里跑一条命令（生产不该有这种入口） | 否 |
 | `POST /agent` | 跑一次真 agent 会话 | 是 |
-| `ALL /gateway/*` | **对外网关端点**（需 `NIMBO_GATEWAY_TOKEN`，未配置返回 503） | 否 |
+| `ALL /gateway/*` | **对外网关端点**（需 `RUNKO_GATEWAY_TOKEN`，未配置返回 503） | 否 |
 
 ## 刻意不在范围内
 

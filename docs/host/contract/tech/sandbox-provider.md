@@ -4,7 +4,7 @@ slug: sandbox-provider
 view: 技术
 layer: 宿主层
 module: 沙盒
-packages: ["@nimbo/sandbox-e2b", "@nimbo/sandbox-vercel"]
+packages: ["@runko/sandbox-e2b", "@runko/sandbox-vercel"]
 tags: ["沙盒 provider", "可选沙盒", "重连令牌", "休眠唤醒"]
 related: ["host/contract/features/sandbox-provider.md", "host/contract/plans/sandbox-provider.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -12,11 +12,11 @@ related: ["host/contract/features/sandbox-provider.md", "host/contract/plans/san
 
 > 相关：[产品视角](../features/sandbox-provider.md) · [施工进展](../plans/sandbox-provider.md)
 > 依赖：[chat-webapp 技术方案](../../../ingress/tech/chat-webapp.md)（§2.2 `sandbox-manager.ts`、§4 服务端模块）· [sandbox 技术方案](./sandbox.md)（§8 沙盒适配器契约）
-> 术语：[沙盒 provider](../../../terms.md) · [重连令牌](../../../terms.md) · [沙盒适配器](../../../terms.md) · [工作区](../../../terms.md) · [NimboFS / NimboExec](../../../terms.md) · [休眠 / 唤醒](../../../terms.md)
+> 术语：[沙盒 provider](../../../terms.md) · [重连令牌](../../../terms.md) · [沙盒适配器](../../../terms.md) · [工作区](../../../terms.md) · [RunkoFS / RunkoExec](../../../terms.md) · [休眠 / 唤醒](../../../terms.md)
 
 ## 1. 核心判断：差异全在 server，不在适配器包
 
-[沙盒适配器](../../../terms.md)（`@nimbo/sandbox-vercel` / `@nimbo/sandbox-e2b`）按设计**只做 [NimboFS/NimboExec](../../../terms.md) 视图层**、刻意不管生命周期（[BYO 实例](../../../terms.md)）——创建、拉码、重连、超时、休眠全归宿主。所以「支持两家沙盒」要改的**只有一个文件**：`apps/node-server/src/agent/sandbox-manager.ts`（现状 100% 绑 Vercel）。routes/chat-agent 继续只见 `SandboxManager` 接口，零改动。
+[沙盒适配器](../../../terms.md)（`@runko/sandbox-vercel` / `@runko/sandbox-e2b`）按设计**只做 [RunkoFS/RunkoExec](../../../terms.md) 视图层**、刻意不管生命周期（[BYO 实例](../../../terms.md)）——创建、拉码、重连、超时、休眠全归宿主。所以「支持两家沙盒」要改的**只有一个文件**：`apps/node-server/src/agent/sandbox-manager.ts`（现状 100% 绑 Vercel）。routes/chat-agent 继续只见 `SandboxManager` 接口，零改动。
 
 E2B 与 Vercel 的结构性差异（决定抽象缝在哪）：
 
@@ -67,7 +67,7 @@ export type SandboxProviderId = 'vercel' | 'e2b';
 
 /** 一个已就绪、仓库已 clone 在 workspace 根的沙盒句柄。 */
 export interface ProvisionedSandbox {
-  workspace: NimboFS & NimboExec;          // 已锚定到仓库根（Vercel /vercel/sandbox、E2B /home/user/repo）
+  workspace: RunkoFS & RunkoExec;          // 已锚定到仓库根（Vercel /vercel/sandbox、E2B /home/user/repo）
   /** 供下次唤醒指名恢复、需持久化的令牌：Vercel = name（=入参，无变化）；E2B = 新分配的 sandboxId。 */
   resumeToken: string;
   /** 保活：Vercel extendTimeout / E2B setTimeout —— 把「续期」这一步的差异藏进句柄。 */
@@ -111,7 +111,7 @@ interface AcquireInput {
   resumeToken?: string;             // 新增：已落库的令牌（Vercel=sandboxName、E2B=sandbox_id；全新会话 undefined）
 }
 interface AcquiredSandbox {
-  workspace: NimboFS & NimboExec;
+  workspace: RunkoFS & RunkoExec;
   defaultBranch: string;
   resumeToken: string;              // 新增：当前令牌 —— 路由据此决定是否回写 conversations.sandbox_id
 }
@@ -169,7 +169,7 @@ Vercel 路径同构，把 `create/resume/extendIdle` 换成 `Sandbox.create(sour
 - **E2B 令牌落库时机**：`sandboxId` 建盒后才有，故 `acquire` 必须能把它回传给路由落库（`AcquiredSandbox.resumeToken`）。若首建落库前进程崩溃，该 E2B 沙盒成孤儿（靠 `onTimeout:'kill'`? 否——它是 pause，会占额度）——首建流程要保证「create 成功 → 立即落库」尽量原子（路由内 create 与 insert 同一 try）；孤儿由 `Sandbox.list` + metadata.conversationId 兜底清理（运维脚本，非本次范围）。
 - **`setTimeout` 语义**：E2B `setTimeout(ms)` 是「从现在起剩余 ms」，正是「每条消息把空闲窗口滚到满」的意图；与 Vercel `extendTimeout` 的差异被 `extendIdle` 抽象吸收，`sandbox-manager` 的 `touch` 无感。
 - **`E2B_API_KEY` 成为 chat 应用条件依赖**：仅当有会话选 E2B 时需要；provider 工厂惰性读 env（同 `model.ts`/`github-repo.ts` 的「不在 import 时读 env」纪律），未配又选 E2B → `create` 抛带指引的配置错误，路由转 500。
-- **E2B 不用自带 `base`，改用自建[沙盒模板](../../../terms.md) `nimbo-chat-base`（1024 MiB）**：E2B 的 CPU/内存**只能在构建模板时定死**——`SandboxOpts` 只有 template/timeout/lifecycle/envs/metadata，没有任何内存参数——而自带 `base` 是 2 vCPU / **512 MiB**，跑 `npm install` 会被 OOM kill。故 `scripts/build-e2b-template.ts` 用 `Template().fromBaseImage()`（**同一个** base 镜像，盒内环境零变化）以 `memoryMB: 1024` 构建并发布 `nimbo-chat-base`，`create` 传 `template` 指名用它。规格三项（名字/内存/核数）均**从 env 读、以 `src/agent/e2b-template.ts` 的 `DEFAULT_*` 常量兜底**，构建脚本与运行时共用同一组 resolver，名字不会漂移。**但三项生效时机不同**：名字每次建盒都读；内存/核数**只有构建脚本读**（E2B 只在构建时给设资源的机会），改完必须重跑 `pnpm --filter @nimbo-chat/node-server e2b:template`（每个 E2B team 一次性，幂等）。内存/核数填了非正整数**直接抛错终止构建**，不沿用 `resolveIdleTimeoutMs` 的静默回退——构建是一次性操作，把 `4O96` 静默当成 1024 会发布一个「看着像 4 GiB 实则 1 GiB」的模板，几周后才以 OOM 现形。**已知限制**：模板未构建前建 E2B 盒会拿到 E2B 的 template-not-found 错误——逃生门是 `E2B_TEMPLATE=base` 退回自带模板（内存回到 512）。Vercel 侧无此问题（其资源在 `Sandbox.create` 上按盒指定）。
+- **E2B 不用自带 `base`，改用自建[沙盒模板](../../../terms.md) `runko-chat-base`（1024 MiB）**：E2B 的 CPU/内存**只能在构建模板时定死**——`SandboxOpts` 只有 template/timeout/lifecycle/envs/metadata，没有任何内存参数——而自带 `base` 是 2 vCPU / **512 MiB**，跑 `npm install` 会被 OOM kill。故 `scripts/build-e2b-template.ts` 用 `Template().fromBaseImage()`（**同一个** base 镜像，盒内环境零变化）以 `memoryMB: 1024` 构建并发布 `runko-chat-base`，`create` 传 `template` 指名用它。规格三项（名字/内存/核数）均**从 env 读、以 `src/agent/e2b-template.ts` 的 `DEFAULT_*` 常量兜底**，构建脚本与运行时共用同一组 resolver，名字不会漂移。**但三项生效时机不同**：名字每次建盒都读；内存/核数**只有构建脚本读**（E2B 只在构建时给设资源的机会），改完必须重跑 `pnpm --filter @runko-chat/node-server e2b:template`（每个 E2B team 一次性，幂等）。内存/核数填了非正整数**直接抛错终止构建**，不沿用 `resolveIdleTimeoutMs` 的静默回退——构建是一次性操作，把 `4O96` 静默当成 1024 会发布一个「看着像 4 GiB 实则 1 GiB」的模板，几周后才以 OOM 现形。**已知限制**：模板未构建前建 E2B 盒会拿到 E2B 的 template-not-found 错误——逃生门是 `E2B_TEMPLATE=base` 退回自带模板（内存回到 512）。Vercel 侧无此问题（其资源在 `Sandbox.create` 上按盒指定）。
 - **进程内缓存必须能失效，且长轮次要保活**（SP-7）：见下 §5.1——这是**上面「`setTimeout` 语义」那条的直接后果**，当初只写了语义、没写它对缓存和长轮次的含义，代价是一个线上 bug。
 - **测试可 fake**：`SandboxProvider` 是纯结构接口，E2B/Vercel 两实现各自的契约测试用进程内 fake（沿用适配器包已有的 `FakeE2bSandbox`/fake `VercelSandboxLike`），`sandbox-manager` 的 acquire 三态测试注入 fake provider，零网络/凭证。
 
@@ -205,6 +205,6 @@ Vercel 路径同构，把 `create/resume/extendIdle` 换成 `Sandbox.create(sour
 
 - `SANDBOX_PROVIDER`（新增，可选，默认 `vercel`）：新建会话不带 `provider` 时的服务端默认。
 - `E2B_API_KEY`：注释从「仅 examples/09」改为「examples/09 + chat 应用选 E2B 的会话」。
-- `E2B_TEMPLATE`（可选，默认 `nimbo-chat-base`）：建 E2B 盒用哪个[沙盒模板](../../../terms.md)。**建盒时读**，改了下一个盒即生效；填 `base` 即退回 E2B 自带模板（512 MiB），是模板没构建时的逃生门。
+- `E2B_TEMPLATE`（可选，默认 `runko-chat-base`）：建 E2B 盒用哪个[沙盒模板](../../../terms.md)。**建盒时读**，改了下一个盒即生效；填 `base` 即退回 E2B 自带模板（512 MiB），是模板没构建时的逃生门。
 - `E2B_TEMPLATE_MEMORY_MB`（可选，默认 `1024`）/ `E2B_TEMPLATE_CPU_COUNT`（可选，默认 `2`）：模板的资源规格。**只有构建脚本读**——E2B 不给建盒时设资源的机会，所以改完必须重跑 `e2b:template`，否则沙盒规格纹丝不动。非正整数直接抛错终止构建（不静默回退，见 §5）。
 - `VERCEL_*` / `GITHUB_*`：不变。

@@ -4,7 +4,7 @@ slug: telemetry
 view: 技术
 layer: 接入层
 module: —
-packages: ["@nimbo/core", "@nimbo-chat/node-server"]
+packages: ["@runko/core", "@runko-chat/node-server"]
 tags: ["遥测", "观测", "token 统计", "耗时"]
 related: ["ingress/features/telemetry.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -15,10 +15,10 @@ related: ["ingress/features/telemetry.md", "architecture/tech/agent-kernel.md"]
 
 ## 1. 方案总览
 
-ai@7 把 telemetry 转正为**纯回调的事件集成接口**（`Telemetry`，`experimental_telemetry` 已废弃）——无 OpenTelemetry 依赖，无 collector/exporter，实现一个带生命周期回调的对象即可。nimbo 的接入分三层：
+ai@7 把 telemetry 转正为**纯回调的事件集成接口**（`Telemetry`，`experimental_telemetry` 已废弃）——无 OpenTelemetry 依赖，无 collector/exporter，实现一个带生命周期回调的对象即可。runko 的接入分三层：
 
-1. **core 注入口**：`SessionOptions.telemetry`（`SessionTelemetry`，loop.ts）透传集成对象到每次 `streamText`；不注入时零开销。loop 恒在 `telemetry.functionId` 注入 **`"<nimbo 会话 id>#<turn>"` 关联键**——ai 的 `InferTelemetryEvent` 把 TelemetryOptions 字段并进每个事件，因此所有事件天然自带此键。
-2. **工具事件补发**：nimbo 的工具由 loop 自己结算（[tech/single-ledger](../../logic/orchestration/tech/single-ledger.md)），AI SDK 自己永远没机会触发 `onToolExecutionStart/End`——core 的 `settleExecution` 在 `executeToolCall` 前后**替它补发**这两个事件（`loop.ts` 的 `notifyToolExecution*`，事件形状用 ai 导出的 widened 联合类型构造）。deny/未知工具/畸形调用从未执行，不发。
+1. **core 注入口**：`SessionOptions.telemetry`（`SessionTelemetry`，loop.ts）透传集成对象到每次 `streamText`；不注入时零开销。loop 恒在 `telemetry.functionId` 注入 **`"<runko 会话 id>#<turn>"` 关联键**——ai 的 `InferTelemetryEvent` 把 TelemetryOptions 字段并进每个事件，因此所有事件天然自带此键。
+2. **工具事件补发**：runko 的工具由 loop 自己结算（[tech/single-ledger](../../logic/orchestration/tech/single-ledger.md)），AI SDK 自己永远没机会触发 `onToolExecutionStart/End`——core 的 `settleExecution` 在 `executeToolCall` 前后**替它补发**这两个事件（`loop.ts` 的 `notifyToolExecution*`，事件形状用 ai 导出的 widened 联合类型构造）。deny/未知工具/畸形调用从未执行，不发。
 3. **server 落库**：`apps/node-server/src/telemetry.ts` 的 `createSqliteTelemetry(store)` 把每个事件写成一行 SQLite；生产装配是惰性单例（`getChatTelemetry`/`getChatTelemetryStore`），经 `ChatRouteDeps` 注入默认 chatApp（写侧 `telemetry` + 读侧 `telemetryStore` 两个口，测试可分别注入假件）。
 
 三条硬纪律：
@@ -36,7 +36,7 @@ ai@7 把 telemetry 转正为**纯回调的事件集成接口**（`Telemetry`，`
 ```sql
 CREATE TABLE IF NOT EXISTS telemetry_events (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  agent_session_id   TEXT,      -- functionId 前半段：nimbo 会话 id（非 chat 行 id！见 §2.2）
+  agent_session_id   TEXT,      -- functionId 前半段：runko 会话 id（非 chat 行 id！见 §2.2）
   turn         INTEGER,   -- functionId 后半段
   event_type   TEXT NOT NULL,   -- start / step-start / model-call-start / model-call-end / tool-execution-* / step-end / end / abort / error
   ts           INTEGER NOT NULL,   -- 落库时刻（epoch ms）
@@ -48,7 +48,7 @@ CREATE INDEX IF NOT EXISTS telemetry_events_session_turn
 
 ### 2.2 数据领域与关联
 
-遥测键的是 **nimbo 会话 id**（core `SessionState.id`），不是 chat 行 id——chat 行经 `agent_session_id` 列（首轮优雅收尾时由 `finalizeTurnPersistence` 写入的会话 header）映射过去。查询端点做这一次翻译；会话尚无 header（首轮未完成/中途崩溃）时按「无数据」处理。
+遥测键的是 **runko 会话 id**（core `SessionState.id`），不是 chat 行 id——chat 行经 `agent_session_id` 列（首轮优雅收尾时由 `finalizeTurnPersistence` 写入的会话 header）映射过去。查询端点做这一次翻译；会话尚无 header（首轮未完成/中途崩溃）时按「无数据」处理。
 
 ```mermaid
 erDiagram
@@ -69,7 +69,7 @@ erDiagram
     }
     telemetry_events {
         integer id PK
-        text agent_session_id "nimbo 会话 id（functionId 前半段）"
+        text agent_session_id "runko 会话 id（functionId 前半段）"
         integer turn
         text event_type
         integer ts
@@ -106,7 +106,7 @@ erDiagram
 - `firstChunkMs`：`startTurn` 返回到第一个 chunk 抵达——这段是 `session.stream()` 顶部的 `await`（把 skill 附属文件**写回**沙盒的 `mountSkillFiles`、账本 zod 校验）加 `convertToModelMessages`。**不含**模型首 token：core 的 loop 在发出请求之前就 yield 了 `start`/`start-step`。
 - `firstOutputMs`：`startTurn` 到第一个可见 chunk——`firstOutputMs - firstChunkMs` 即模型首 token 的等待。（模型自报的 `timeToFirstOutputMs` 在 `model-call-end` 里，但那要等整次调用结束才落库，看不到「此刻还在等」。）
 
-**为什么在第一个 chunk 抵达时才落库，而不是装配一结束就写**：遥测的关联键是 `functionId = "<nimbo 会话 id>#<turn>"`，而首轮的 nimbo 会话 id 是 `createSession` 现场 mint 的，装配阶段根本不知道；`turn` 号同理要等 `session.stream()` 把它 `+1`。第一个 chunk 抵达时两者都已确定，`session.toJSON()` 一读即得，且与 core 注入 `streamText` 的那个 functionId **逐字节相同**——同轮数据自然 join 得上。代价是这一轮若在产出任何 chunk 之前就崩了（沙盒装配失败），就没有 `turn-prepare` 行；那种失败会以 500 响应 + `turn-launcher` 的 error 日志现身，不靠遥测。
+**为什么在第一个 chunk 抵达时才落库，而不是装配一结束就写**：遥测的关联键是 `functionId = "<runko 会话 id>#<turn>"`，而首轮的 runko 会话 id 是 `createSession` 现场 mint 的，装配阶段根本不知道；`turn` 号同理要等 `session.stream()` 把它 `+1`。第一个 chunk 抵达时两者都已确定，`session.toJSON()` 一读即得，且与 core 注入 `streamText` 的那个 functionId **逐字节相同**——同轮数据自然 join 得上。代价是这一轮若在产出任何 chunk 之前就崩了（沙盒装配失败），就没有 `turn-prepare` 行；那种失败会以 500 响应 + `turn-launcher` 的 error 日志现身，不靠遥测。
 
 **依赖方向**：`turn-runner/` 不认识遥测，也不认识计时——它只多了两个生命周期通知点（`onMilestone`），与既有的 `onTurnSettled`（不认识「队列」只报告事件）是同一姿态；拼载荷、写库都在 `turn-launcher.ts`。
 
@@ -202,16 +202,16 @@ sequenceDiagram
 
 ## 5. 关键接口
 
-- `SessionTelemetry`（`@nimbo/core`，loop.ts）：`{ integrations: Telemetry[]; recordInputs?; recordOutputs? }`——SDK 门面原样透传（`@nimbo/sdk` 的 `createSession` 直接收 `CoreSessionOptions`）。
+- `SessionTelemetry`（`@runko/core`，loop.ts）：`{ integrations: Telemetry[]; recordInputs?; recordOutputs? }`——SDK 门面原样透传（`@runko/sdk` 的 `createSession` 直接收 `CoreSessionOptions`）。
 - `TelemetryStore`（`apps/node-server/src/telemetry.ts`）：`record(eventType, functionId, event)` / `list(agentSessionId, turn)` / `close()`——写读同一抽象，测试用 `createTelemetryStore(':memory:')`。
-- functionId 约定：`"<nimbo 会话 id>#<turn>"`，`parseFunctionId` 按**最后一个** `#` 切分（防会话 id 含 `#`），不合形状时 turn 置 NULL、原文落 agent_session_id。
+- functionId 约定：`"<runko 会话 id>#<turn>"`，`parseFunctionId` 按**最后一个** `#` 切分（防会话 id 含 `#`），不合形状时 turn 置 NULL、原文落 agent_session_id。
 
 ## 6. 取舍与已知限制
 
 1. **API 新鲜度**：ai@7 的 telemetry 刚转正（7.0.20），字段仍可能小版本漂移——防御是「payload 整体 JSON + 消费端零星 `safeParse` + 坏行静默跳过」，而不是深度建模。
 2. **工具事件是补发的**：`toolExecutionMs` 由 loop 自测（`executeToolCall` 前后 `Date.now()`），与账本 `data-tool-timing` 的执行区间同源同刻但独立记录；两者数值理论一致，权威口径以账本为准（产品数据）。
 3. **单进程本地文件**：多实例部署时各写各的 telemetry.db，无汇聚——当前单进程场景够用，需要集中式再议（届时 `Telemetry` 集成换个后端即可，接口不变）。
-4. **首轮未完成的会话查不到**：`agent_session_id` 在首轮优雅收尾才写入，此前端点返回空数组（数据其实已按 nimbo 会话 id 落库，只是缺翻译键）——可接受的边界，统计按钮本就只出现在完成轮上，无 `turn` 键时弹窗只出概览、不拉明细。
+4. **首轮未完成的会话查不到**：`agent_session_id` 在首轮优雅收尾才写入，此前端点返回空数组（数据其实已按 runko 会话 id 落库，只是缺翻译键）——可接受的边界，统计按钮本就只出现在完成轮上，无 `turn` 键时弹窗只出概览、不拉明细。
 5. **turn 内时序**：`ts` 是落库时刻、`id` 单调递增，同轮内按 `id` 排序即事件顺序；跨轮/跨会话比较用各事件 payload 里的业务时间字段。
 6. **起轮装配打点只覆盖成功起轮的那些轮**（§2.4）：装配途中失败（沙盒挂了、凭据缺失）永远产不出第一个 chunk，也就没有 `turn-prepare` 行——那条路径的可观测性归日志与 500 响应，遥测不兜底。同理，`intent: 'steer'`（[插话](../../terms.md)）与[排队](../../terms.md)不走 `launchTurn`，也没有这两种事件。
-7. **`firstChunkMs` 里混着一段 core 内部的活**（`mountSkillFiles` + 账本校验 + `convertToModelMessages`），当前不再细分——继续拆需要在 `@nimbo/core` 里加打点口，那是发布包的破坏性面，等这层数据证明确有必要再动。
+7. **`firstChunkMs` 里混着一段 core 内部的活**（`mountSkillFiles` + 账本校验 + `convertToModelMessages`），当前不再细分——继续拆需要在 `@runko/core` 里加打点口，那是发布包的破坏性面，等这层数据证明确有必要再动。

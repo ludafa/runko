@@ -1,4 +1,4 @@
-import { fromMemory } from "@nimbo/virtual-fs";
+import { fromMemory } from "@runko/virtual-fs";
 import { describe, expect, it } from "vitest";
 import { run, withFailingReadFile } from "./helpers.js";
 
@@ -52,7 +52,7 @@ describe("cat", () => {
     expect(result.stderr).toContain("cat: /dir: Is a directory");
   });
 
-  it("surfaces a readFile() failure even when stat() reported a readable file (non-conforming NimboFS)", async () => {
+  it("surfaces a readFile() failure even when stat() reported a readable file (non-conforming RunkoFS)", async () => {
     const fs = withFailingReadFile(fixture(), "/a.txt", new Error("boom"));
     const result = await run(fs, "cat /a.txt");
     expect(result.exitCode).toBe(1);

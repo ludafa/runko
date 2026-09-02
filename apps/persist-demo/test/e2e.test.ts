@@ -1,7 +1,7 @@
 /**
  * 端到端：**从 HTTP 请求打到库里**，两种方言各跑一遍同一套。
  *
- * 这一套跟 `@nimbo/conformance` 那套是**两回事**，各管一段：
+ * 这一套跟 `@runko/conformance` 那套是**两回事**，各管一段：
  *
  * | | 一致性套件 | 本文件 |
  * |---|---|---|
@@ -14,7 +14,7 @@
  *
  * **不起真端口**：直接对 `app.request()` 打（Hono 原生能力）。快，而且没有端口冲突。
  */
-import type { NimboUIMessage } from "@nimbo/core";
+import type { RunkoUIMessage } from "@runko/core";
 import type { LanguageModel } from "ai";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -30,21 +30,21 @@ import { gatedModel, scriptedModel } from "../src/model.js";
  * 只跑 SQLite 那一档——不是静默跳过，这里写清楚了怎么带上它们：
  *
  * ```sh
- * NIMBO_TEST_POSTGRES_URL=postgres://nimbo:nimbo@127.0.0.1:5433/nimbo \
- * NIMBO_TEST_MYSQL_URL=mysql://root:nimbo@127.0.0.1:3307/nimbo \
- *   pnpm --filter @nimbo-demo/persist-demo test
+ * RUNKO_TEST_POSTGRES_URL=postgres://runko:runko@127.0.0.1:5433/runko \
+ * RUNKO_TEST_MYSQL_URL=mysql://root:runko@127.0.0.1:3307/runko \
+ *   pnpm --filter @runko-demo/persist-demo test
  * ```
  */
 const DIALECTS: { name: string; kind: DriverKind; url?: string }[] = [
   { name: "sqlite (:memory:)", kind: "memory" },
-  ...(process.env["NIMBO_TEST_POSTGRES_URL"] !== undefined
-    ? [{ name: "postgres (真库)", kind: "postgres" as const, url: process.env["NIMBO_TEST_POSTGRES_URL"] }]
+  ...(process.env["RUNKO_TEST_POSTGRES_URL"] !== undefined
+    ? [{ name: "postgres (真库)", kind: "postgres" as const, url: process.env["RUNKO_TEST_POSTGRES_URL"] }]
     : []),
-  ...(process.env["NIMBO_TEST_MYSQL_URL"] !== undefined
-    ? [{ name: "mysql (真库)", kind: "mysql" as const, url: process.env["NIMBO_TEST_MYSQL_URL"] }]
+  ...(process.env["RUNKO_TEST_MYSQL_URL"] !== undefined
+    ? [{ name: "mysql (真库)", kind: "mysql" as const, url: process.env["RUNKO_TEST_MYSQL_URL"] }]
     : []),
-  ...(process.env["NIMBO_TEST_MONGO_URL"] !== undefined
-    ? [{ name: "mongo (真库)", kind: "mongo" as const, url: `${process.env["NIMBO_TEST_MONGO_URL"]}/persist_demo_e2e` }]
+  ...(process.env["RUNKO_TEST_MONGO_URL"] !== undefined
+    ? [{ name: "mongo (真库)", kind: "mongo" as const, url: `${process.env["RUNKO_TEST_MONGO_URL"]}/persist_demo_e2e` }]
     : []),
 ];
 
@@ -54,10 +54,10 @@ interface Conversation {
 }
 
 interface MessagesBody {
-  frames: { seq: number; message: NimboUIMessage }[];
+  frames: { seq: number; message: RunkoUIMessage }[];
 }
 
-function textOf(message: NimboUIMessage): string {
+function textOf(message: RunkoUIMessage): string {
   return message.parts
     .map((part) => (part.type === "text" ? part.text : ""))
     .join("");
@@ -339,7 +339,7 @@ describe("persist-demo e2e · 重启之后还在", () => {
     const conversations = ((await listed.json()) as { conversations: Conversation[] }).conversations;
     expect(conversations.map((c) => c.id)).toContain(id);
 
-    // 账本还在（nimbo 的那三张表）。
+    // 账本还在（runko 的那三张表）。
     const res = await second.app.request(`/api/chat/conversations/${id}/messages`);
     const { frames } = (await res.json()) as MessagesBody;
     expect(frames.map((f) => textOf(f.message))).toEqual(["重启前发的", "重启前说的话"]);

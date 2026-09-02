@@ -4,7 +4,7 @@ slug: composer-skill-mention
 view: 技术
 layer: 接入层
 module: —
-packages: ["@nimbo-chat/web", "@nimbo/core"]
+packages: ["@runko-chat/web", "@runko/core"]
 tags: ["composer", "skill 提及", "渐进式披露"]
 related: ["ingress/features/composer-skill-mention.md", "ingress/plans/composer-skill-mention.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -59,7 +59,7 @@ modelText（喂给模型）      = "/frontend-design 帮我看看首页排版\n\
 
 这个拆分**几乎零成本**，因为 `turn-runner/drive.ts` 的 `driveTurn` 里这两条路本来就是分开的两行，只是眼下共用同一个 `text` 变量：
 
-- `turn-runner/drive.ts` 的 `emit.emitMessage(userMessage)` —— 合成给界面看的 `NimboUIMessage`（落[账本](../../terms.md) + 广播）
+- `turn-runner/drive.ts` 的 `emit.emitMessage(userMessage)` —— 合成给界面看的 `RunkoUIMessage`（落[账本](../../terms.md) + 广播）
 - `turn-runner/drive.ts` 的 `session.stream(...)` —— 喂给模型
 
 把 `driveTurn` 的 `text: string` 参数拆成 `displayText` / `modelText` 两个即可，没有任何新机制。
@@ -73,7 +73,7 @@ modelText（喂给模型）      = "/frontend-design 帮我看看首页排版\n\
 
 `POST .../messages` 的 body **不加** `skills: string[]` 字段，提及就以 `/<skill-name>` 的形态待在 `text` 里，服务端起轮时用正则扫出来。
 
-理由是**账本一致性**：如果提及是独立字段，它就没有进账本的位置（账本存的是 `NimboUIMessage`，一条 `text` part），[回放](../../terms.md)时就丢了，界面上那条历史消息会变得跟用户当初打的不一样。留在文本里则[排队](../../terms.md)、[steer 中途插话](../../terms.md)、回放、[压缩](../../terms.md)全部零改动——它就是普通文本，天然跟着走。
+理由是**账本一致性**：如果提及是独立字段，它就没有进账本的位置（账本存的是 `RunkoUIMessage`，一条 `text` part），[回放](../../terms.md)时就丢了，界面上那条历史消息会变得跟用户当初打的不一样。留在文本里则[排队](../../terms.md)、[steer 中途插话](../../terms.md)、回放、[压缩](../../terms.md)全部零改动——它就是普通文本，天然跟着走。
 
 代价：服务端要做一次正则匹配 + 白名单校验（只有**确实存在于本会话 skill 清单**的名字才算提及，避免用户正常输入的 `/usr/local` 被误判）。这个校验逻辑做成纯函数，好测。
 
@@ -81,7 +81,7 @@ modelText（喂给模型）      = "/frontend-design 帮我看看首页排版\n\
 
 装 tiptap 是为了拿到**原子节点（atom node）**这个能力——一枚删得干净、选得整体、不会被拆成半截字符的标记块。这是 `<textarea>` 做不到的（textarea 里 `/frontend-design` 就是 17 个可以任意删改的字符）。
 
-**不开放任何富文本格式**：不装 `@tiptap/starter-kit`，只装 `Document` + `Paragraph` + `Text` + `HardBreak` + `Placeholder` + `Mention` 六个扩展。粘贴一律走纯文本。理由是这是个聊天输入框，用户消息最终要变成 `NimboUIMessage` 的一条 `text` part——任何富文本格式都无处可去，做出来只会是骗人的。
+**不开放任何富文本格式**：不装 `@tiptap/starter-kit`，只装 `Document` + `Paragraph` + `Text` + `HardBreak` + `Placeholder` + `Mention` 六个扩展。粘贴一律走纯文本。理由是这是个聊天输入框，用户消息最终要变成 `RunkoUIMessage` 的一条 `text` part——任何富文本格式都无处可去，做出来只会是骗人的。
 
 ## 3. 业务数据领域设计图
 
@@ -189,7 +189,7 @@ sequenceDiagram
     L->>L: modelText = text + 系统提示行
     L->>T: startTurn(displayText=text, modelText)
 
-    T->>T: 合成 NimboUIMessage(displayText)
+    T->>T: 合成 RunkoUIMessage(displayText)
     T-->>W: MessageFrame（界面看到的是用户原话）
     T->>DB: 落账本（原话，不含提示行）
 
@@ -223,7 +223,7 @@ export interface SkillSummary {
  * 不让一个坏 skill 拖垮整轮——这是每轮起轮的必经路径。
  */
 export async function loadSkillsFromWorkspace(
-  workspace: NimboFS,
+  workspace: RunkoFS,
   log: Logger,
 ): Promise<Skill[]>;
 

@@ -26,7 +26,7 @@ related: ["misc/tech/docs-site.md", "misc/plans/docs-site.md", "architecture/tec
 
 ## 2. 怎么用
 
-`docs/` 是一个**独立的 workspace 成员**（`@nimbo/docs`）——自带依赖、自己构建、产物可单独部署。
+`docs/` 是一个**独立的 workspace 成员**（`@runko/docs`）——自带依赖、自己构建、产物可单独部署。
 
 在仓库根跑：
 
@@ -43,10 +43,10 @@ pnpm docs:check      # front matter 体检
 
 ### 部署
 
-产物在 `docs/.vitepress/dist/`，是一堆静态文件，托管在哪儿都行。**部署到子路径**（比如 GitHub Pages 的 `https://<user>.github.io/nimbo/`）用环境变量指定，不用改配置：
+产物在 `docs/.vitepress/dist/`，是一堆静态文件，托管在哪儿都行。**部署到子路径**（比如 GitHub Pages 的 `https://<user>.github.io/runko/`）用环境变量指定，不用改配置：
 
 ```sh
-DOCS_BASE=/nimbo/ pnpm docs:build
+DOCS_BASE=/runko/ pnpm docs:build
 ```
 
 放在域名根下（Cloudflare Pages / Vercel / Netlify）则不用设。
@@ -59,8 +59,8 @@ DOCS_BASE=/nimbo/ pnpm docs:build
 | --- | --- | --- |
 | 架构 | —— | `docs/architecture/`：分层总纲、部署形态、包怎么拆 |
 | **agent 逻辑层** | 归属仲裁 | `docs/logic/arbitration/`：语义 + 三种随宿主变化的实现 |
-| | 轮编排 | `docs/logic/orchestration/`：`@nimbo/agent`，账本、挂起恢复、排队、保活 |
-| | 执行引擎 | `docs/logic/engine/`：`@nimbo/core`，loop、内置工具、审批链 |
+| | 轮编排 | `docs/logic/orchestration/`：`@runko/agent`，账本、挂起恢复、排队、保活 |
+| | 执行引擎 | `docs/logic/engine/`：`@runko/core`，loop、内置工具、审批链 |
 | **宿主层** | 契约（跨环境） | `docs/host/contract/`：沙盒 · 持久化 · 流分发三份接口 |
 | | Node 长驻 | `docs/host/node/`：单进程 / cluster / Docker / k8s |
 | | Cloudflare | `docs/host/cloudflare/`：Worker + Durable Object |

@@ -9,14 +9,14 @@ import { sql } from "kysely";
 
 import type { Flavor } from "./flavor.js";
 import { traitsOf } from "./flavor.js";
-import type { NimboDatabase } from "./schema.js";
+import type { RunkoDatabase } from "./schema.js";
 import { DECISIONS_TABLE, LEASES_TABLE, LEDGER_TABLE, QUEUE_TABLE } from "./schema.js";
 
 export interface MigrateOptions {
   flavor: Flavor;
 }
 
-export async function migrate(db: Kysely<NimboDatabase>, opts: MigrateOptions): Promise<void> {
+export async function migrate(db: Kysely<RunkoDatabase>, opts: MigrateOptions): Promise<void> {
   const t = traitsOf(opts.flavor);
   // MySQL 的 TEXT 列不能直接当主键（要指定长度），所以主键上的字符串列一律 varchar(255)。
   // 另两家把 varchar(255) 当普通变长文本，没有副作用。
@@ -33,7 +33,7 @@ export async function migrate(db: Kysely<NimboDatabase>, opts: MigrateOptions): 
     .addColumn("seq", t.intColumnType, (c) => c.notNull())
     .addColumn("payload", t.jsonColumnType, (c) => c.notNull())
     .addColumn("ts", t.intColumnType, (c) => c.notNull())
-    .addPrimaryKeyConstraint("nimbo_ledger_pk", ["conversation_id", "seq"])
+    .addPrimaryKeyConstraint("agent_ledger_pk", ["conversation_id", "seq"])
     .execute();
 
   await db.schema
@@ -50,7 +50,7 @@ export async function migrate(db: Kysely<NimboDatabase>, opts: MigrateOptions): 
     .addColumn("message", "text")
     .addColumn("requested_at", t.intColumnType, (c) => c.notNull())
     .addColumn("decided_at", t.intColumnType)
-    .addPrimaryKeyConstraint("nimbo_decisions_pk", ["conversation_id", "tool_call_id"])
+    .addPrimaryKeyConstraint("agent_decisions_pk", ["conversation_id", "tool_call_id"])
     .execute();
 
   await db.schema
@@ -61,12 +61,12 @@ export async function migrate(db: Kysely<NimboDatabase>, opts: MigrateOptions): 
     .addColumn("seq", t.intColumnType, (c) => c.notNull())
     .addColumn("input", t.jsonColumnType, (c) => c.notNull())
     .addColumn("created_at", t.intColumnType, (c) => c.notNull())
-    .addPrimaryKeyConstraint("nimbo_queue_pk", ["conversation_id", "id"])
+    .addPrimaryKeyConstraint("agent_queue_pk", ["conversation_id", "id"])
     // **seq 的唯一性交给数据库**。应用层「先查最大值再插」在并发下必然有窗口：两个请求
     // 读到同一份快照就会算出同一个 seq，之后按 seq 排序平局，先到先发不再成立。写后读回
     // 校验也堵不住——校验那次读可能发生在对手插入之前。有了这条约束，撞号的那条会被
     // 幂等插入吞掉，调用方读回来发现自己不在队列里，换个号重来（见 `stores.ts` 的 `enqueue`）。
-    .addUniqueConstraint("nimbo_queue_seq_uk", ["conversation_id", "seq"])
+    .addUniqueConstraint("agent_queue_seq_uk", ["conversation_id", "seq"])
     .execute();
   // [租约表](../../../docs/terms.md)：多进程下的归属仲裁机制。单进程用不上它——内存版
   // 的归属表跟进程同生共死，根本不落库；这张表建了也只是空着，没有代价。
@@ -80,7 +80,7 @@ export async function migrate(db: Kysely<NimboDatabase>, opts: MigrateOptions): 
     .addColumn("seq_watermark", t.intColumnType, (c) => c.notNull())
     .addColumn("heartbeat_at", t.intColumnType, (c) => c.notNull())
     .addColumn("acquired_at", t.intColumnType, (c) => c.notNull())
-    .addPrimaryKeyConstraint("nimbo_leases_pk", ["conversation_id"])
+    .addPrimaryKeyConstraint("agent_leases_pk", ["conversation_id"])
     .execute();
 
   // ⚠️ **`migrate()` 只做首建，不做 schema 演进。** 四张表全是 `CREATE TABLE IF NOT

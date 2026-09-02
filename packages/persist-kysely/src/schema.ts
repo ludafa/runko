@@ -7,21 +7,21 @@
  * **表名写死，不做前缀。** 原先手搓那版有个 `tablePrefix`，换 Kysely 之后放弃了：
  * Kysely 的类型是按**字面量表名**推的，前缀一动态化就得退回 `any`，等于把这个库最值钱的
  * 东西（类型安全的查询）扔掉，去换一个几乎没人用的开关。真要隔离，Postgres/MySQL 有
- * **schema / database** 这个更对的工具（`db.withSchema(...)`）；SQLite 那边 `nimbo_` 前缀
+ * **schema / database** 这个更对的工具（`db.withSchema(...)`）；SQLite 那边 `runko_` 前缀
  * 撞名的概率约等于零。
  */
 
-export const LEDGER_TABLE = "nimbo_ledger";
-export const DECISIONS_TABLE = "nimbo_decisions";
-export const QUEUE_TABLE = "nimbo_queue";
-export const LEASES_TABLE = "nimbo_leases";
+export const LEDGER_TABLE = "agent_ledger";
+export const DECISIONS_TABLE = "agent_decisions";
+export const QUEUE_TABLE = "agent_queue";
+export const LEASES_TABLE = "agent_leases";
 
 /** [账本](../../../docs/terms.md)：一个会话的全部成品消息。 */
 export interface LedgerTable {
   conversation_id: string;
   /** 每会话递增，由[归属仲裁](../../../docs/terms.md)分配。**允许有空洞**。 */
   seq: number;
-  /** `NimboUIMessage` 的 JSON。形状归 core 管，本包不拆列。 */
+  /** `RunkoUIMessage` 的 JSON。形状归 core 管，本包不拆列。 */
   payload: string;
   ts: number;
 }
@@ -82,14 +82,14 @@ export interface LeasesTable {
  * 本包要求的库形状。宿主自己带 Kysely 实例时，把它并进自己的 `Database` 类型：
  *
  * ```ts
- * interface MyDatabase extends NimboDatabase {
+ * interface MyDatabase extends RunkoDatabase {
  *   my_users: MyUsersTable;
  * }
  * ```
  */
-export interface NimboDatabase {
-  nimbo_ledger: LedgerTable;
-  nimbo_decisions: DecisionsTable;
-  nimbo_queue: QueueTable;
-  nimbo_leases: LeasesTable;
+export interface RunkoDatabase {
+  agent_ledger: LedgerTable;
+  agent_decisions: DecisionsTable;
+  agent_queue: QueueTable;
+  agent_leases: LeasesTable;
 }

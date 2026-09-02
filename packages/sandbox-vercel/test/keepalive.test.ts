@@ -5,7 +5,7 @@
  * docs/plans/sandbox-keepalive.md KA-3。
  *
  * [续期闸门](../../../docs/terms.md)本身（补足语义、审批状态机、两个上限）已在
- * `@nimbo/core` 的 `test/keepalive.test.ts` 里测透，这里只覆盖 Vercel 这一层——
+ * `@runko/core` 的 `test/keepalive.test.ts` 里测透，这里只覆盖 Vercel 这一层——
  * 而这一层与 E2B **正好相反**的两点正是重点：
  *
  * 1. `extendTimeout` 是**加时**，所以要算差额；

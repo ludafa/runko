@@ -1,10 +1,10 @@
 /**
- * NimboFS 七方法契约（docs/tech/sandbox.md §3.1 / §8.2 Vercel 列）：ENOENT → NotFoundError，
+ * RunkoFS 七方法契约（docs/tech/sandbox.md §3.1 / §8.2 Vercel 列）：ENOENT → NotFoundError，
  * 非递归 rm 对空/非空目录的分流（`src/fs.ts` 头注释记录的实测发现——node
  * `fs.rm()` 不能承担这个语义，必须靠 `fs.rmdir()`），glob 递归 + matcher，
  * mtime 整数 ms，root 锚定，readdir/mkdir/writeFile 的父目录语义。
  */
-import { DirectoryNotEmptyError, NotFoundError } from "@nimbo/virtual-fs";
+import { DirectoryNotEmptyError, NotFoundError } from "@runko/virtual-fs";
 import { describe, expect, it } from "vitest";
 import { vercelWorkspace } from "../src/index.js";
 import { FakeVercelSandbox, writeChunks } from "./helpers.js";

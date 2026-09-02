@@ -1,16 +1,16 @@
-# @nimbo/persist-postgres
+# @runko/persist-postgres
 
-nimbo 的持久化实现，**PostgreSQL（pg）**。
+runko 的持久化实现，**PostgreSQL（pg）**。
 
 你只有一个驱动实例、没在用任何 ORM 时装这个。
 
 ```sh
-pnpm add @nimbo/persist-postgres pg
+pnpm add @runko/persist-postgres pg
 ```
 
 ```ts
-import { createAgentRuntime } from "@nimbo/agent";
-import { migrate, postgresPersistence } from "@nimbo/persist-postgres";
+import { createAgentRuntime } from "@runko/agent";
+import { migrate, postgresPersistence } from "@runko/persist-postgres";
 import { Pool } from "pg";
 
 const db = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -23,7 +23,7 @@ const runtime = createAgentRuntime(agent, { persistence: postgresPersistence(db)
 ## 它是个薄壳
 
 本包只做一件事：把你的驱动包成一个 Kysely 实例，转交
-[`@nimbo/persist-kysely`](../persist-kysely/README.md)。三个 Store 与建表的实现都在那儿。
+[`@runko/persist-kysely`](../persist-kysely/README.md)。三个 Store 与建表的实现都在那儿。
 
 ```
 persist-sqlite ─┐
@@ -31,18 +31,18 @@ persist-postgres ┼─→ persist-kysely ─→ 你的库
 persist-mysql  ─┘
 ```
 
-**已经在用 Kysely 了？** 别用这个包——直接装 `@nimbo/persist-kysely`，把你自己的实例
-给它，nimbo 的四张表和你的表就在同一个实例、同一套迁移之下。
+**已经在用 Kysely 了？** 别用这个包——直接装 `@runko/persist-kysely`，把你自己的实例
+给它，runko 的四张表和你的表就在同一个实例、同一套迁移之下。
 
 **一种库一个包**，所以本包只 `peerDependencies` `pg`——不会把别家的驱动拖进你的
 依赖树。
 
 ## 它存什么
 
-四张表：`nimbo_ledger`（账本）· `nimbo_decisions`（人工裁决留底）· `nimbo_queue`（待发队列）· `nimbo_leases`（租约表）。
+四张表：`agent_ledger`（账本）· `agent_decisions`（人工裁决留底）· `agent_queue`（待发队列）· `agent_leases`（租约表）。
 表名固定，不提供前缀开关——要隔离请用 schema/database。
 
-**它不存你的东西。** nimbo 只认一个不透明的 `conversationId`，会话叫什么、属于谁，
+**它不存你的东西。** runko 只认一个不透明的 `conversationId`，会话叫什么、属于谁，
 全归你自己存。它不建外键、不碰你的用户表。
 
 ## 文档

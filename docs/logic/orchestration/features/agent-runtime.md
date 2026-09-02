@@ -4,7 +4,7 @@ slug: agent-runtime
 view: 功能
 layer: 逻辑层
 module: 轮编排
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["轮编排", "运行时", "宿主能力", "内置实现", "零配置"]
 related: ["logic/orchestration/tech/agent-runtime.md", "logic/orchestration/plans/agent-runtime.md", "architecture/features/agent-kernel.md"]
 ---
@@ -17,7 +17,7 @@ related: ["logic/orchestration/tech/agent-runtime.md", "logic/orchestration/plan
 
 ## 1. 要解决的问题
 
-`@nimbo/core` 的 [`Session`](../../engine/features/core-sdk.md) 只解决「跑一轮」：给它历史和工具，它调模型、跑工具、喂回去，跑完返回。**它不知道时间、进程、存储。**
+`@runko/core` 的 [`Session`](../../engine/features/core-sdk.md) 只解决「跑一轮」：给它历史和工具，它调模型、跑工具、喂回去，跑完返回。**它不知道时间、进程、存储。**
 
 于是每个拿它建产品的人都要自己写同一批东西：
 
@@ -31,10 +31,10 @@ related: ["logic/orchestration/tech/agent-runtime.md", "logic/orchestration/plan
 ## 2. 三十秒上手
 
 ```ts
-import { defineAgent } from "@nimbo/sdk";
-import { createAgentRuntime } from "@nimbo/agent";
-import { MemoryFS } from "@nimbo/virtual-fs";
-import { localExec } from "@nimbo/core";
+import { defineAgent } from "@runko/sdk";
+import { createAgentRuntime } from "@runko/agent";
+import { MemoryFS } from "@runko/virtual-fs";
+import { localExec } from "@runko/core";
 
 const agent = defineAgent({ model: "anthropic/claude-sonnet-5" });
 
@@ -156,7 +156,7 @@ createAgentRuntime({
 
 ## 6. 范围与非目标
 
-**明确不做**（与[架构总纲 §9](../../../architecture/features/agent-kernel.md) 一致）：不提供用户/认证体系、不碰 HTTP、不提供沙盒（只消费 `NimboFS`/`NimboExec`）、不要求用某个 ORM。
+**明确不做**（与[架构总纲 §9](../../../architecture/features/agent-kernel.md) 一致）：不提供用户/认证体系、不碰 HTTP、不提供沙盒（只消费 `RunkoFS`/`RunkoExec`）、不要求用某个 ORM。
 
 **本批未实现**（接口已为它留好位置，见[施工进展](../plans/agent-runtime.md)）：
 

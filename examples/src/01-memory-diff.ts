@@ -2,10 +2,10 @@
  * 01-memory-diff — the "SaaS inline code assistant" scenario from
  * docs/features/core-sdk.md §3.1: a code snippet lives only in memory, the
  * agent edits it, the host reads back a diff. Nothing ever touches the real
- * disk, which is the whole point of NimboFS.fromMemory — this is what makes
- * nimbo safe to run per-request in a multi-tenant service.
+ * disk, which is the whole point of RunkoFS.fromMemory — this is what makes
+ * runko safe to run per-request in a multi-tenant service.
  *
- * Demonstrates: NimboFS.fromMemory, defineAgent, createSession, session.send,
+ * Demonstrates: RunkoFS.fromMemory, defineAgent, createSession, session.send,
  * session.fs.diff().
  *
  * Run: `node examples/01-memory-diff.ts` (see examples/README.md for setup).
@@ -14,18 +14,18 @@
  *   1. A deterministic section (no model, no env vars needed) that writes a
  *      file into a MemoryFS by hand and prints session.fs.diff() — proving
  *      diff() reports `kind: "created"` for a brand new in-memory file.
- *   2. If NIMBO_MODEL is set: a second MemoryFS seeded with a small file,
+ *   2. If RUNKO_MODEL is set: a second MemoryFS seeded with a small file,
  *      the agent asked to make an edit, and the resulting diff — `kind:
- *      "modified"` with `before`/`after`/`patch` populated. If NIMBO_MODEL is
+ *      "modified"` with `before`/`after`/`patch` populated. If RUNKO_MODEL is
  *      unset, this section is skipped with a clean exit (code 0).
  */
-import { createSession, defineAgent, NimboFS } from "@nimbo/sdk";
+import { createSession, defineAgent, RunkoFS } from "@runko/sdk";
 import { resolveModel } from "./shared/model.ts";
 
 async function deterministicSection(): Promise<void> {
-  console.log("--- 1. NimboFS.fromMemory + diff(), no model involved ---");
+  console.log("--- 1. RunkoFS.fromMemory + diff(), no model involved ---");
 
-  const fs = NimboFS.fromMemory({ "src/index.ts": "var x = 1;\n" });
+  const fs = RunkoFS.fromMemory({ "src/index.ts": "var x = 1;\n" });
   await fs.writeFile("src/greeting.ts", 'export const greeting = "hi";\n');
 
   // MemoryFS has no persistent base snapshot (docs/tech/core-sdk.md §4.4) — every entry
@@ -39,7 +39,7 @@ async function modelDrivenSection(): Promise<void> {
 
   console.log("\n--- 2. agent edits an in-memory file, host reads back the diff ---");
 
-  const fs = NimboFS.fromMemory({ "src/index.ts": "var x = 1;\nvar y = 2;\n" });
+  const fs = RunkoFS.fromMemory({ "src/index.ts": "var x = 1;\nvar y = 2;\n" });
   const agent = defineAgent({ model });
   const session = createSession(agent, { fs });
 

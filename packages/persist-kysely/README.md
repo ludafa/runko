@@ -1,21 +1,21 @@
-# @nimbo/persist-kysely
+# @runko/persist-kysely
 
-nimbo 持久化的**核心实现**，底下是 [Kysely](https://kysely.dev)。
+runko 持久化的**核心实现**，底下是 [Kysely](https://kysely.dev)。
 
 四张表的读写与建表都在这儿；SQLite / PostgreSQL / MySQL 三个薄壳共用它。
 
 ## 什么时候装它
 
-**你已经在用 Kysely。** 把你自己的实例给它，nimbo 的四张表和你的表就在同一个实例、
+**你已经在用 Kysely。** 把你自己的实例给它，runko 的四张表和你的表就在同一个实例、
 同一套迁移之下：
 
 ```ts
 import { Kysely, PostgresDialect } from "kysely";
-import { kyselyPersistence, migrate } from "@nimbo/persist-kysely";
-import type { NimboDatabase } from "@nimbo/persist-kysely";
+import { kyselyPersistence, migrate } from "@runko/persist-kysely";
+import type { RunkoDatabase } from "@runko/persist-kysely";
 
-// 把 nimbo 的四张表并进你自己的库类型
-interface MyDatabase extends NimboDatabase {
+// 把 runko 的四张表并进你自己的库类型
+interface MyDatabase extends RunkoDatabase {
   my_users: MyUsersTable;
 }
 
@@ -43,9 +43,9 @@ createAgentRuntime(agent, {
 
 | 你用什么 | 装哪个 |
 | --- | --- |
-| `better-sqlite3` | [`@nimbo/persist-sqlite`](../persist-sqlite/README.md) |
-| `pg` | [`@nimbo/persist-postgres`](../persist-postgres/README.md) |
-| `mysql2` | [`@nimbo/persist-mysql`](../persist-mysql/README.md) |
+| `better-sqlite3` | [`@runko/persist-sqlite`](../persist-sqlite/README.md) |
+| `pg` | [`@runko/persist-postgres`](../persist-postgres/README.md) |
+| `mysql2` | [`@runko/persist-mysql`](../persist-mysql/README.md) |
 
 ## 为什么底下是 Kysely
 
@@ -84,13 +84,13 @@ createAgentRuntime(agent, {
 
 ## 表
 
-`nimbo_ledger`（账本）· `nimbo_decisions`（人工裁决留底）· `nimbo_queue`（待发队列）。
+`agent_ledger`（账本）· `agent_decisions`（人工裁决留底）· `agent_queue`（待发队列）。
 
 **表名固定，不提供前缀开关。** Kysely 的类型按**字面量表名**推，前缀一动态化就得退回
 `any`，等于把这个库最值钱的东西扔掉去换一个几乎没人用的开关。要隔离请用 schema/database
 （Kysely 有 `db.withSchema()`）。
 
-**它不存你的东西。** nimbo 只认一个不透明的 `conversationId`——会话叫什么、属于谁，全归
+**它不存你的东西。** runko 只认一个不透明的 `conversationId`——会话叫什么、属于谁，全归
 你自己存。它不建外键、不碰你的用户表。
 
 ## 不是只有这一条路
@@ -98,10 +98,10 @@ createAgentRuntime(agent, {
 **你的 schema 跟这四张表对不上？那就自己实现那三个接口**——那是[头等路径，不是降级方案](../../docs/host/contract/features/persistence.md)。
 一共十来个方法，架在你**已有的表**上通常比迁就本包的表更省事。
 
-自己实现的话，装上 [`@nimbo/conformance`](../conformance/README.md) 自测：
+自己实现的话，装上 [`@runko/conformance`](../conformance/README.md) 自测：
 
 ```ts
-import { persistenceCases } from "@nimbo/conformance";
+import { persistenceCases } from "@runko/conformance";
 
 describe("我自己的实现", () => {
   for (const testCase of persistenceCases) {
@@ -120,13 +120,13 @@ describe("我自己的实现", () => {
 ## 测试
 
 ```sh
-pnpm --filter @nimbo/persist-kysely test
+pnpm --filter @runko/persist-kysely test
 ```
 
 默认跑 SQLite 与 Postgres（**pglite**，WASM 进程内，不用起服务）。要连真库：
 
 ```sh
-NIMBO_TEST_POSTGRES_URL=postgres://... NIMBO_TEST_MYSQL_URL=mysql://... pnpm test
+RUNKO_TEST_POSTGRES_URL=postgres://... RUNKO_TEST_MYSQL_URL=mysql://... pnpm test
 ```
 
 **MySQL 没有进程内替身**，只能对真库跑——不给连接串时那一档会跳过并说明原因。

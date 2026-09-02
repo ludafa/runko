@@ -1,9 +1,9 @@
 /**
  * 一次工具调用的卡片——**壳来自 ai-elements 的 `Tool`**（`components/ai-elements/tool.tsx`），
- * 这里只补 nimbo 特有的两件事：中文状态词，和工具计时条。
+ * 这里只补 runko 特有的两件事：中文状态词，和工具计时条。
  *
  * 为什么不直接用 `ToolHeader`：它的状态徽标是英文固定表，且没有「排队/等审批」
- * 这一档——而这一档在 nimbo 里是真实存在的（loop 对同一步的多个调用**串行**结算）。
+ * 这一档——而这一档在 runko 里是真实存在的（loop 对同一步的多个调用**串行**结算）。
  * 所以 header 自己拼，`ToolContent`/`ToolInput`/`ToolOutput` 照用官方件。
  *
  * ---- tool timing (`timing` prop, `message-entry.tsx` 的 `findToolTiming` join) ----
@@ -11,7 +11,7 @@
  * `timing` 在这次调用还没有 `data-tool-timing` 部件时是 `undefined`（入参还在流式，
  * 或这条消息在该部件引入前就落盘了）——此时计时条整个不渲染。一旦到位，显示完全
  * 由 `timing`/`part.state` 驱动（绝不看外部的轮/会话状态——「跳动只跟 tool part
- * 自身状态挂钩」），围绕 `@nimbo/core` 的三段生命周期（state.ts `toolTimingDataSchema`：
+ * 自身状态挂钩」），围绕 `@runko/core` 的三段生命周期（state.ts `toolTimingDataSchema`：
  * `startedAt` 成形入队 → `executionStartedAt` 真实开始执行 → `completedAt` 结算）：
  *
  * - queued（`executionStartedAt` 缺席、未结算）：还在排队/等审批——状态词换成
@@ -27,7 +27,7 @@
  * - crash residue（部件状态已结算但 `completedAt` 缺席——正常跑完的 loop 不会出现，
  *   防御既有/损坏数据）：钟表时间 + "—"，不跳动。
  */
-import type { ToolTimingData } from '@nimbo/core';
+import type { ToolTimingData } from '@runko/core';
 import {
   CheckCircleIcon,
   ChevronDownIcon,
@@ -51,7 +51,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { CollapsibleTrigger } from '@/components/ui/collapsible';
 
-import type { NimboToolPart } from '../timeline';
+import type { RunkoToolPart } from '../timeline';
 import {
   formatClockTime,
   formatDuration,
@@ -60,7 +60,7 @@ import {
 } from '../timeline';
 
 const STATUS_META: Record<
-  NimboToolPart['state'],
+  RunkoToolPart['state'],
   { label: string; icon: ReactNode }
 > = {
   'input-streaming': {
@@ -113,8 +113,8 @@ const STATUS_META: Record<
   },
 };
 
-/** The three tool-part states `data-tool-timing`'s `completedAt` is ever written for (`@nimbo/core`'s `loop.ts`) — "already settled" for `ToolTimingStrip`'s crash-residue check below. */
-const SETTLED_STATES = new Set<NimboToolPart['state']>([
+/** The three tool-part states `data-tool-timing`'s `completedAt` is ever written for (`@runko/core`'s `loop.ts`) — "already settled" for `ToolTimingStrip`'s crash-residue check below. */
+const SETTLED_STATES = new Set<RunkoToolPart['state']>([
   'output-available',
   'output-error',
   'output-denied',
@@ -214,7 +214,7 @@ export function ToolCallCard({
   part,
   timing,
 }: {
-  part: NimboToolPart;
+  part: RunkoToolPart;
   /** The `data-tool-timing` part sharing this call's `toolCallId` (`message-entry.tsx`'s `findToolTiming` join) — `undefined` while input is still streaming, or for a message persisted before this part existed. */
   timing?: ToolTimingData;
 }) {

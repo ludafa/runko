@@ -1,15 +1,15 @@
 ---
-title: "轮编排运行时 `@nimbo/agent` — 技术方案"
+title: "轮编排运行时 `@runko/agent` — 技术方案"
 slug: agent-runtime
 view: 技术
 layer: 逻辑层
 module: 轮编排
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["轮编排", "运行时", "宿主能力", "归属仲裁", "账本", "待发队列"]
 related: ["logic/orchestration/features/agent-runtime.md", "logic/orchestration/plans/agent-runtime.md", "architecture/tech/agent-kernel.md", "host/contract/tech/persistence.md"]
 ---
 
-# 轮编排运行时 `@nimbo/agent` — 技术方案
+# 轮编排运行时 `@runko/agent` — 技术方案
 
 > 相关：[功能](../features/agent-runtime.md)，[施工进展](../plans/agent-runtime.md)。
 > **推导与论证在 [架构总纲 · 技术方案](../../../architecture/tech/agent-kernel.md)**——分层为什么这么切、独占为什么是推出来的、租期标识为什么只需唯一，本文一概不复述，只写**落地的接口与流程**。
@@ -25,7 +25,7 @@ related: ["logic/orchestration/features/agent-runtime.md", "logic/orchestration/
 flowchart TB
     IN["接入层（构建者写）<br/>routes / SSE / 审批端点"]
 
-    subgraph RT["@nimbo/agent"]
+    subgraph RT["@runko/agent"]
         direction TB
         API["<b>AgentRuntime</b><br/>enqueue · subscribe · submitDecision<br/>abort · recover · shutdown"]
         QUEUE["<b>队列编排</b><br/>入队 · 出队 · conversation-drained"]
@@ -39,13 +39,13 @@ flowchart TB
 
     subgraph HOST["宿主能力（四样，都有内置平凡实现）"]
         direction LR
-        WS["工作区<br/>NimboFS + NimboExec"]
+        WS["工作区<br/>RunkoFS + RunkoExec"]
         PER["持久化<br/>账本 · 裁决 · 队列"]
         STR["流分发"]
         ARB["归属仲裁机制"]
     end
 
-    CORE["@nimbo/core<br/>Session.stream()"]
+    CORE["@runko/core<br/>Session.stream()"]
 
     IN --> API
     TURN --> CORE
@@ -72,7 +72,7 @@ erDiagram
         string conversationId PK "复合主键前半"
         int    seq            PK "每会话递增；由归属仲裁分配"
         string kind              "只有 message —— 草稿不再落库"
-        json   payload           "NimboUIMessage"
+        json   payload           "RunkoUIMessage"
         int    ts
     }
     DECISION {
@@ -109,11 +109,11 @@ erDiagram
 
 ```ts
 export interface TurnPreparation {
-  fs?: NimboFS;
+  fs?: RunkoFS;
   /** 注入即激活 core 的内置 `bash` 工具 */
-  exec?: NimboExec;
+  exec?: RunkoExec;
   /** 同源工作区（模式 A）：一个对象同时实现两个接口。与 `fs`/`exec` 互斥 */
-  workspace?: NimboFS & NimboExec;
+  workspace?: RunkoFS & RunkoExec;
   /** 这一轮额外要装的 skill（宿主从沙盒里扫出来的） */
   skills?: Skill[];
   /** 只对这一轮生效的 instructions 追加 */
@@ -372,6 +372,6 @@ flowchart TB
 |---|---|
 | 把 seq 分配藏进 `LedgerStore.append` | 违反「seq 由归属仲裁分配」——`MAX(seq)+1` 与 sequence 都是方言特性，通用适配器表达不了 |
 | `Grant.nextSeq()` 抛 `OwnershipLostError` | 见 §4.5：异常通道让正常路径被当故障，且 TS 不检查异常 |
-| 顺带做 `@nimbo/persist-sql` | `apps/node-server` 已有 drizzle schema，硬塞会造出第二套数据访问方式 |
+| 顺带做 `@runko/persist-sql` | `apps/node-server` 已有 drizzle schema，硬塞会造出第二套数据访问方式 |
 | 队列放账本表 | 见 §6.2 |
 | 运行时自己序列化 SSE | 框架不碰 HTTP（[架构总纲 §9](../../../architecture/features/agent-kernel.md)）——给中立 `AsyncIterable`，怎么序列化归接入层 |

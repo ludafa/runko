@@ -2,12 +2,12 @@
  * **[持久化](../../../docs/terms.md)的一致性套件**——31 条，把接口注释里写死却没验过的
  * 承诺变成可执行断言。五个官方实现跑的是同一份；第三方实现装上这个包也能跑。
  */
-import type { NimboUIMessage } from "@nimbo/core";
+import type { RunkoUIMessage } from "@runko/core";
 
 import * as assert from "./assert.js";
 import type { ConformanceCase, PersistenceConformanceSetup } from "./types.js";
 
-function message(id: string, text: string): NimboUIMessage {
+function message(id: string, text: string): RunkoUIMessage {
   return { id, role: "assistant", parts: [{ type: "text", text }] };
 }
 
@@ -42,7 +42,7 @@ export const persistenceCases: readonly ConformanceCase<PersistenceConformanceSe
   {
     name: "message 原样往返（JSON 列的序列化边界）",
     async run(setup) {
-      const original: NimboUIMessage = {
+      const original: RunkoUIMessage = {
         id: "m1",
         role: "assistant",
         parts: [{ type: "text", text: "带 emoji 😀 与「引号」和 \\ 反斜杠" }],

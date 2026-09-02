@@ -1,7 +1,7 @@
 /**
  * Incrementally materializes the wire's `ChatReplayFrame` sequence (message
  * frames from replay + chunk envelopes from replay/live alike, docs/tech/single-ledger.md §5 单-3) into a single, render-ready
- * `NimboUIMessage[]` — the client-side mirror of `@nimbo/core`'s own
+ * `RunkoUIMessage[]` — the client-side mirror of `@runko/core`'s own
  * server-side "UIMessage 单账本".
  *
  * ---- materialization mechanism (P13-5-4 report §①) ----
@@ -11,10 +11,10 @@
  *
  * A `ChunkEnvelope`'s `chunk` is routed through ai's own official
  * chunk-to-UIMessage incremental builder, `readUIMessageStream()` — but
- * *one call per message*, not one call for a whole turn: `@nimbo/core`'s
+ * *one call per message*, not one call for a whole turn: `@runko/core`'s
  * `loop.ts` opens a fresh `start`/…/`finish` boundary for *every* assistant
  * step and for every steer-injected user message (its own file header: "一个
- * nimbo step = 一条 assistant NimboUIMessage"), so a turn's chunk stream is
+ * runko step = 一条 assistant RunkoUIMessage"), so a turn's chunk stream is
  * really a *concatenation* of several independent per-message chunk streams,
  * not one continuous one. `readUIMessageStream()` mutates a single
  * accumulating `state.message` in place and only patches `.id` on a `start`
@@ -44,7 +44,7 @@
  * asked to flag if found.
  *
  * A third case has *no* open message at all: the turn-ending
- * `message-metadata` chunk (`@nimbo/core`'s `loop.ts`'s `finalizeTurn`) is
+ * `message-metadata` chunk (`@runko/core`'s `loop.ts`'s `finalizeTurn`) is
  * always yielded *after* the last step's own `finish` already closed that
  * message — mirroring the ledger write server-side, where the metadata lands
  * on `target.metadata` (the *previous*, already-fully-built message), not
@@ -75,7 +75,7 @@
  * on a later microtask/macrotask, never synchronously within the same
  * `applyChunk()` call that enqueued them (confirmed empirically: not even
  * after two microtask ticks, only a real macrotask boundary flushes the
- * pipe — `__tests__/helpers/nimbo-chunks.ts`'s `flushLedger()`). A first cut
+ * pipe — `__tests__/helpers/runko-chunks.ts`'s `flushLedger()`). A first cut
  * of this class tracked "the last assistant message" by recording the *id*
  * only once that message's *materialized object* had actually been `upsert`ed
  * from `consume()` — which meant a caller that applies a whole turn's frames
@@ -89,7 +89,7 @@
  * each ("直播") happened to avoid this, since by the time the metadata chunk
  * arrived the pipeline had long since caught up — an inconsistency this
  * class must not have: replay and live delivery of the *same* frame sequence
- * have to materialize to the *same* `NimboUIMessage[]`, independent of
+ * have to materialize to the *same* `RunkoUIMessage[]`, independent of
  * timing.
  *
  * The fix has two parts, both keyed off information `applyChunk()` already
@@ -118,10 +118,10 @@
  *    recombines the *latest* content with the metadata fresh.
  */
 import type {
-  NimboChunk,
-  NimboMessageMetadata,
-  NimboUIMessage,
-} from '@nimbo/core';
+  RunkoChunk,
+  RunkoMessageMetadata,
+  RunkoUIMessage,
+} from '@runko/core';
 import type { FileUIPart, TextUIPart } from 'ai';
 import { readUIMessageStream } from 'ai';
 
@@ -133,15 +133,15 @@ import { isMessageFrame } from './schema';
 // `drainSteerMessages` (loop.ts) can ever produce for one of these. ----
 
 interface SteerMessageBuilder {
-  message: NimboUIMessage;
+  message: RunkoUIMessage;
   openText: Map<string, TextUIPart>;
 }
 
 function startSteerMessage(
   messageId: string,
-  metadata: NimboMessageMetadata | undefined,
+  metadata: RunkoMessageMetadata | undefined,
 ): SteerMessageBuilder {
-  const message: NimboUIMessage = { id: messageId, role: 'user', parts: [] };
+  const message: RunkoUIMessage = { id: messageId, role: 'user', parts: [] };
   if (metadata !== undefined) {
     message.metadata = metadata;
   }
@@ -150,7 +150,7 @@ function startSteerMessage(
 
 function applySteerChunk(
   builder: SteerMessageBuilder,
-  chunk: NimboChunk,
+  chunk: RunkoChunk,
 ): void {
   switch (chunk.type) {
     case 'text-start': {
@@ -187,8 +187,8 @@ function applySteerChunk(
   }
 }
 
-export type MessageLedgerListener = (messages: NimboUIMessage[]) => void;
-export type TurnEndListener = (metadata: NimboMessageMetadata) => void;
+export type MessageLedgerListener = (messages: RunkoUIMessage[]) => void;
+export type TurnEndListener = (metadata: RunkoMessageMetadata) => void;
 /**
  * Fires exactly when a `role === 'user'` `MessageFrame` is applied — today
  * that's *only* ever the turn-start synthesized user message
@@ -211,14 +211,14 @@ export class MessageLedger {
   private readonly order: string[] = [];
   /** `order` 的成员集（O(1) 判重）——`order` 会长到几百条，每次占位都线性扫一遍不划算。 */
   private readonly ordered = new Set<string>();
-  private readonly byId = new Map<string, NimboUIMessage>();
+  private readonly byId = new Map<string, RunkoUIMessage>();
   private openController:
-    ReadableStreamDefaultController<NimboChunk> | undefined;
+    ReadableStreamDefaultController<RunkoChunk> | undefined;
   private steerBuilder: SteerMessageBuilder | undefined;
   /** Set synchronously the instant a non-steer `start` chunk is seen — never derived from `consume()`'s (asynchronous) `upsert()` calls. See file header, "P13-5-5 fix". */
   private lastAssistantId: string | undefined;
   /** Standalone `message-metadata` waiting to be merged onto `lastAssistantId`'s message — merged lazily in `snapshot()`, never written directly into `byId`. See file header, "P13-5-5 fix" part 2. */
-  private readonly pendingMetadata = new Map<string, NimboMessageMetadata>();
+  private readonly pendingMetadata = new Map<string, RunkoMessageMetadata>();
   private placeholderCount = 0;
   private readonly onChange: MessageLedgerListener;
   private readonly onTurnEnd: TurnEndListener | undefined;
@@ -246,7 +246,7 @@ export class MessageLedger {
     this.applyChunk(frame.chunk);
   }
 
-  private applyChunk(chunk: NimboChunk): void {
+  private applyChunk(chunk: RunkoChunk): void {
     if (chunk.type === 'start') {
       this.closeOpenMessage(); // defensive: a prior unfinished stream (shouldn't happen, loop.ts's boundaries are always paired) is closed rather than leaked.
       if (
@@ -270,12 +270,12 @@ export class MessageLedger {
           // `start` chunk 已经带着 messageId，而它是**同步**到达的。
           this.ensureOrder(chunk.messageId);
         }
-        const stream = new ReadableStream<NimboChunk>({
+        const stream = new ReadableStream<RunkoChunk>({
           start: (controller) => {
             this.openController = controller;
           },
         });
-        void this.consume(readUIMessageStream<NimboUIMessage>({ stream }));
+        void this.consume(readUIMessageStream<RunkoUIMessage>({ stream }));
       }
     }
 
@@ -289,7 +289,7 @@ export class MessageLedger {
     }
 
     if (this.openController === undefined) {
-      // No message currently open — the only chunk `@nimbo/core`'s loop ever
+      // No message currently open — the only chunk `@runko/core`'s loop ever
       // produces outside a start/finish window (see file header).
       if (chunk.type === 'message-metadata') {
         this.applyStandaloneMetadata(chunk.messageMetadata);
@@ -309,14 +309,14 @@ export class MessageLedger {
   }
 
   private async consume(
-    iterable: AsyncIterable<NimboUIMessage>,
+    iterable: AsyncIterable<RunkoUIMessage>,
   ): Promise<void> {
     for await (const message of iterable) {
       this.upsert(message);
     }
   }
 
-  private applyStandaloneMetadata(metadata: NimboMessageMetadata): void {
+  private applyStandaloneMetadata(metadata: RunkoMessageMetadata): void {
     if (this.lastAssistantId === undefined) {
       // No assistant message has ever started this session (a turn failing
       // before its first step ever ran) — nothing to merge onto, ever;
@@ -366,7 +366,7 @@ export class MessageLedger {
     this.order.push(id);
   }
 
-  private upsert(message: NimboUIMessage): void {
+  private upsert(message: RunkoUIMessage): void {
     this.ensureOrder(message.id);
     this.byId.set(message.id, message);
     this.notifyChange();
@@ -376,7 +376,7 @@ export class MessageLedger {
     this.onChange(this.snapshot());
   }
 
-  private snapshot(): NimboUIMessage[] {
+  private snapshot(): RunkoUIMessage[] {
     return this.order.flatMap((id) => {
       const message = this.byId.get(id);
       // 占了位、内容还没物化出来（`ensureOrder` 在 `start` chunk 就占位，而
@@ -390,7 +390,7 @@ export class MessageLedger {
       if (pending === undefined) {
         return [message];
       }
-      const mergedMetadata: NimboMessageMetadata =
+      const mergedMetadata: RunkoMessageMetadata =
         message.metadata === undefined ?
           pending
         : { ...message.metadata, ...pending };

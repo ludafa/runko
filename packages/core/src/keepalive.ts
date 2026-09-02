@@ -4,7 +4,7 @@
  *
  * **这个文件是一件工具，不是 core 的行为。** `session.ts` 不 import 它、不调它、
  * 也不知道它存在——core 侧依然零定时器零保活策略（见 `types.ts` 的
- * `NimboActivityAware`）。只有[沙盒适配器](../../../docs/terms.md)会显式
+ * `RunkoActivityAware`）。只有[沙盒适配器](../../../docs/terms.md)会显式
  * `createKeepAlive(...)` 把它造出来，造出来之后定时器归适配器所有。
  *
  * 放在 core 而不是各适配器包里，是因为 E2B 与 Vercel 的闸门逻辑逐行相同，两份拷贝
@@ -63,7 +63,7 @@ export interface KeepAliveDriver {
 }
 
 export interface KeepAlive {
-  /** 接 core 的[活动信号](../../../docs/terms.md)。同步、不抛错——契约见 `NimboActivityAware`。 */
+  /** 接 core 的[活动信号](../../../docs/terms.md)。同步、不抛错——契约见 `RunkoActivityAware`。 */
   onActivity(signal: ActivitySignal): void;
   /** 手动补足一次。宿主在轮之外用（起轮前、审批路由等），**不受[单轮保活上限](../../../docs/terms.md)约束**。 */
   keepAlive(targetMs: number): Promise<void>;

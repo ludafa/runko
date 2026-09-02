@@ -1,11 +1,11 @@
 /**
- * `@nimbo/sandbox-cloudflare` 网关协议（tech-spec 见 docs/tech/sandbox.md
+ * `@runko/sandbox-cloudflare` 网关协议（tech-spec 见 docs/tech/sandbox.md
  * §8.3）：`.`（客户端）与 `./worker`（网关）两端共用同一份 zod schema——schema 是
  * wire 契约的唯一事实来源，两端各自 `parse()` 校验后再消费，任何一端改了字段形状
  * 都会在另一端的 parse() 上炸出来，而不是悄悄读到 `undefined`。
  *
  * 全部端点 `POST` + JSON body；鉴权 `Authorization: Bearer <token>`；沙盒选择
- * `x-nimbo-sandbox: <id>`（缺省 `"default"`）；二进制经 base64；错误响应统一
+ * `x-runko-sandbox: <id>`（缺省 `"default"`）；二进制经 base64；错误响应统一
  * `{ code, message }` 形状（`errorBodySchema`），配对应 HTTP 状态码。
  */
 import { z } from "zod";
@@ -23,7 +23,7 @@ export const ENDPOINTS = {
 } as const;
 
 export const AUTH_HEADER = "authorization";
-export const SANDBOX_ID_HEADER = "x-nimbo-sandbox";
+export const SANDBOX_ID_HEADER = "x-runko-sandbox";
 export const DEFAULT_SANDBOX_ID = "default";
 
 // ---- /fs/read ----
@@ -58,7 +58,7 @@ export type MkdirRequest = z.infer<typeof mkdirRequestSchema>;
 export const readdirRequestSchema = z.object({ path: z.string() });
 export type ReaddirRequest = z.infer<typeof readdirRequestSchema>;
 
-/** `NimboFS.FileStat.type` 的沙盒子集——沙盒工作区没有 reference 条目（§3.1），但
+/** `RunkoFS.FileStat.type` 的沙盒子集——沙盒工作区没有 reference 条目（§3.1），但
  * 该字面量仍保留在 wire 类型里，让客户端可以直接复用 core 的 `DirEntry`/`FileStat`
  * 类型而不必再窄化一次。 */
 export const entryTypeSchema = z.enum(["file", "dir", "reference"]);

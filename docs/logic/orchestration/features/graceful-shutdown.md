@@ -4,7 +4,7 @@ slug: graceful-shutdown
 view: 功能
 layer: 逻辑层
 module: 轮编排
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["优雅关闭", "崩溃恢复", "交权", "SIGTERM"]
 related: ["logic/orchestration/plans/graceful-shutdown.md", "logic/orchestration/tech/graceful-shutdown.md", "architecture/tech/agent-kernel.md"]
 ---

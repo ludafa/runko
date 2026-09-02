@@ -90,7 +90,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
               to="/"
               className="flex items-baseline gap-1.5 font-mono text-sm"
             >
-              <span className="font-medium">nimbo</span>
+              <span className="font-medium">runko</span>
               <span className="text-muted-foreground/50">/</span>
               <span className="text-muted-foreground">chat</span>
             </Link>

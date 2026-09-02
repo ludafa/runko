@@ -13,8 +13,8 @@ import type {
   FileStat,
   HumanDecision,
   JsonValue,
-  NimboExec,
-  NimboFS,
+  RunkoExec,
+  RunkoFS,
   Tool,
   ToolContext,
 } from "../src/types.js";
@@ -134,9 +134,9 @@ describe("jsonValueSchema", () => {
   });
 });
 
-describe("NimboFS / NimboExec / Tool / ToolContext shapes", () => {
-  it("accepts a minimal conforming NimboFS implementation", () => {
-    const fs: NimboFS = {
+describe("RunkoFS / RunkoExec / Tool / ToolContext shapes", () => {
+  it("accepts a minimal conforming RunkoFS implementation", () => {
+    const fs: RunkoFS = {
       readFile: async () => new Uint8Array(),
       writeFile: async () => {},
       rm: async () => {},
@@ -148,8 +148,8 @@ describe("NimboFS / NimboExec / Tool / ToolContext shapes", () => {
     expect(typeof fs.readFile).toBe("function");
   });
 
-  it("accepts a minimal conforming NimboExec implementation", () => {
-    const exec: NimboExec = {
+  it("accepts a minimal conforming RunkoExec implementation", () => {
+    const exec: RunkoExec = {
       exec: async (): Promise<ExecResult> => ({ exitCode: 0, stdout: "", stderr: "", durationMs: 0 }),
       defaultApproval: "review",
     };
@@ -157,7 +157,7 @@ describe("NimboFS / NimboExec / Tool / ToolContext shapes", () => {
   });
 
   it("accepts a minimal conforming Tool + ToolContext pair", async () => {
-    const fs: NimboFS = {
+    const fs: RunkoFS = {
       readFile: async () => new Uint8Array(),
       writeFile: async () => {},
       rm: async () => {},
@@ -183,8 +183,8 @@ describe("NimboFS / NimboExec / Tool / ToolContext shapes", () => {
     expect(await tool.execute("hi", ctx)).toBe("hi");
   });
 
-  it("accepts a NimboFS implementation that also implements the optional searchFiles/searchContent seam (docs/tech/sandbox.md §4)", async () => {
-    const fs: NimboFS = {
+  it("accepts a RunkoFS implementation that also implements the optional searchFiles/searchContent seam (docs/tech/sandbox.md §4)", async () => {
+    const fs: RunkoFS = {
       readFile: async () => new Uint8Array(),
       writeFile: async () => {},
       rm: async () => {},
@@ -204,7 +204,7 @@ describe("NimboFS / NimboExec / Tool / ToolContext shapes", () => {
   });
 });
 
-describe("FileSearchQuery / FileSearchResult (NimboFS.searchFiles, docs/tech/sandbox.md §4)", () => {
+describe("FileSearchQuery / FileSearchResult (RunkoFS.searchFiles, docs/tech/sandbox.md §4)", () => {
   it("requires pattern + limit; ignore is optional", () => {
     const withoutIgnore: FileSearchQuery = { pattern: "/app/**", limit: 1000 };
     const withIgnore: FileSearchQuery = { pattern: "/app/**", ignore: ["**/.git", "**/node_modules"], limit: 1000 };
@@ -224,7 +224,7 @@ describe("FileSearchQuery / FileSearchResult (NimboFS.searchFiles, docs/tech/san
   });
 });
 
-describe("ContentSearchQuery / ContentSearchResult (NimboFS.searchContent, docs/tech/sandbox.md §4)", () => {
+describe("ContentSearchQuery / ContentSearchResult (RunkoFS.searchContent, docs/tech/sandbox.md §4)", () => {
   it("requires pattern/scope/mode/maxFiles/maxLines; ignoreCase/ignore/context are optional", () => {
     const minimal: ContentSearchQuery = { pattern: "TODO", scope: "/**", mode: "files", maxFiles: 100, maxLines: 500 };
     expect(minimal.ignoreCase).toBeUndefined();

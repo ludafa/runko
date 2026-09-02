@@ -1,19 +1,19 @@
 /**
- * 一对假的 `stream()`/`toJSON()`（`@nimbo/agent` 的 `DrivenSession`），塞给运行时的
+ * 一对假的 `stream()`/`toJSON()`（`@runko/agent` 的 `DrivenSession`），塞给运行时的
  * `sessionFactory`——于是整条轮编排链路（起轮 → 装配 → 驱动 → 收尾 → [出队](../../../../docs/terms.md)）
  * 可以在**零模型**下跑完，而且测试能精确控制每个 chunk 什么时候到、这一轮怎么结束。
  *
  * 取代了迁移前的 `controllable-session.ts`：那时测试直接调 `startTurn(session, …)` 把
  * session 递进去；现在 session 由框架自己造，所以接缝挪到了工厂上。
  */
-import type { DrivenSession, SessionFactory } from '@nimbo/agent';
+import type { DrivenSession, SessionFactory } from '@runko/agent';
 import type {
-  NimboChunk,
-  NimboUIMessage,
+  RunkoChunk,
+  RunkoUIMessage,
   SessionOptions,
   SessionState,
   TurnResult,
-} from '@nimbo/core';
+} from '@runko/core';
 
 const EMPTY_RESULT: TurnResult = { finalResponse: '', usage: {} };
 
@@ -26,8 +26,8 @@ export interface FakeTurnSession extends DrivenSession {
   readonly onReview: SessionOptions['onReview'];
   /** 框架装配好的工具表——用来断言 `ask-user`/`web-search` 有没有注册上。 */
   readonly tools: Record<string, unknown>;
-  emit(chunk: NimboChunk): void;
-  push(message: NimboUIMessage): void;
+  emit(chunk: RunkoChunk): void;
+  push(message: RunkoUIMessage): void;
   finish(result?: TurnResult): void;
   fail(error: Error): void;
 }
@@ -37,13 +37,13 @@ function createFakeTurnSession(
   tools: Record<string, unknown>,
 ): FakeTurnSession {
   const resume = options.resume;
-  const messages: NimboUIMessage[] =
+  const messages: RunkoUIMessage[] =
     resume === undefined ? [] : [...resume.messages];
   const id = resume?.id ?? 'fake-session';
   const createdAt = resume?.createdAt ?? Date.now();
   let turn = resume?.turn ?? 0;
 
-  const queued: NimboChunk[] = [];
+  const queued: RunkoChunk[] = [];
   let finished = false;
   let failure: Error | undefined;
   let result: TurnResult = EMPTY_RESULT;
@@ -70,7 +70,7 @@ function createFakeTurnSession(
   async function* stream(
     input: string,
     opts?: { signal?: AbortSignal },
-  ): AsyncGenerator<NimboChunk, TurnResult> {
+  ): AsyncGenerator<RunkoChunk, TurnResult> {
     active = true;
     signal = opts?.signal;
     turn += 1;
@@ -125,11 +125,11 @@ function createFakeTurnSession(
       });
       return true;
     },
-    emit(chunk: NimboChunk): void {
+    emit(chunk: RunkoChunk): void {
       queued.push(chunk);
       bump();
     },
-    push(message: NimboUIMessage): void {
+    push(message: RunkoUIMessage): void {
       messages.push(message);
     },
     finish(next?: TurnResult): void {

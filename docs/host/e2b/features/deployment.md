@@ -4,7 +4,7 @@ slug: deployment
 view: 功能
 layer: 宿主层
 module: 沙盒
-packages: ["@nimbo/sandbox-e2b"]
+packages: ["@runko/sandbox-e2b"]
 tags: ["E2B", "沙盒", "休眠", "唤醒", "重连令牌", "沙盒模板"]
 related: ["host/e2b/tech/deployment.md", "host/contract/features/sandbox.md", "host/contract/features/sandbox-provider.md"]
 ---
@@ -48,7 +48,7 @@ flowchart LR
 模板构建是**每个 E2B team 一次性**的操作，幂等：
 
 ```sh
-pnpm --filter @nimbo-chat/node-server e2b:template
+pnpm --filter @runko-chat/node-server e2b:template
 ```
 
 ## 4. 为什么必须自建模板
@@ -57,7 +57,7 @@ E2B 的 **CPU 和内存只能在构建模板时定死**——建盒时的选项�
 
 而 E2B 自带的 `base` 模板是 2 vCPU / **512 MiB**，跑 `npm install` 会被 OOM 杀掉。
 
-所以我们用**同一个 base 镜像**（盒内环境零变化）以 1024 MiB 重新构建一个叫 `nimbo-chat-base` 的模板。
+所以我们用**同一个 base 镜像**（盒内环境零变化）以 1024 MiB 重新构建一个叫 `runko-chat-base` 的模板。
 
 **逃生门**：模板还没构建好的时候，设 `E2B_TEMPLATE=base` 可以退回自带模板（内存回到 512 MiB）。
 

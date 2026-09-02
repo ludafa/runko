@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { convertTool, convertTools } from "../../src/model/convert.js";
-import type { Tool as NimboTool } from "../../src/types.js";
+import type { Tool as RunkoTool } from "../../src/types.js";
 
-function makeNimboTool(overrides: Partial<NimboTool> = {}): NimboTool {
+function makeRunkoTool(overrides: Partial<RunkoTool> = {}): RunkoTool {
   return {
     description: "reads a file",
     inputSchema: z.object({ path: z.string() }),
@@ -15,24 +15,24 @@ function makeNimboTool(overrides: Partial<NimboTool> = {}): NimboTool {
 describe("convertTool", () => {
   it("passes description and inputSchema through by identity", () => {
     const inputSchema = z.object({ query: z.string() });
-    const nimboTool = makeNimboTool({ description: "search", inputSchema });
+    const runkoTool = makeRunkoTool({ description: "search", inputSchema });
 
-    const aiTool = convertTool(nimboTool);
+    const aiTool = convertTool(runkoTool);
 
     expect(aiTool.description).toBe("search");
     expect(aiTool.inputSchema).toBe(inputSchema);
   });
 
   it("omits execute on the returned AI SDK tool object (manual loop control point)", () => {
-    const aiTool = convertTool(makeNimboTool());
+    const aiTool = convertTool(makeRunkoTool());
 
     expect("execute" in aiTool).toBe(false);
     expect(aiTool.execute).toBeUndefined();
   });
 
-  it("does not carry over outputSchema/approval — those are nimbo-only concerns", () => {
+  it("does not carry over outputSchema/approval — those are runko-only concerns", () => {
     const aiTool = convertTool(
-      makeNimboTool({ outputSchema: z.string(), approval: "review" }),
+      makeRunkoTool({ outputSchema: z.string(), approval: "review" }),
     );
 
     expect("outputSchema" in aiTool).toBe(false);
@@ -50,8 +50,8 @@ describe("convertTools", () => {
     const searchSchema = z.object({ query: z.string() });
 
     const toolSet = convertTools({
-      "read-file": makeNimboTool({ description: "read", inputSchema: readSchema }),
-      search: makeNimboTool({ description: "search", inputSchema: searchSchema }),
+      "read-file": makeRunkoTool({ description: "read", inputSchema: readSchema }),
+      search: makeRunkoTool({ description: "search", inputSchema: searchSchema }),
     });
 
     expect(Object.keys(toolSet).sort()).toEqual(["read-file", "search"]);

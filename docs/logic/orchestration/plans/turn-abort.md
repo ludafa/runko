@@ -4,7 +4,7 @@ slug: turn-abort
 view: 施工
 layer: 逻辑层
 module: 轮编排
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["中断", "停止本轮", "收尾"]
 related: ["logic/orchestration/features/turn-abort.md", "logic/orchestration/tech/turn-abort.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -48,9 +48,9 @@ related: ["logic/orchestration/features/turn-abort.md", "logic/orchestration/tec
 ### 第二批验证结论（2026-07-27）
 
 ```bash
-pnpm --filter @nimbo-chat/node-server test        # 466 passed / 469（3 个失败与本批无关，见偏差 4）
-pnpm --filter @nimbo-chat/node-server typecheck   # 干净
-pnpm --filter @nimbo-chat/web test                # 249 全绿
+pnpm --filter @runko-chat/node-server test        # 466 passed / 469（3 个失败与本批无关，见偏差 4）
+pnpm --filter @runko-chat/node-server typecheck   # 干净
+pnpm --filter @runko-chat/web test                # 249 全绿
 ```
 
 新增用例 12 条，逐条对应产品文档 §4 的成功标准 8–12：
@@ -134,7 +134,7 @@ pnpm --filter @nimbo-chat/web test                # 249 全绿
 
 - `packages/core/src/loop.ts`：`runTurn` for 循环开头 `if (abortSignal.aborted)` → `finalizeTurn({ status: statusForError(error), error: { code: 'aborted', … } })` + `return`。见 [tech §2](../tech/turn-abort.md)。
 - 产出：`packages/core/test/` 下一条用例——已 abort 的 signal 传进 `stream()`，断言「零次模型调用 + 收尾 metadata 为 `interrupted`」。
-- changeset：`@nimbo/core` `patch`（不动 API，只让既有 `TurnOptions.signal` 的停止时机确定化）。
+- changeset：`@runko/core` `patch`（不动 API，只让既有 `TurnOptions.signal` 的停止时机确定化）。
 
 ### A2 server：turn-runner
 
@@ -174,11 +174,11 @@ pnpm --filter @nimbo-chat/web test                # 249 全绿
 
 ```bash
 pnpm build && pnpm typecheck && pnpm test          # packages/*：core 418 项全绿（含新增的 abort step 边界用例）
-pnpm --filter @nimbo-chat/node-server test         # 370 全绿（含 turn-runner 的 abortTurn 组 + 路由的 POST .../abort 组）
-pnpm --filter @nimbo-chat/node-server typecheck    # 干净
-pnpm --filter @nimbo-chat/web test                 # 233 全绿（含 hook 的停止组、composer 的停止键、时间线的「已停止」标记）
-pnpm --filter @nimbo-chat/web typecheck            # 干净
-pnpm --filter @nimbo-chat/web lint                 # 干净（node-server 的 lint 见上「偏差」第 5 条）
+pnpm --filter @runko-chat/node-server test         # 370 全绿（含 turn-runner 的 abortTurn 组 + 路由的 POST .../abort 组）
+pnpm --filter @runko-chat/node-server typecheck    # 干净
+pnpm --filter @runko-chat/web test                 # 233 全绿（含 hook 的停止组、composer 的停止键、时间线的「已停止」标记）
+pnpm --filter @runko-chat/web typecheck            # 干净
+pnpm --filter @runko-chat/web lint                 # 干净（node-server 的 lint 见上「偏差」第 5 条）
 ```
 
 自动化覆盖到的成功标准：§4 的 1（收尾状态 interrupted + 无第二次模型调用，`routes/chat.test.ts` 真链路用例）、2（落盘形态：消息留存 + chunk 行 GC）、3（队列清空且不自动出队）、4（挂起审批被就地拒绝）、6（幂等）。真机只需覆盖 5、7 与观感。
@@ -209,8 +209,8 @@ pnpm --filter @nimbo-chat/web lint                 # 干净（node-server 的 li
 
 1. **`onTurnSettled` 没加 `aborted` 标志**（原 A2 计划里有过这个想法，施工时否决）：停止时清空[待发队列](../../../terms.md)的动作放在路由里、**先于** `abortTurn`，于是收尾时队列必然已空、自动[出队](../../../terms.md)自然无事可做——不需要跨模块多传一个状态。理由与被否决的方案见 [tech §3.2](../tech/turn-abort.md)。
 2. **`abortTurn` 多了「停止后新来的审批请求也立即拒绝」这一条**（计划里只写了「结掉已挂起的」）：`loop.ts` 的 `mergeSettleStreams` 让一步内的多个工具调用**并发**结算，所以停止的那一瞬间可能还有别的调用正要请求审批。只结已挂起的会让它们各自挂到 240 秒超时，把「停止」拖成「四分钟后停止」。`ActiveTurn.aborted` 因此同时充当这个闸门。
-3. **`TurnFailedBar` 的 `aborted` 分支改成中性 Alert**（计划里写的是「改标题文案」，实际连形态一起改了）：那条 bar 原本四种 `NimboError.code` 一律 destructive，但 `aborted` 是用户自己按的，不是故障；同时不再显示 core 那句英文 `message`（给日志看的），换成固定中文文案。
+3. **`TurnFailedBar` 的 `aborted` 分支改成中性 Alert**（计划里写的是「改标题文案」，实际连形态一起改了）：那条 bar 原本四种 `RunkoError.code` 一律 destructive，但 `aborted` 是用户自己按的，不是故障；同时不再显示 core 那句英文 `message`（给日志看的），换成固定中文文案。
 4. **顺带修掉一条过时的测试注释**：`packages/core/test/loop.test.ts` 里 abort 用例带着「已发现 src 缺陷、此断言当前会失败」的注释（账本残留一条孤儿占位 assistant 消息），实际早已被后来的 `ledgerLengthBeforeStep` 修复解决——本期新加的用例顺带钉住了「恰好一条 assistant 消息承接 metadata」这条不变量。注释未删（不属本期范围），仅在此备注。
 5. **契约重生成只跑了两步、没跑整个 `chat:bootstrap`**：本期没有 DB 改动，所以只跑 `generate:openapi` + web 的 `generate:api`，跳过 `db:generate`/`db:migrate`（跑它们只会凭空生成一份空迁移）。
 6. **顺带补了两处计划外的覆盖**：`api.test.ts` 加了 `postAbortTurn` 的两条（请求形状 + 409 带 status），`fixtures/design-preview-data.ts` 加了一组「已停止」样例并挂进[设计工作台](../../../terms.md)——那个页面的职责就是「每一档界面状态都在同一屏」，新增一档状态不挂上去等于让它失效。
-7. **`@nimbo-chat/node-server` 的 `lint` 本就不绿**：`test/agent/uimessage-single-ledger.test.ts` 有 11 个既有 `no-unused-vars` 错误（一批只当类型用的 zod schema），与本期无关、未在本期修。本期新增/改动的文件本身 lint 干净。
+7. **`@runko-chat/node-server` 的 `lint` 本就不绿**：`test/agent/uimessage-single-ledger.test.ts` 有 11 个既有 `no-unused-vars` 错误（一批只当类型用的 zod schema），与本期无关、未在本期修。本期新增/改动的文件本身 lint 干净。

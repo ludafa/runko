@@ -20,7 +20,7 @@ const CONVERSATION_ID = 'conv-1';
 const TITLE = '给博客站换主题';
 
 /**
- * 直接往[待发队列](../../../../docs/terms.md)那一列塞一条——形状是 `@nimbo/agent` 的
+ * 直接往[待发队列](../../../../docs/terms.md)那一列塞一条——形状是 `@runko/agent` 的
  * `QueuedInput`（`persistence.ts` 的 `parseQueuedInputs` 读的就是它）。这里刻意不经
  * runtime：本文件测的是通知的抑制规则，不该为此拉起一整个轮编排。
  */
@@ -78,8 +78,8 @@ describe('push/notifier', () => {
       userId: 'user-1',
       title: TITLE,
       repo: 'acme/demo',
-      branchName: 'nimbo/chat-conv-1',
-      sandboxName: 'nimbo-chat-conv-1',
+      branchName: 'runko/chat-conv-1',
+      sandboxName: 'runko-chat-conv-1',
     });
     upsertSubscription(db, {
       endpoint: 'https://a.example/1',

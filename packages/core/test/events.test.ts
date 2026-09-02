@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { nimboMessageMetadataSchema } from "../src/state.js";
-import type { NimboChunk, NimboDataParts, NimboMessageMetadata } from "../src/state.js";
-import type { NimboError, Usage } from "../src/events.js";
+import { runkoMessageMetadataSchema } from "../src/state.js";
+import type { RunkoChunk, RunkoDataParts, RunkoMessageMetadata } from "../src/state.js";
+import type { RunkoError, Usage } from "../src/events.js";
 
 /**
  * 编译期穷尽性断言（docs/tech/single-ledger.md §5 单-2 工单原文
- * "改写为对 NimboChunk/NimboDataParts/NimboMessageMetadata 的等价穷尽性检查，
+ * "改写为对 RunkoChunk/RunkoDataParts/RunkoMessageMetadata 的等价穷尽性检查，
  * 保持漏成员编译即炸的防线精神"）：只要下面任一 switch 漏了一个变体，
  * default 分支里的实参类型就不再是 never，`pnpm typecheck` 直接编译失败。
  */
@@ -13,8 +13,8 @@ function assertNever(x: never): never {
   throw new Error(`unreachable variant: ${JSON.stringify(x)}`);
 }
 
-/** 穷尽 `NimboChunk`（ai 的 `UIMessageChunk` 词汇表，对 `NimboUIMessage` 实例化）的全部 32 个 `type` 判别值（含 chat 可观测性新增的 `data-tool-timing`）。 */
-function describeChunk(chunk: NimboChunk): string {
+/** 穷尽 `RunkoChunk`（ai 的 `UIMessageChunk` 词汇表，对 `RunkoUIMessage` 实例化）的全部 32 个 `type` 判别值（含 chat 可观测性新增的 `data-tool-timing`）。 */
+function describeChunk(chunk: RunkoChunk): string {
   switch (chunk.type) {
     case "text-start":
       return `text-start:${chunk.id}`;
@@ -85,9 +85,9 @@ function describeChunk(chunk: NimboChunk): string {
   }
 }
 
-describe("NimboChunk", () => {
+describe("RunkoChunk", () => {
   it("covers all 31 UIMessageChunk variants exhaustively (docs/tech/single-ledger.md §5-2)", () => {
-    const chunks: NimboChunk[] = [
+    const chunks: RunkoChunk[] = [
       { type: "text-start", id: "t1" },
       { type: "text-delta", id: "t1", delta: "hi" },
       { type: "text-end", id: "t1" },
@@ -165,11 +165,11 @@ describe("NimboChunk", () => {
 });
 
 /**
- * 穷尽 `NimboDataParts` 的全部五个 data 部件名（docs/tech/single-ledger.md
+ * 穷尽 `RunkoDataParts` 的全部五个 data 部件名（docs/tech/single-ledger.md
  * §2.2b：`tool-progress` 是 transient；`tool-timing` 是 chat 可观测性新增的
  * **持久**部件，与 `tool-progress` 相反——见 state.ts 头注释）。
  */
-function describeDataPartName(name: keyof NimboDataParts): string {
+function describeDataPartName(name: keyof RunkoDataParts): string {
   switch (name) {
     case "file-change":
       return "file-change";
@@ -186,22 +186,22 @@ function describeDataPartName(name: keyof NimboDataParts): string {
   }
 }
 
-describe("NimboDataParts", () => {
+describe("RunkoDataParts", () => {
   it("covers all five data part names exhaustively", () => {
-    const names: (keyof NimboDataParts)[] = ["file-change", "plan-update", "error", "tool-progress", "tool-timing"];
+    const names: (keyof RunkoDataParts)[] = ["file-change", "plan-update", "error", "tool-progress", "tool-timing"];
     expect(names.map(describeDataPartName)).toEqual(["file-change", "plan-update", "error", "tool-progress", "tool-timing"]);
   });
 });
 
 /**
- * 穷尽 `NimboMessageMetadata.status` 的四态（`interrupted` 对应 `NimboError.code === "aborted"`，
+ * 穷尽 `RunkoMessageMetadata.status` 的四态（`interrupted` 对应 `RunkoError.code === "aborted"`，
  * loop.ts 的 `statusForError`）。
  *
  * `suspended` 目前**只有类型、没有产出方**——它是[挂起](../../../docs/architecture/tech/agent-kernel.md)
  * 的收尾态，等 K3 落地才会真的被写出来（`finalizeTurn` 的 `status` 参数至今仍是三值联合）。
  * 先进联合类型是为了让宿主/界面提前占好渲染分支。这条穷尽性测试保证它别被遗漏。
  */
-function describeStatus(status: NonNullable<NimboMessageMetadata["status"]>): string {
+function describeStatus(status: NonNullable<RunkoMessageMetadata["status"]>): string {
   switch (status) {
     case "completed":
       return "completed";
@@ -216,9 +216,9 @@ function describeStatus(status: NonNullable<NimboMessageMetadata["status"]>): st
   }
 }
 
-describe("NimboMessageMetadata.status", () => {
+describe("RunkoMessageMetadata.status", () => {
   it("covers completed/failed/interrupted/suspended exhaustively", () => {
-    const statuses: NonNullable<NimboMessageMetadata["status"]>[] = [
+    const statuses: NonNullable<RunkoMessageMetadata["status"]>[] = [
       "completed",
       "failed",
       "interrupted",
@@ -228,13 +228,13 @@ describe("NimboMessageMetadata.status", () => {
   });
 
   it("schema 也认 suspended（类型与 zod 两处不能漂）", () => {
-    expect(nimboMessageMetadataSchema.safeParse({ status: "suspended" }).success).toBe(true);
-    expect(nimboMessageMetadataSchema.safeParse({ status: "nope" }).success).toBe(false);
+    expect(runkoMessageMetadataSchema.safeParse({ status: "suspended" }).success).toBe(true);
+    expect(runkoMessageMetadataSchema.safeParse({ status: "nope" }).success).toBe(false);
   });
 });
 
-/** 穷尽 `NimboError.code` 的四个错误码。 */
-function describeErrorCode(code: NimboError["code"]): string {
+/** 穷尽 `RunkoError.code` 的四个错误码。 */
+function describeErrorCode(code: RunkoError["code"]): string {
   switch (code) {
     case "max_turns":
       return "max_turns";
@@ -249,9 +249,9 @@ function describeErrorCode(code: NimboError["code"]): string {
   }
 }
 
-describe("NimboError.code", () => {
+describe("RunkoError.code", () => {
   it("only allows the four defined error codes", () => {
-    const codes: NimboError["code"][] = ["max_turns", "context_overflow", "provider_error", "aborted"];
+    const codes: RunkoError["code"][] = ["max_turns", "context_overflow", "provider_error", "aborted"];
     expect(codes.map(describeErrorCode)).toEqual(["max_turns", "context_overflow", "provider_error", "aborted"]);
   });
 });

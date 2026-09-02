@@ -1,5 +1,5 @@
 {
-  "name": "@nimbo/agent",
+  "name": "@runko/agent",
   "version": "0.1.0",
   "description": "轮编排运行时：一轮接一轮地跑下去 —— 起/中断/收尾、待发队列、人在回路桥、崩溃恢复，外加四种宿主能力的接口与内置实现",
   "type": "module",
@@ -37,15 +37,15 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@nimbo/core": "workspace:*",
-    "@nimbo/virtual-fs": "workspace:*",
+    "@runko/core": "workspace:*",
+    "@runko/virtual-fs": "workspace:*",
     "zod": "catalog:"
   },
   "peerDependencies": {
     "ai": "^7"
   },
   "devDependencies": {
-    "@nimbo/conformance": "workspace:*",
+    "@runko/conformance": "workspace:*",
     "@types/node": "catalog:",
     "ai": "catalog:",
     "tsdown": "catalog:",

@@ -1,17 +1,17 @@
 ---
-title: "agent 内核包 `@nimbo/agent`（使用手册）"
+title: "agent 内核包 `@runko/agent`（使用手册）"
 slug: agent-kernel
 view: 功能
 layer: 总纲
 module: —
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["架构分层", "会话生命周期", "部署形态", "包拆分", "归属仲裁"]
 related: ["architecture/plans/agent-kernel.md", "architecture/tech/agent-kernel.md"]
 ---
-# agent 内核包 `@nimbo/agent`（使用手册）
+# agent 内核包 `@runko/agent`（使用手册）
 
 > 相关：[技术方案](../tech/agent-kernel.md)，[施工进展](../plans/agent-kernel.md)。
-> 设计讨论的完整记录在 [issue #2](https://github.com/ludafa/nimbo/issues/2)。
+> 设计讨论的完整记录在 [issue #2](https://github.com/ludafa/runko/issues/2)。
 > 依赖/延续：[core SDK](../../logic/engine/features/core-sdk.md)（本包建在它的 loop 之上）· [优雅关闭与崩溃恢复](../../logic/orchestration/features/graceful-shutdown.md)（[交权](../../terms.md)是它的推广）· [排队与插话](../../logic/orchestration/features/steer-and-queue.md)（那套机制从 chat 应用上移到本包）· [沙盒保活](../../logic/orchestration/features/sandbox-keepalive.md)（[等人状态](../../terms.md)的信号从这里发）。
 > 宿主层四样可替换能力各自展开：[沙盒](../../host/contract/features/sandbox.md) · [持久化](../../host/contract/features/persistence.md) · [流分发](../../host/contract/features/stream-fanout.md) · [归属仲裁机制](../../logic/arbitration/features/arbitration-impl.md)。
 
@@ -21,11 +21,11 @@ related: ["architecture/plans/agent-kernel.md", "architecture/tech/agent-kernel.
 
 ## 0. 一句话
 
-`@nimbo/core` 给的是「跑一轮」，`@nimbo/agent` 给的是「**一轮接一轮地跑下去，而且换个部署形态不用改业务代码**」。
+`@runko/core` 给的是「跑一轮」，`@runko/agent` 给的是「**一轮接一轮地跑下去，而且换个部署形态不用改业务代码**」。
 
 ## 1. 要解决的问题
 
-`@nimbo/core` 只解决「一次执行」：给它历史和工具，它调模型、跑工具、喂回去，跑完返回。**它不知道时间、进程、存储。**
+`@runko/core` 只解决「一次执行」：给它历史和工具，它调模型、跑工具、喂回去，跑完返回。**它不知道时间、进程、存储。**
 
 于是想拿它建真产品的人，要自己搭这四件事：
 
@@ -43,7 +43,7 @@ chat 应用把这四件事全写了一遍，绑死 SQLite、绑死单进程。**
 ### 2.1 光想试试：一条命令
 
 ```sh
-npx @nimbo/cli
+npx @runko/cli
 ```
 
 在当前目录起一个本机服务 + 自带前端，浏览器里就能让 agent 改这个项目的文件。**不用配数据库、不用申请沙盒账号。**
@@ -51,10 +51,10 @@ npx @nimbo/cli
 ### 2.2 嵌进自己的服务：零配置
 
 ```ts
-import { defineAgent } from "@nimbo/sdk";
-import { localExec } from "@nimbo/core";
-import { fromDirectory } from "@nimbo/virtual-fs";
-import { createAgentRuntime } from "@nimbo/agent";
+import { defineAgent } from "@runko/sdk";
+import { localExec } from "@runko/core";
+import { fromDirectory } from "@runko/virtual-fs";
+import { createAgentRuntime } from "@runko/agent";
 
 const agent = defineAgent({ model: "anthropic/claude-sonnet-5" });
 
@@ -142,12 +142,12 @@ app.post("/conversations/:id/messages", async (c) => {
 ### 4.1 ⓪ 本机 CLI
 
 ```sh
-npx @nimbo/cli                          # 在当前目录干活
-npx @nimbo/cli --workspace ./my-project # 指定目录
-npx @nimbo/cli --port 4000
+npx @runko/cli                          # 在当前目录干活
+npx @runko/cli --workspace ./my-project # 指定目录
+npx @runko/cli --port 4000
 ```
 
-**装它一个就够**，`fromDirectory` + `localExec` 已经配好，历史落在 `./.nimbo/nimbo.db`。
+**装它一个就够**，`fromDirectory` + `localExec` 已经配好，历史落在 `./.runko/runko.db`。
 
 **没有隔离**——agent 能改本机任何文件、跑任何命令，跟 Claude Code 同一个模型。适合个人自用与受信环境，**不适合多租户服务**。
 
@@ -157,10 +157,10 @@ Node cluster 的 worker **不共享内存**，所以这一档已经需要真正�
 
 ```ts
 import Database from "better-sqlite3";
-import { sqlPersistence } from "@nimbo/persist-sql";
+import { sqlPersistence } from "@runko/persist-sql";
 
 const persistence = sqlPersistence({
-  driver: new Database("./nimbo.db"),   // 传裸驱动，框架不要求你用某个 ORM
+  driver: new Database("./runko.db"),   // 传裸驱动，框架不要求你用某个 ORM
   dialect: "sqlite",
 });
 
@@ -184,8 +184,8 @@ const runtime = createAgentRuntime(agent, {
 
 ```ts
 import { Pool } from "pg";
-import { sqlPersistence } from "@nimbo/persist-sql";
-import { e2bWorkspace } from "@nimbo/sandbox-e2b";
+import { sqlPersistence } from "@runko/persist-sql";
+import { e2bWorkspace } from "@runko/sandbox-e2b";
 
 const persistence = sqlPersistence({
   driver: new Pool({ connectionString: process.env.DATABASE_URL }),
@@ -193,7 +193,7 @@ const persistence = sqlPersistence({
 });
 
 const runtime = createAgentRuntime(agent, {
-  workspace: e2bWorkspace({ template: "nimbo-node", apiKey: process.env.E2B_API_KEY! }),
+  workspace: e2bWorkspace({ template: "runko-node", apiKey: process.env.E2B_API_KEY! }),
   persistence,
   arbitration: persistence.lease({
     holder: `${process.env.POD_IP}:${PORT}`,   // k8s 填 pod IP，docker 填容器可达地址
@@ -208,15 +208,15 @@ const runtime = createAgentRuntime(agent, {
 不想在应用里出现第二套数据访问方式，就换一条腿——**只有构造持久化那一行不同，其余全一样**：
 
 ```ts
-import { drizzlePersistence } from "@nimbo/persist-drizzle";
+import { drizzlePersistence } from "@runko/persist-drizzle";
 const persistence = drizzlePersistence(db, { provider: "pg" });
 
 // 或
-import { prismaPersistence } from "@nimbo/persist-prisma";
+import { prismaPersistence } from "@runko/persist-prisma";
 const persistence = prismaPersistence(prisma, { provider: "postgresql" });
 ```
 
-nimbo 的表会长在你自己的 schema 管理之下，跟着你的迁移一起走。
+runko 的表会长在你自己的 schema 管理之下，跟着你的迁移一起走。
 
 ### 4.5 ④a Cloudflare Durable Object
 
@@ -224,8 +224,8 @@ nimbo 的表会长在你自己的 schema 管理之下，跟着你的迁移一起
 
 ```ts
 import { DurableObject } from "cloudflare:workers";
-import { durableObjectBackend } from "@nimbo/durable-object";
-import { cloudflareWorkspace } from "@nimbo/sandbox-cloudflare";
+import { durableObjectBackend } from "@runko/durable-object";
+import { cloudflareWorkspace } from "@runko/sandbox-cloudflare";
 
 export class Conversation extends DurableObject<Env> {
   private runtime = createAgentRuntime(agent, {
@@ -251,7 +251,7 @@ export default {
 Vercel **不可寻址**——同一会话的两个请求可能落到不同实例，转发不了。拆开看只有一件事真需要找到持有者：**实时流**。所以用广播绕过：
 
 ```ts
-import { redisStream } from "@nimbo/stream-redis";
+import { redisStream } from "@runko/stream-redis";
 
 const runtime = createAgentRuntime(agent, {
   workspace: vercelWorkspace({ ... }),
@@ -364,7 +364,7 @@ agent 弹出审批卡片后：
 
 | 角色 | 是什么 | 干什么 |
 |---|---|---|
-| **[agent 构建者](../../terms.md)** | 拿 nimbo 建产品的**开发者**（人） | 做产品决策；写接入代码；把宿主配起来 |
+| **[agent 构建者](../../terms.md)** | 拿 runko 建产品的**开发者**（人） | 做产品决策；写接入代码；把宿主配起来 |
 | **[宿主](../../terms.md)** | 框架落地的**运行底座**（代码/环境） | 提供四样资源：沙盒、持久化、流分发、归属仲裁机制 |
 | **最终用户** | 跟 agent 对话的**人** | 发消息、点审批、看结果 |
 
@@ -378,9 +378,9 @@ agent 弹出审批卡片后：
 
 - 不提供用户 / 认证体系（构建者的事）
 - 不碰 HTTP——不提供路由、不提供 SSE 序列化、不假设 `node:http` 存在
-- 不提供沙盒（只消费 `NimboFS`/`NimboExec` 标准接口）
-- 不把 chat 应用的数据模型标准化成契约（标题、仓库、分支不归 nimbo）
-- 不要求用某个 ORM、不要求跑 nimbo 的迁移
+- 不提供沙盒（只消费 `RunkoFS`/`RunkoExec` 标准接口）
+- 不把 chat 应用的数据模型标准化成契约（标题、仓库、分支不归 runko）
+- 不要求用某个 ORM、不要求跑 runko 的迁移
 - 不支持纯无状态函数里「一轮跑很久」的场景
 
 **已知限制**：
@@ -391,9 +391,9 @@ agent 弹出审批卡片后：
 
 ## 10. 成功标准
 
-1. **零配置能跑**：不配任何外部件，`@nimbo/agent` 单独就能起会话、跑完一轮、再跑下一轮。
+1. **零配置能跑**：不配任何外部件，`@runko/agent` 单独就能起会话、跑完一轮、再跑下一轮。
 2. **换存储不改业务代码**：SQLite → Postgres 只换一个字符串和一个 driver。
 3. **换部署形态不改业务代码**：单进程 → 多进程只加 `arbitration` 一行。
 4. **等人不占机器**：审批挂起后那个节点能正常参与滚动发布并退出；人回来在别的节点恢复成功。
 5. **多节点下账本不交错**：失联节点恢复后的写入被明确拒绝，而不是静默混进账本。
-6. **`@nimbo/cli` 三十秒可用**：`npx` 一条命令起来，浏览器里能让 agent 改当前目录的文件。
+6. **`@runko/cli` 三十秒可用**：`npx` 一条命令起来，浏览器里能让 agent 改当前目录的文件。

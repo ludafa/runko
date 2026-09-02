@@ -4,7 +4,7 @@ slug: turn-checkpoint
 view: 施工
 layer: 逻辑层
 module: 轮编排
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["轮检查点", "代码快照", "沙盒生命周期"]
 related: ["logic/orchestration/features/turn-checkpoint.md", "logic/orchestration/tech/turn-checkpoint.md", "architecture/tech/agent-kernel.md"]
 ---

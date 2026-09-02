@@ -1,5 +1,5 @@
 {
-  "name": "@nimbo-chat/web",
+  "name": "@runko-chat/web",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -25,7 +25,7 @@
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "@fontsource-variable/martian-mono": "^5.3.0",
     "@iconify/react": "^6.0.2",
-    "@nimbo/core": "workspace:*",
+    "@runko/core": "workspace:*",
     "@radix-ui/react-use-controllable-state": "^1.2.5",
     "@tailwindcss/vite": "^4.2.4",
     "@tanstack/react-form": "^1.29.1",

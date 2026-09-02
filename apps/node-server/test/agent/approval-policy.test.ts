@@ -10,7 +10,7 @@
  * involved — these are the same pure inputs/outputs the module's own header
  * comment promises.
  */
-import type { JsonValue } from '@nimbo/core';
+import type { JsonValue } from '@runko/core';
 import { describe, expect, it } from 'vitest';
 
 import {

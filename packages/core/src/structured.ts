@@ -46,20 +46,20 @@
  * turn 失败了"，是"turn 成功了，但把结果折叠成结构化 JSON 这一附加步骤
  * 没能在重试预算内完成"，语义上不适合折进 `turn.failed`（宿主会误以为整个
  * turn 的常规产出都不可信，但 items/finalResponse 其实都是好的）。此外本
- * 工单的文件清单不含 `events.ts`，往 `NimboError.code` 联合新增枚举值本就
- * 落在改动范围外。因此选择 `throw`——`NimboStructuredOutputError`，与
- * `NimboSessionError` 同级但不复用它（不是同一种失败），`Session.send<T>`
- * 让它直接从 `await` 冒出去，不经 `NimboSessionError` 包装。
+ * 工单的文件清单不含 `events.ts`，往 `RunkoError.code` 联合新增枚举值本就
+ * 落在改动范围外。因此选择 `throw`——`RunkoStructuredOutputError`，与
+ * `RunkoSessionError` 同级但不复用它（不是同一种失败），`Session.send<T>`
+ * 让它直接从 `await` 冒出去，不经 `RunkoSessionError` 包装。
  */
 import { generateText, NoObjectGeneratedError, Output } from "ai";
 import type { LanguageModel, ModelMessage } from "ai";
 import type { z } from "zod";
 
 /** `send<T>` 结构化输出耗尽重试预算后的明确错误（见本文件头"错误形态"一节）。 */
-export class NimboStructuredOutputError extends Error {
+export class RunkoStructuredOutputError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "NimboStructuredOutputError";
+    this.name = "RunkoStructuredOutputError";
   }
 }
 
@@ -96,7 +96,7 @@ function correctionMessages(rawText: string | undefined, validationMessage: stri
 /**
  * `Session.send<T>` 的结构化输出实现：`generateText` + `Output.object` 一次
  * 调用失败即重试（`NoObjectGeneratedError` 判别），耗尽预算后
- * `NimboStructuredOutputError`。
+ * `RunkoStructuredOutputError`。
  */
 export async function generateStructuredOutput<T>(opts: GenerateStructuredOutputOptions<T>): Promise<T> {
   const output = Output.object({ schema: opts.outputSchema });
@@ -127,7 +127,7 @@ export async function generateStructuredOutput<T>(opts: GenerateStructuredOutput
     conversation = [...conversation, ...correctionMessages(lastRawText, lastValidationMessage)];
   }
 
-  throw new NimboStructuredOutputError(
+  throw new RunkoStructuredOutputError(
     `Structured output generation failed after ${MAX_RETRIES + 1} attempt(s): ${lastValidationMessage}` +
       (lastRawText !== undefined ? ` (last raw response: ${lastRawText})` : ""),
   );

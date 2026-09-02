@@ -7,7 +7,7 @@
  * ---- 为什么是一段裸字符串常量，而不是独立的 .js 文件 + 打包 ----
  *
  * 这段脚本运行在**远端沙盒的 node**里，不是本包自己的运行时——它不能 `require`
- * 任何本包/`@nimbo/*` 的模块（沙盒里没有这些包），必须是一段零依赖、自包含的
+ * 任何本包/`@runko/*` 的模块（沙盒里没有这些包），必须是一段零依赖、自包含的
  * 纯 JS。写成字符串常量经单个 argv 元素传给 `node -e`，避免"先把脚本文件写进
  * 沙盒再执行"这类额外的一次文件写入 RTT。脚本体故意只用 `var`/`function`/字符串
  * 拼接这类最保守的语法（不用模板字符串——本文件自身是一个 TS 模板字符串，两层
@@ -17,19 +17,19 @@
  * ---- 语义零漂移：正则全部由调用侧预编译好 source 传入 ----
  *
  * `patternSource`/`scopeSource`/`ignoreSources` 都是调用侧（`fs.ts`）用
- * `@nimbo/virtual-fs` 的 `globToRegExp(pattern).source` 预编译好的正则表达式
- * source；脚本里只做 `new RegExp(source)`，因此这里跑的和 `@nimbo/virtual-fs`
+ * `@runko/virtual-fs` 的 `globToRegExp(pattern).source` 预编译好的正则表达式
+ * source；脚本里只做 `new RegExp(source)`，因此这里跑的和 `@runko/virtual-fs`
  * 的 JS 回退路径是**同一条正则**，不会出现"两条路径各自实现一份 glob 语法、
  * 行为慢慢漂移"的问题。grep 的内容匹配同理——`patternSource` 是调用侧已经校验
  * 过的合法 JavaScript RegExp source（`ContentSearchQuery.pattern` 契约本身如此），
  * 脚本只需按 `ignoreCase` 决定是否加 `"i"` 标志。
  *
- * ---- ignore 的 ancestor-or-self 剪枝：和 `@nimbo/virtual-fs` 的 `isIgnoredPath`
+ * ---- ignore 的 ancestor-or-self 剪枝：和 `@runko/virtual-fs` 的 `isIgnoredPath`
  * 同一套算法，这里必须重复实现一份 ----
  *
  * `isIgnoredPath`（`packages/virtual-fs/src/path.ts`）没有从包入口导出（只在
  * 包内部给 grep/glob 工具用），而这段脚本运行在沙盒里，本就不能 import 任何
- * `@nimbo/*` 模块——即使导出了也用不上。因此 `isIgnored()` 是这套"命中路径自身
+ * `@runko/*` 模块——即使导出了也用不上。因此 `isIgnored()` 是这套"命中路径自身
  * 或任一祖先目录即整棵子树剪枝"算法的第二份实现，两处保持同步靠的是它足够简单
  * （20 行内的前缀扫描）且双方都有测试锁住行为，不是靠共享代码。
  *
@@ -45,7 +45,7 @@
  *
  * JS 回退路径（`grep.ts` 的 `readTextOrSkip`）靠扩展名推断的 `mimeType` 判断
  * 文本/二进制；这段脚本里没有那张 mimeType 表可用（同样是"不能 import
- * @nimbo/*"的限制），改用更朴素但足够通用的字节嗅探——读文件头 8KB，出现
+ * @runko/*"的限制），改用更朴素但足够通用的字节嗅探——读文件头 8KB，出现
  * `0x00` 就判定为二进制并跳过。两种判据不保证对每个边界文件的判断完全一致
  * （比如某些没有可识别扩展名、但内容全是可打印字符的文件），但对真实代码库里
  * 绝大多数文件（源码 vs. 图片/压缩包/二进制可执行文件）结论相同。

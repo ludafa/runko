@@ -4,7 +4,7 @@ slug: sandbox-keepalive
 view: 施工
 layer: 逻辑层
 module: 轮编排
-packages: ["@nimbo/agent"]
+packages: ["@runko/agent"]
 tags: ["沙盒保活", "活动信号", "保活预算", "等人状态"]
 related: ["logic/orchestration/features/sandbox-keepalive.md", "logic/orchestration/tech/sandbox-keepalive.md", "architecture/tech/agent-kernel.md"]
 ---
@@ -18,10 +18,10 @@ related: ["logic/orchestration/features/sandbox-keepalive.md", "logic/orchestrat
 | 阶段 | 内容 | 落点 | 状态 |
 |---|---|---|---|
 | KA-0 | 术语表 + 三份文档 | `docs/` | ✅ 完成（2026-07-26） |
-| KA-1 | core：活动信号接缝 | `@nimbo/core` | ✅ 完成（2026-07-27） |
-| KA-2 | 闸门 + E2B 实现 | `@nimbo/core`、`@nimbo/sandbox-e2b` | ✅ 完成（2026-07-27） |
-| KA-3 | Vercel 实现（含修加时 bug） | `@nimbo/sandbox-vercel` | ✅ 完成（2026-07-27） |
-| KA-4 | sdk：类型 re-export | `@nimbo/sdk` | ✅ 完成（零改动，见下） |
+| KA-1 | core：活动信号接缝 | `@runko/core` | ✅ 完成（2026-07-27） |
+| KA-2 | 闸门 + E2B 实现 | `@runko/core`、`@runko/sandbox-e2b` | ✅ 完成（2026-07-27） |
+| KA-3 | Vercel 实现（含修加时 bug） | `@runko/sandbox-vercel` | ✅ 完成（2026-07-27） |
+| KA-4 | sdk：类型 re-export | `@runko/sdk` | ✅ 完成（零改动，见下） |
 | KA-5 | chat 应用迁移 | `apps/node-server` | ✅ 完成（2026-07-27） |
 | KA-6 | 端到端验证 | — | ⏳ 待用户执行（需真实凭据） |
 
@@ -48,7 +48,7 @@ related: ["logic/orchestration/features/sandbox-keepalive.md", "logic/orchestrat
 
 **涉及文件**：
 
-- `packages/core/src/types.ts`：新增 `ActivitySignal`、`NimboActivityAware`。
+- `packages/core/src/types.ts`：新增 `ActivitySignal`、`RunkoActivityAware`。
 - `packages/core/src/session.ts`：`stream()` 的 chunk 循环里插入 `notifyActivity(chunk)`（改动点见技术方案 §5.2）；结构探测 `"onActivity" in workspace`。
 - `packages/core/src/index.ts`：导出新类型。
 
@@ -72,7 +72,7 @@ related: ["logic/orchestration/features/sandbox-keepalive.md", "logic/orchestrat
 
 ## KA-2 闸门 + E2B 实现 ✅
 
-**目标**：`@nimbo/sandbox-e2b` 具备完整保活能力。
+**目标**：`@runko/sandbox-e2b` 具备完整保活能力。
 
 **涉及文件**：
 
@@ -86,7 +86,7 @@ related: ["logic/orchestration/features/sandbox-keepalive.md", "logic/orchestrat
 
 **实际改动与计划的偏差**：
 
-1. **闸门落在 `@nimbo/core` 而不是各适配器包。** E2B 与 Vercel 的闸门逻辑逐行相同，两份拷贝必然漂移，而补足语义要可预测就要求两家严格一致。`session.ts` 不 import 也不调用它，core 侧「零保活策略」的承诺不受影响；厂商差异经 `KeepAliveDriver` 注入。
+1. **闸门落在 `@runko/core` 而不是各适配器包。** E2B 与 Vercel 的闸门逻辑逐行相同，两份拷贝必然漂移，而补足语义要可预测就要求两家严格一致。`session.ts` 不 import 也不调用它，core 侧「零保活策略」的承诺不受影响；厂商差异经 `KeepAliveDriver` 注入。
 2. **`FakeE2bSandbox` 没有加 `setTimeout`**——刻意保持原样，正好当成「不支持保活的沙盒」的活样本，用来验证最小结构面没被打破、以及传了 `keepAlive` 时会提前抛错。带 `setTimeout` 的假沙盒在 `test/keepalive.test.ts` 内部自建（沿用本仓「测试文件自给自足」的惯例）。
 
 **⚠️ 不得**把 `setTimeout` 加进 `E2bSandboxLike` 的**必填**面——会打死 `examples/09` 的假沙盒和 `test/helpers.ts` 的 `FakeE2bSandbox`，违反 [BYO 实例](../../../terms.md)与最小结构面纪律。
@@ -107,7 +107,7 @@ related: ["logic/orchestration/features/sandbox-keepalive.md", "logic/orchestrat
 
 ## KA-3 Vercel 实现（含修加时 bug）✅
 
-**目标**：`@nimbo/sandbox-vercel` 同等能力，并修掉"每条消息盲加 5 分钟"。
+**目标**：`@runko/sandbox-vercel` 同等能力，并修掉"每条消息盲加 5 分钟"。
 
 **涉及文件**：
 
@@ -131,14 +131,14 @@ related: ["logic/orchestration/features/sandbox-keepalive.md", "logic/orchestrat
 
 ## KA-4 sdk：类型 re-export ✅
 
-**实际改动：零。** `packages/sdk/src/index.ts` 已有 `export * from "@nimbo/core"`，新增的类型与 `createKeepAlive` 自动透出，不需要加任何具名 re-export（新符号与 virtual-fs / mini-bash 的导出无重名，不触发 ambiguous export）。已用一个临时 `import type { ... } from '@nimbo/sdk'` 探针编译验证后删除。
+**实际改动：零。** `packages/sdk/src/index.ts` 已有 `export * from "@runko/core"`，新增的类型与 `createKeepAlive` 自动透出，不需要加任何具名 re-export（新符号与 virtual-fs / mini-bash 的导出无重名，不触发 ambiguous export）。已用一个临时 `import type { ... } from '@runko/sdk'` 探针编译验证后删除。
 
-适配器包本身仍**不进** `@nimbo/sdk` 依赖（既有纪律不变）。
+适配器包本身仍**不进** `@runko/sdk` 依赖（既有纪律不变）。
 
 **验收标准**：
 
-- [x] `import type { NimboActivityAware } from '@nimbo/sdk'` 可用。
-- [x] `@nimbo/sdk` 的依赖列表没有新增适配器包。
+- [x] `import type { RunkoActivityAware } from '@runko/sdk'` 可用。
+- [x] `@runko/sdk` 的依赖列表没有新增适配器包。
 
 ---
 
@@ -189,11 +189,11 @@ related: ["logic/orchestration/features/sandbox-keepalive.md", "logic/orchestrat
 
 ### 2026-07-26 — 方案定稿，KA-0 完成
 
-**背景**：从"e2b sandbox 怎么保活、nimbo sdk 和适配器包怎么配合"的问题出发，发现保活能力完全在 `apps/node-server` 里、SDK 侧零支持，讨论后决定下沉。
+**背景**：从"e2b sandbox 怎么保活、runko sdk 和适配器包怎么配合"的问题出发，发现保活能力完全在 `apps/node-server` 里、SDK 侧零支持，讨论后决定下沉。
 
 **推翻的既有决定**：
 
-- **P13-2b 的"保活不进 nimbo SDK / 适配器"被推翻**（原文见 [turn-checkpoint](../tech/turn-checkpoint.md) §5）。理由见技术方案 §2.1：知识归属、补足语义只有适配器做得干净、"归宿主"指的是所有权而非执行。**保留** P13-2b 的补足语义与单轮上限设计。
+- **P13-2b 的"保活不进 runko SDK / 适配器"被推翻**（原文见 [turn-checkpoint](../tech/turn-checkpoint.md) §5）。理由见技术方案 §2.1：知识归属、补足语义只有适配器做得干净、"归宿主"指的是所有权而非执行。**保留** P13-2b 的补足语义与单轮上限设计。
 
 **讨论中被否决的方案**：
 

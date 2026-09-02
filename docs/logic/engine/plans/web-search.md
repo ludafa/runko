@@ -4,7 +4,7 @@ slug: web-search
 view: 施工
 layer: 逻辑层
 module: 执行引擎
-packages: ["@nimbo/core"]
+packages: ["@runko/core"]
 tags: ["联网搜索", "工具", "provider"]
 related: ["logic/engine/features/web-search.md", "logic/engine/tech/web-search.md", "architecture/tech/agent-kernel.md"]
 ---

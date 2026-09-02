@@ -17,7 +17,7 @@ import {
 } from "../src/index.js";
 import type { CreateFileToolsOptions, FileChange, FileToolName, ReadStateStore } from "../src/index.js";
 
-describe("@nimbo/virtual-fs public API surface", () => {
+describe("@runko/virtual-fs public API surface", () => {
   it("exports the FS classes and factory functions", () => {
     expect(typeof MemoryFS).toBe("function");
     expect(typeof OverlayFS).toBe("function");
