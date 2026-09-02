@@ -290,7 +290,8 @@ await Skill.fromFS(fs, "/.agents/skills/frontend-design") // 从任意 NimboFS �
 | 宿主层 · **沙盒**（文件） | `@nimbo/virtual-fs` | ✅ 已有 |
 | 宿主层 · **沙盒**（命令） | `@nimbo/mini-bash` · `@nimbo/just-bash` | ✅ 已有 |
 | 宿主层 · **沙盒**（远端） | `@nimbo/sandbox-e2b` · `-vercel` · `-cloudflare` | ✅ 已有 |
-| 宿主层 · **持久化 + 归属仲裁机制** | `@nimbo/persist-sql`（裸驱动，方言是参数）· `-drizzle` · `-prisma` | 🚧 待建 |
+| 宿主层 · **持久化 + 归属仲裁机制** | `@nimbo/persist-kysely`（核心，方言是参数）· `-sqlite` · `-postgres` · `-mysql`（三个薄壳）· `-mongo` | ✅ 已有 |
+| 契约自证 | `@nimbo/conformance`（一致性套件，验一个实现合不合契约） | ✅ 已有 |
 | 宿主层 · **流分发** | `@nimbo/stream-redis`（Redis Streams） | 🚧 待建 |
 | Cloudflare DO **全套** | `@nimbo/durable-object`（持久化 + 平凡仲裁 + 实例内流分发） | 🚧 待建 |
 | 门面 | `@nimbo/sdk` | ✅ 已有 |
@@ -311,6 +312,12 @@ await Skill.fromFS(fs, "/.agents/skills/frontend-design") // 从任意 NimboFS �
 | `@nimbo/sandbox-e2b`        | NimboFS & NimboExec 适配 E2B 云沙盒（真实 Firecracker microVM，BYO 实例，e2b 仅类型依赖，**不随 sdk 装入**）                                          | [packages/sandbox-e2b](../packages/sandbox-e2b/README.md)               |
 | `@nimbo/sandbox-vercel`     | NimboFS & NimboExec 适配 Vercel Sandbox（真实 Amazon Linux 2023 Firecracker microVM，BYO 实例，`@vercel/sandbox` 仅类型依赖，**不随 sdk 装入**）      | [packages/sandbox-vercel](../packages/sandbox-vercel/README.md)         |
 | `@nimbo/sandbox-cloudflare` | NimboFS & NimboExec 适配 Cloudflare Sandbox（网关形态：`.` 纯 fetch 客户端跑在任意 Node，`./worker` 网关部署在宿主 wrangler 项目，**不随 sdk 装入**） | [packages/sandbox-cloudflare](../packages/sandbox-cloudflare/README.md) |
+| `@nimbo/persist-kysely`     | 持久化 + 租约版归属仲裁的核心实现，吃一个 Kysely 实例；三方言差异收敛在一处                                                                            | [packages/persist-kysely](../packages/persist-kysely/README.md)         |
+| `@nimbo/persist-sqlite`     | 薄壳：吃 better-sqlite3 实例 → Kysely → 核心                                                                                                          | [packages/persist-sqlite](../packages/persist-sqlite/README.md)         |
+| `@nimbo/persist-postgres`   | 薄壳：吃 `pg.Pool`                                                                                                                                    | [packages/persist-postgres](../packages/persist-postgres/README.md)     |
+| `@nimbo/persist-mysql`      | 薄壳：吃 mysql2 连接池                                                                                                                                | [packages/persist-mysql](../packages/persist-mysql/README.md)           |
+| `@nimbo/persist-mongo`      | MongoDB 直接实现三个领域接口（不走 Kysely——那是 SQL 的东西）                                                                                          | [packages/persist-mongo](../packages/persist-mongo/README.md)           |
+| `@nimbo/conformance`        | 契约一致性套件：写了自己的持久化 / 归属仲裁实现，拿它验合不合契约（**不依赖任何测试框架**）                                                            | [packages/conformance](../packages/conformance/README.md)               |
 
 **bash 分档说明**：`bash` 工具的命令执行环境（`NimboExec`）分两档，按需二选一注入，一行代码互换、loop/session 代码零改动（[tech/core-sdk §4.5b](./logic/engine/tech/core-sdk.md)）——
 

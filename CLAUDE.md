@@ -21,6 +21,7 @@ pnpm workspace 三组成员（见 [pnpm-workspace.yaml](./pnpm-workspace.yaml)�
 | `@nimbo/persist-postgres`   | 薄壳：吃 `pg.Pool`                                                           | agent, persist-kysely       |
 | `@nimbo/persist-mysql`      | 薄壳：吃 mysql2 连接池                                                       | agent, persist-kysely       |
 | `@nimbo/persist-mongo`      | **非** 薄壳：MongoDB 直接实现三个领域接口（Kysely 是 SQL，用不上）            | agent, core（peer mongodb） |
+| `@nimbo/conformance`        | 契约一致性套件：持久化 / 归属仲裁的用例数据（`{ name, run }`），**不依赖任何测试框架** | agent（peer）、core（dev） |
 | `@nimbo/sdk`                | 主包门面：re-export core + virtual-fs + mini-bash，不放实现                  | core, virtual-fs, mini-bash |
 
 **依赖方向单向**：`core` 是根，其余全部指向它。`agent` 建在 `core` 之上、**不依赖 `sdk`**——`sdk` 是门面包（re-export core + virtual-fs + mini-bash），让逻辑层反过来依赖门面会把依赖图从一棵树变成有回边；代价是 `agent` 自己写了一份与 sdk 同款的文件工具默认装配（`runtime/session-factory.ts`，改 sdk 的默认装配时要同步）。`core` 反向持有 `mini-bash`/`virtual-fs` 的是 **devDependencies**（自测用）——这条循环 devDep 正是「跨包类型解析指向 dist、必须先 `build` 再 `typecheck`」的原因，别改成 dependencies。
@@ -43,10 +44,10 @@ pnpm workspace 三组成员（见 [pnpm-workspace.yaml](./pnpm-workspace.yaml)�
 ### 命令边界（容易踩）
 
 - 根 `pnpm build` / `typecheck` / `test` 只 filter `./packages/*`，**不覆盖 apps、examples 与 docs**；动了 apps 要进对应目录跑它自己的 `typecheck`/`lint`/`test`。
-- CI（`.github/workflows/ci.yml`）跑的是 `pnpm -r build|typecheck|test`，覆盖**全部** 19 个成员——本地只跑根脚本会漏掉 apps/examples/docs 的问题。
+- CI（`.github/workflows/ci.yml`）跑的是 `pnpm -r build|typecheck|test`，覆盖**全部** 21 个成员——本地只跑根脚本会漏掉 apps/examples/docs 的问题。
 - **文档站的死链检查藏在 `pnpm -r build` 里**（`docs` 的 build 就是 `vitepress build`，构建时会校验全站链接）；`typecheck` 查的是 `.vitepress/` 下的配置。但 **front matter 体检（`docs:check`）不在 `-r` 的三个脚本里**，CI 单列了一步。
 - chat 应用另有根级 `chat:bootstrap`（建库 + 生成 OpenAPI 与前端 client）、`chat:server`、`chat:web`；文档站有 `docs:dev` / `docs:build` / `docs:preview` / `docs:check`（都是 `--filter @nimbo/docs` 的快捷方式）。
-- **lint 跟其余三个根脚本不一样：`pnpm lint` / `pnpm lint:fix` 走的是 `pnpm -r`，覆盖全部 19 个有 lint 脚本的成员**（`packages/*` 十四个 + `examples` + 四个 app；只有 `docs` 没配——它的源码里没有可 lint 的 JS/TS，`.vitepress/cache` 全是构建缓存）。规则分两套：`packages/*`、`examples` 与 `cloudflare-worker-server` 引根目录的 `eslint.config.base.js`（共享基线，目前只有「花括号强制」一条）；`web` 与 `node-server` 各有自己的完整配置（prettier + import 排序 + react-hooks），不引基线。
+- **lint 跟其余三个根脚本不一样：`pnpm lint` / `pnpm lint:fix` 走的是 `pnpm -r`，覆盖全部 20 个有 lint 脚本的成员**（`packages/*` 十五个 + `examples` + 四个 app；只有 `docs` 没配——它的源码里没有可 lint 的 JS/TS，`.vitepress/cache` 全是构建缓存）。规则分两套：`packages/*`、`examples` 与 `cloudflare-worker-server` 引根目录的 `eslint.config.base.js`（共享基线，目前只有「花括号强制」一条）；`web` 与 `node-server` 各有自己的完整配置（prettier + import 排序 + react-hooks），不引基线。
 - **给 app 的配置加规则时，位置很关键**：两个 app 的配置最后一项是 `eslint-config-prettier`，它会把 `curly` 这类「特殊规则」直接关掉。新规则若被它覆盖，必须写在它**后面**的配置块里（`curly: ['error', 'all']` 就是这么加的——`all` 档只加括号、不动折行，与 prettier 不冲突）。
 - **根 `package.json` 的 `typescript` 是 `^6.0.3`，跟 catalog 的 `^7.0.2` 不一致，这是故意的**：`typescript-eslint` 至今（8.67）的 peer 范围是 `>=4.8.4 <6.1.0`，装在 TS 7 上一 import 就崩（`Cannot read properties of undefined (reading 'Cjs')`）。根上这份 TS 6 只给 lint 工具链用；`packages/*` 各自的 `typescript: catalog:` 仍是 7.0.2，编译不受影响（两个 app 早就为同一原因把自己钉在 `^6.0.3`）。**typescript-eslint 支持 TS 7 后可以撤掉这个钉子。**
 

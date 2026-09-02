@@ -59,7 +59,7 @@ persist-mysql  ─┘      （三个 Store + 建表）
 ```
 
 薄壳只做一件事：把你的驱动包成一个 Kysely 实例，转交核心。所以**已经在用 Kysely 的人
-直接装核心**——nimbo 的三张表和你自己的表就在同一个实例、同一套迁移之下。
+直接装核心**——nimbo 的四张表和你自己的表就在同一个实例、同一套迁移之下。
 
 > **为什么底下是 Kysely**：这跟 better-auth 是同一个答案（它的内置适配器也是 kysely）。
 > 自己手搓一个方言层，在「MySQL 不支持 `RETURNING`」这类差异上很快就要开始长分支；
@@ -151,14 +151,14 @@ const db = createPool(process.env.DATABASE_URL);
 
 ### 已经在用 Kysely 的话
 
-别装薄壳，直接装核心，把你自己的实例给它——nimbo 的三张表和你的表就在同一个实例、
+别装薄壳，直接装核心，把你自己的实例给它——nimbo 的四张表和你的表就在同一个实例、
 同一套迁移之下：
 
 ```ts
 import { kyselyPersistence, migrate } from "@nimbo/persist-kysely";
 import type { NimboDatabase } from "@nimbo/persist-kysely";
 
-// 把 nimbo 的三张表并进你自己的库类型
+// 把 nimbo 的四张表并进你自己的库类型
 interface MyDatabase extends NimboDatabase {
   my_users: MyUsersTable;
 }
