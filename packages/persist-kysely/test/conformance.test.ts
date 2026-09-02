@@ -15,11 +15,11 @@
  * MySQL 目前不跑，得靠本地或带 service container 的流水线。
  */
 import { PGlite } from "@electric-sql/pglite";
-import type { ConformanceCase } from "@nimbo/conformance";
+import type { ConformanceCase, PersistenceConformanceSetup } from "@nimbo/conformance";
 import { persistenceCases } from "@nimbo/conformance";
 import Database from "better-sqlite3";
 import { Kysely, MysqlDialect, PostgresDialect, SqliteDialect } from "kysely";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 import { kyselyPersistence, migrate } from "../src/index.js";
 import type { NimboDatabase } from "../src/index.js";
@@ -64,16 +64,55 @@ runCases("persist-kysely · sqlite", persistenceCases, async () => {
   };
 });
 
-runCases("persist-kysely · postgres (pglite)", persistenceCases, async () => {
-  const pglite = new PGlite();
-  const db = new Kysely<NimboDatabase>({ dialect: pgliteDialect(pglite) });
-  await migrate(db, { flavor: "postgres" });
-  return {
-    persistence: kyselyPersistence(db, { flavor: "postgres" }),
-    cleanup: async () => {
-      await db.destroy();
-    },
-  };
+/**
+ * 跑前清表——**复用同一个库的那几档都靠它**：pglite 共用实例、真库跨两次运行，
+ * 都得保证每条用例从空表开始。
+ *
+ * **只清持久化用的三张，不动 `nimbo_leases`。** 租约那张归 arbitration.test.ts 清
+ * （它的 `clearLeases`）；两个文件在 CI 上连的是同一个真库、还是并发跑的，各清各的
+ * 才不会把对方的用例洗掉。
+ */
+async function truncate(db: Kysely<NimboDatabase>): Promise<void> {
+  await db.deleteFrom("nimbo_ledger").execute();
+  await db.deleteFrom("nimbo_decisions").execute();
+  await db.deleteFrom("nimbo_queue").execute();
+}
+
+/**
+ * **pglite 这一档共用一个实例，用例之间清表**——不是一条用例一个库。
+ *
+ * `new PGlite()` 是「现编译 WASM + 起一个 initdb 出来的库」，一次要 0.6~3 秒。这一档
+ * 三十多条用例，一条一个的话光它就是一分多钟，更要命的是**单条用例的耗时里绝大部分
+ * 是建库**——CI 上被别的包挤一挤就顶穿超时，真挂过（见 vitest.config.ts 里那段）。
+ *
+ * 共用之后每条用例只多三条 `DELETE`，**隔离性没打折**：四张表里持久化用例只碰账本、
+ * 裁决、待发队列这三张，`truncate` 全清；表里也没有自增列，删干净就等于新库。
+ *
+ * **只有这一档能这么共用。** 租约那边（arbitration.test.ts）的心跳是后台定时器，
+ * 用例结束后还会继续跳，共用一个库要靠令牌 CAS 兜底才不串台——那是另一回事，
+ * 那个文件保持一条用例一个实例。
+ */
+let pglite: Promise<Kysely<NimboDatabase>> | undefined;
+
+function sharedPglite(): Promise<Kysely<NimboDatabase>> {
+  pglite ??= (async () => {
+    const db = new Kysely<NimboDatabase>({ dialect: pgliteDialect(new PGlite()) });
+    await migrate(db, { flavor: "postgres" });
+    return db;
+  })();
+  return pglite;
+}
+
+afterAll(async () => {
+  if (pglite !== undefined) {
+    await (await pglite).destroy();
+  }
+});
+
+runCases<PersistenceConformanceSetup>("persist-kysely · postgres (pglite)", persistenceCases, async () => {
+  const db = await sharedPglite();
+  await truncate(db);
+  return { persistence: kyselyPersistence(db, { flavor: "postgres" }) };
 });
 
 // ---------------------------------------------------------------------------
@@ -82,13 +121,6 @@ runCases("persist-kysely · postgres (pglite)", persistenceCases, async () => {
 
 const POSTGRES_URL = process.env["NIMBO_TEST_POSTGRES_URL"];
 const MYSQL_URL = process.env["NIMBO_TEST_MYSQL_URL"];
-
-/** 每次用独立的 schema/前缀跑，避免两次运行互相污染。这里用「跑前清表」最省事。 */
-async function truncate(db: Kysely<NimboDatabase>): Promise<void> {
-  await db.deleteFrom("nimbo_ledger").execute();
-  await db.deleteFrom("nimbo_decisions").execute();
-  await db.deleteFrom("nimbo_queue").execute();
-}
 
 if (POSTGRES_URL !== undefined) {
   runCases("persist-kysely · postgres (真库)", persistenceCases, async () => {

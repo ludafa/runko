@@ -27,7 +27,7 @@ import {
 } from "@nimbo/conformance";
 import Database from "better-sqlite3";
 import { Kysely, MysqlDialect, PostgresDialect, SqliteDialect } from "kysely";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 import { traitsOf } from "../src/flavor.js";
 import type { Flavor, NimboDatabase } from "../src/index.js";
@@ -82,6 +82,12 @@ function setupFor(db: Kysely<NimboDatabase>, flavor: Flavor): TakeoverConformanc
         .where("conversation_id", "=", conversationId)
         .execute();
     },
+  };
+}
+
+/** 一条用例一个库的那几档：跑完把库关掉。共用库的那档不用它。 */
+function closing(db: Kysely<NimboDatabase>): { cleanup: () => Promise<void> } {
+  return {
     cleanup: async (): Promise<void> => {
       await db.destroy();
     },
@@ -109,13 +115,41 @@ runAllGroups("lease · sqlite", async () => {
   const sqlite = new Database(":memory:");
   const db = new Kysely<NimboDatabase>({ dialect: new SqliteDialect({ database: sqlite }) });
   await migrate(db, { flavor: "sqlite" });
-  return setupFor(db, "sqlite");
+  return { ...setupFor(db, "sqlite"), ...closing(db) };
+});
+
+/**
+ * **pglite 这一档共用一个实例，用例之间清租约表**——不是一条用例一个库。
+ *
+ * `new PGlite()` 是「现编译 WASM + 起一个 initdb 出来的库」，一次 0.6~3 秒，而这一档
+ * 二十条用例的耗时几乎全花在建库上。CI 上被别的包挤一挤，单条就摸到默认 5s 超时——
+ * 真挂过（见 vitest.config.ts 里那段）。
+ *
+ * **共用是安全的，靠的正是这个包保证的那条性质**：心跳的 UPDATE 和 `stillHeld` 都带
+ * `lease_token`。上一条用例没释放的心跳还在跳，但 `clearLeases` 之后它那行已经没了、
+ * 新用例的行又是新令牌——它打中的行数是 0，下一拍就自己 `lose()` 停表，**碰不到新
+ * 用例的租约**。两个「真库」档本来就是所有用例共用同一个库，形状完全一样。
+ */
+let pglite: Promise<Kysely<NimboDatabase>> | undefined;
+
+function sharedPglite(): Promise<Kysely<NimboDatabase>> {
+  pglite ??= (async () => {
+    const db = new Kysely<NimboDatabase>({ dialect: pgliteDialect(new PGlite()) });
+    await migrate(db, { flavor: "postgres" });
+    return db;
+  })();
+  return pglite;
+}
+
+afterAll(async () => {
+  if (pglite !== undefined) {
+    await (await pglite).destroy();
+  }
 });
 
 runAllGroups("lease · postgres (pglite)", async () => {
-  const pglite = new PGlite();
-  const db = new Kysely<NimboDatabase>({ dialect: pgliteDialect(pglite) });
-  await migrate(db, { flavor: "postgres" });
+  const db = await sharedPglite();
+  await clearLeases(db);
   return setupFor(db, "postgres");
 });
 
@@ -137,7 +171,7 @@ if (POSTGRES_URL !== undefined) {
     const db = new Kysely<NimboDatabase>({ dialect: new PostgresDialect({ pool }) });
     await migrate(db, { flavor: "postgres" });
     await clearLeases(db);
-    return setupFor(db, "postgres");
+    return { ...setupFor(db, "postgres"), ...closing(db) };
   });
 } else {
   describe.skip("lease · postgres (真库)", () => {
@@ -152,7 +186,7 @@ if (MYSQL_URL !== undefined) {
     const db = new Kysely<NimboDatabase>({ dialect: new MysqlDialect({ pool }) });
     await migrate(db, { flavor: "mysql" });
     await clearLeases(db);
-    return setupFor(db, "mysql");
+    return { ...setupFor(db, "mysql"), ...closing(db) };
   });
 } else {
   describe.skip("lease · mysql (真库)", () => {
