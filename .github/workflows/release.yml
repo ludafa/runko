@@ -28,15 +28,51 @@ jobs:
   release:
     runs-on: ubuntu-latest
 
+    # 三个真库：与 ci.yml 保持一致。**没有它们，persist-mysql / persist-mongo /
+    # persist-postgres 在这里一条测试都不跑**（三个包都靠 RUNKO_TEST_*_URL 开关，
+    # 没给就整档 skip）。发布不可逆，发布前的把关不能比日常 CI 还弱——
+    # 首次演练就是漏了这段，三档全 skip 才发现。
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: runko
+          POSTGRES_PASSWORD: runko
+          POSTGRES_DB: runko
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U runko"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      mysql:
+        image: mysql:9
+        env:
+          MYSQL_ROOT_PASSWORD: runko
+          MYSQL_DATABASE: runko
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -prunko"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+      mongo:
+        image: mongo:8
+        ports: ['27017:27017']
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ping:1})'"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+
+    env:
+      RUNKO_TEST_POSTGRES_URL: postgres://runko:runko@127.0.0.1:5432/runko
+      RUNKO_TEST_MYSQL_URL: mysql://root:runko@127.0.0.1:3306/runko
+      RUNKO_TEST_MONGO_URL: mongodb://127.0.0.1:27017
+
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # changesets 要读历史才能判断哪些包有改动
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
