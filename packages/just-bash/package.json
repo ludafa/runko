@@ -4,6 +4,11 @@
   "description": "RunkoExec 实现：适配 vercel-labs/just-bash 的全语法档 bash（if/for/while/case/函数），跑在任意 RunkoFS 上",
   "type": "module",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ludafa/runko.git",
+    "directory": "packages/just-bash"
+  },
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"

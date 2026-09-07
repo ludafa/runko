@@ -4,6 +4,11 @@
   "description": "runko L0 接口 + L1 定义层 + L2 运行层 + AI SDK step runner + skills + load_skill/update_plan/bash 工具本体",
   "type": "module",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ludafa/runko.git",
+    "directory": "packages/core"
+  },
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"

@@ -4,6 +4,11 @@
   "description": "runko 主包（门面）：re-export core + virtual-fs（+ mini-bash），batteries-included",
   "type": "module",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ludafa/runko.git",
+    "directory": "packages/sdk"
+  },
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"

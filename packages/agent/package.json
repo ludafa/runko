@@ -4,6 +4,11 @@
   "description": "轮编排运行时：一轮接一轮地跑下去 —— 起/中断/收尾、待发队列、人在回路桥、崩溃恢复，外加四种宿主能力的接口与内置实现",
   "type": "module",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ludafa/runko.git",
+    "directory": "packages/agent"
+  },
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"

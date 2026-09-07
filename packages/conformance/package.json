@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "description": "runko 宿主能力的契约一致性套件——写了持久化或归属仲裁实现，拿它验合不合契约",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ludafa/runko.git",
+    "directory": "packages/conformance"
+  },
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"

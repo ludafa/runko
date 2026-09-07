@@ -4,6 +4,11 @@
   "description": "持久化实现：PostgreSQL（pg）—— 你只有一个连接池时装这个",
   "type": "module",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ludafa/runko.git",
+    "directory": "packages/persist-postgres"
+  },
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"

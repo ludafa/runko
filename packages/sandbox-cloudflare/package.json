@@ -4,6 +4,11 @@
   "description": "RunkoFS & RunkoExec 同源工作区：适配 Cloudflare Sandbox（网关形态——`.` 纯 fetch 客户端跑在任意 Node，`./worker` 网关部署在宿主 wrangler 项目）",
   "type": "module",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ludafa/runko.git",
+    "directory": "packages/sandbox-cloudflare"
+  },
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"

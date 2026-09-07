@@ -4,6 +4,11 @@
   "description": "RunkoFS & RunkoExec 同源工作区：适配 E2B 云沙盒（e2b SDK 仅类型依赖，BYO sandbox 实例）",
   "type": "module",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ludafa/runko.git",
+    "directory": "packages/sandbox-e2b"
+  },
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"

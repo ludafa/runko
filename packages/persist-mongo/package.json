@@ -4,6 +4,11 @@
   "description": "持久化实现：MongoDB —— 第一个非关系型实现，直接落在三个领域接口上",
   "type": "module",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ludafa/runko.git",
+    "directory": "packages/persist-mongo"
+  },
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
