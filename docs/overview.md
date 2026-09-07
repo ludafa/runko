@@ -2,19 +2,34 @@
 
 > 英文版（根目录）见 [../README.md](../README.md)。
 
-**可嵌入 Node.js 应用的轻量 agent SDK**：几行代码在自己的服务里跑起一个具备文件操作、命令执行、skills 能力的 agent loop——不 spawn 任何外部 CLI 二进制，运行时依赖只有 `ai`（Vercel AI SDK，peer）+ `zod`。
+**能跑在各种宿主上的 agent harness**：一轮接一轮地跑、崩溃能恢复、人能插手、同一时刻只有一个执行在跑——这套 agent 逻辑是固定的；它底下的东西全部可替换，所以同一个 agent 既能跑在长驻的 Node 进程里，也能跑在 Cloudflare Worker + Durable Object 或 Vercel Function 上，**loop 一行都不用改**。
+
+起步不需要任何外部件：四样宿主能力各自都带一份进程内的内置实现。运行时依赖只有 `ai`（Vercel AI SDK，peer）+ `zod`，全程不 spawn 任何 CLI 二进制。
 
 ## 为什么需要它
 
+「能改文件、能执行任务」的 agent，演示容易、上线难。一旦离开你的笔记本——多租户、多节点、serverless、进程随时会重启——就会发现 loop 和宿主是缠在一起的，换一种部署形态就得重写一遍 loop。
+
 现有方案的空缺（详见 [core-sdk 产品设计](./logic/engine/features/core-sdk.md)）：
 
-- **CLI 封装类**（`@openai/codex-sdk`、`@anthropic-ai/claude-agent-sdk`）：本质是 spawn 平台二进制的进程包装——重、绑定单一厂商、**没有虚拟文件抽象**（agent 只能操作真实磁盘）、会话状态落在用户目录，服务端多租户场景难用。
+- **CLI 封装类**（`@openai/codex-sdk`、`@anthropic-ai/claude-agent-sdk`）：本质是 spawn 平台二进制的进程包装——重、绑定单一厂商、会话状态落在用户目录，服务端多租户场景难用。
 - **纯 API client**（`@anthropic-ai/sdk`、`openai`）：只给 messages/tool-use 原语，loop、工具、文件、skills 全要自己搭。
-- **eve**（API 设计优秀，runko 的 API 层次即参考它）：但它是带 HTTP server 与 durable workflow 的**框架**，不是可嵌入进程内的库；文件操作在真实沙盒。
+- **eve**（API 设计优秀，runko 的 API 层次即参考它）：但它是带 HTTP server 与 durable workflow 的**框架**，不是可嵌入进程内的库。
 
-**核心痛点**：想在普通 Node 服务里嵌入"能改文件、能执行任务"的 agent，要么被绑死在某家 CLI 上，要么从零手写 loop。
+**runko 的答案**就是一条划定并守住的线：**凡是可替换的东西，语义在 agent 逻辑层、实现在宿主层。**
 
-**runko 的答案** = eve 的 API 人体工学 + codex-sdk 的 item 级事件粒度 + AI SDK 的模型层（30+ provider 任选）+ 自有的 VirtualFS 内核与 loop，以可嵌入库的形态交付。关键差异化：**虚拟文件系统**——agent 的所有文件读写默认落在内存/overlay 层，全程不碰真实磁盘，天然多租户安全；结束后 `diff()` 导出、`writeBack()` 才落盘。
+逻辑层是固定的——归属仲裁（保证同时只有一个执行在跑）→ 轮编排（起、中断、挂起、恢复、收尾）→ 执行引擎（调模型 → 跑工具 → 喂回去）。它底下插着四样宿主能力：
+
+| 宿主能力 | 决定什么 | 内置实现 |
+| --- | --- | --- |
+| **沙盒** | 文件和命令实际落在哪 | 内存 VirtualFS + 纯 TS 的 bash |
+| **持久化** | 重启之后还剩下什么 | 进程内 |
+| **流分发** | 输出怎么送到另一个实例上的浏览器 | 进程内 |
+| **归属仲裁机制** | 此刻这个会话归谁 | 进程内 |
+
+每一样都有进程内的平凡实现，所以**零外部件就能跑**；等部署形态真的需要了，再把 Postgres / Durable Object / Redis 换进来。
+
+其中一样内置实现值得单独提一句，因为它决定了在服务端能安全做什么：默认沙盒是一套**虚拟文件系统**——agent 的所有文件读写都落在内存/overlay 层，全程不碰真实磁盘，多租户天然安全；结束后 `diff()` 导出、`writeBack()` 才落盘。
 
 典型场景：SaaS 内嵌代码助手（改代码返回 diff，零临时文件）、CI/后台流水线节点（结构化输出接回流水线）、带领域能力的 agent 产品（SKILL.md 生态复用）、自定义执行环境（宿主沙盒经 `RunkoExec` 接口注入，loop 零改动）。
 

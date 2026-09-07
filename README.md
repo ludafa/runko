@@ -1,38 +1,60 @@
 # runko
 
-**An embeddable, lightweight agent SDK for Node.js.** In a few lines of code you
-can run an agent loop — with file operations, command execution, and skills —
-inside your own service, without spawning any external CLI binary. Runtime
-dependencies are just `ai` (Vercel AI SDK, a peer dependency) + `zod`.
+**An agent harness that runs on whatever host you have.** The agent logic — one
+turn after another, crash recovery, human-in-the-loop, exactly one execution at a
+time — stays fixed. Everything underneath it is swappable, so the same agent runs
+in a long-lived Node process, on Cloudflare Workers + Durable Objects, or inside a
+Vercel Function, without the loop changing at all.
+
+Nothing external is required to start: every host capability ships with a built-in
+in-process implementation. Runtime dependencies are just `ai` (Vercel AI SDK, a
+peer dependency) + `zod`, and no CLI binary is ever spawned.
 
 > 中文版见 [docs/overview.md](./docs/overview.md)。
 
 ## Why it exists
 
-The gap in existing options (full write-up in
+An agent that "edits files and runs tasks" is easy to demo and hard to deploy. The
+moment it leaves your laptop — multi-tenant, multi-node, serverless, restartable —
+the loop and the host turn out to be tangled together, and every change of
+deployment shape means rewriting the loop.
+
+What's on offer today (full write-up in
 [core-sdk product design](./docs/logic/engine/features/core-sdk.md)):
 
 - **CLI wrappers** (`@openai/codex-sdk`, `@anthropic-ai/claude-agent-sdk`): these
-  spawn a platform binary — heavy, tied to one vendor, **no virtual filesystem**
-  (the agent can only touch the real disk), and session state lands in a user
-  directory, which is awkward for multi-tenant server use.
+  spawn a platform binary — heavy, tied to one vendor, and session state lands in
+  a user directory, which is awkward for multi-tenant server use.
 - **Raw API clients** (`@anthropic-ai/sdk`, `openai`): you only get
   messages/tool-use primitives; the loop, tools, files, and skills are all on you.
 - **eve** (excellent API design — runko's API layering is modeled on it): but it's
   a **framework** with an HTTP server and durable workflows, not an in-process
-  embeddable library, and its file operations run against a real sandbox.
+  embeddable library.
 
-**The core pain:** embedding an agent that "can edit files and run tasks" into an
-ordinary Node service means either being locked to a vendor's CLI, or hand-rolling
-the whole loop from scratch.
+**runko's answer** is a single line, drawn and held: **whatever is replaceable has
+its meaning in the agent logic layer and its implementation in the host layer.**
 
-**runko's answer** = eve's API ergonomics + codex-sdk's item-level event
-granularity + the AI SDK's model layer (30+ providers) + its own VirtualFS core
-and loop, delivered as an embeddable library. The key differentiator is the
-**virtual filesystem**: all of the agent's file reads/writes land in an
-in-memory/overlay layer by default and never touch the real disk — inherently
-multi-tenant-safe — and afterward you export a `diff()` or `writeBack()` to disk
-only when you choose to.
+The logic layer is fixed — lease arbitration (exactly one execution at a time) →
+turn orchestration (start, interrupt, suspend, resume, finish) → execution engine
+(call the model, run the tools, feed the results back). Four host capabilities plug
+in underneath it:
+
+| Host capability | What it decides | Built-in fallback |
+| --- | --- | --- |
+| **Sandbox** | where files and commands actually land | in-memory VirtualFS + a pure-TS bash |
+| **Persistence** | what survives a restart | in-process |
+| **Stream delivery** | how output reaches a browser on another instance | in-process |
+| **Lease arbitration** | who owns this conversation right now | in-process |
+
+Every one of them has a trivial in-process implementation, so **you can run with
+zero external components** and bring in Postgres, Durable Objects or Redis only
+when the deployment actually calls for it.
+
+One built-in is worth calling out, because it changes what is safe to do on a
+server: the default sandbox is a **virtual filesystem**. The agent's reads and
+writes land in an in-memory/overlay layer and never touch the real disk — safe for
+multi-tenant use by construction — and you export a `diff()` or `writeBack()` to
+disk only when you choose to.
 
 Typical use cases: an in-app code assistant in a SaaS (edit code, return a diff,
 zero temp files), a CI/background pipeline node (structured output back into the
@@ -124,7 +146,7 @@ At runtime skills are progressively disclosed: instructions carry only the
 name+description list, and the model calls `load_skill` to pull in the body —
 loading a skill adds instructions, never a new execution surface.
 
-## Package structure (pnpm monorepo, one-way deps, 8 packages)
+## Package structure (pnpm monorepo, one-way deps, 15 packages)
 
 ```mermaid
 graph TD
