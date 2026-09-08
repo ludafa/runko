@@ -1,6 +1,6 @@
 {
   "name": "@runko/core",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "runko L0 接口 + L1 定义层 + L2 运行层 + AI SDK step runner + skills + load_skill/update_plan/bash 工具本体",
   "type": "module",
   "license": "ISC",

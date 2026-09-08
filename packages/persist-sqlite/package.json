@@ -1,6 +1,6 @@
 {
   "name": "@runko/persist-sqlite",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "持久化实现：SQLite（better-sqlite3）—— 你只有一个驱动实例时装这个",
   "type": "module",
   "license": "ISC",

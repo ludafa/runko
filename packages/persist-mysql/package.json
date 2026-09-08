@@ -1,6 +1,6 @@
 {
   "name": "@runko/persist-mysql",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "持久化实现：MySQL（mysql2）—— 你只有一个连接池时装这个",
   "type": "module",
   "license": "ISC",

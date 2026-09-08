@@ -1,6 +1,6 @@
 {
   "name": "@runko/sandbox-cloudflare",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "RunkoFS & RunkoExec 同源工作区：适配 Cloudflare Sandbox（网关形态——`.` 纯 fetch 客户端跑在任意 Node，`./worker` 网关部署在宿主 wrangler 项目）",
   "type": "module",
   "license": "ISC",
