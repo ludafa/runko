@@ -106,6 +106,10 @@ jobs:
             echo "没有待发布的 changeset，后续步骤全部跳过。"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
+            # 记下本次真正 bump 了版本的包，供后面拼聚合 Release 的正文。
+            # 必须在 commit 之前取——commit 之后 git diff 就空了。
+            git diff --name-only -- 'packages/*/package.json' \
+              | xargs -r -n1 dirname > "$RUNNER_TEMP/bumped.txt"
             echo "本次将发布："
             node -e '
               const {readdirSync,readFileSync} = require("fs");
@@ -191,6 +195,28 @@ jobs:
           pnpm changeset tag
           git push --follow-tags origin HEAD:main
 
+
+      # ---- 聚合 Release ----
+
+      # **一次发版建一条 Release，不是一个 tag 一条**。这仓库一次动 15 个包、打 15 个
+      # tag，照 changesets 官方那样每个 tag 建一条，Releases 页会被内容几乎相同的
+      # 15 条刷屏。正文由脚本从各包 CHANGELOG 汇总并按 changeset hash 去重。
+      #
+      # 版本号取主包 @runko/sdk 的版本——当前 15 个包始终同步 bump，所以它能代表整体。
+      # 若将来版本分化（只发部分包），这个假设要重新考虑。
+      - name: 建一条聚合 GitHub Release
+        if: steps.check.outputs.changed == 'true' && inputs.dry_run == false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ver=$(node -p "require('./packages/sdk/package.json').version")
+          tag="v$ver"
+          node scripts/collect-release-notes.mjs "$RUNNER_TEMP/bumped.txt" > "$RUNNER_TEMP/notes.md"
+          git tag -a "$tag" -m "$tag"
+          git push origin "$tag"
+          gh release create "$tag" --title "$tag" --notes-file "$RUNNER_TEMP/notes.md"
+          echo "已建 Release $tag"
 
       # ---- 发布后验证 ----
 
