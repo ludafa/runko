@@ -164,14 +164,59 @@ async function clearLeases(db: Kysely<RunkoDatabase>): Promise<void> {
   await db.deleteFrom("agent_leases").execute();
 }
 
-if (POSTGRES_URL !== undefined) {
-  runAllGroups("lease · postgres (真库)", async () => {
+/**
+ * **两个真库档也共用一个连接池，用例之间清租约表**——共用为什么安全，理由与 pglite
+ * 那档同款（见上）；这里还多一条硬理由：
+ *
+ * `migrate()` 是一串 `CREATE TABLE IF NOT EXISTS`，而 **Postgres 上并发跑它会撞
+ * `pg_type` 的唯一索引**（见 [schema.sql](../schema.sql) 顶部的告警：幂等 ≠ 可并发）。
+ * 原来是一条用例一次 `new Pool()` + 一次 `migrate()`，两档各 18 条用例就是各 18 次；
+ * `pnpm -r` 又默认并发跑多个包，而 `persist-postgres` 连的是同一个库、也在 migrate。
+ * 两边一撞就卡在 schema 锁上等到 30s 超时——**2026-09-08 的正式发布就挂在这条上**
+ * （前一天的演练侥幸错开了，所以这是条会看人下菜碟的不稳定测试）。
+ *
+ * 共用之后每档只 migrate 一次，撞锁窗口从 18 次缩到 1 次。连接不再由 `closing()`
+ * 一条一关，改为整个文件跑完在 `afterAll` 里统一销毁。
+ */
+let realPostgres: Promise<Kysely<RunkoDatabase>> | undefined;
+let realMysql: Promise<Kysely<RunkoDatabase>> | undefined;
+
+function sharedRealPostgres(url: string): Promise<Kysely<RunkoDatabase>> {
+  realPostgres ??= (async () => {
     const { Pool } = await import("pg");
-    const pool = new Pool({ connectionString: POSTGRES_URL });
+    const pool = new Pool({ connectionString: url });
     const db = new Kysely<RunkoDatabase>({ dialect: new PostgresDialect({ pool }) });
     await migrate(db, { flavor: "postgres" });
+    return db;
+  })();
+  return realPostgres;
+}
+
+function sharedRealMysql(url: string): Promise<Kysely<RunkoDatabase>> {
+  realMysql ??= (async () => {
+    const { createPool } = await import("mysql2");
+    const pool = createPool(url);
+    const db = new Kysely<RunkoDatabase>({ dialect: new MysqlDialect({ pool }) });
+    await migrate(db, { flavor: "mysql" });
+    return db;
+  })();
+  return realMysql;
+}
+
+afterAll(async () => {
+  if (realPostgres !== undefined) {
+    await (await realPostgres).destroy();
+  }
+  if (realMysql !== undefined) {
+    await (await realMysql).destroy();
+  }
+});
+
+if (POSTGRES_URL !== undefined) {
+  runAllGroups("lease · postgres (真库)", async () => {
+    const db = await sharedRealPostgres(POSTGRES_URL);
     await clearLeases(db);
-    return { ...setupFor(db, "postgres"), ...closing(db) };
+    return setupFor(db, "postgres");
   });
 } else {
   describe.skip("lease · postgres (真库)", () => {
@@ -181,12 +226,9 @@ if (POSTGRES_URL !== undefined) {
 
 if (MYSQL_URL !== undefined) {
   runAllGroups("lease · mysql (真库)", async () => {
-    const { createPool } = await import("mysql2");
-    const pool = createPool(MYSQL_URL);
-    const db = new Kysely<RunkoDatabase>({ dialect: new MysqlDialect({ pool }) });
-    await migrate(db, { flavor: "mysql" });
+    const db = await sharedRealMysql(MYSQL_URL);
     await clearLeases(db);
-    return { ...setupFor(db, "mysql"), ...closing(db) };
+    return setupFor(db, "mysql");
   });
 } else {
   describe.skip("lease · mysql (真库)", () => {
