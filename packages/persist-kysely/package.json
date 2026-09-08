@@ -1,6 +1,6 @@
 {
   "name": "@runko/persist-kysely",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "持久化实现：Kysely —— 你已经在用 Kysely 时把实例给它；SQLite / Postgres / MySQL 三个方言的差异只剩三处",
   "type": "module",
   "license": "ISC",

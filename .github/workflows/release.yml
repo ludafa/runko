@@ -118,6 +118,20 @@ jobs:
 
       # ---- 发布 ----
 
+      # **先把版本改动落成本地 commit，再去动 package.json 做协议替换。**
+      # 顺序颠倒过就会出 0.1.1 那次的事故：收尾时用 `git checkout -- packages/`
+      # 丢弃协议替换，把 changeset 刚写好的版本号一起抹了——CHANGELOG 推回去了、
+      # 版本号没有，仓库停在 0.1.0 而 npm 上已是 0.1.1。下一次发版 changeset 会
+      # 再 bump 出一个 registry 上已存在的号，于是一个包都发不出去。
+      # 先 commit 之后，收尾那步的 checkout 恢复到的就是「已 bump」的 HEAD。
+      - name: 先把版本改动提交到本地（此时还不 push）
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore(release): 发布新版本"
+
       # npm 不认识 pnpm 的 `workspace:` 与 `catalog:` 两个私有协议，原样发上去装包的人
       # 会收到 EUNSUPPORTEDPROTOCOL。**0.1.1 就是这么发坏的**：当时只换了 workspace:，
       # 15 个包全带着 `zod: "catalog:"` 出了门，npm 一个都装不上。
@@ -195,11 +209,9 @@ jobs:
         if: steps.check.outputs.changed == 'true' && inputs.dry_run == false
         run: |
           set -euo pipefail
-          # 发布前那步改过的 package.json（workspace: → 具体版本）不能进仓库，先丢弃
-          git checkout -- 'packages/*/package.json'
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "chore(release): 发布新版本"
+          # 丢弃协议替换对 package.json 的改动。版本 bump 早已在上面提交进 HEAD，
+          # 所以这次 checkout 恢复出来的是「已 bump」的版本号，不会再被抹掉。
+          git checkout -- packages/
+          git status --short
           pnpm changeset tag
           git push --follow-tags origin HEAD:main

@@ -1,6 +1,6 @@
 {
   "name": "@runko/conformance",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "runko 宿主能力的契约一致性套件——写了持久化或归属仲裁实现，拿它验合不合契约",
   "license": "ISC",
   "repository": {

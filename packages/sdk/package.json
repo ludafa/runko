@@ -1,6 +1,6 @@
 {
   "name": "@runko/sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "runko 主包（门面）：re-export core + virtual-fs（+ mini-bash），batteries-included",
   "type": "module",
   "license": "ISC",
