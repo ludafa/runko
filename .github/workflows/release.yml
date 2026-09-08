@@ -176,31 +176,6 @@ jobs:
           done
           echo "演练结束。把 dry_run 取消勾选再跑一次才会真的发布。"
 
-      # 发布后立刻用 npm 真装一次。**0.1.1 的坏包正是靠这一步发现的**——当时它是我
-      # 手动跑的：build/typecheck/test/docs 全绿、pnpm pack 验证也绿，唯独 `npm i`
-      # 会炸（EUNSUPPORTEDPROTOCOL）。用 pnpm 验证发布产物有天然盲区：pnpm 认识自己
-      # 的协议，装得上不代表 npm 装得上。所以这一步必须用 npm。
-      # registry 索引有延迟（实测个别包两三分钟才可见），故带重试。
-      - name: 发布后验证——用 npm 真装一次
-        if: steps.check.outputs.changed == 'true' && inputs.dry_run == false
-        run: |
-          set -uo pipefail
-          ver=$(node -p "require('./packages/sdk/package.json').version")
-          work=$(mktemp -d)
-          cd "$work" && npm init -y >/dev/null 2>&1
-          for i in $(seq 1 12); do
-            if npm i "@runko/sdk@$ver" --no-audit --no-fund >/dev/null 2>&1; then
-              echo "✓ @runko/sdk@$ver 装上了，连带 @runko/core 实际版本：$(node -p "require('$work/node_modules/@runko/core/package.json').version")"
-              exit 0
-            fi
-            echo "第 $i 次未成功（registry 索引可能还没同步），15s 后重试"
-            sleep 15
-          done
-          echo "✗ @runko/sdk@$ver 发布后装不上——包可能是坏的，立刻排查（下面是真实报错）"
-          npm i "@runko/sdk@$ver" --no-audit --no-fund 2>&1 | tail -20
-          exit 1
-
-
       # ---- 收尾：把版本改动推回 main 并打 tag ----
 
       # 放在发布之后：npm 发成功了才留下版本记录。反过来的话，一旦发布失败，
@@ -215,3 +190,47 @@ jobs:
           git status --short
           pnpm changeset tag
           git push --follow-tags origin HEAD:main
+
+
+      # ---- 发布后验证 ----
+
+      # 放在打完 tag **之后**：包已经发出去是既成事实，版本记录必须先落地，
+      # 否则一个假警报就会让仓库停在旧版本、而 registry 上是新版本——下次发版
+      # 撞号，一个包都发不出去。0.1.2 那次就是这么乱的：验证因索引延迟误报，
+      # 打 tag 被跳过，版本又得手工对齐。这一步失败只当警报（job 变红要人来看），
+      # 不再影响仓库状态。
+      #
+      # 先逐个等包在 registry 上可见，再装。字母序最后发的是 virtual-fs，而 sdk
+      # 依赖它——紧接着装必然 ETARGET。索引延迟实测可超过 200 秒，给足 10 分钟。
+      - name: 发布后验证——用 npm 真装一次
+        if: steps.check.outputs.changed == 'true' && inputs.dry_run == false
+        run: |
+          set -uo pipefail
+          ver=$(node -p "require('./packages/sdk/package.json').version")
+
+          echo "① 等 15 个包在 registry 上全部可见"
+          missing=""
+          for dir in packages/*/; do
+            name=$(node -p "require('./${dir}package.json').name")
+            private=$(node -p "!!require('./${dir}package.json').private")
+            if [ "$private" = "true" ]; then continue; fi
+            seen=""
+            for i in $(seq 1 40); do
+              if npm view "$name@$ver" version >/dev/null 2>&1; then seen=yes; break; fi
+              sleep 15
+            done
+            if [ -z "$seen" ]; then missing="$missing $name"; else echo "  ✓ $name@$ver"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "✗ 等了 10 分钟仍不可见：$missing"
+            exit 1
+          fi
+
+          echo "② 用 npm 真装一次"
+          work=$(mktemp -d); cd "$work" && npm init -y >/dev/null 2>&1
+          if npm i "@runko/sdk@$ver" --no-audit --no-fund; then
+            echo "✓ @runko/sdk@$ver 装上了，连带 @runko/core：$(node -p "require('$work/node_modules/@runko/core/package.json').version")"
+          else
+            echo "✗ 装不上——包可能是坏的（比如又有 pnpm 私有协议漏网），立刻排查"
+            exit 1
+          fi
