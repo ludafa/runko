@@ -118,40 +118,17 @@ jobs:
 
       # ---- 发布 ----
 
-      # workspace:^ 是 pnpm 的协议，npm 不认识；直接用 npm 发会把它原样发上去，
-      # 装包的人就装不上了。pnpm pack 会替换它，但 pnpm 不会签 provenance——
-      # 所以这里自己做替换：workspace:^ → ^<该包在本次 bump 后的真实版本>，
-      # 只改 CI 工作区、不提交，随后交给 npm 从包目录正常发布。
-      - name: 把 workspace:^ 换成真实版本号
+      # npm 不认识 pnpm 的 `workspace:` 与 `catalog:` 两个私有协议，原样发上去装包的人
+      # 会收到 EUNSUPPORTEDPROTOCOL。**0.1.1 就是这么发坏的**：当时只换了 workspace:，
+      # 15 个包全带着 `zod: "catalog:"` 出了门，npm 一个都装不上。
+      # （`pnpm publish` 两个协议都会换，但它不支持 provenance；`pnpm pack` 只换
+      #  workspace: 不换 catalog:，实测过——所以只能自己换。）
+      # 脚本换完会断言「一个私有协议都不剩」，有残留直接退出 1 把发布拦在门外。
+      # 只改 CI 工作区，不提交。
+      - name: 把 pnpm 私有协议换成真实版本号
         if: steps.check.outputs.changed == 'true'
-        run: |
-          node -e '
-            const {readdirSync, readFileSync, writeFileSync} = require("fs");
-            const dirs = readdirSync("packages");
-            const version = {};
-            for (const d of dirs) {
-              const p = JSON.parse(readFileSync(`packages/${d}/package.json`, "utf8"));
-              version[p.name] = p.version;
-            }
-            let n = 0;
-            for (const d of dirs) {
-              const f = `packages/${d}/package.json`;
-              const p = JSON.parse(readFileSync(f, "utf8"));
-              for (const blk of ["dependencies", "devDependencies", "peerDependencies"]) {
-                for (const [dep, range] of Object.entries(p[blk] || {})) {
-                  if (typeof range === "string" && range.startsWith("workspace:")) {
-                    const prefix = range.slice("workspace:".length);   // ^ | ~ | *
-                    const v = version[dep];
-                    if (!v) throw new Error(`${p.name} 依赖了未知的 workspace 包 ${dep}`);
-                    p[blk][dep] = prefix === "*" ? v : prefix + v;
-                    n++;
-                  }
-                }
-              }
-              writeFileSync(f, JSON.stringify(p, null, 2) + "\n");
-            }
-            console.log(`替换了 ${n} 处 workspace: 协议`);
-          '
+        run: node scripts/resolve-publish-protocols.mjs
+
 
       # --provenance 生成溯源证明：npm 包页面会显示这个包来自哪个仓库、哪次 commit、
       # 哪条 workflow，别人可以验真。它依赖 package.json 的 repository 字段与
@@ -184,6 +161,31 @@ jobs:
             ( cd "$dir" && npm publish --provenance --access public --dry-run )
           done
           echo "演练结束。把 dry_run 取消勾选再跑一次才会真的发布。"
+
+      # 发布后立刻用 npm 真装一次。**0.1.1 的坏包正是靠这一步发现的**——当时它是我
+      # 手动跑的：build/typecheck/test/docs 全绿、pnpm pack 验证也绿，唯独 `npm i`
+      # 会炸（EUNSUPPORTEDPROTOCOL）。用 pnpm 验证发布产物有天然盲区：pnpm 认识自己
+      # 的协议，装得上不代表 npm 装得上。所以这一步必须用 npm。
+      # registry 索引有延迟（实测个别包两三分钟才可见），故带重试。
+      - name: 发布后验证——用 npm 真装一次
+        if: steps.check.outputs.changed == 'true' && inputs.dry_run == false
+        run: |
+          set -uo pipefail
+          ver=$(node -p "require('./packages/sdk/package.json').version")
+          work=$(mktemp -d)
+          cd "$work" && npm init -y >/dev/null 2>&1
+          for i in $(seq 1 12); do
+            if npm i "@runko/sdk@$ver" --no-audit --no-fund >/dev/null 2>&1; then
+              echo "✓ @runko/sdk@$ver 装上了，连带 @runko/core 实际版本：$(node -p "require('$work/node_modules/@runko/core/package.json').version")"
+              exit 0
+            fi
+            echo "第 $i 次未成功（registry 索引可能还没同步），15s 后重试"
+            sleep 15
+          done
+          echo "✗ @runko/sdk@$ver 发布后装不上——包可能是坏的，立刻排查（下面是真实报错）"
+          npm i "@runko/sdk@$ver" --no-audit --no-fund 2>&1 | tail -20
+          exit 1
+
 
       # ---- 收尾：把版本改动推回 main 并打 tag ----
 
