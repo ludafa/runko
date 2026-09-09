@@ -21,8 +21,8 @@ import { randomUUID } from "node:crypto";
 import type { Arbitration, AcquireContext, AcquireResult, Grant, OwnershipInfo, SeqResult, StaleOwnership } from "@runko/agent";
 import type { Kysely } from "kysely";
 
-import type { FlavorTraits } from "./flavor.js";
-import { toNumber } from "./flavor.js";
+import type { Flavor, FlavorTraits } from "./flavor.js";
+import { toNumber, traitsOf } from "./flavor.js";
 import { insertOrIgnore } from "./idempotent-insert.js";
 import type { RunkoDatabase } from "./schema.js";
 import { LEASES_TABLE } from "./schema.js";
@@ -35,7 +35,11 @@ export const DEFAULT_TAKEOVER_MS = 60_000;
 const MIN_BEATS_BEFORE_TAKEOVER = 3;
 
 export interface LeaseArbitrationOptions {
-  flavor: FlavorTraits;
+  /**
+   * 你这个 Kysely 实例接的是哪一家。**给方言名就行**（与 `kyselyPersistence` 同款）；
+   * 已经手上有一份 `FlavorTraits` 的也照收。
+   */
+  flavor: Flavor | FlavorTraits;
   /**
    * 这个节点的身份——**不透明字符串**（k8s pod 地址 / Fly machine id / 随便什么）。
    * 框架存它、传它、**不解释它**：别人抢不到归属时会拿到它，由[接入层](../../../docs/terms.md)
@@ -54,11 +58,12 @@ export interface LeaseArbitrationOptions {
  * 建一个租约版归属仲裁机制。
  *
  * ```ts
- * const arbitration = leaseArbitration(db, { flavor: traitsOf("postgres"), holder: process.env.POD_NAME });
+ * const arbitration = leaseArbitration(db, { flavor: "postgres", holder: process.env.POD_NAME });
  * createAgentRuntime({ ..., persistence, arbitration });
  * ```
  */
 export function leaseArbitration(db: Kysely<RunkoDatabase>, opts: LeaseArbitrationOptions): Arbitration {
+  const traits = typeof opts.flavor === "string" ? traitsOf(opts.flavor) : opts.flavor;
   const heartbeatMs = opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
   const takeoverMs = opts.takeoverMs ?? DEFAULT_TAKEOVER_MS;
   const now = opts.now ?? Date.now;
@@ -107,7 +112,7 @@ export function leaseArbitration(db: Kysely<RunkoDatabase>, opts: LeaseArbitrati
       // 撞了不算错，下面那条条件 UPDATE 会决出胜负。
       const watermark = await ctx.seedSeq();
       await insertOrIgnore(
-        opts.flavor,
+        traits,
         db.insertInto(LEASES_TABLE).values({
           conversation_id: conversationId,
           holder: null,

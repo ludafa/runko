@@ -11,7 +11,7 @@ import { persistenceCases } from "@runko/conformance";
 import { Pool } from "pg";
 import { describe, expect, it } from "vitest";
 
-import { postgresPersistence, migrate } from "../src/index.js";
+import { postgresArbitration, postgresPersistence, migrate } from "../src/index.js";
 
 /**
  * 把一致性用例接进 vitest。**套件本身不依赖任何测试框架**（它只导出 `{ name, run }`），
@@ -61,6 +61,39 @@ if (URL === undefined) {
       const entries = await persistence.ledger.read(conversationId);
       expect(entries).toHaveLength(1);
       expect(entries[0]?.message.parts).toEqual([{ type: "text", text: "喂" }]);
+
+      await pool.end();
+    });
+
+    it("装出来的租约版仲裁与账本落在同一个库——取号从账本水位接着数", async () => {
+      const pool = new Pool({ connectionString: URL });
+      await migrate(pool);
+      const persistence = postgresPersistence(pool);
+      const conversationId = `lease-${crypto.randomUUID()}`;
+      await persistence.ledger.append({
+        conversationId,
+        seq: 1,
+        message: { id: "m1", role: "user", parts: [{ type: "text", text: "喂" }] },
+        ts: 1,
+      });
+
+      const arbitration = postgresArbitration(pool, { holder: "node-a" });
+      const acquired = await arbitration.acquire(conversationId, {
+        seedSeq: () => persistence.ledger.maxSeq(conversationId),
+      });
+      expect(acquired.ok).toBe(true);
+      if (acquired.ok) {
+        // 接错库的话这里会是 1——那正是「账本写这边、租约写那边」的症状。
+        expect(await acquired.grant.nextSeq()).toEqual({ ok: true, seq: 2 });
+        // 第二个「节点」抢不到，且拿得到第一个的 holder（接入层据它转发）。
+        const other = postgresArbitration(pool, { holder: "node-b" });
+        expect(await other.acquire(conversationId, { seedSeq: () => Promise.resolve(0) })).toEqual({
+          ok: false,
+          reason: "busy",
+          holder: "node-a",
+        });
+        await acquired.grant.release();
+      }
 
       await pool.end();
     });

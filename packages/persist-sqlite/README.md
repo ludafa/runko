@@ -17,7 +17,7 @@ const db = new Database("app.db");
 
 await migrate(db);          // 建表，幂等，跑几次都一样
 
-const runtime = createAgentRuntime(agent, { persistence: sqlitePersistence(db) });
+const runtime = createAgentRuntime({ agent, prepareTurn, persistence: sqlitePersistence(db) });
 ```
 
 ## 它是个薄壳
@@ -44,6 +44,30 @@ persist-mysql  ─┘
 
 **它不存你的东西。** runko 只认一个不透明的 `conversationId`，会话叫什么、属于谁，
 全归你自己存。它不建外键、不碰你的用户表。
+
+## 多副本怎么配
+
+跑不止一个进程时，光换持久化不够——还得把[归属仲裁机制](../../docs/terms.md)换成**租约版**，
+否则同一份对话会被两个进程同时推进。同一个驱动实例装两次就行：
+
+```ts
+createAgentRuntime({
+  agent,
+  prepareTurn,
+  persistence: sqlitePersistence(database),
+  arbitration: sqliteArbitration(database, { holder: process.env.RUNKO_NODE_URL }),
+});
+```
+
+`holder` 是**本副本的可达地址**，框架原样存、原样传、不解释它：别的副本抢不到归属时会拿到它，
+由接入代码决定把请求转给谁——**转发是你写的，不是框架做的**。
+
+两件事值得先知道：`sqlitePersistence()` 与 `sqliteArbitration()` 各建一个 Kysely 实例，但共用你给的那个连接池，
+不多占资源；`migrate()` 仍然只调一次，租约表已经在里面了。
+
+单进程别装它：`@runko/agent` 内置的内存版更快，[独占](../../docs/terms.md)还是**真保证**，
+而租约版只能做到**尽力 + 可检测**。完整取舍与两个真进程的验收见
+[多副本部署](../../docs/host/node/tech/multi-replica.md)。
 
 ## 文档
 

@@ -11,7 +11,7 @@
  * const db = client.db("myapp");
  *
  * await migrate(db);                    // 建索引，幂等
- * createAgentRuntime(agent, { persistence: mongoPersistence(db) });
+ * createAgentRuntime({ agent, prepareTurn, persistence: mongoPersistence(db) });
  * ```
  *
  * **它不是薄壳。** SQLite / Postgres / MySQL 那三个包底下共用 `@runko/persist-kysely`

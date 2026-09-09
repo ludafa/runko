@@ -22,7 +22,9 @@ interface MyDatabase extends RunkoDatabase {
 const db = new Kysely<MyDatabase>({ dialect: new PostgresDialect({ pool }) });
 await migrate(db, { flavor: "postgres" });
 
-createAgentRuntime(agent, {
+createAgentRuntime({
+  agent,
+  prepareTurn,
   persistence: kyselyPersistence(db, { flavor: "postgres" }),
 });
 ```

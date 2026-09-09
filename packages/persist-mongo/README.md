@@ -17,7 +17,7 @@ const db = client.db("myapp");
 
 await migrate(db);          // 建索引，幂等
 
-const runtime = createAgentRuntime(agent, { persistence: mongoPersistence(db) });
+const runtime = createAgentRuntime({ agent, prepareTurn, persistence: mongoPersistence(db) });
 ```
 
 **吃 `Db` 而不是 `MongoClient`**：选哪个 database 是你的决定（多租户可能一租户一个 db），

@@ -9,7 +9,7 @@
  * const db = new Kysely<MyDatabase>({ dialect: new PostgresDialect({ pool }) });
  * await migrate(db, { flavor: "postgres" });
  *
- * createAgentRuntime(agent, { persistence: kyselyPersistence(db, { flavor: "postgres" }) });
+ * createAgentRuntime({ agent, prepareTurn, persistence: kyselyPersistence(db, { flavor: "postgres" }) });
  * ```
  *
  * **只有一个驱动、没在用 Kysely** 的话别用这个包——用那三个薄壳，它们替你把 Kysely
@@ -19,8 +19,9 @@
  * 上一版手搓了一个方言层，在「MySQL 不支持 RETURNING」这类差异上已经开始长分支；换成
  * 现成的之后，三个方言真正的差异只剩三处（见 `flavor.ts`）。
  *
- * **这一版只出持久化，不含租约版[归属仲裁](../../../docs/terms.md)**（心跳 + 租期标识 +
- * CAS）——那是下一批，仲裁仍用 `@runko/agent` 内置的单进程实现。
+ * **它同时出租约版[归属仲裁机制](../../../docs/terms.md)**（心跳 + 租期标识 + CAS）：
+ * `leaseArbitration(db, { flavor, holder })`，多进程 / 多副本共享一个库时用它。单进程不必装
+ * ——`@runko/agent` 内置的内存版更快，[独占](../../../docs/terms.md)还是**真保证**。
  */
 import type { Persistence } from "@runko/agent";
 import type { Kysely } from "kysely";
