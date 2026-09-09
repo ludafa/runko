@@ -4,9 +4,9 @@ slug: deployment
 view: 技术
 layer: 宿主层
 module: —
-packages: ["@runko/agent", "@runko/persist-sql", "@runko/persist-drizzle", "@runko/persist-prisma"]
+packages: ["@runko/agent", "@runko/persist-kysely", "@runko/persist-sqlite", "@runko/persist-postgres", "@runko/persist-mysql", "@runko/persist-mongo"]
 tags: ["Node", "cluster", "租约", "CAS", "应用层转发", "部署形态"]
-related: ["host/node/features/deployment.md", "logic/arbitration/tech/arbitration-impl.md", "host/contract/tech/persistence.md"]
+related: ["host/node/features/deployment.md", "host/node/tech/multi-replica.md", "logic/arbitration/tech/arbitration-impl.md", "host/contract/tech/persistence.md"]
 ---
 
 # Node 长驻（宿主层）— 技术方案
@@ -27,6 +27,8 @@ related: ["host/node/features/deployment.md", "logic/arbitration/tech/arbitratio
 | **① 同机 cluster** | **租约** | **SQLite** | 内置 + [应用层转发](../../../terms.md) | 本机 |
 | **② Docker** | 租约 | SQLite | 内置 + 应用层转发 | **远端**（[E2B](../../e2b/tech/deployment.md) 等） |
 | **③ k8s 多副本** | 租约 | **Postgres** | 内置 + 应用层转发 | 远端 |
+
+③ 那一档的落地设计与施工拆单单独一份：[多副本部署 · 技术方案](./multi-replica.md) · [施工计划](../plans/multi-replica.md)。
 
 **流分发那一列从头到尾没变**，这是这一档最省事的地方。原因见 §5。
 
@@ -51,8 +53,8 @@ sequenceDiagram
     Note over W1,W2: 两个 worker 同时收到同一个会话的消息
     W1->>DB: CAS：会话没人持有 → 写我持有 + 新租期标识
     W2->>DB: CAS：会话没人持有 → 写我持有 + 新租期标识
-    DB-->>W1: 影响 1 行 —— 抢到了
-    DB-->>W2: 影响 0 行 —— 有人先我一步
+    DB-->>W1: 读回来是我的令牌 —— 抢到了
+    DB-->>W2: 读回来是别人的令牌 —— 有人先我一步
     Note over W2: 不是错误。<br/>把请求转给 A（应用层转发）
 
     loop 每隔一段
@@ -64,15 +66,15 @@ sequenceDiagram
 
     Note over W1: A 卡住了，心跳停了
     W2->>DB: 心跳超时 → CAS 抢占，换发新租期标识
-    DB-->>W2: 影响 1 行 —— 接管成功
+    DB-->>W2: 读回来是我的令牌 —— 接管成功
     W1->>DB: （A 活过来了）写账本，带的是**旧**租期标识
-    DB-->>W1: 影响 0 行 —— 拒绝
+    DB-->>W1: 令牌对不上 —— 拒绝
     Note over W1: 这就是「安全地失败」：<br/>A 全程不知道自己过期了，存储替它判断
 ```
 
 三个要点：
 
-1. **CAS（比对后再写）必须能拿到影响行数**——那是唯一的成功/失败信号。
+1. **CAS（比对后再写）的成败判据是「读回来比对[租期标识](../../../terms.md)」，不是影响行数。** MySQL 把「匹配到了但值没变」也报成 0 行，跟「没匹配到」分不开——三个方言里只有这条判据是一致的。
 2. **`held_by_other` 不是错误**，是「转给持有者」。把它当 500 返回给用户是这一档最常见的实现错误。
 3. **每一次写入都可能被拒绝**，而且是正常路径。单进程版永远走不到这条路，但代码里必须有它。
 
@@ -88,7 +90,7 @@ sequenceDiagram
 | **①** | SQLite（同机文件） | 同一台机器上的多个进程，够用 |
 | **②③** | Postgres / MySQL | 跨机就必须换——SQLite 那个文件别的机器看不见 |
 
-`@runko/persist-sql` 是**裸驱动**实现，方言是它的参数；另外两条腿 `persist-drizzle` / `persist-prisma` 接你已有的 ORM。三条腿共用同一套接口，换腿不改业务代码。
+`@runko/persist-kysely` 吃一个 Kysely 实例，方言是它的参数；只有一个裸驱动、没在用 ORM 的话用三个薄壳（`persist-sqlite` / `-postgres` / `-mysql`），它们替你把 Kysely 装配好。非关系型那条腿是 `persist-mongo`，它不走 Kysely。全部共用同一套接口，换腿不改业务代码。
 
 **持久化和租约版归属仲裁打包在同一个包里**，因为它们共享连接与 CRUD + CAS 原语。这不是耦合，是「一次装什么」的划分。
 

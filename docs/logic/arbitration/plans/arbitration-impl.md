@@ -6,7 +6,7 @@ layer: 逻辑层
 module: 归属仲裁
 packages: ["@runko/persist-kysely", "@runko/persist-mongo", "@runko/agent"]
 tags: ["租约", "心跳", "租期标识", "多进程", "CAS"]
-related: ["logic/arbitration/features/arbitration-impl.md", "logic/arbitration/tech/arbitration-impl.md", "architecture/plans/agent-kernel.md"]
+related: ["logic/arbitration/features/arbitration-impl.md", "logic/arbitration/tech/arbitration-impl.md", "architecture/plans/agent-kernel.md", "host/node/plans/multi-replica.md"]
 ---
 
 # 归属仲裁机制 · 租约版（施工计划）
@@ -21,6 +21,10 @@ related: ["logic/arbitration/features/arbitration-impl.md", "logic/arbitration/t
 换成**数据库里一张租约表**（多进程也成立）。轮编排一行不改。
 
 ## 1. 现状盘点：哪些已经有了，缺口在哪
+
+> ⚠️ **本节是 2026-09-01 立项当时的快照，不是当前事实。** 里面写着「租约版实现 ❌ 不存在」——
+> 它当天就交付了。**当前事实以 §3 的阶段表与 §8 的变更记录为准**，别照着本节重做一遍。
+> 保留它是因为它解释了当时为什么这么拆单。
 
 **这是本计划最要紧的一节**——接口在 K2 就定形了，很多人以为还没开始的东西其实已经在跑。
 
@@ -98,10 +102,10 @@ related: ["logic/arbitration/features/arbitration-impl.md", "logic/arbitration/t
 | **L5** | `listStale` / `clearStale` 的租约语义 | ✅ 同上 |
 | **L6** | **仲裁一致性套件** | ✅ `@runko/conformance` 的 `arbitrationCases` / `arbitrationMultiNodeCases` / `arbitrationTakeoverCases` |
 | **L9 场景 3** | **被误判的老持有者写入被拒** | ✅ 四个方言全过（含真 Postgres / 真 MySQL） |
-| **L7** | 三个薄壳导出 `*Arbitration()` | ⬜ 未开工（本批范围外） |
-| **L8** | Mongo 版 | ⬜ 未开工 |
-| **L9 完整版** | 两个**真进程**的 e2e | ⬜ 未开工，见下「与计划的偏差」 |
-| **L10** | 接入层转发（`held_by_other` 不再回 500） | ⬜ 未开工 |
+| **L7** | 三个薄壳导出 `*Arbitration()` | ✅ 2026-09-09，见[多副本部署 · 施工](../../../host/node/plans/multi-replica.md) M1 |
+| **L8** | Mongo 版 | ⬜ 未开工，见[多副本部署 · 施工](../../../host/node/plans/multi-replica.md) M2 |
+| **L9 完整版** | 两个**真进程**的 e2e | ✅ 2026-09-09（SQLite 文件档四场景），真 Postgres 档见[多副本部署 · 施工](../../../host/node/plans/multi-replica.md) M6 |
+| **L10** | 接入层转发（`held_by_other` 不再回 500） | ✅ 2026-09-09，示范在 `persist-demo`，见[多副本部署 · 施工](../../../host/node/plans/multi-replica.md) M5 |
 
 ### 与计划的偏差（四处，都是有意的）
 

@@ -56,4 +56,8 @@ for await (const frame of runtime.subscribe("conv_abc")) {
 ## 还没做的
 
 - **挂起与恢复**：等人等太久时落盘退出、人回来在任意节点接着干。卡在一个未定的上游问题（core 的「恢复开轮」入口怎么加），见[施工进展](../../docs/logic/orchestration/plans/agent-runtime.md)。
-- **租约版归属仲裁**：多进程共享 DB。接口已按它定形（`nextSeq` 会报「失去独占权」、`Grant` 带失效信号），换实现不用改轮编排。
+
+> **租约版归属仲裁不在这张单子上了**——2026-09-01 已交付。多进程 / 多副本共享一个库时，用
+> `@runko/persist-kysely` 的 `leaseArbitration()`，或三个薄壳的 `sqliteArbitration()` /
+> `postgresArbitration()` / `mysqlArbitration()`，**轮编排一行不改**。怎么配见
+> [多副本部署](../../docs/host/node/tech/multi-replica.md)。

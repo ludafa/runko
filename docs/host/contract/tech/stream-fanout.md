@@ -15,7 +15,8 @@ related: ["host/contract/features/stream-fanout.md", "architecture/tech/agent-ke
 > 宿主层的另两样能力：[沙盒](./sandbox.md) · [持久化](./persistence.md)。第四样[归属仲裁机制](../../../logic/arbitration/tech/arbitration-impl.md)的实现文档跟它的语义并排放在逻辑层。
 > 依赖/延续：[chat 服务端技术方案](../../../ingress/tech/chat-webapp.md)（现行 SSE 直播流 + 回放游标的具体实现）· [进行中草稿放内存](../../../logic/orchestration/tech/in-flight-draft.md)（直播内容与账本的分工）。
 >
-> **状态：接口未定稿。** 已定的是两条硬约束（§3）与打包方式，方法签名待定。
+> **状态：接口定稿**（2026-09-09，随[多副本部署](../../node/tech/multi-replica.md)落地）。
+> 两个方法就是全部；游标与保留窗口是**外挂广播那条腿**才需要的东西，归 Vercel 那一档，见 §7。
 
 ## 1. 一句话
 
@@ -97,9 +98,15 @@ sequenceDiagram
 - **不做鉴权。** 谁能订阅哪个会话是[接入层](../../../terms.md)的事。
 - **多了一个外部件的运维成本。** ④b 那档必须自己养一个 Redis，这是这一档的固有代价，不是设计缺陷。
 
-## 7. TODO（未定）
+## 7. 四条待定项：全部结案（2026-09-09）
 
-- [ ] 接口方法签名（`publish` / `subscribeFrom` 这组名字本身也未定）。
-- [ ] 流里内容的保留窗口：多长、由谁配、超窗之后订阅方怎么回落到账本回放。
-- [ ] 要不要再给一条腿（NATS / Postgres `LISTEN/NOTIFY` / 平台原生广播）。
-- [ ] 与现有 chat 应用那套 SSE 实现怎么并轨——是把它重构成这个接口的一个实现，还是并存。
+| 原待定项 | 结案 |
+|---|---|
+| 接口方法签名 | ✅ **定为现状的两个方法**：`publish(conversationId, frame)` 与同步的 `subscribe(conversationId, listener)`。转发那几档不需要更多——「从某个位置续读」是广播才有的问题 |
+| 流里内容的保留窗口 | ⏸ **只有外挂广播那条腿才需要**，归 [Vercel 那一档](../../vercel/tech/deployment.md)。转发档下历史的唯一事实来源是[账本](../../../terms.md)，流里什么都不留 |
+| 要不要再给一条腿（NATS / Postgres `LISTEN/NOTIFY` / 平台原生） | ⏸ 同上，等第一条腿真被用起来再谈 |
+| 与 chat 应用那套 SSE 怎么并轨 | ✅ **不并轨**：chat 应用是单进程，用内置实现就够。它那套 SSE 本来就是这个接口的消费方，不是第二个实现 |
+
+**定稿的推导只有一步**：Node 长驻那四档总能知道持有者在哪，所以「订阅方与产出方不在一处」
+用转发就解决了；不广播就不需要游标。真正绕不过去的只有 Vercel 那一档——实例由平台调度，
+找不到持有者。落地形态与验收见[多副本部署](../../node/tech/multi-replica.md)。
