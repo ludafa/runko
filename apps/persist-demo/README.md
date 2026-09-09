@@ -54,6 +54,47 @@ src/
 > 而且它跟 runko 完全无关：这二十行伺候的是 `demo_conversations`（demo 自己的产品数据）。
 > **agent 那三张表一次都没被这里碰过**，全归 `@runko/persist-*`。
 
+## 跑两个副本
+
+多副本只靠一个环境变量开：`RUNKO_NODE_URL` 是本副本的**可达地址**，原样进 `holder`。
+给了它就换成租约版[归属仲裁机制](../../docs/terms.md)并打开转发；不给就是单副本跑法，
+行为与以前一字不差。
+
+```sh
+# 两个进程，共用一个 SQLite 文件（就是部署形态里的「① 同机 cluster」）
+PORT=3921 DEMO_DB_PATH=/tmp/runko-demo.db RUNKO_NODE_URL=http://127.0.0.1:3921 \
+  pnpm --filter @runko-demo/persist-demo start &
+PORT=3922 DEMO_DB_PATH=/tmp/runko-demo.db RUNKO_NODE_URL=http://127.0.0.1:3922 \
+  pnpm --filter @runko-demo/persist-demo start &
+```
+
+跨机就把 `DEMO_DB=postgres` + `DATABASE_URL` 换上，`RUNKO_NODE_URL` 填 pod 的可达地址。
+
+| 变量 | 说明 |
+| --- | --- |
+| `RUNKO_NODE_URL` | 本副本可达地址；**给了才开多副本** |
+| `RUNKO_PEER_TOKEN` | 副本之间的内部令牌；不配就不校验（本机联调用） |
+| `RUNKO_HEARTBEAT_MS` / `RUNKO_TAKEOVER_MS` | 租约的两个时间参数，缺省 5000 / 60000 |
+| `DEMO_MODEL_DELAY_MS` | 回声模型答话前先睡多久，用来手工制造「一轮还在跑」 |
+
+**转发哪些端点**，判据只有一条：这件事的状态在数据库里，还是在持有者的**进程内存**里。
+
+| 端点 | 转不转 | 为什么 |
+| --- | --- | --- |
+| `POST …/messages` | 转 | 起轮要在持有者那儿发生（拿 `held_by_other` 带回的 `holder`） |
+| `POST …/abort` | **必须转** | 停止作用在持有者的 `AbortController` 上 |
+| `POST …/approvals/:callId` · `…/questions/:callId` | **必须转** | 待裁决项挂在持有者内存里那一轮上 |
+| `GET …/stream` | 转 | 进行中草稿在持有者内存里 |
+| `DELETE …/queue[/:id]` | 转 | 改完库要广播一帧新快照，而订阅者都在持有者那一侧 |
+| `GET …/messages` · `GET …/queue` | 不转 | 读，状态在库里，谁都能答 |
+
+转发带 `x-runko-forwarded: 1`，**带着它进来的请求一律不再转**——没有这条，两个副本在归属
+刚好易主的那一瞬间会打成死循环。
+
+验收跑的是 `test/multi-replica.e2e.test.ts`：两个真进程、一个 SQLite 文件、四个场景，
+其中「被误判的老持有者活过来之后写不进账本」是核心那条。设计见
+[多副本部署](../../docs/host/node/tech/multi-replica.md)。
+
 ## 端点
 
 形状**刻意对齐 `apps/node-server`**（去掉认证/沙盒/推送/遥测这些跟持久化无关的）。

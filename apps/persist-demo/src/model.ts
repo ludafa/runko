@@ -39,6 +39,35 @@ export function scriptedModel(text: string): LanguageModel {
   });
 }
 
+/**
+ * **慢一点的回声模型**——给多副本 e2e 用：让「这一轮还在跑」在**另一个进程**里也是个
+ * 确定事实。`gatedModel` 的闸门是进程内的 promise，跨进程递不过去。
+ */
+export function slowModel(text: string, delayMs: number): LanguageModel {
+  return new MockLanguageModelV4({
+    doStream: async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+      return {
+        stream: simulateReadableStream({
+          chunks: [
+            { type: "stream-start" as const, warnings: [] },
+            { type: "text-start" as const, id: "t1" },
+            { type: "text-delta" as const, id: "t1", delta: text },
+            { type: "text-end" as const, id: "t1" },
+            {
+              type: "finish" as const,
+              finishReason: { unified: "stop" as const, raw: undefined },
+              usage: USAGE,
+            },
+          ],
+          initialDelayInMs: null,
+          chunkDelayInMs: null,
+        }),
+      };
+    },
+  });
+}
+
 /** 缺省的「回声」模型：不联网，回一句固定话。 */
 export function echoModel(): LanguageModel {
   return scriptedModel("（回声模型：没配 API key，所以我只会说这一句。持久化照样在工作。）");

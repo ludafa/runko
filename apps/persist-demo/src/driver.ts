@@ -16,15 +16,28 @@
  *
  * 三个 import 都是**动态**的：跑 SQLite 的人不该被迫加载 `pg` 和 `mysql2`。
  */
-import type { Persistence } from "@runko/agent";
+import type { Arbitration, Persistence } from "@runko/agent";
 
 import type { DemoStore } from "./store.js";
 import { createMongoStore, createSqlStore } from "./store.js";
 
 export type DriverKind = "sqlite" | "memory" | "postgres" | "mysql" | "mongo";
 
+/** 多副本时给租约版[归属仲裁机制](../../../docs/terms.md)的入参。 */
+export interface ArbitrationSettings {
+  /** 本副本的可达地址，原样进 `holder`。 */
+  holder: string;
+  heartbeatMs?: number;
+  takeoverMs?: number;
+}
+
 export interface OpenedDriver {
   persistence: Persistence;
+  /**
+   * 把**同一个驱动实例**装成租约版归属仲裁——多副本要它。缺席 = 这一档还没有租约版
+   * 实现（Mongo 目前如此），调用方应当退回单副本。
+   */
+  makeArbitration?: (settings: ArbitrationSettings) => Arbitration;
   /** 库名，用于日志与 e2e 断言。 */
   kind: "sqlite" | "postgres" | "mysql" | "mongo";
   close(): Promise<void>;
@@ -56,7 +69,7 @@ export async function openDriver(opts: OpenDriverOptions = {}): Promise<OpenedDr
   const url = opts.url ?? process.env["DATABASE_URL"] ?? "";
 
   if (kind === "postgres") {
-    const [{ Pool }, { migrate, postgresPersistence }] = await Promise.all([
+    const [{ Pool }, { migrate, postgresArbitration, postgresPersistence }] = await Promise.all([
       import("pg"),
       import("@runko/persist-postgres"),
     ]);
@@ -64,6 +77,7 @@ export async function openDriver(opts: OpenDriverOptions = {}): Promise<OpenedDr
     await migrate(pool);
     return {
       persistence: postgresPersistence(pool),
+      makeArbitration: (settings) => postgresArbitration(pool, settings),
       kind: "postgres",
       makeStore: () =>
         createSqlStore({
@@ -80,7 +94,7 @@ export async function openDriver(opts: OpenDriverOptions = {}): Promise<OpenedDr
   }
 
   if (kind === "mysql") {
-    const [{ createPool }, { migrate, mysqlPersistence }] = await Promise.all([
+    const [{ createPool }, { migrate, mysqlArbitration, mysqlPersistence }] = await Promise.all([
       import("mysql2/promise"),
       import("@runko/persist-mysql"),
     ]);
@@ -90,6 +104,7 @@ export async function openDriver(opts: OpenDriverOptions = {}): Promise<OpenedDr
     await migrate(pool.pool);
     return {
       persistence: mysqlPersistence(pool.pool),
+      makeArbitration: (settings) => mysqlArbitration(pool.pool, settings),
       kind: "mysql",
       makeStore: () =>
         createSqlStore({
@@ -130,15 +145,25 @@ export async function openDriver(opts: OpenDriverOptions = {}): Promise<OpenedDr
     };
   }
 
-  const [{ default: Database }, { migrate, sqlitePersistence }] = await Promise.all([
+  const [{ default: Database }, { migrate, sqliteArbitration, sqlitePersistence }] = await Promise.all([
     import("better-sqlite3"),
     import("@runko/persist-sqlite"),
   ]);
   const file = kind === "memory" ? ":memory:" : (opts.path ?? process.env["DEMO_DB_PATH"] ?? "demo.db");
   const db = new Database(file);
+  if (file !== ":memory:") {
+    // **多进程共用一个 SQLite 文件时这两条是必需的**（部署形态里的「① 同机 cluster」）：
+    // 默认的 rollback journal 下第二个写者直接吃 `SQLITE_BUSY`，而不是等一下再来。
+    // WAL 让读写不互斥，`busy_timeout` 让写写冲突退化成「等一会儿」。
+    db.pragma("journal_mode = WAL");
+    db.pragma("busy_timeout = 5000");
+  }
   await migrate(db);
   return {
     persistence: sqlitePersistence(db),
+    // 同机多进程共用一个 SQLite 文件也是多副本的一档（部署形态里的「① 同机 cluster」），
+    // 所以这一档也给。`:memory:` 那档给了也没用——每个进程各有一份内存库。
+    makeArbitration: (settings) => sqliteArbitration(db, settings),
     kind: "sqlite",
     makeStore: () =>
       createSqlStore({
