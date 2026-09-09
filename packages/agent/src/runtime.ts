@@ -244,8 +244,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       //    （`text-delta` 之类，脱离顺序重放反而会写坏）。中间**不能有 `await`**：Node
       //    单线程，同步段内没有别的东西能插进来，所以这样写就是零空隙。
       const turn = registry.get(conversationId);
-      const active = turn !== undefined;
-      const holder = turn?.grant.holder;
+      const localActive = turn !== undefined;
       const draft = turn === undefined ? [] : [...turn.draft];
       // **只丢 chunk 与快照帧，`message` 帧必须留下。**
       // - `chunk`：要么已经在草稿快照里（重复发无害），要么是纯增量（`text-delta`
@@ -273,9 +272,34 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       // ④ 两帧权威快照：队列、以及[轮状态](../../docs/terms.md)。**每条连接必发**——任何
       //    时候连上/重连拿到的都是当下的真实状态，而不是靠客户端猜。
       yield { kind: "queue", queue: await persistence.queue.list(conversationId) };
-      yield { kind: "activity", active, ...(holder !== undefined ? { holder } : {}) };
 
-      if (!active && follow === "turn") {return;}
+      // **轮状态必须是权威答案，不能只看本进程的登记表。** 多副本下这份对话可能正跑在别的
+      // 副本上，那时本地登记表是空的——报「没有轮在跑」是错的，[接入层](../../docs/terms.md)
+      // 据此既不知道该转发、也没法告诉用户这一轮在别处。取法与 `getActivity()` 同一套：
+      // 本地登记表命中就用它，**单进程下 `inspect()` 一次都不会被调到**；没命中才去问
+      // [归属仲裁](../../docs/terms.md)（租约版下是一次 SELECT）。
+      //
+      // 判据刻意仍用**第 ③ 步捕获的那个 `turn`**，不重新查登记表：这里到第 ⑤ 步之间要是
+      // 换了判据，「这一轮刚好在 ③④ 之间收尾」那条窄路上会把已经躺在缓冲里的收尾
+      // `message` 帧丢掉——而收尾窗口里重连恰恰是最该管用的那一刻。于是控制流一行没变，
+      // 变的只是这一帧的内容。
+      //
+      // **归属报的是我们自己上一次的 `holder` 时不算「有轮在跑」**：收尾是先删登记表、
+      // 再释放归属（见 `queue.ts` 的 `settleTurn`），中间那一小段两边都查得到「有人持有」
+      // 却没有任何东西在跑。不排除它的话，这一帧会说「还在跑」然后流立刻断掉——客户端
+      // 的转圈动画就停在那儿了。释放失败时这段窗口会一直拖到租约过期。
+      const remote = localActive ? undefined : await arbitration.inspect(conversationId);
+      const heldElsewhere =
+        remote?.held === true &&
+        (registry.lastHolder === undefined || remote.holder !== registry.lastHolder);
+      const holder = localActive ? turn.grant.holder : heldElsewhere ? remote?.holder : undefined;
+      yield {
+        kind: "activity",
+        active: localActive || heldElsewhere,
+        ...(holder !== undefined ? { holder } : {}),
+      };
+
+      if (!localActive && follow === "turn") {return;}
 
       // ⑤ 直播。「先看有没有货，没货才等」——`scheduleWake` 换新 promise 的写法下，一个在
       //    本循环 yield 期间到达的帧唤醒的是已经没人等的旧 promise，那次唤醒会丢；先看

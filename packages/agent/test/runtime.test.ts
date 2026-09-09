@@ -8,8 +8,8 @@
 import type { AgentDefinition, RunkoUIMessage } from "@runko/core";
 import { describe, expect, it, vi } from "vitest";
 
-import type { AgentRuntime, Frame, TurnInput, TurnPreparation } from "../src/index.js";
-import { createAgentRuntime, memoryPersistence } from "../src/index.js";
+import type { AgentRuntime, Arbitration, Frame, OwnershipInfo, TurnInput, TurnPreparation } from "../src/index.js";
+import { createAgentRuntime, inProcessArbitration, memoryPersistence } from "../src/index.js";
 import { buildResumeState } from "../src/runtime/turn.js";
 import type { FakeSession } from "./helpers/fake-session.js";
 import { assistantMessage, createFakeSessionFactory, endTurnChunk } from "./helpers/fake-session.js";
@@ -33,6 +33,57 @@ function setup(overrides: Partial<Parameters<typeof createAgentRuntime>[0]> = {}
     ...overrides,
   });
   return { runtime, sessions, persistence, prepared };
+}
+
+/**
+ * 一个「归属在别的节点手上」的假[归属仲裁机制](../../../docs/terms.md)：抢不到，
+ * `inspect` 报别人持有。多副本下本进程的登记表是空的，就是这个样子。
+ */
+function remoteArbitration(holder: string): Arbitration {
+  return {
+    acquire: () => Promise.resolve({ ok: false, reason: "busy", holder }),
+    inspect: (): Promise<OwnershipInfo> => Promise.resolve({ held: true, holder }),
+    listStale: () => Promise.resolve([]),
+    clearStale: () => Promise.resolve(),
+  };
+}
+
+/**
+ * 一个**永远报「我自己持有」**的假仲裁：`release()` 刻意不清账，于是 `inspect` 在这一轮
+ * 收尾之后仍然说有人持有。它模拟的是收尾窗口——`settleTurn` 先删登记表、再释放归属，
+ * 中间那一小段（以及释放失败时的更长一段）两边都查得到「有人持有」却没有任何东西在跑。
+ */
+function selfHoldingArbitration(holder: string): Arbitration {
+  let seq = 0;
+  return {
+    acquire: async (conversationId, ctx) => {
+      seq = await ctx.seedSeq();
+      return {
+        ok: true,
+        grant: {
+          conversationId,
+          holder,
+          signal: new AbortController().signal,
+          valid: true,
+          nextSeq: () => {
+            seq += 1;
+            return Promise.resolve({ ok: true as const, seq });
+          },
+          release: () => Promise.resolve(),
+        },
+      };
+    },
+    inspect: (): Promise<OwnershipInfo> => Promise.resolve({ held: true, holder }),
+    listStale: () => Promise.resolve([]),
+    clearStale: () => Promise.resolve(),
+  };
+}
+
+/** 内存版仲裁 + 一个盯着 `inspect` 的探针——用来钉「单进程下不该多打一次库」。 */
+function setupWithSpiedArbitration() {
+  const inner = inProcessArbitration();
+  const inspect = vi.fn((id: string) => inner.inspect(id));
+  return { ...setup({ arbitration: { ...inner, inspect } }), inspect };
 }
 
 /** 收集 `subscribe` 吐出的帧，直到它自己收线。 */
@@ -153,6 +204,54 @@ describe("subscribe", () => {
     await tail.done;
     expect(tail.frames.map((f) => f.kind)).toEqual(["queue", "activity"]);
     expect(tail.frames.at(-1)).toMatchObject({ active: false });
+  });
+
+  it("归属在别的节点时，轮状态快照报 active + 那个 holder（不是本地的「没在跑」）", async () => {
+    const { runtime } = setup({ arbitration: remoteArbitration("node-b") });
+
+    const tail = collect(runtime, "conv-remote");
+    await tail.done; // 本地没有轮，`follow: 'turn'` 照旧收线
+
+    expect(tail.frames.map((f) => f.kind)).toEqual(["queue", "activity"]);
+    // 关键：不是 `{ active: false }`——那是「本进程不知道」，不是「没有轮在跑」。
+    expect(tail.frames.at(-1)).toMatchObject({ kind: "activity", active: true, holder: "node-b" });
+  });
+
+  it("归属报的是**我们自己**上一次的 holder 时，不算「有轮在跑」", async () => {
+    // 这一条钉的是收尾窗口：登记表已经删了、归属还没释放完。此时若照搬 `inspect` 的
+    // 答案，最后一帧会说「还在跑」然后流立刻断掉——客户端的转圈动画就停在那儿了。
+    const { runtime, sessions } = setup({ arbitration: selfHoldingArbitration("node-a") });
+    await runtime.enqueue("conv-settling", { text: "hello" });
+    await runOneTurn(await sessions.next(), "done");
+    await vi.waitFor(async () => {
+      expect((await runtime.readLedger("conv-settling")).length).toBe(2);
+    });
+
+    const tail = collect(runtime, "conv-settling");
+    await tail.done;
+
+    expect(tail.frames.at(-1)).toMatchObject({ kind: "activity", active: false });
+    expect(tail.frames.at(-1)).not.toHaveProperty("holder");
+  });
+
+  it("本地持有时不去问归属仲裁——单进程下 `inspect()` 一次都不该被调到", async () => {
+    const { runtime, sessions, inspect } = setupWithSpiedArbitration();
+    await runtime.enqueue("conv-local", { text: "hello" });
+    const session = await sessions.next();
+    await session.started;
+
+    const tail = collect(runtime, "conv-local");
+    await vi.waitFor(() => {
+      expect(tail.frames.some((f) => f.kind === "activity")).toBe(true);
+    });
+    expect(tail.frames.at(-1)).toMatchObject({ kind: "activity", active: true });
+    expect(inspect).not.toHaveBeenCalled();
+
+    session.emit({ type: "finish" });
+    session.push(assistantMessage("done", { turn: 1, usage: {}, status: "completed" }));
+    session.emit(endTurnChunk(1));
+    session.finish();
+    await tail.done;
   });
 
   it("`follow: 'forever'` 靠 signal 收线", async () => {
@@ -965,5 +1064,35 @@ describe("buildResumeState 滤掉存量的空 parts 行", () => {
     // 轮号仍然从**全部**行里推——被滤掉那条身上的 metadata 不该丢。
     expect(state.turn).toBe(1);
     expect(state.id).toBe("conv-legacy");
+  });
+});
+
+/**
+ * 多副本下[接入层](../../../docs/terms.md)要能**转发**，靠的是框架把 `holder` 交出来。
+ * 交在一句英文文案里不算交——改一次文案就断一次转发。
+ */
+describe("起轮被拒时的 holder", () => {
+  it("`held_by_other` 带结构化 holder，其余拒绝原因不带", async () => {
+    const { runtime } = setup({ arbitration: remoteArbitration("http://10.1.2.3:3910") });
+
+    const outcome = await runtime.enqueue("conv-forward", { text: "hello" });
+
+    expect(outcome).toMatchObject({
+      mode: "rejected",
+      reason: "held_by_other",
+      holder: "http://10.1.2.3:3910",
+    });
+    // 文案照旧带着同一个事实，但它是给人看的，不是协议。
+    expect(outcome).toMatchObject({ message: expect.stringContaining("http://10.1.2.3:3910") });
+  });
+
+  it("关闭中被拒时不带 holder——那条路跟归属无关", async () => {
+    const { runtime } = setup();
+    await runtime.shutdown({ graceMs: 0 });
+
+    const outcome = await runtime.enqueue("conv-down", { text: "hello" });
+
+    expect(outcome).toMatchObject({ mode: "rejected", reason: "shutting_down" });
+    expect(outcome).not.toHaveProperty("holder");
   });
 });

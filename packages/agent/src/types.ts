@@ -85,7 +85,18 @@ export type EnqueueResult =
   | { mode: "started" }
   | { mode: "queued"; queued: QueuedInput; queue: QueuedInput[] }
   | { mode: "steered" }
-  | { mode: "rejected"; reason: EnqueueRejection; message: string };
+  | {
+      mode: "rejected";
+      reason: EnqueueRejection;
+      message: string;
+      /**
+       * 归属此刻在谁手上——**只有 `held_by_other` 才有值**，其余四种拒绝原因不带。
+       *
+       * 它跟 `message` 里那句话是同一个事实，但**接入层要的是这一个**：转发是照着地址走的，
+       * 从一句给人看的英文里抠 holder 是把文案当协议用，改一次文案就断一次转发。
+       */
+      holder?: string;
+    };
 
 /**
  * 拒绝的四种原因，**处置各不相同**，所以必须分开报（[归属仲裁机制 §5](../../../docs/logic/arbitration/tech/arbitration-impl.md)）：

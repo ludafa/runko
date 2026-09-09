@@ -77,6 +77,19 @@ export interface ActiveTurn {
 export class TurnRegistry {
   private readonly turns = new Map<string, ActiveTurn>();
 
+  /**
+   * 本进程最近一次抢到[归属](../../../../docs/terms.md)时用的 `holder` 字符串。
+   *
+   * `subscribe` 拿它把两件长得一样的事分开：**「我自己那一轮正在收尾」**（收尾是先删
+   * 登记表、再释放归属，中间那一小段登记表已经查不到、归属却还在）与**「归属真在别的
+   * 副本上」**。不分开的话，收尾窗口里的订阅者会拿到一帧「还在跑」然后流立刻断掉——
+   * 那正是它用来关掉转圈动画的那一帧。释放失败时这段窗口会一直拖到租约过期。
+   *
+   * 放在登记表上而不是另开一个字段：它讲的就是「本进程的轮」这件事，而且**这样测试
+   * 夹具不用改**——它们本来就在造这个对象。
+   */
+  lastHolder: string | undefined;
+
   get(conversationId: string): ActiveTurn | undefined {
     return this.turns.get(conversationId);
   }

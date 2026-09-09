@@ -49,6 +49,8 @@ export async function startTurn(ctx: RuntimeContext, conversationId: string, inp
       : { started: false, reason: "held_by_other", ...(acquired.holder !== undefined ? { holder: acquired.holder } : {}) };
   }
 
+  // 记下这次的 holder：`subscribe` 靠它把「本进程正在收尾」与「归属在别的副本」分开。
+  ctx.registry.lastHolder = acquired.grant.holder;
   const turn = createActiveTurn({ conversationId, grant: acquired.grant, input, turnNumber: 1 });
   ctx.registry.set(turn);
   publish(ctx, conversationId, { kind: "activity", active: true, ...(acquired.grant.holder !== "" ? { holder: acquired.grant.holder } : {}) });
@@ -209,10 +211,13 @@ export async function enqueue(
     return { mode: "rejected", reason: "shutting_down", message: "The server is shutting down; retry shortly." };
   }
   if (outcome.reason === "held_by_other") {
+    // `holder` 既进 `message`（给人看）也单独出一个字段（给接入层转发用）。两者同源，
+    // 但接入层只能用后者——把地址从文案里抠出来，等于让一句英文成为协议。
     return {
       mode: "rejected",
       reason: "held_by_other",
       message: `This conversation is owned by ${outcome.holder ?? "another node"}; forward the request there.`,
+      ...(outcome.holder !== undefined ? { holder: outcome.holder } : {}),
     };
   }
   // `busy`：窄竞态——另一条请求在这两步之间抢先起了一轮。排队是正确回落。
