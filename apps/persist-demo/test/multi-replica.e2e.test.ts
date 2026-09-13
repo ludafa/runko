@@ -136,7 +136,7 @@ describe("多副本：两个真进程共用一个库", () => {
     expect(await activity(b, id)).toMatchObject({ active: true, local: false, holder: a.url });
 
     // 同一条会话再往 B 发一句：B 抢不到归属 → 拿着 holder 转给 A → A 排队。
-    // 转发没接通的话这里会是 421。
+    // 转发没接通的话这里会是 503。
     const second = await send(b, id, "第二条");
     expect(second.status).toBe(202);
     expect(await json(second)).toMatchObject({ mode: "queued" });

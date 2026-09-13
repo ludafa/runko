@@ -5,7 +5,7 @@
  * 抽成一个函数（而不是写在 `index.ts` 里）是为了让 e2e 能不起真端口就把它装起来，
  * 直接对 `app.request()` 打——这是 Hono 的原生能力，比起真监听端口快且没有端口冲突。
  */
-import type { AgentRuntime } from "@runko/agent";
+import type { AgentRuntime, Logger } from "@runko/agent";
 import { createAgentRuntime } from "@runko/agent";
 import type { LanguageModel } from "ai";
 import type { Hono } from "hono";
@@ -39,6 +39,12 @@ export interface CreateDemoAppOptions extends OpenDriverOptions {
    * 那种配法本来就不成立。
    */
   node?: NodeIdentity & { heartbeatMs?: number; takeoverMs?: number };
+  /**
+   * 日志出口，注入两处：runtime 与 HTTP 层（含转发）。不给就一行不打——e2e 直接对 `app.request()`
+   * 打的那些用例不需要日志。（租约版仲裁暂时不打日志：框架层的可观测性会改成「框架发事件、宿主订阅」，
+   * 见 docs/host/node/tech/multi-replica.md §11.6。）
+   */
+  logger?: Logger;
 }
 
 export async function createDemoApp(opts: CreateDemoAppOptions): Promise<DemoApp> {
@@ -94,6 +100,7 @@ async function assemble(
     persistence: opened.persistence,
     ...(arbitration !== undefined ? { arbitration } : {}),
     queue: { max: opts.queueMax ?? 10 },
+    ...(opts.logger !== undefined ? { logger: opts.logger } : {}),
   });
 
   // 启动扫描：给崩溃残留的[孤儿轮](../../../docs/terms.md)补「已停止」收尾。
@@ -101,7 +108,12 @@ async function assemble(
   await runtime.recover();
 
   return {
-    app: createServer({ runtime, store, forwarder: createForwarder(opts.node) }),
+    app: createServer({
+      runtime,
+      store,
+      forwarder: createForwarder(opts.node, opts.logger),
+      ...(opts.logger !== undefined ? { logger: opts.logger } : {}),
+    }),
     runtime,
     kind: opened.kind,
     close: async () => {

@@ -23,12 +23,33 @@
  *
  * 三道防护缺一不可，见下面各自的注释：**环路**、**鉴权**、**背压**。
  */
+import type { Logger } from "@runko/agent";
+import { describeError } from "@runko/agent";
 import type { Context } from "hono";
+
+import { silentLogger } from "./logger.js";
+
+const LOG_SCOPE = "forward";
 
 /** 转发标记。带着它进来的请求**一律不再转发**——见 `shouldForward`。 */
 export const FORWARDED_HEADER = "x-runko-forwarded";
 /** 副本之间的内部令牌。用户凭据不透传，节点间自己认自己。 */
 export const PEER_TOKEN_HEADER = "x-runko-peer-token";
+
+/**
+ * 「持有者这会儿够不着，稍后再试」统一回 **503 + `Retry-After`**，**不能回 421**。
+ *
+ * 421（Misdirected Request）看着更贴切，但 Fetch 标准规定：客户端收到 421 要**自动换一条连接
+ * 把请求再发一遍**（undici `lib/web/fetch/index.js` 照此实现，浏览器同理），带 JSON 正文的
+ * POST 也照发不误。于是每次等待翻倍，发消息的请求还会被悄悄重发。多副本验证环境里这条是实测
+ * 出来的：同一个请求 curl 2 秒拿到结果，Node `fetch` 要 4 秒。503 不会被自动重发。
+ */
+export const RETRY_LATER_STATUS = 503;
+/** 建议客户端多久之后重试（秒）。持有者刚死时要等到接管阈值才有人接手，重试间隔短一点也只是多问几次。 */
+export const RETRY_AFTER_SECONDS = "1";
+
+/** 转发时最多等多久对方开口（收到响应头）。见 `forward` 里「持有者可能不响应」那段。 */
+export const DEFAULT_FORWARD_TIMEOUT_MS = 10_000;
 
 export interface NodeIdentity {
   /**
@@ -38,6 +59,8 @@ export interface NodeIdentity {
   url: string;
   /** 副本之间的内部令牌；不配就不校验（本机联调用）。 */
   peerToken?: string;
+  /** 转发时等对方开口的上限，缺省 `DEFAULT_FORWARD_TIMEOUT_MS`。**只管响应头，不管响应体**。 */
+  forwardTimeoutMs?: number;
 }
 
 export interface Forwarder {
@@ -57,7 +80,7 @@ export interface Forwarder {
 /**
  * 没配 `RUNKO_NODE_URL` 时给一个「什么都不转」的实现——单副本跑法一行代码都不用改。
  */
-export function createForwarder(node?: NodeIdentity): Forwarder {
+export function createForwarder(node?: NodeIdentity, logger: Logger = silentLogger): Forwarder {
   return {
     url: node?.url,
 
@@ -70,6 +93,7 @@ export function createForwarder(node?: NodeIdentity): Forwarder {
       if (token === undefined || token === "") {return undefined;}
       if (c.req.header(FORWARDED_HEADER) === undefined) {return undefined;}
       if (c.req.header(PEER_TOKEN_HEADER) === token) {return undefined;}
+      logger.warn(LOG_SCOPE, "rejected a forwarded request with a bad peer token", { method: c.req.method, path: c.req.path });
       return new Response(JSON.stringify({ error: "bad peer token" }), {
         status: 401,
         headers: { "content-type": "application/json" },
@@ -102,7 +126,21 @@ export function createForwarder(node?: NodeIdentity): Forwarder {
       // **持有者可能已经不在了**：进程崩溃之后，租约在库里还「活着」最长一个接管阈值
       // （缺省 60 秒）。这段窗口里 `inspect` 照样报它持有，于是这里会吃一个
       // `ECONNREFUSED`。放任它抛就是一条 500——而这不是服务器的错，是「稍后再试」。
-      // 回 421 并带上 `holder`，客户端据此重试即可。
+      // 回 503 并带上 `holder`，客户端据此重试即可（为什么不是 421 见 `RETRY_LATER_STATUS`）。
+      //
+      // **持有者也可能活着但不响应**（长时间 GC、虚机被挂起、被冻住）。那时 TCP 握手由它的
+      // 内核完成、连接照样建立，`fetch` 不抛，只是一直等——等到 Node 内置 HTTP 客户端默认的
+      // 300 秒响应头超时。所以要自己设一个「等对方开口」的上限，超时同样回 503。
+      //
+      // 计时器**拿到响应头就撤**（`finally`）：`fetch` 在响应头到达时就返回，响应体仍是一条流。
+      // 它只管「对方开没开口」，不管「说了多久」——否则 SSE 这种一连几分钟的流会被拦腰切断。
+      const forwardTimeoutMs = node?.forwardTimeoutMs ?? DEFAULT_FORWARD_TIMEOUT_MS;
+      const startedAt = Date.now();
+      logger.info(LOG_SCOPE, "forwarding to holder", { method: c.req.method, path: c.req.path, holder });
+      const timeout = new AbortController();
+      const timer = setTimeout(() => {
+        timeout.abort();
+      }, forwardTimeoutMs);
       let upstream: Response;
       try {
         upstream = await fetch(target, {
@@ -110,19 +148,40 @@ export function createForwarder(node?: NodeIdentity): Forwarder {
           headers,
           ...(body === undefined ? {} : { body }),
           // 客户端断开时把上游那条也收掉，别让转发出去的订阅悬着。
-          signal: c.req.raw.signal,
+          signal: AbortSignal.any([c.req.raw.signal, timeout.signal]),
         });
       } catch (error) {
         if (c.req.raw.signal.aborted) {throw error;} // 客户端自己走的，不是持有者的问题
+        // 连不上与等超时是同一件事：「持有者这会儿够不着，结果未知，稍后重试」。
+        logger.warn(LOG_SCOPE, "holder unreachable, answering 503", {
+          method: c.req.method,
+          path: c.req.path,
+          holder,
+          cause: timeout.signal.aborted ? `no response headers within ${String(forwardTimeoutMs)}ms` : describeError(error),
+          elapsedMs: Date.now() - startedAt,
+        });
         return new Response(
           JSON.stringify({
             reason: "holder_unreachable",
             holder,
-            message: `Could not reach the holder ${holder}; it may have just died. Retry shortly.`,
+            message: `Could not reach the holder ${holder}; it may have just died or stopped responding. Retry shortly.`,
           }),
-          { status: 421, headers: { "content-type": "application/json" } },
+          {
+            status: RETRY_LATER_STATUS,
+            headers: { "content-type": "application/json", "retry-after": RETRY_AFTER_SECONDS },
+          },
         );
+      } finally {
+        clearTimeout(timer);
       }
+      // 这里的耗时只到「响应头回来」：SSE 的响应体此后还会流很久，不算在里面。
+      logger.info(LOG_SCOPE, "holder answered", {
+        method: c.req.method,
+        path: c.req.path,
+        holder,
+        status: upstream.status,
+        headersMs: Date.now() - startedAt,
+      });
       return new Response(upstream.body, {
         status: upstream.status,
         headers: upstream.headers,

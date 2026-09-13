@@ -1,0 +1,13 @@
+# BuildKit 会自动认「Dockerfile 名 + .dockerignore」这个文件，所以不用往仓库根目录加 .dockerignore。
+**/node_modules
+**/dist
+**/.turbo
+**/coverage
+.git
+docs/.vitepress/cache
+docs/.vitepress/dist
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/.env
+**/.env.*

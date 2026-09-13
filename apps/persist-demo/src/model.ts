@@ -5,6 +5,8 @@
  * 要展示的是持久化，一上来先要人配 API key 是没必要的门槛。真要接 provider 的写法
  * 看 `apps/node-server/src/agent/model.ts`。
  */
+import { setTimeout as sleep } from "node:timers/promises";
+
 import { simulateReadableStream } from "ai";
 import type { LanguageModel } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
@@ -42,11 +44,15 @@ export function scriptedModel(text: string): LanguageModel {
 /**
  * **慢一点的回声模型**——给多副本 e2e 用：让「这一轮还在跑」在**另一个进程**里也是个
  * 确定事实。`gatedModel` 的闸门是进程内的 promise，跨进程递不过去。
+ *
+ * **等待要能被中断**，跟真 provider 一样（它们的 HTTP 请求会随 `abortSignal` 断掉）。否则
+ * 一轮被停止、或持有者[自我围栏](../../../docs/terms.md)停手之后，它仍要睡满整段才结束——
+ * 验证环境里「这一轮是自己停的」与「模型睡完自然结束的」就分不出来了。
  */
 export function slowModel(text: string, delayMs: number): LanguageModel {
   return new MockLanguageModelV4({
-    doStream: async () => {
-      await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+    doStream: async ({ abortSignal }) => {
+      await sleep(delayMs, undefined, abortSignal === undefined ? {} : { signal: abortSignal });
       return {
         stream: simulateReadableStream({
           chunks: [

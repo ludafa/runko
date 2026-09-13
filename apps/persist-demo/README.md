@@ -21,6 +21,7 @@ pnpm --filter @runko-demo/persist-demo start
 | `DEMO_DB` | `sqlite` | `sqlite` / `memory` / `postgres` / `mysql` / `mongo`（认不出来的值一律回落成 `sqlite`） |
 | `DEMO_DB_PATH` | `demo.db` | SQLite 库文件 |
 | `DATABASE_URL` | — | `DEMO_DB=postgres` 时的连接串 |
+| `RUNKO_LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` / `silent`。框架的起轮收尾、转发、每个 HTTP 请求都会记（单行文本，写 stdout） |
 
 换库只动 `src/driver.ts` 一个文件，业务代码一个字不改——这就是「持久化是宿主层能力」
 那句话的实际手感。
@@ -75,6 +76,7 @@ PORT=3922 DEMO_DB_PATH=/tmp/runko-demo.db RUNKO_NODE_URL=http://127.0.0.1:3922 \
 | `RUNKO_NODE_URL` | 本副本可达地址；**给了才开多副本** |
 | `RUNKO_PEER_TOKEN` | 副本之间的内部令牌；不配就不校验（本机联调用） |
 | `RUNKO_HEARTBEAT_MS` / `RUNKO_TAKEOVER_MS` | 租约的两个时间参数，缺省 5000 / 60000 |
+| `RUNKO_FORWARD_TIMEOUT_MS` | 转发给持有者时等它开口（响应头）的上限，缺省 10000；等不到回 503 |
 | `DEMO_MODEL_DELAY_MS` | 回声模型答话前先睡多久，用来手工制造「一轮还在跑」 |
 
 **转发哪些端点**，判据只有一条：这件事的状态在数据库里，还是在持有者的**进程内存**里。
@@ -91,9 +93,43 @@ PORT=3922 DEMO_DB_PATH=/tmp/runko-demo.db RUNKO_NODE_URL=http://127.0.0.1:3922 \
 转发带 `x-runko-forwarded: 1`，**带着它进来的请求一律不再转**——没有这条，两个副本在归属
 刚好易主的那一瞬间会打成死循环。
 
+持有者够不着（崩了、冻住、太慢）或者请求转不了时，回 **503 + `Retry-After`**，body 里带 `reason` 与 `holder`。
+**不用 421**：Fetch 标准要求浏览器和 Node `fetch` 收到 421 自动重发一遍，发消息的请求会被悄悄重发。
+
 验收跑的是 `test/multi-replica.e2e.test.ts`：两个真进程、一个 SQLite 文件、四个场景，
 其中「被误判的老持有者活过来之后写不进账本」是核心那条。设计见
 [多副本部署](../../docs/host/node/tech/multi-replica.md)。
+
+## 多副本验证环境（docker-compose）
+
+跨容器、真 Postgres、真网络故障的那一档在 `docker/` 下：一个 `postgres:18-alpine` + 三个副本 + 一个 nginx。
+
+```sh
+pnpm --filter @runko-demo/persist-demo lab:up     # 构建并起好，全部健康才返回
+pnpm --filter @runko-demo/persist-demo lab:down   # 连数据一起删
+pnpm --filter @runko-demo/persist-demo test:lab   # 自己起一套独立环境 → 八个故障场景 → 自己删干净
+```
+
+| 地址 | 是什么 |
+| --- | --- |
+| `localhost:3931` / `3932` / `3933` | 三个副本，直连（做验证用这个） |
+| `localhost:3930` | nginx 轮询（体验「请求随机落到某个副本」） |
+| `localhost:55433` | Postgres（用户 / 密码 / 库名都是 `runko`） |
+
+时间轴压扁成心跳 1 秒、接管阈值 5 秒、每轮 10 秒、转发超时 2 秒，都能用 `LAB_*` 环境变量覆盖（见 `docker/compose.yml`）。
+故障怎么造、八个场景各证明什么，见[多副本部署 · 使用手册 §6](../../docs/host/node/features/multi-replica.md)
+与[技术方案 §11](../../docs/host/node/tech/multi-replica.md)。
+
+`test:lab` 不设 `RUNKO_TEST_LAB=1` 就整档跳过，所以 `pnpm test` 与 CI 不碰 Docker。
+
+### 看日志
+
+每次 `test:lab` 的日志存在 `logs/lab-<时间>/`（不进 git），`logs/lab-latest` 指向最近一次。**先看 `timeline.log`**：
+测试的每一步和三个副本的日志按时间排在一起，一次请求从哪进来、转给了谁、谁起了轮、谁补了「已停止」，按行读下来就是执行顺序。
+（租约本身的抢占、自我围栏还不打日志——框架层的可观测性会改成「框架发事件、宿主订阅」，届时补上。）
+单个副本的完整日志在 `replica-a.log` 等文件里。
+
+手动起的环境：`docker compose -f docker/compose.yml logs -f` 实时看；`pnpm --filter @runko-demo/persist-demo lab:logs` 存一份到同一个目录结构。
 
 ## 端点
 

@@ -20,12 +20,13 @@
  * 对齐一个**已经写死的**契约是刻意的：demo 是我们自己写的，天然有「不自觉迁就包的
  * 能力」的风险；照着别人定好的形状写，包做不到的地方会当场暴露。
  */
-import type { AgentRuntime, Frame } from "@runko/agent";
+import type { AgentRuntime, Frame, Logger } from "@runko/agent";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 
 import type { Forwarder } from "./forward.js";
-import { createForwarder } from "./forward.js";
+import { createForwarder, FORWARDED_HEADER, RETRY_AFTER_SECONDS, RETRY_LATER_STATUS } from "./forward.js";
+import { silentLogger } from "./logger.js";
 import type { DemoStore } from "./store.js";
 
 export interface ServerDeps {
@@ -33,6 +34,15 @@ export interface ServerDeps {
   store: DemoStore;
   /** 多副本时的[应用层转发](../../../docs/terms.md)；不给就是「什么都不转」的单副本跑法。 */
   forwarder?: Forwarder;
+  logger?: Logger;
+}
+
+/**
+ * 不进访问日志的请求：健康检查与轮状态查询。它们是**轮询**（验证环境每 200 毫秒问一次），
+ * 记下来只会把真正的请求淹没。
+ */
+function isPolling(method: string, path: string): boolean {
+  return method === "GET" && (path === "/health" || path.endsWith("/activity"));
 }
 
 /** `Frame` → SSE 的 event 名。四种帧靠自己带的字段区分，跟 node-server 同款。 */
@@ -53,11 +63,36 @@ export function createServer(deps: ServerDeps): Hono {
   const app = new Hono();
   const { runtime, store } = deps;
   const forwarder = deps.forwarder ?? createForwarder();
+  const logger = deps.logger ?? silentLogger;
 
   /**
    * 转发进来的请求先过内部令牌闸门。**只拦转发**——终端用户的请求不带这个头，也不该被
    * 要求带。
    */
+  /**
+   * 访问日志：每个请求一行「方法 路径 → 状态 耗时」。**耗时只到响应头**——SSE 的响应体会流很久，
+   * 那段不算。`forwarded` 表示这条是别的副本转过来的，读时间线时靠它把「转出」与「转入」对上。
+   */
+  app.use("*", async (c, next) => {
+    const startedAt = Date.now();
+    await next();
+    if (isPolling(c.req.method, c.req.path)) {return;}
+    const stream = c.res.headers.get("content-type")?.startsWith("text/event-stream") === true;
+    const fields = {
+      ms: Date.now() - startedAt,
+      forwarded: c.req.header(FORWARDED_HEADER) !== undefined ? true : undefined,
+      stream: stream ? true : undefined,
+    };
+    const line = `${c.req.method} ${c.req.path} → ${String(c.res.status)}`;
+    // 普通的读（回放账本、看队列）记 debug：客户端与测试都会反复读，放在 info 会把真正改变状态的请求淹没。
+    // 订阅流是例外——它是转发与直播的主角，照样记 info。
+    if (c.req.method === "GET" && !stream && c.res.status < 400) {
+      logger.debug("http", line, fields);
+    } else {
+      logger.info("http", line, fields);
+    }
+  });
+
   app.use("*", async (c, next) => {
     const rejected = forwarder.reject(c);
     if (rejected !== undefined) {return rejected;}
@@ -120,15 +155,24 @@ export function createServer(deps: ServerDeps): Hono {
       { text, ...(body.userId !== undefined ? { userId: body.userId } : {}) },
       body.intent !== undefined ? { intent: body.intent } : {},
     );
+    logger.info("http", "enqueue result", {
+      conversationId: id,
+      mode: result.mode,
+      ...(result.mode === "rejected" ? { reason: result.reason, holder: result.holder } : {}),
+    });
     if (result.mode === "rejected") {
       // **`held_by_other` 不是错误，是「转给持有者」。** 框架把地址放在 `holder` 字段里
-      // （不是那句英文文案里），照着转就行；转过一次的请求不再转，退回 421 让客户端重试。
+      // （不是那句英文文案里），照着转就行；转过一次的请求不再转，退回 503 让客户端重试。
       if (result.reason === "held_by_other" && result.holder !== undefined && !forwarder.isForwarded(c)) {
         return await forwarder.forward(c, result.holder);
       }
-      // 其余三种处置不同：队列满 409、正在关闭 503、归属在别的节点又转不了 421。
-      // **421 要带上 `holder`**：这条路正是客户端最需要一个结构化重试目标的时候。
-      const status = result.reason === "queue_full" ? 409 : result.reason === "shutting_down" ? 503 : 421;
+      // 其余处置不同：队列满 409；正在关闭、归属在别的节点又转不了，都是「稍后再试」的 503，
+      // 靠 `reason` 区分。**不用 421**：Fetch 标准要求客户端收到 421 自动重发，见 `RETRY_LATER_STATUS`。
+      // **转不了时要带上 `holder`**：这条路正是客户端最需要一个结构化重试目标的时候。
+      if (result.reason === "queue_full") {
+        return c.json({ mode: result.mode, reason: result.reason, message: result.message }, 409);
+      }
+      c.header("retry-after", RETRY_AFTER_SECONDS);
       return c.json(
         {
           mode: result.mode,
@@ -136,7 +180,7 @@ export function createServer(deps: ServerDeps): Hono {
           message: result.message,
           ...(result.holder !== undefined ? { holder: result.holder } : {}),
         },
-        status,
+        RETRY_LATER_STATUS,
       );
     }
     return c.json({ mode: result.mode }, 202);

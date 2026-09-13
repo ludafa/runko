@@ -9,6 +9,8 @@ coverage/
 !.env.template
 # Local agent transcripts (examples/shared/transcript-store.ts) — dev data, never committed
 .transcripts/
+# apps/persist-demo 多副本验证环境的本地日志（test:lab / lab:logs 写入）
+apps/persist-demo/logs/
 # apps/node-server dev sqlite (drizzle/better-sqlite3)
 apps/node-server/data.db
 # lantai 本地工具数据（判断日志 + 上传游标）—— 由本地 lantai dev server 存储，不入库

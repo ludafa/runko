@@ -10,7 +10,11 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
     "lint:fix": "eslint . --fix",
-    "test": "vitest run"
+    "test": "vitest run",
+    "lab:up": "docker compose -f docker/compose.yml up -d --build --wait",
+    "lab:down": "docker compose -f docker/compose.yml down -v --remove-orphans",
+    "test:lab": "RUNKO_TEST_LAB=1 vitest run test/lab.e2e.test.ts",
+    "lab:logs": "node --import tsx scripts/lab-logs.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.1",
