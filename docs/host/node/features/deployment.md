@@ -4,9 +4,9 @@ slug: deployment
 view: 功能
 layer: 宿主层
 module: —
-packages: ["@runko/agent", "@runko/persist-sql", "@runko/persist-drizzle", "@runko/persist-prisma"]
+packages: ["@runko/agent", "@runko/persist-kysely", "@runko/persist-sqlite", "@runko/persist-postgres", "@runko/persist-mysql", "@runko/persist-mongo"]
 tags: ["Node", "单进程", "cluster", "Docker", "k8s", "部署形态", "零配置"]
-related: ["host/node/tech/deployment.md", "architecture/features/agent-kernel.md", "host/contract/features/persistence.md"]
+related: ["host/node/tech/deployment.md", "host/node/features/multi-replica.md", "architecture/features/agent-kernel.md", "host/contract/features/persistence.md"]
 ---
 
 # Node 长驻（宿主层）— 使用手册
@@ -52,6 +52,9 @@ flowchart LR
     D["③ k8s 多副本<br/><small>+ 持久化 → Postgres</small>"]
     A --> B --> C --> D
 ```
+
+**③ 多副本怎么开、出故障时用户会看到什么、怎么在本机用 docker-compose 把故障逐个演一遍**，见
+[多副本部署 · 使用手册](./multi-replica.md)。
 
 **流分发从头到尾都不用换。** 因为这一档你总能知道「持有者在哪台机器上」——框架把持有者的地址原样交给你，你的接入代码把请求转过去就行（这叫[应用层转发](../../../terms.md)）。只有连持有者都找不到的环境才需要外挂 Redis，那是 [Vercel 那一档](../../vercel/features/deployment.md)的事。
 

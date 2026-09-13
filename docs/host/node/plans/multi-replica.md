@@ -4,14 +4,14 @@ slug: multi-replica
 view: 施工
 layer: 宿主层
 module: —
-packages: ["@runko/agent", "@runko/persist-sqlite", "@runko/persist-postgres", "@runko/persist-mysql", "@runko/persist-mongo"]
-tags: ["多副本", "租约", "应用层转发", "拆单", "端到端"]
-related: ["host/node/tech/multi-replica.md", "host/node/features/deployment.md", "logic/arbitration/plans/arbitration-impl.md", "host/contract/tech/stream-fanout.md"]
+packages: ["@runko/agent", "@runko/persist-kysely", "@runko/persist-sqlite", "@runko/persist-postgres", "@runko/persist-mysql", "@runko/persist-mongo", "@runko/conformance"]
+tags: ["多副本", "租约", "应用层转发", "拆单", "端到端", "docker-compose", "验证方案"]
+related: ["host/node/tech/multi-replica.md", "host/node/features/multi-replica.md", "host/node/features/deployment.md", "logic/arbitration/plans/arbitration-impl.md", "host/contract/tech/stream-fanout.md"]
 ---
 
 # 多副本部署（Node 长驻）— 施工计划
 
-> 相关：[技术方案](../tech/multi-replica.md) · [Node 长驻 · 功能](../features/deployment.md) ·
+> 相关：[使用手册](../features/multi-replica.md) · [技术方案](../tech/multi-replica.md) · [Node 长驻 · 功能](../features/deployment.md) ·
 > [归属仲裁机制 · 施工](../../../logic/arbitration/plans/arbitration-impl.md)（本计划接着它的 L7–L10 往下做）。
 
 ## 0. 一句话
@@ -21,12 +21,15 @@ related: ["host/node/tech/multi-replica.md", "host/node/features/deployment.md",
 **状态：进行中。** 底座（租约版[归属仲裁机制](../../../terms.md)）已于 2026-09-01 交付，本计划做的是
 它的四个出口、一处订阅侧的修正、一套接入层示范，和一次真进程端到端。
 
-**九单里八单已交付**（2026-09-09，逐条见 §7）。**只剩 M2（Mongo 版租约仲裁）**——本机没有
+**第一批九单里八单已交付**（2026-09-09，逐条见 §9 变更记录）。**只剩 M2（Mongo 版租约仲裁）**——本机没有
 可用的 MongoDB，那一单一条都验不了，盲写一份要过三组一致性用例的实现不划算。
 
 M6 的形态与原计划不同、而且更早可用：**用一个 SQLite 文件对两个真进程**，那就是部署形态里的
 「① 同机 cluster」，走的代码路径与 Postgres 完全相同（同一个 `leaseArbitration`，只是方言不同），
 **不需要任何外部服务**。真 Postgres 那一档留给 CI。
+
+**第二批（2026-09-13 立项，同日交付）**：把端到端搬到**真跨容器 + 真 Postgres**（[多副本验证环境](../../../terms.md)），
+顺带修掉读代码时发现的两处缺陷。七单全部交付，八个故障场景在 Postgres 18 上连续通过。拆单见 §7，验证方案与实际结果见 §8。
 
 ## 1. 起点：这些已经有了，别重做
 
@@ -357,7 +360,202 @@ A 滞留在网络里的旧写入会被放行。**粒度必须是一次租期**�
 - **[挂起](../../../terms.md)与恢复**：等人时仍占着归属与沙盒。多副本只让「等着的是哪个副本」变确定，不改这件事本身。
 - **依赖基础设施的 sticky routing**：亲和的单位是「一次排空」，不是一轮、也不是会话永久绑定。
 
-## 7. 变更记录
+## 7. 第二批拆单：跨容器验证与两处修复
+
+设计见[技术方案 §9–§11](../tech/multi-replica.md)。
+
+```mermaid
+flowchart LR
+    M10["M10 镜像与 compose 拓扑"] --> M13
+    M11["M11 转发超时"] --> M13
+    M12["M12 接管时补收尾"] --> M13
+    M13["M13 验证环境 e2e（S1–S8）"] --> M14["M14 本批 code review"]
+    M14 --> M15["M15 文档回填"]
+    M14 --> M16["M16 changeset"]
+```
+
+| 单 | 目标 | 动谁 | 大小 | 状态 |
+|---|---|---|---|---|
+| **M10** | 镜像、compose、nginx、起停脚本 | `apps/persist-demo/docker/` · `package.json` | M | ✅ |
+| **M11** | 转发只给「等对方开口」设超时，超时回 503 | `apps/persist-demo/src/forward.ts` · `server.ts` · `index.ts` · `model.ts` | S | ✅ |
+| **M12** | 抢占顶掉过期持有者时报 `takeover`，新持有者补「已停止」 | `@runko/agent` · `@runko/persist-kysely` · `@runko/conformance` | M | ✅ |
+| **M13** | 验证环境里的八个场景自动化 | `apps/persist-demo/test/lab.e2e.test.ts` | L | ✅ |
+| **M14** | 对本批全部改动做一次 code review，修掉确认的问题 | 本批全部文件 | M | ✅ |
+| **M15** | 回填：使用手册、技术方案、施工计划、README、仲裁文档 | `docs` · README | S | ✅ |
+| **M16** | changeset | `.changeset/` | XS | ✅ |
+
+### M10 · 镜像与 compose 拓扑
+
+**做什么**：`apps/persist-demo/docker/` 下四个文件。
+
+| 文件 | 内容 |
+|---|---|
+| `Dockerfile` | `node:24-bookworm` → 装 pnpm 11 → `pnpm install --frozen-lockfile --filter "@runko-demo/persist-demo..."` → 构建依赖包 `dist` → `node --import tsx src/index.ts` |
+| `Dockerfile.dockerignore` | 排除 `node_modules`、`dist`、`.git`、文档站缓存、`*.db`。**放在 Dockerfile 旁边**，不往仓库根目录加东西 |
+| `compose.yml` | Postgres + replica-a/b/c + nginx；两个网络；a→b→c 串行启动；时间参数与端口都可用环境变量覆盖 |
+| `nginx.conf` | 三个副本轮询；`proxy_buffering off` |
+
+`package.json` 加三个脚本：`lab:up`（`up -d --build --wait`）、`lab:down`（`down -v`）、`test:lab`（带门禁变量跑 M13）。
+
+**验收**：`docker compose config -q` 通过；`lab:up` 返回时三个副本全部健康；`lab:down` 之后不留容器与卷。
+
+### M11 · 转发超时
+
+**做什么**：`forward()` 里用 `AbortSignal.any([客户端信号, 超时信号])`，**拿到响应头就撤计时器**；
+超时与连不上走同一个「稍后再试」分支。超时时长放在 `NodeIdentity.forwardTimeoutMs`，入口 `index.ts` 读
+`RUNKO_FORWARD_TIMEOUT_MS`（缺省 10000）。
+
+**与原计划的偏差**（都是 M13 实跑出来的）：
+
+- 「稍后再试」从 **421 改成 503 + `Retry-After: 1`**，`server.ts` 里「归属在别处又转不了」那条一并改。原因：
+  Fetch 标准要求客户端自动重发 421，实测用时翻倍、POST 被悄悄重发。见[技术方案 §10.4](../tech/multi-replica.md)。
+- 回声模型 `slowModel` 的等待改成**可被中断**（审查第 2 条的前提），否则被停掉的轮也要睡满整段。
+
+**验收**：✅ S7「冻住期间转发」在 2～3.5 秒之间回 503；S2 的 SSE 转发不被超时切断（一轮 10 秒 > 超时 2 秒）。
+
+### M12 · 接管时补收尾
+
+**做什么**（形状见[技术方案 §9.3](../tech/multi-replica.md)）：
+
+1. `packages/agent/src/arbitration.ts`：`AcquireResult` 成功分支加 `takeover?: { holder?: string }`；
+2. `packages/persist-kysely/src/arbitration.ts`：读到的行令牌不为空、且条件 UPDATE 赢了 → 带 `takeover`；
+3. `packages/agent/src/runtime/`：`ActiveTurn` 记下 `takeover`；`runToCompletion` 读账本前补标记并广播 `message` 帧；
+   与 `recover()` 共用一个写标记的函数；新增理由文案常量；
+4. `packages/conformance/src/arbitration.ts`：接管组加用例——过期被顶掉时带 `takeover`、首次抢占与释放后再抢不带；
+5. `packages/agent/test/`：用假仲裁返回 `takeover`，断言账本在新一轮用户消息之前多一条 `interrupted` 标记，且不带 `takeover` 时不多写。
+
+**与原计划的偏差**（审查后）：
+
+- 「顶掉过期持有者时报 `takeover`」从接管组里**拆成单独一组可选导出** `arbitrationTakeoverReportCases`。
+  并在接管组里的话，已有的第三方租约实现升级套件就会无故变红，与「字段可选」自相矛盾。
+- 顺带修 `turn.ts` 一处老竞态：挂 `grant.signal` 监听时信号若**已经** abort，监听不会响。补标记让这段空档
+  变宽了，所以挂完监听补查一次，并加单测。
+
+**验收**：✅ 根目录 `pnpm test` 全绿（`@runko/agent` 122 条、`persist-kysely` 113 条、`persist-sqlite` 55 条、`conformance` 37 条）；
+M13 的 S5、S7、S8 在真 Postgres 上看到接管理由的「已停止」标记。
+
+### M13 · 验证环境端到端
+
+**做什么**：`apps/persist-demo/test/lab.e2e.test.ts`，八个场景见[技术方案 §11.4](../tech/multi-replica.md)。
+没设 `RUNKO_TEST_LAB=1` 就整档跳过；自带 `up --build --wait` 与 `down -v`；独立项目名 `runko-lab-e2e` 与独立端口。
+
+**验收**：八个场景全绿，连跑两次不 flaky；跑完 `docker ps -a` 里没有 `runko-lab-e2e` 的残留。
+
+### M14 · 本批 code review
+
+**做什么**：对第二批全部 diff 做一次审查，重点看：并发与竞态（§9 的补标记时机、§10 计时器与流）、
+类型逃逸（`as` / `any` / `!`）、测试是否测到点、文档与代码是否一致。确认的问题当批修掉并重跑 M13。
+
+**结论**：9 条（P1 两条、P2 七条），全部处置，逐条如下。审查由一个全新上下文的 agent 只读完成（避免被实现时的思路带偏）。
+
+| # | 级别 | 问题 | 处置 |
+|---|---|---|---|
+| 1 | P1 | 挂 `grant.signal` 监听前归属已丢，监听不响，这一轮照常跑完 | ✅ 修：挂完补查一次；单测「补标记时就丢了归属」，去掉修复即红 |
+| 2 | P1 | S8 只证明账本没写坏，证明不了自我围栏 | ✅ 修：订阅持有者自己的流，**在没人接管时**断言它早于模型结束就停了；模型等待改为可中断 |
+| 3 | P2 | S4 库卡 2 秒离围栏只差不到 1 秒，会偶发 | ✅ 缩到 1 秒 |
+| 4 | P2 | `beforeAll` 失败时 `pool` 未赋值，`afterAll` 抛错导致容器残留 | ✅ `pool` 改为可空，`pool?.end()` |
+| 5 | P2 | 冻住后没人接管的那一轮仍补不上标记，changeset 说「一定会」过头 | ✅ 措辞收窄；[技术方案 §9.6](../tech/multi-replica.md) 记为已知遗漏 |
+| 6 | P2 | 强制用例与「字段可选」矛盾，第三方升级会变红 | ✅ 拆成可选导出组，minor 站得住 |
+| 7 | P2 | 「超时后结果未知」不只冻住，持有者慢也会触发 | ✅ 附录 C 与使用手册 §5 补上 |
+| 8 | P2 | 文档里残留 421、M11 描述与实现不符 | ✅ 回填（M15） |
+| 9 | P2 | S7 的 `leaseHolder` 断言分不出「老持有者 release 擦掉了别人」 | ✅ 改为趁新一轮还在跑时解冻老持有者，断言持有者仍是新持有者 |
+
+审查后用最终代码重跑 lab 两轮，均 8/8 通过（见 §8.3）。
+
+### M15 · 文档回填
+
+逐条：本文 §7 状态与 §8 实际结果；[技术方案](../tech/multi-replica.md)状态行与 §2 / §3 现状列；
+[使用手册](../features/multi-replica.md)与实现对齐；[Node 长驻 · 使用手册](../features/deployment.md)链到多副本手册；
+`apps/persist-demo/README.md` 加「验证环境」一节；[归属仲裁机制 · 技术方案](../../../logic/arbitration/tech/arbitration-impl.md)补 `takeover` 字段。
+
+**验收**：`pnpm docs:check` + `pnpm docs:build` 通过。
+
+### M16 · changeset
+
+| 包 | 改动 | 建议级别 |
+|---|---|---|
+| `@runko/agent` | `AcquireResult.takeover`（新增可选字段）+ 接管时补「已停止」 | minor |
+| `@runko/persist-kysely` | 租约版仲裁报 `takeover` | minor |
+| `@runko/conformance` | 接管组新增用例 | minor |
+
+`persist-sqlite` / `-postgres` / `-mysql` 只是透传 `leaseArbitration`，源码不动，**不写**。
+M10 / M11 / M13 落在 `private: true` 的 `apps/persist-demo`，**不写**。
+
+### 追加（2026-09-13）：看得见的日志
+
+**起因**：场景跑绿之后，用户想看「核心成功路径」每一步在哪个副本、按什么顺序、花多久，而副本什么都不打、
+测试跑完容器日志也被删了。设计见[技术方案 §11.6](../tech/multi-replica.md)；OTel 这批不做，理由见附录 D。
+
+| 单 | 目标 | 动谁 | 大小 | 状态 |
+|---|---|---|---|---|
+| **M17** | ~~框架补日志：租约版可选 `logger`；轮编排补「起轮」「丢归属」~~ | `@runko/persist-kysely` · `@runko/agent` | S | ❌ 撤销 |
+| **M18** | demo 注入文本 logger：`RUNKO_LOG_LEVEL`、副本名、HTTP 请求耗时、转发与 503 的原因 | `apps/persist-demo/src/` | S | ✅ |
+| **M19** | `test:lab` 收集日志到 `logs/lab-<时间>/`：每场景后覆盖写各容器日志、`test.log`、合并的 `timeline.log`、`lab-latest` 链接；`lab:logs` 给手动环境用 | `apps/persist-demo/test/` · `scripts/` · `package.json` · `.gitignore` | M | ✅ |
+
+**M17 为什么撤销**：实现过、实跑有效（时间线里能读出「心跳失败 → 自我围栏 → 顶掉过期租约」），但方向不对——文案与级别写死在框架里。
+用户指出应当「框架发事件、宿主自己打」，随即对齐了可观测性方案（技术方案附录 D）：删掉注入式 `Logger` 与 `RuntimeHooks`，
+改为带类型的事件。租约的日志将由那份方案的事件层提供，这批不提交框架层改动。
+
+**M18 实际**：logger 的格式与级别过滤有单测；普通读请求降到 debug（否则测试轮询每 200 毫秒刷一行）；`pnpm start` 缺省 info。
+**M19 实际**：S1 能按顺序读出「A 起轮 → B 抢输 → B 转发 → A 排队 → 收尾 → 出队起下一轮」，S7 能读出「冻住 → 转发等满 2 秒回 503 → 接管方补已停止」。
+中途修掉两处：被杀的副本改用 `docker compose start` 拉起（`up` 会重建容器、丢掉旧日志）；`lab-latest` 软链接第二次跑时删不掉（`rmSync` 不认软链接，改 `unlink`，有单测）。
+
+**changeset**：不需要。M18 / M19 都落在 `private: true` 的 `apps/persist-demo`。
+
+## 8. 第二批验证方案
+
+### 8.1 环境
+
+| 项 | 要求 |
+|---|---|
+| Docker | Docker Engine 带 compose v2（本机 Docker 29.4 / Compose 5.1）；Postgres 镜像 `postgres:18-alpine`（18.1） |
+| Node / pnpm | Node ≥ 24，pnpm 11（只在宿主机跑测试进程；镜像里自带） |
+| 网络 | 首次构建镜像要从 npm 源拉依赖 |
+
+### 8.2 运行步骤
+
+```sh
+pnpm build                                              # 包的 dist（宿主机跑单测要用）
+pnpm --filter @runko/agent test                         # M12 单测
+pnpm --filter @runko/persist-kysely test                # M12 一致性用例
+pnpm --filter @runko/persist-sqlite test
+pnpm --filter @runko-demo/persist-demo typecheck
+pnpm --filter @runko-demo/persist-demo test             # 原有 e2e，lab 档自动跳过
+pnpm --filter @runko-demo/persist-demo test:lab         # M13：起环境 → 八个场景 → 删环境
+docker ps -a --filter name=runko-lab-e2e                # 应当为空
+pnpm docs:check && pnpm docs:build
+```
+
+### 8.3 用例、预期与实际
+
+| 用例 | 预期 | 实际 |
+|---|---|---|
+| 改动前的镜像上复现两处缺陷（探测脚本） | 崩溃那一轮无标记；转发到冻住的持有者一直挂 | ✅ 复现：账本 `user,user,assistant`；curl 等满 20 秒无响应 |
+| M12 单测：带 `takeover` 起轮 | 账本在新一轮用户消息前多一条 `interrupted`，理由为接管文案，且作为直播帧广播 | ✅ 通过；关掉修复即红 |
+| M12 单测：不带 `takeover` | 账本不多写 | ✅ 通过 |
+| M12 单测：补标记时就丢了归属（审查 #1） | 不建 session，直接收尾，会话不锁死 | ✅ 通过；去掉补查即红 |
+| M12 单测：补标记被账本拒绝 | 只记一行，这一轮照常跑完 | ✅ 通过 |
+| M12 一致性：过期被顶掉（可选组） | `acquire` 带 `takeover.holder` = 原持有者 | ✅ `persist-kysely` 三方言 + `persist-sqlite` 通过 |
+| M12 一致性：首次抢占 / 释放后再抢 / `clearStale` 之后 | 不带 `takeover` | ✅ 通过（内存版也过） |
+| S1 并发抢占 + 转发 | 一个 started、一个 queued，账本两条用户消息 seq 不重复 | ✅ |
+| S2 SSE 经非持有者、经 nginx | 首帧在半轮之内到达，`active:true` + 真持有者 | ✅ |
+| S3 停止打到非持有者 | `aborted:true`，账本以 `interrupted` 收尾 | ✅ |
+| S4 库卡顿 1 秒 | 这一轮正常完成 | ✅ |
+| S5 崩溃 + 别的副本先接手 | 先 503 + `Retry-After`，后 started，账本有接管理由的「已停止」 | ✅ |
+| S6 崩溃 + 先重启 | 重启后账本有「已停止」（关机理由），租约持有者为空 | ✅ |
+| S7 冻住的老持有者 | 转发 2～3.5 秒回 503；解冻后持有者仍是新持有者；账本四行一行不多 | ✅（第一轮用 421 时这里测出 4 秒，据此改成 503） |
+| S8 网络分区 | 没人接管时持有者早于模型结束自己停手；接管方 started；账本有「已停止」、seq 不重复 | ✅ |
+| 连跑 | 最终代码连跑两轮不 flaky | ✅ 第三轮 8/8（159.5 秒）、第四轮 8/8（147.9 秒） |
+| 清理 | 无残留容器 | ✅ `docker ps -a --filter name=runko-lab-e2e` 为空 |
+| 包的全量回归 | 根目录 `pnpm build` + `pnpm test` | ✅ 全绿 |
+| 文档 | `docs:check` + `docs:build` | ✅ 91 份文档体检通过；构建与全站死链检查通过 |
+| M17 用例：顶掉 / 自我围栏记日志 | — | ❌ 随 M17 撤销 |
+| M18 用例：logger 格式与级别过滤 | 单测通过 | ✅ `logger.test.ts` 6 条 |
+| M19 用例：合并时间线 / 连续建两次日志目录 | 单测通过 | ✅ `lab-logs.test.ts` 4 条 |
+| M19：跑一次 `test:lab` 看日志 | 目录与各服务日志、`test.log`、`timeline.log` 齐全；时间线有序，能读出 S1 与 S7 的完整路径；轮询不刷屏 | ✅ 8/8，时间线里读请求 0 行 |
+| M19：日志不进 git | `git status` 看不到 `logs/` | ✅ |
+
+## 9. 变更记录
 
 | 日期 | 变更 |
 |---|---|
@@ -371,3 +569,9 @@ A 滞留在网络里的旧写入会被放行。**粒度必须是一次租期**�
 | 2026-09-09 | **M7 交付**：流分发接口定稿为现有两个方法，四条待定项全部结案；游标与保留窗口归 Vercel 那条线 |
 | 2026-09-09 | **审查修复（8 条）**：① `persist-demo` 在拿不出租约版实现的档次上开多副本时直接抛，不再静默回落成内存版仲裁（那会让两个副本同时推进同一会话）；② 转发的 `fetch` 兜住 `ECONNREFUSED` 回 421 带 `holder`，并把客户端的 `signal` 传下去；③ **队列的写端点也要转发**——库改完之后框架会广播一帧新快照，而订阅者都在持有者那一侧；④ `subscribe` 排除「本进程自己那一轮正在收尾」的归属（这是本批引入的回归，见 M3）；⑤ 空环境变量不再被 `Number("")` 当成 0；⑥ 421 回落带上 `holder`；⑦⑧ 注释与 `createAgentRuntime` 签名 |
 | 2026-09-09 | **M8 交付**：Node 部署文档的三处漂移、仲裁施工计划 §1 的历史快照说明、`persist-kysely` 与 `@runko/agent` 的过期注释、三个薄壳 README 的「多副本怎么配」 |
+| 2026-09-13 | **第二批立项**：跨容器 + 真 Postgres 的[多副本验证环境](../../../terms.md)（M10、M13），两处读代码发现的缺陷（M11 转发超时、M12 接管时补收尾），本批 code review（M14）。使用手册 `features/multi-replica.md` 补齐三视角 |
+| 2026-09-13 | **M10 / M11 / M12 / M13 交付**。M13 第一轮 8 过 6，挂在 S5、S7 的用时断言：421 总是花两倍转发超时。查到是 Fetch 标准的自动重发，「稍后再试」统一改为 503 + `Retry-After`。Postgres 按要求换成 `postgres:18-alpine`。第二轮 8/8 |
+| 2026-09-13 | **M14 code review**：9 条全部处置（见 M14 表）。连带改动：`turn.ts` 补查已丢的归属、一致性套件拆出可选组 `arbitrationTakeoverReportCases`、回声模型等待可中断、一轮时长 8 → 10 秒、S4 / S7 / S8 重写断言。审查后连跑两轮 8/8 |
+| 2026-09-13 | **M15 / M16 交付**：三视角文档、术语表（租约、租约心跳、接管阈值、自我围栏、多副本验证环境）、Node 长驻手册链接与 `packages` 漂移、仲裁与轮编排文档的 `takeover`、persist-demo 与 conformance README、changeset |
+| 2026-09-13 | **追加 M17–M19 立项**：用户要能看到核心成功路径的执行顺序与耗时。查明仓库没有 OTel（只有 chat 应用接的 AI SDK 遥测回调，不覆盖多副本阶段），这批先用「带时间戳的日志 + 按时间合并」，OTel 另议（技术方案附录 D） |
+| 2026-09-13 | **M18 / M19 交付，M17 撤销**：demo 侧日志与验证环境日志收集交付；框架层日志改由已对齐的可观测性事件方案提供（技术方案附录 D），不随本批提交 |

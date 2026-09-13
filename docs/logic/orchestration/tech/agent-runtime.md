@@ -191,7 +191,8 @@ export interface AcquireContext {
 }
 
 export type AcquireResult =
-  | { ok: true; grant: Grant }
+  // takeover：这次抢占顶掉了一个过期的持有者（租约版才会报）。轮编排据此先替上一轮补「已停止」
+  | { ok: true; grant: Grant; takeover?: { holder?: string } }
   | { ok: false; reason: "busy"; holder: string | undefined };
 
 export interface Grant {
