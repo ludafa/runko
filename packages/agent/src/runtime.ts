@@ -21,6 +21,7 @@ import type { Persistence } from "./persistence.js";
 import type { TurnPreparer } from "./prepare.js";
 import type { RuntimeContext, RuntimeHooks, SteerPolicy } from "./runtime/context.js";
 import { HumanBridge } from "./runtime/human.js";
+import { appendInterruptedMarker } from "./runtime/interrupted-marker.js";
 import type { SubmittedDecision } from "./runtime/human.js";
 import { enqueue as enqueueInput, publishQueue, startNextQueued, startTurn } from "./runtime/queue.js";
 import type { EnqueueOptions } from "./runtime/queue.js";
@@ -407,7 +408,15 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
      * 的轮误判成孤儿。幂等：补完就把标记清了，再跑一次扫不到它。
      *
      * 顺序是**先清标记再抢归属**：标记还在的话 `acquire` 会被自己要恢复的那条挡成
-     * `busy`。只在进程启动、开始服务之前跑，那时不可能有活跃轮，所以没有竞态。
+     * `busy`。
+     *
+     * **单进程**下它只在启动、开始服务之前跑，那时不可能有活跃轮，所以没有竞态。**多副本**
+     * 下不成立：滚动重启时几个副本会同时开机、扫到同一条陈旧标记。那时的防护在仲裁机制里——
+     * `clearStale` 带着与 `listStale` 同一条陈旧判据，后到的那个清不掉先到者刚拿到的令牌，
+     * 它的 `acquire` 会老实报 `busy`。
+     *
+     * 它也**只兜得住「先重启、后有人发消息」这一种顺序**。反过来——别的副本先接手——租约行
+     * 被覆盖，这里就扫不到了，那条路由起轮时的 `takeover` 补（见 `runtime/interrupted-marker.ts`）。
      */
     async recover() {
       const stale = await arbitration.listStale();
@@ -421,27 +430,12 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
           });
           if (!acquired.ok) {continue;}
           try {
-          const allocated = await acquired.grant.nextSeq();
-          if (allocated.ok) {
-            // 一条**只有 `step-start` 的 assistant 消息**承载收尾 metadata——形状与 core
-            // 自己在「首步之前就失败」时造的占位消息同源（`loop.ts` 的 `placeholder`），
-            // 界面据 `status` 显示「已停止」。
-            // **不能写空 parts**：ai 的 `validateUIMessages()` 拒绝它，而每一轮起轮都要拿
-            // 整个账本过一次校验——写进去一条空的，这个会话此后永远起不了新轮。
-            const message: RunkoUIMessage = {
-              id: `turn-interrupted-${String(allocated.seq)}`,
-              role: "assistant",
-              parts: [{ type: "step-start" }],
-              metadata: {
-                usage: {},
-                status: "interrupted",
-                error: { code: "aborted", message: ABORT_REASON_SHUTDOWN },
-              },
-            };
-            await persistence.ledger.append({ conversationId, seq: allocated.seq, message, ts: Date.now() });
-            recovered += 1;
-            logger.info(LOG_SCOPE, "recovered orphaned turn", { conversationId, seq: allocated.seq });
-          }
+            // 与「接管时补收尾」共用同一个写法（`runtime/interrupted-marker.ts`），只是理由不同。
+            const marker = await appendInterruptedMarker(persistence, acquired.grant, ABORT_REASON_SHUTDOWN);
+            if (marker.written) {
+              recovered += 1;
+              logger.info(LOG_SCOPE, "recovered orphaned turn", { conversationId, seq: marker.seq });
+            }
           } finally {
             // 放在 finally 里：`nextSeq`/`append` 抛错时也要还回去，否则这个会话的
             // 归属被一个已经没人管的 grant 永久占着，此后再也起不了轮。

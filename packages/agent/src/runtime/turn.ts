@@ -115,6 +115,11 @@ export async function driveTurn(ctx: RuntimeContext, turn: ActiveTurn): Promise<
     turn.abortController.abort(new Error(OWNERSHIP_LOST_MESSAGE));
   };
   turn.grant.signal.addEventListener("abort", onOwnershipLost, { once: true });
+  // **挂监听之前就已经丢了，监听永远不会响**（DOM 规范：给已经 abort 的信号加监听不会补发事件）。
+  // 从抢到归属到走到这一行，中间隔着几次打库：读账本，以及接管时替上一轮补「已停止」
+  // （`queue.ts` 的 `settleDisplacedTurn`）。库卡住超过自我围栏的余量时，心跳会在这段空档里
+  // 把 grant 停掉——不补这一句，这一轮会照常装配、跑模型、动沙盒，而每一次写账本都被拒。
+  if (turn.grant.signal.aborted) {onOwnershipLost();}
 
   try {
     // ---- 装配 ----

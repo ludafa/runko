@@ -13,7 +13,7 @@
 import type { RunkoChunk } from "@runko/core";
 import type { HumanDecision, JsonValue } from "@runko/core";
 
-import type { Grant } from "../arbitration.js";
+import type { Grant, Takeover } from "../arbitration.js";
 import type { TurnInput, TurnPhase } from "../types.js";
 
 /** 一次 `ask-user` 的结局——`timeout` 永不带 `answer`，同 `HumanDecision` 的 deny 分支不要求 `message`。 */
@@ -67,6 +67,11 @@ export interface ActiveTurn {
   pendingQuestions: Map<string, QuestionPendingEntry>;
   /** 这一轮的输入（收尾通知要用）。 */
   input: TurnInput;
+  /**
+   * 起轮时顶掉了一个过期持有者（`AcquireResult.takeover`）。有它，驱动之前要先替**上一轮**补一条
+   * 「已停止」——上一个持有者崩了或卡住了，自己写不了收尾。可选：测试夹具与不报它的仲裁都不用改。
+   */
+  takeover?: Takeover;
   turnNumber: number;
   done: boolean;
   /** 收尾完成——[优雅关闭](../../../../docs/terms.md)等的就是它。 */
@@ -122,6 +127,7 @@ export function createActiveTurn(opts: {
   grant: Grant;
   input: TurnInput;
   turnNumber: number;
+  takeover?: Takeover;
 }): ActiveTurn {
   const abortController = new AbortController();
   let markSettled = (): void => undefined;
@@ -140,6 +146,7 @@ export function createActiveTurn(opts: {
     pendingReviews: new Map(),
     pendingQuestions: new Map(),
     input: opts.input,
+    ...(opts.takeover !== undefined ? { takeover: opts.takeover } : {}),
     turnNumber: opts.turnNumber,
     done: false,
     settled,

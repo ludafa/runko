@@ -16,4 +16,9 @@ export type {
 } from "./types.js";
 export { ConformanceAssertionError } from "./assert.js";
 export { persistenceCases } from "./persistence.js";
-export { arbitrationCases, arbitrationMultiNodeCases, arbitrationTakeoverCases } from "./arbitration.js";
+export {
+  arbitrationCases,
+  arbitrationMultiNodeCases,
+  arbitrationTakeoverCases,
+  arbitrationTakeoverReportCases,
+} from "./arbitration.js";

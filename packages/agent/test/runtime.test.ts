@@ -8,8 +8,9 @@
 import type { AgentDefinition, RunkoUIMessage } from "@runko/core";
 import { describe, expect, it, vi } from "vitest";
 
-import type { AgentRuntime, Arbitration, Frame, OwnershipInfo, TurnInput, TurnPreparation } from "../src/index.js";
+import type { AgentRuntime, Arbitration, Frame, OwnershipInfo, Takeover, TurnInput, TurnPreparation } from "../src/index.js";
 import { createAgentRuntime, inProcessArbitration, memoryPersistence } from "../src/index.js";
+import { ABORT_REASON_HOLDER_LOST } from "../src/runtime/reasons.js";
 import { buildResumeState } from "../src/runtime/turn.js";
 import type { FakeSession } from "./helpers/fake-session.js";
 import { assistantMessage, createFakeSessionFactory, endTurnChunk } from "./helpers/fake-session.js";
@@ -74,6 +75,37 @@ function selfHoldingArbitration(holder: string): Arbitration {
       };
     },
     inspect: (): Promise<OwnershipInfo> => Promise.resolve({ held: true, holder }),
+    listStale: () => Promise.resolve([]),
+    clearStale: () => Promise.resolve(),
+  };
+}
+
+/**
+ * 抢占总是成功、并按参数决定报不报 `takeover` 的假仲裁——模拟租约版「顶掉了一个过期持有者」。
+ * 多副本下这正是「崩溃那一轮只能由新持有者补收尾」的入口。
+ */
+function takeoverArbitration(takeover: Takeover | undefined): Arbitration {
+  let seq = 0;
+  return {
+    acquire: async (conversationId, ctx) => {
+      seq = await ctx.seedSeq();
+      return {
+        ok: true,
+        grant: {
+          conversationId,
+          holder: "http://node-new:3910",
+          signal: new AbortController().signal,
+          valid: true,
+          nextSeq: () => {
+            seq += 1;
+            return Promise.resolve({ ok: true as const, seq });
+          },
+          release: () => Promise.resolve(),
+        },
+        ...(takeover !== undefined ? { takeover } : {}),
+      };
+    },
+    inspect: (): Promise<OwnershipInfo> => Promise.resolve({ held: false }),
     listStale: () => Promise.resolve([]),
     clearStale: () => Promise.resolve(),
   };
@@ -716,6 +748,134 @@ describe("崩溃恢复", () => {
 
     // 幂等：标记已清，再扫一次什么都不做。
     await expect(runtime.recover()).resolves.toEqual({ scanned: 0, recovered: 0 });
+  });
+
+  it("起轮时顶掉了过期持有者 → 先替上一轮补「已停止」并广播，再写这一轮的用户消息", async () => {
+    const persistence = memoryPersistence();
+    // 上一个持有者起过轮、写下了用户消息，然后崩了——账本停在这里，再也不会有收尾。
+    await persistence.ledger.append({
+      conversationId: "conv-takeover-1",
+      seq: 1,
+      message: { id: "u-old", role: "user", parts: [{ type: "text", text: "old" }] },
+      ts: Date.now(),
+    });
+    const { runtime, sessions } = setup({ persistence, arbitration: takeoverArbitration({ holder: "http://node-old:3910" }) });
+
+    const controller = new AbortController();
+    const frames: Frame[] = [];
+    // 等订阅发完轮状态快照（= 回放结束、进入直播）再起轮：这样 seq 2 那条标记只可能是**广播**来的，
+    // 不会混进回放里让这条断言形同虚设。
+    let live = (): void => undefined;
+    const isLive = new Promise<void>((resolve) => {
+      live = resolve;
+    });
+    const watching = (async () => {
+      for await (const frame of runtime.subscribe("conv-takeover-1", { follow: "forever", signal: controller.signal })) {
+        frames.push(frame);
+        if (frame.kind === "activity") {live();}
+      }
+    })();
+    await isLive;
+    const replayed = frames.length;
+
+    expect((await runtime.enqueue("conv-takeover-1", { text: "hello" })).mode).toBe("started");
+    await runOneTurn(await sessions.next(), "hi", 1);
+    await vi.waitFor(async () => {
+      expect((await runtime.getActivity("conv-takeover-1")).active).toBe(false);
+    });
+    controller.abort();
+    await watching;
+
+    const messages = await ledgerMessages(runtime, "conv-takeover-1");
+    expect(messages.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
+    // 标记夹在「上一轮的用户消息」与「这一轮的用户消息」之间，理由是接管，不是关机。
+    expect(messages[1]?.metadata).toMatchObject({
+      status: "interrupted",
+      error: { code: "aborted", message: ABORT_REASON_HOLDER_LOST },
+    });
+    expect(messages[1]?.parts).toEqual([{ type: "step-start" }]);
+    expect(messages[2]?.parts).toEqual([{ type: "text", text: "hello" }]);
+
+    // 已经挂着的订阅者也要收到这条标记，不必等重连回放。
+    const broadcast = frames.slice(replayed).filter((frame) => frame.kind === "message");
+    expect(broadcast[0]).toMatchObject({ kind: "message", seq: 2, message: { metadata: { status: "interrupted" } } });
+  });
+
+  it("替上一轮补标记时就丢了归属 → 这一轮不装配、不建 session，直接按中断收尾", async () => {
+    // 库卡住、心跳在补标记那几次打库期间把 grant 停掉——`driveTurn` 挂监听时信号**已经** abort，
+    // 监听不会响。没有「挂完再补查一次」的话，这一轮会照常建 session 跑下去，而每次写账本都被拒。
+    const controller = new AbortController();
+    const arbitration: Arbitration = {
+      acquire: (conversationId) =>
+        Promise.resolve({
+          ok: true,
+          grant: {
+            conversationId,
+            holder: "http://node-new:3910",
+            signal: controller.signal,
+            valid: true,
+            nextSeq: () => {
+              controller.abort();
+              return Promise.resolve({ ok: false as const, reason: "lost_ownership" as const });
+            },
+            release: () => Promise.resolve(),
+          },
+          takeover: { holder: "http://node-old:3910" },
+        }),
+      inspect: (): Promise<OwnershipInfo> => Promise.resolve({ held: false }),
+      listStale: () => Promise.resolve([]),
+      clearStale: () => Promise.resolve(),
+    };
+    const { runtime, sessions } = setup({ arbitration });
+
+    expect((await runtime.enqueue("conv-takeover-3", { text: "hello" })).mode).toBe("started");
+    await vi.waitFor(async () => {
+      expect((await runtime.getActivity("conv-takeover-3")).active).toBe(false);
+    });
+    expect(sessions.sessions).toHaveLength(0);
+    // 取号一律被拒：什么都没写进去，但会话没被锁死。
+    expect(await ledgerMessages(runtime, "conv-takeover-3")).toHaveLength(0);
+  });
+
+  it("补标记被账本拒绝 → 只记一行，这一轮照常跑完", async () => {
+    const inner = memoryPersistence();
+    let rejectNext = true;
+    const persistence = {
+      ...inner,
+      ledger: {
+        ...inner.ledger,
+        append: (entry: Parameters<typeof inner.ledger.append>[0]) => {
+          if (rejectNext) {
+            rejectNext = false;
+            return Promise.resolve({ ok: false as const, reason: "rejected" as const });
+          }
+          return inner.ledger.append(entry);
+        },
+      },
+    };
+    const { runtime, sessions } = setup({ persistence, arbitration: takeoverArbitration({ holder: "http://node-old:3910" }) });
+
+    expect((await runtime.enqueue("conv-takeover-4", { text: "hello" })).mode).toBe("started");
+    await runOneTurn(await sessions.next(), "hi", 1);
+    await vi.waitFor(async () => {
+      expect((await runtime.getActivity("conv-takeover-4")).active).toBe(false);
+    });
+    const messages = await ledgerMessages(runtime, "conv-takeover-4");
+    expect(messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(messages.some((m) => m.metadata?.status === "interrupted")).toBe(false);
+  });
+
+  it("没顶掉谁（不带 `takeover`）→ 一条标记都不补", async () => {
+    const { runtime, sessions } = setup({ arbitration: takeoverArbitration(undefined) });
+    await runtime.enqueue("conv-takeover-2", { text: "hello" });
+    await runOneTurn(await sessions.next(), "hi", 1);
+    await vi.waitFor(async () => {
+      expect((await runtime.getActivity("conv-takeover-2")).active).toBe(false);
+    });
+
+    const messages = await ledgerMessages(runtime, "conv-takeover-2");
+    expect(messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(messages.some((m) => m.metadata?.status === "interrupted")).toBe(false);
   });
 
   it("内置的内存归属表看不到自己上次崩溃的残留——恒空，不是偷懒", async () => {

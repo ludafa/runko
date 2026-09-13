@@ -29,9 +29,32 @@ export interface AcquireContext {
   seedSeq: () => Promise<number>;
 }
 
+/**
+ * 这次抢占**顶掉了一个过期的持有者**——它的[租约](../../../docs/terms.md)还挂着、只是太久没续。
+ *
+ * 那说明上一轮没有正常收尾：持有者要么崩了，要么被冻住、此后一写就会被拒。两种情况下它那一轮
+ * 在[账本](../../../docs/terms.md)里都不会再有收尾，所以[轮编排](../../../docs/terms.md)据此补一条
+ * 「已停止」标记。**只报「顶掉了谁」，不报令牌**——本文件的约束一不变。
+ *
+ * 为什么不能只靠启动扫描（`recover()`）补：多副本下常常是**别的副本先接手**，接手时租约行被覆盖，
+ * 此后谁重启都扫不到它了。
+ */
+export interface Takeover {
+  /** 被顶掉的那个持有者（不透明字符串，与 `Grant.holder` 同源）。 */
+  holder?: string;
+}
+
 /** 抢归属的结果。`busy` 时带上 `holder`，[接入层](../../../docs/terms.md)据它决定转发给谁。 */
 export type AcquireResult =
-  | { ok: true; grant: Grant }
+  | {
+      ok: true;
+      grant: Grant;
+      /**
+       * 顶掉了过期持有者时才有。内存版与 Durable Object 永远不带（进程内与平台保证单实例下
+       * 不存在「过期的持有者」）。可选字段：不报它的实现照常能用，只是崩溃那一轮少一条收尾。
+       */
+      takeover?: Takeover;
+    }
   | { ok: false; reason: "busy"; holder: string | undefined };
 
 /** 取号的结果。**不抛错**——理由见 `../persistence.ts` 的 `WriteResult`。 */

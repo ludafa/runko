@@ -10,6 +10,8 @@
 import { describeError } from "../logger.js";
 import type { EnqueueResult, Frame, QueuedInput, TurnInput } from "../types.js";
 import type { RuntimeContext } from "./context.js";
+import { appendInterruptedMarker } from "./interrupted-marker.js";
+import { ABORT_REASON_HOLDER_LOST } from "./reasons.js";
 import { createActiveTurn } from "./registry.js";
 import type { ActiveTurn } from "./registry.js";
 import { driveTurn, nextTurnNumber } from "./turn.js";
@@ -51,7 +53,13 @@ export async function startTurn(ctx: RuntimeContext, conversationId: string, inp
 
   // 记下这次的 holder：`subscribe` 靠它把「本进程正在收尾」与「归属在别的副本」分开。
   ctx.registry.lastHolder = acquired.grant.holder;
-  const turn = createActiveTurn({ conversationId, grant: acquired.grant, input, turnNumber: 1 });
+  const turn = createActiveTurn({
+    conversationId,
+    grant: acquired.grant,
+    input,
+    turnNumber: 1,
+    ...(acquired.takeover !== undefined ? { takeover: acquired.takeover } : {}),
+  });
   ctx.registry.set(turn);
   publish(ctx, conversationId, { kind: "activity", active: true, ...(acquired.grant.holder !== "" ? { holder: acquired.grant.holder } : {}) });
 
@@ -74,6 +82,11 @@ export async function startTurn(ctx: RuntimeContext, conversationId: string, inp
 async function runToCompletion(ctx: RuntimeContext, turn: ActiveTurn): Promise<void> {
   const { conversationId } = turn;
   let status: Awaited<ReturnType<typeof driveTurn>>["status"] = "crashed";
+  // **先替上一轮收尾，再开这一轮。** 必须在读账本之前：标记要排在这一轮的用户消息前面，
+  // 回放时才读得通（「上一轮停了 → 你又说了一句」）。
+  if (turn.takeover !== undefined) {
+    await settleDisplacedTurn(ctx, turn);
+  }
   try {
     // 轮号要等读过账本才知道——`driveTurn` 读完第一时间回填（`prepareTurn` 与钩子都要用）。
     const entries = await ctx.persistence.ledger.read(conversationId);
@@ -136,6 +149,33 @@ async function runToCompletion(ctx: RuntimeContext, turn: ActiveTurn): Promise<v
 
   // ⑤ 交棒：取队首起下一轮。同样兜一层——出队要碰持久化，抛错不该反噬到已经收好的这一轮。
   await step("start-next-queued", () => startNextQueued(ctx, conversationId));
+}
+
+/**
+ * 起轮时顶掉了一个过期持有者：替它那一轮补「已停止」，并广播给已经挂在本进程上的订阅者
+ * （不广播的话他们要等下次重连回放才看得到）。
+ *
+ * **失败只记一行，不拦这一轮**：补不上的后果是界面上少一个标记；为它把用户这一轮也搭进去
+ * 不划算。取号被拒（`lost_ownership`）说明刚抢到就又丢了——那时 `grant.signal` 已经 abort，
+ * `driveTurn` 一开头就会发现并走中断收尾（它挂监听之后会补查一次「是不是已经丢了」）。
+ */
+async function settleDisplacedTurn(ctx: RuntimeContext, turn: ActiveTurn): Promise<void> {
+  const { conversationId } = turn;
+  try {
+    const marker = await appendInterruptedMarker(ctx.persistence, turn.grant, ABORT_REASON_HOLDER_LOST);
+    if (!marker.written) {
+      ctx.logger.warn(LOG_SCOPE, "could not settle the displaced holder's turn", { conversationId, reason: marker.reason });
+      return;
+    }
+    publish(ctx, conversationId, { kind: "message", seq: marker.seq, message: marker.message });
+    ctx.logger.warn(LOG_SCOPE, "took over from a stale holder, settled its turn as interrupted", {
+      conversationId,
+      ...(turn.takeover?.holder !== undefined ? { previousHolder: turn.takeover.holder } : {}),
+      seq: marker.seq,
+    });
+  } catch (error) {
+    ctx.logger.error(LOG_SCOPE, "settling the displaced holder's turn threw", { conversationId, error: describeError(error) });
+  }
 }
 
 /**

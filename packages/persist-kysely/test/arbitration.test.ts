@@ -24,6 +24,7 @@ import {
   arbitrationCases,
   arbitrationMultiNodeCases,
   arbitrationTakeoverCases,
+  arbitrationTakeoverReportCases,
 } from "@runko/conformance";
 import Database from "better-sqlite3";
 import { Kysely, MysqlDialect, PostgresDialect, SqliteDialect } from "kysely";
@@ -105,6 +106,7 @@ function runAllGroups(title: string, make: () => Promise<TakeoverConformanceSetu
   runCases<ArbitrationConformanceSetup>(`${title} · 通用`, arbitrationCases, make);
   runCases<MultiNodeConformanceSetup>(`${title} · 多节点`, arbitrationMultiNodeCases, make);
   runCases<TakeoverConformanceSetup>(`${title} · 超时接管`, arbitrationTakeoverCases, make);
+  runCases<TakeoverConformanceSetup>(`${title} · 报 takeover`, arbitrationTakeoverReportCases, make);
 }
 
 // ---------------------------------------------------------------------------

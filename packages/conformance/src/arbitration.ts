@@ -1,5 +1,6 @@
 /**
- * **[归属仲裁机制](../../../docs/terms.md)的一致性套件**，按能力分三组导出。
+ * **[归属仲裁机制](../../../docs/terms.md)的一致性套件**，按能力分四组导出（第四组 `arbitrationTakeoverReportCases`
+ * 是可选能力，见它自己的注释）。
  *
  * 三种实现的「独占」不是同一个级别的保证（内存版与 Durable Object 是**真保证**，租约版是
  * **尽力 + 可检测**），所以这里**不是一个数组配可选字段**，而是三个数组配三种 setup 类型。
@@ -43,6 +44,23 @@ export const arbitrationCases: readonly ConformanceCase<ArbitrationConformanceSe
       assert.same(second.ok, false);
       if (second.ok) {return;}
       assert.same(second.reason, "busy");
+    },
+  },
+  {
+    // 报了 `takeover` 轮编排就会往账本补一条「已停止」。正常抢占误报的话，每次起轮都会
+    // 在对话里多出一条莫名其妙的「已停止」。
+    name: "**正常抢占不报 `takeover`**——第一次抢、释放之后再抢都不算顶掉了谁",
+    async run(setup) {
+      const first = await setup.arbitration.acquire("c1", ctx());
+      assert.same(first.ok, true);
+      if (!first.ok) {return;}
+      assert.same(first.takeover, undefined);
+      await first.grant.release();
+
+      const again = await setup.arbitration.acquire("c1", ctx());
+      assert.same(again.ok, true);
+      if (!again.ok) {return;}
+      assert.same(again.takeover, undefined);
     },
   },
   {
@@ -217,6 +235,22 @@ export const arbitrationTakeoverCases: readonly ConformanceCase<TakeoverConforma
     },
   },
   {
+    // 启动扫描那条路：先 `clearStale` 把令牌置空再 `acquire`。它已经在替那一轮补标记了，
+    // 这里再报一次就是同一轮补两条「已停止」。
+    name: "`clearStale` 之后再抢**不报** `takeover`——启动扫描自己会补，不能补两条",
+    async run(setup) {
+      const a = await setup.arbitration.acquire("c1", ctx());
+      assert.same(a.ok, true);
+
+      await setup.expire("c1");
+      await setup.other.clearStale("c1");
+      const b = await setup.other.acquire("c1", ctx());
+      assert.same(b.ok, true);
+      if (!b.ok) {return;}
+      assert.same(b.takeover, undefined);
+    },
+  },
+  {
     name: "**被误判的老持有者，取号一律被拒**（这条是核心）",
     async run(setup) {
       const a = await setup.arbitration.acquire("c1", ctx());
@@ -286,6 +320,35 @@ export const arbitrationTakeoverCases: readonly ConformanceCase<TakeoverConforma
       assert.notContains((await setup.other.listStale()).map((s) => s.conversationId), "c1");
       // 清完之后这个会话是自由的。
       assert.same((await setup.other.acquire("c1", ctx())).ok, true);
+    },
+  },
+];
+
+/**
+ * **报 `takeover` 的实现才跑**——顶掉过期持有者时，`acquire` 要说出顶掉了谁。
+ *
+ * 单独成组而不是并进 `arbitrationTakeoverCases`：`AcquireResult.takeover` 是**可选字段**，已有的
+ * 第三方租约实现不报它照样能用（只是多副本下崩溃那一轮少一条「已停止」）。并进去的话，它们升级
+ * 本包就会无故变红。报了它的实现（`@runko/persist-kysely` 的租约版）显式接上这一组。
+ *
+ * 反方向的「不该报的时候别报」在另外两组里，所有实现都要过——误报会让每次起轮都多一条「已停止」。
+ */
+export const arbitrationTakeoverReportCases: readonly ConformanceCase<TakeoverConformanceSetup>[] = [
+  {
+    // 多副本下给崩溃那一轮补收尾，只能靠这一句：别的副本先接手时租约行被覆盖，启动扫描
+    // （`listStale`）此后再也扫不到它。见 docs/host/node/tech/multi-replica.md §9。
+    name: "**顶掉过期持有者时报 `takeover`**，带上被顶掉的那个 holder",
+    async run(setup) {
+      const a = await setup.arbitration.acquire("c1", ctx());
+      assert.same(a.ok, true);
+      if (!a.ok) {return;}
+
+      await setup.expire("c1");
+      const b = await setup.other.acquire("c1", ctx());
+      assert.same(b.ok, true);
+      if (!b.ok) {return;}
+      assert.notSame(b.takeover, undefined, "顶掉了一个过期持有者，应当报 takeover");
+      assert.same(b.takeover?.holder, a.grant.holder);
     },
   },
 ];

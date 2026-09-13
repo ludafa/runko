@@ -142,7 +142,18 @@ export function leaseArbitration(db: Kysely<RunkoDatabase>, opts: LeaseArbitrati
       return { ok: false, reason: "busy", holder: after?.holder ?? undefined };
     }
 
-    return { ok: true, grant: createGrant(conversationId, token, at) };
+    const grant = createGrant(conversationId, token, at);
+    // **抢到的是一个令牌还挂着的行** = 顶掉了一个过期的持有者（走到这里说明快路判它不活了）。
+    // 它那一轮在账本里不会再有收尾，告诉轮编排去补。启动扫描那条路先 `clearStale` 把令牌
+    // 置空了，所以不会在这里重复报。
+    //
+    // 已知不精确：「读到过期令牌」与「条件 UPDATE 赢」之间，老持有者若恰好活过来、正常收尾并
+    // 释放，这里会多报一次，结果是账本多一条「已停止」。窗口只有一次往返宽、不写坏账本，
+    // 与 `listStale` 分不清「崩了」和「收尾时卡住」是同一种不精确，不另加一层 CAS。
+    if (existing !== undefined && existing.lease_token !== null) {
+      return { ok: true, grant, takeover: existing.holder !== null ? { holder: existing.holder } : {} };
+    }
+    return { ok: true, grant };
   }
 
   function createGrant(conversationId: string, token: string, acquiredAt: number): Grant {

@@ -15,5 +15,11 @@ export const ABORT_REASON_SHUTDOWN = "Server is shutting down; this turn was int
 /** 一轮被停止时，挂着的人审就地按拒绝结掉（abort 信号对一个普通的 `await` 无效）。 */
 export const ABORT_DENY_MESSAGE = "The turn was stopped before this approval was decided.";
 
+/**
+ * 新持有者接手时，替**上一个**持有者那一轮补的「已停止」理由（租约版才可能走到）。
+ * 上一个持有者崩了或卡住了，它自己写不了收尾。
+ */
+export const ABORT_REASON_HOLDER_LOST = "The node running this turn stopped responding; another node took over.";
+
 /** 归属被别人接管（租约版才可能走到）——按中断收尾，不是故障。 */
 export const OWNERSHIP_LOST_MESSAGE = "This conversation is now owned by another node; this turn was interrupted.";

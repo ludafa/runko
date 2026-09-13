@@ -41,6 +41,7 @@ describe("我自己的持久化实现", () => {
 | `arbitrationCases` | 所有实现 | `{ arbitration }` |
 | `arbitrationMultiNodeCases` | 能表达两个节点的 | `+ other` |
 | `arbitrationTakeoverCases` | 能表达超时接管的 | `+ expire` |
+| `arbitrationTakeoverReportCases` | 顶掉过期持有者时报 `takeover` 的（可选能力，见 `AcquireResult.takeover`） | `+ expire` |
 
 ```ts
 import { arbitrationCases, arbitrationTakeoverCases } from "@runko/conformance";

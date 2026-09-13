@@ -18,6 +18,7 @@ import {
   arbitrationCases,
   arbitrationMultiNodeCases,
   arbitrationTakeoverCases,
+  arbitrationTakeoverReportCases,
 } from "@runko/conformance";
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
@@ -78,6 +79,7 @@ async function setupFor(): Promise<TakeoverConformanceSetup> {
 runCases<ArbitrationConformanceSetup>("persist-sqlite 仲裁 · 通用", arbitrationCases, setupFor);
 runCases<MultiNodeConformanceSetup>("persist-sqlite 仲裁 · 多节点", arbitrationMultiNodeCases, setupFor);
 runCases<TakeoverConformanceSetup>("persist-sqlite 仲裁 · 超时接管", arbitrationTakeoverCases, setupFor);
+runCases<TakeoverConformanceSetup>("persist-sqlite 仲裁 · 报 takeover", arbitrationTakeoverReportCases, setupFor);
 
 describe("persist-sqlite 仲裁的装配", () => {
   it("租约与账本落在同一个库——取号从账本水位接着数，不从 0 重来", async () => {
