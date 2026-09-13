@@ -866,7 +866,7 @@ k8s 里 pod 是直接可寻址的（pod IP 或 service 地址），`holder` 里�
 2. **日志已经回答了「顺序」和「耗时」**：每行带时间戳和 `*Ms` 字段，按时间合并后跨副本的先后一目了然。缺的只是「一棵树」的可视化。
 3. **两者不冲突**：将来上 OTel 时，日志行里补上 trace id 就能和调用链对上，这批的日志不白做。
 
-**已对齐的方案（2026-09-13）**——另立文档施工，这里只列结论：
+**已对齐的方案（2026-09-13）**——另立文档施工（[功能](../../../architecture/features/observability.md) · [技术方案](../../../architecture/tech/observability.md) · [施工计划](../../../architecture/plans/observability.md)），这里只列结论：
 
 | # | 问题 | 结论 |
 |---|---|---|

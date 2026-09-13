@@ -165,7 +165,7 @@ pnpm --filter @runko-demo/persist-demo test:lab
 ```
 
 > 租约本身的抢占、被占、**自我围栏**这几件事暂时还不在日志里：框架层的可观测性会改成「框架发事件、宿主订阅」
-> （方案已对齐，见[技术方案附录 D](../tech/multi-replica.md)），届时由 demo 的订阅者打出来。
+> （方案已对齐，见[可观测性 · 使用手册](../../../architecture/features/observability.md)），届时由 demo 的订阅者打出来。
 
 每一行依次是：时间、谁（`test` 或哪个副本）、级别、模块、发生了什么、相关字段。带 `Ms` 的字段就是耗时。
 
