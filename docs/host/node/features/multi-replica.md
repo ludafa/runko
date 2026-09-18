@@ -4,7 +4,7 @@ slug: multi-replica
 view: 功能
 layer: 宿主层
 module: —
-packages: ["@runko/agent", "@runko/persist-kysely", "@runko/persist-sqlite", "@runko/persist-postgres", "@runko/persist-mysql"]
+packages: ["@runko/agent", "@runko/persist-kysely", "@runko/persist-sqlite", "@runko/persist-postgres", "@runko/persist-mysql", "@runko/persist-mongo"]
 tags: ["多副本", "租约", "应用层转发", "docker-compose", "验证环境", "故障演练"]
 related: ["host/node/tech/multi-replica.md", "host/node/plans/multi-replica.md", "host/node/features/deployment.md", "logic/arbitration/features/arbitration-impl.md"]
 ---
@@ -70,6 +70,15 @@ createAgentRuntime({
   arbitration: postgresArbitration(pool, { holder: process.env.RUNKO_NODE_URL }),
 });
 ```
+
+**四档库都有租约版**，换一个包、换一个驱动实例，形状完全一样：
+
+| 库 | 装的包 | 那两行写成 |
+|---|---|---|
+| SQLite（同机多进程） | `@runko/persist-sqlite` | `sqlitePersistence(db)` · `sqliteArbitration(db, { holder })` |
+| PostgreSQL | `@runko/persist-postgres` | `postgresPersistence(pool)` · `postgresArbitration(pool, { holder })` |
+| MySQL | `@runko/persist-mysql` | `mysqlPersistence(pool)` · `mysqlArbitration(pool, { holder })` |
+| MongoDB | `@runko/persist-mongo` | `mongoPersistence(db)` · `mongoArbitration(db, { holder })` |
 
 转发怎么写看 `apps/persist-demo/src/forward.ts`。哪些端点要转、哪些不用，见[技术方案 §5.3](../tech/multi-replica.md)。
 
@@ -196,6 +205,6 @@ pnpm --filter @runko-demo/persist-demo lab:logs                       # 存一�
 - **崩溃不恢复进度。** 崩溃那一轮只会被标成「已停止」，不会从中间接着跑。
 - **有一种情况连「已停止」也补不上**：持有者被冻住了很久、这段时间没人往这份对话发消息，它醒来后自己停手。
   那一轮只会剩下用户消息。见[技术方案 §9.6](../tech/multi-replica.md)。
-- **Mongo 暂不支持多副本。** 它还没有租约版实现，demo 在这一档开多副本会直接报错。
+- **验证环境只起了 Postgres。** 四档库（SQLite / Postgres / MySQL / MongoDB）都有租约版实现、都能跑多副本，但 `apps/persist-demo` 的 compose 只编排了 Postgres 那一档；换库要自己加一组服务。
 - **验证环境测不了时钟不同步。** 所有容器共用宿主机的时钟。
 - **验证环境测不了审批与提问的转发。** demo 用的回声模型不调工具，触发不了待裁决项；这两条由[技术方案 §5.3](../tech/multi-replica.md) 的转发矩阵和代码审查保证。

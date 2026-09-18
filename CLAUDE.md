@@ -20,7 +20,7 @@ pnpm workspace 三组成员（见 [pnpm-workspace.yaml](./pnpm-workspace.yaml)�
 | `@runko/persist-sqlite`     | 薄壳：吃 better-sqlite3 实例 → Kysely → 核心                                 | agent, persist-kysely       |
 | `@runko/persist-postgres`   | 薄壳：吃 `pg.Pool`                                                           | agent, persist-kysely       |
 | `@runko/persist-mysql`      | 薄壳：吃 mysql2 连接池                                                       | agent, persist-kysely       |
-| `@runko/persist-mongo`      | **非** 薄壳：MongoDB 直接实现三个领域接口（Kysely 是 SQL，用不上）            | agent, core（peer mongodb） |
+| `@runko/persist-mongo`      | **非** 薄壳：MongoDB 直接实现三个领域接口 + 租约版仲裁（Kysely 是 SQL，用不上） | agent, core（peer mongodb） |
 | `@runko/conformance`        | 契约一致性套件：持久化 / 归属仲裁的用例数据（`{ name, run }`），**不依赖任何测试框架** | agent（peer）、core（dev） |
 | `@runko/sdk`                | 主包门面：re-export core + virtual-fs + mini-bash，不放实现                  | core, virtual-fs, mini-bash |
 

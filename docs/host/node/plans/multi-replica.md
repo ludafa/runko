@@ -18,11 +18,11 @@ related: ["host/node/tech/multi-replica.md", "host/node/features/multi-replica.m
 
 把「两个副本共享一个 Postgres」从**设计上成立**推到**跑得起来、验得了、出问题查得到**。
 
-**状态：进行中。** 底座（租约版[归属仲裁机制](../../../terms.md)）已于 2026-09-01 交付，本计划做的是
-它的四个出口、一处订阅侧的修正、一套接入层示范，和一次真进程端到端。
+**状态：九单全部交付**（2026-09-18，逐条见 §9 变更记录）。底座（租约版[归属仲裁机制](../../../terms.md)）
+已于 2026-09-01 交付，本计划做的是它的四个出口、一处订阅侧的修正、一套接入层示范，和一次真进程端到端。
 
-**第一批九单里八单已交付**（2026-09-09，逐条见 §9 变更记录）。**只剩 M2（Mongo 版租约仲裁）**——本机没有
-可用的 MongoDB，那一单一条都验不了，盲写一份要过三组一致性用例的实现不划算。
+最后落地的是 **M2（Mongo 版租约仲裁）**——它曾因「本机没有可用的 MongoDB，一条都验不了」压了九天，
+2026-09-18 对真 MongoDB 8 补齐，四组一致性用例 21 条全绿。
 
 M6 的形态与原计划不同、而且更早可用：**用一个 SQLite 文件对两个真进程**，那就是部署形态里的
 「① 同机 cluster」，走的代码路径与 Postgres 完全相同（同一个 `leaseArbitration`，只是方言不同），
@@ -71,7 +71,7 @@ flowchart LR
 | 单 | 目标 | 动谁 | 大小 | 状态 |
 |---|---|---|---|---|
 | **M1** | 三个薄壳各导出一个 `*Arbitration()` | `persist-sqlite` / `-postgres` / `-mysql` | S | ✅ |
-| **M2** | Mongo 版租约仲裁，过同一套一致性用例 | `persist-mongo` | **L** | ⬜ |
+| **M2** | Mongo 版租约仲裁，过同一套一致性用例 | `persist-mongo` | **L** | ✅ |
 | **M3** | `subscribe` 的轮状态快照改用权威答案 | `@runko/agent` | S | ✅ |
 | **M4** | `EnqueueResult` 的拒绝分支带结构化 `holder` | `@runko/agent` | XS | ✅ |
 | **M5** | persist-demo 的多副本形态与转发中间件 | `apps/persist-demo` | **L** | ✅ |
@@ -117,7 +117,9 @@ export function sqliteArbitration(database: SqliteDatabase, opts: SqliteArbitrat
 
 ---
 
-### M2 · Mongo 版租约仲裁
+### M2 · Mongo 版租约仲裁 ✅
+
+> **已交付 2026-09-18。** 与计划一致，两处**刻意的偏差**在下面标了「实际」。
 
 **为什么**：`persist-mongo` 不是薄壳（Kysely 是 SQL 查询构建器，用不上），它得直接实现
 `Arbitration`。不做的话，用 Mongo 的宿主只能停在单进程。
@@ -125,29 +127,52 @@ export function sqliteArbitration(database: SqliteDatabase, opts: SqliteArbitrat
 **做什么**：新文件 `packages/persist-mongo/src/arbitration.ts`，导出
 `mongoArbitration(db, { holder, heartbeatMs?, takeoverMs?, now? })`。
 
-集合 `agent_leases`，`_id` 就是会话 id，字段与 SQL 表一一对应
-（形状见[技术方案 §4.2](../tech/multi-replica.md)）。`migrate()` 补一个索引：
-`{ lease_token: 1, heartbeat_at: 1 }`，服务 `listStale`。
+集合 `agent_leases`，`_id` 就是会话 id（形状见[技术方案 §4.2](../tech/multi-replica.md)）。
+`migrate()` 补一个索引：`{ heartbeatAt: 1, leaseToken: 1 }`，服务 `listStale`。
+
+> **实际偏差①：字段名用驼峰，不是原计划说的「与 SQL 表一一对应」的下划线。** 同一个
+> database 里另外三个集合全是驼峰，而这两边永远不会 join、也不会互相迁移——为了对齐一张
+> 碰不到的表把唯一一个集合写成另一种风格，只让翻库的人多愣一下。技术方案 §4.2 已同步。
 
 四个操作的写法（**比 SQL 版少一次往返**，因为 `findOneAndUpdate` 直接返回更新后的文档，
 不必为了绕开 MySQL 的 `affectedRows` 再读回来）：
 
 | 操作 | 写法 |
 |---|---|
-| `acquire` | 读一次判 `busy`（保住 `seedSeq` 的惰性）→ 行不存在则 `insertOne` 播种、撞 `E11000` 忽略 → `findOneAndUpdate` 决胜负（filter 带 `$or: [{lease_token: null}, {heartbeat_at: {$lt: at - takeoverMs}}]`，`returnDocument: "after"`） |
-| `nextSeq` | `findOneAndUpdate({ _id, lease_token: token }, { $inc: { seq_watermark: 1 }, $set: { heartbeat_at } }, { returnDocument: "after" })`；返回 `null` = 已出局 |
-| `release` | `updateOne({ _id, lease_token: token }, { $set: { holder: null, lease_token: null } })`——**只在还持有时才放手**，不删文档 |
-| `clearStale` | `updateOne({ _id, heartbeat_at: { $lt: now - takeoverMs } }, …)`——**必须带陈旧判据**，否则会擦掉活着的持有者 |
+| `acquire` | 读一次判 `busy`（保住 `seedSeq` 的惰性）→ 文档不存在则 `insertOne` 播种、撞 `E11000` 忽略 → `findOneAndUpdate` 决胜负（filter 带 `$or: [{leaseToken: null}, {heartbeatAt: {$lt: at - takeoverMs}}]`，`returnDocument: "after"`） |
+| `nextSeq` | `findOneAndUpdate({ _id, leaseToken: token }, { $inc: { seqWatermark: 1 }, $set: { heartbeatAt } }, { returnDocument: "after" })`；返回 `null` = 已出局 |
+| `release` | `updateOne({ _id, leaseToken: token }, { $set: { holder: null, leaseToken: null } })`——**只在还持有时才放手**，不删文档 |
+| `clearStale` | `updateOne({ _id, heartbeatAt: { $lt: now - takeoverMs } }, …)`——**必须带陈旧判据**，否则会擦掉活着的持有者 |
 
 **心跳与自我围栏：复制 `persist-kysely` 的那一段，不抽包。** 理由见
-[技术方案 §4.3](../tech/multi-replica.md)。**两处都要写「这是刻意的重复，改一处必须同步另一处」**。
+[技术方案 §4.3](../tech/multi-replica.md)。两处都写了「这是刻意的重复，改一处必须同步另一处」。
 
-**怎么验**：接同一套仲裁一致性用例的**三组**（通用 / 多节点 / 超时接管），门禁沿用
+**怎么验**：接同一套仲裁一致性用例的**四组**（通用 / 多节点 / 超时接管 / 报 takeover），门禁沿用
 `RUNKO_TEST_MONGO_URL`。`expire` 钩子照 `persist-kysely` 的做法——**冻结持有者那一侧的时钟**，
-不要只把 `heartbeat_at` 拨到过去（持有者的下一拍心跳会把它刷回来，接管随机失败）。
+不要只把 `heartbeatAt` 拨到过去（持有者的下一拍心跳会把它刷回来，接管随机失败）。
 
-**验收**：`arbitrationCases` / `arbitrationMultiNodeCases` / `arbitrationTakeoverCases` 三组全绿，
-其中「被误判的老持有者取号一律被拒」这条在**真 Mongo** 上过。
+**验收结论**：四组一致性用例 **21 条全绿**（含「被误判的老持有者取号一律被拒」这条核心断言，
+在**真 MongoDB 8** 上过），加 Mongo 特有 5 条 + 配置校验 3 条，本文件共 **30 条**；
+`persist-mongo` 整包 67 条全绿。
+
+**变异测试验了四处**，确认用例真的咬得住：`clearStale` 去掉陈旧判据 → 红；`release` 去掉令牌
+过滤 → 红；自我围栏判断挪进 `catch` → 红。
+
+> **实际偏差②：多补了一条用例。** 第四处变异——心跳把 `matchedCount` 换成 `modifiedCount`
+> ——**四组一致性用例全绿**。那是 Mongo 独有的行为（匹配到但值没变时 `modified=0`），套件是
+> 跨实现的、验不到它，而它真会触发：`acquire` / `nextSeq` 也写 `heartbeatAt`，跟一拍心跳落在
+> 同一毫秒里值就没变，于是一次成功的心跳被当成「被接管了」，把用户这一轮无缘无故掐断。
+> 补了一条「把时钟冻住，每一拍都写同一个值」的用例钉死它。同一个坑本包在 `decisions.settle`
+> 上已经踩过一次（见 `persist-mongo` README「两个实测出来的坑」）。
+
+**顺手做的**：`apps/persist-demo` 的 `mongo` 那一档接上 `makeArbitration`——四档库现在都能开
+多副本了（`memory` 档除外，它本来就只活在一个进程里）。
+
+**并且给它补了跨进程验证**：`apps/persist-demo/test/multi-replica.e2e.test.ts` 加了一档
+「两个真进程共用一个真 MongoDB」，挑两条最能说明问题的跑——**转发**（归属只落在一个副本上、
+另一个副本拿着 `holder` 转过去）与**接管**（持有者 `kill -9` 之后另一个副本抢得到）。
+理由：上面四条走的是 Kysely 那份实现，Mongo 版是另写的一份，那四条一条也证明不了它。
+门禁沿用 `RUNKO_TEST_MONGO_URL`，不给就跳过。**两条全绿。**
 
 ---
 
@@ -299,7 +324,7 @@ export function sqliteArbitration(database: SqliteDatabase, opts: SqliteArbitrat
 | 5 | `logic/arbitration/plans/arbitration-impl.md` §1 | 加一行：这是立项时的快照，当前事实见 §3 与 §8 |
 | 6 | 同上阶段表 | L7 / L8 / L9 完整版 / L10 各链到本计划对应的单 |
 | 7 | `packages/persist-kysely/src/index.ts` 文件头 | 删掉「这一版只出持久化，不含租约版归属仲裁」 |
-| 8 | `packages/persist-mongo/src/index.ts` 文件头 | 同上（M2 交付后） |
+| 8 | `packages/persist-mongo/src/index.ts` 文件头 | 同上（✅ 随 M2 一起改了） |
 | 9 | `packages/agent/README.md`「还没做的」 | 租约版已交付；剩的是薄壳出口与 Mongo 版 |
 | 10 | 三个薄壳 + mongo 的 README | 各加一节「多副本怎么配」 |
 
@@ -314,7 +339,7 @@ export function sqliteArbitration(database: SqliteDatabase, opts: SqliteArbitrat
 | 包 | 改动 | 建议级别 |
 |---|---|---|
 | `@runko/persist-sqlite` · `-postgres` · `-mysql` | 新增 `*Arbitration()` 导出（M1） | minor |
-| `@runko/persist-mongo` | 新增 `mongoArbitration()` 导出（M2） | minor |
+| `@runko/persist-mongo` | 新增 `mongoArbitration()` 导出（M2） | minor ✅ 已出（`.changeset/mongo-lease-arbitration.md`，2026-09-18） |
 | `@runko/agent` | `EnqueueResult` 加可选 `holder`（M4） | minor |
 | `@runko/agent` | `subscribe` 的轮状态帧改用权威答案（M3） | **patch？待确认** |
 
@@ -575,3 +600,4 @@ pnpm docs:check && pnpm docs:build
 | 2026-09-13 | **M15 / M16 交付**：三视角文档、术语表（租约、租约心跳、接管阈值、自我围栏、多副本验证环境）、Node 长驻手册链接与 `packages` 漂移、仲裁与轮编排文档的 `takeover`、persist-demo 与 conformance README、changeset |
 | 2026-09-13 | **追加 M17–M19 立项**：用户要能看到核心成功路径的执行顺序与耗时。查明仓库没有 OTel（只有 chat 应用接的 AI SDK 遥测回调，不覆盖多副本阶段），这批先用「带时间戳的日志 + 按时间合并」，OTel 另议（技术方案附录 D） |
 | 2026-09-13 | **M18 / M19 交付，M17 撤销**：demo 侧日志与验证环境日志收集交付；框架层日志改由已对齐的可观测性事件方案提供（技术方案附录 D），不随本批提交 |
+| 2026-09-18 | **M2 交付，本计划九单收口**：Mongo 版租约仲裁（`mongoArbitration`）。压了九天的原因是本机没有可用的 MongoDB，这次有了就补上。四组一致性用例 21 条在真 MongoDB 8 上全绿。两处偏差：字段名用驼峰（不跟 SQL 表的下划线，理由见 M2）；变异测试发现套件守不住「心跳必须看 `matchedCount` 不是 `modifiedCount`」这条 Mongo 特有的坑，本包自己补了一条用例。顺手把 `persist-demo` 的 `mongo` 档接上仲裁出口，并给它补了「两个真进程共用一个真 MongoDB」的 e2e 两条（转发 + 接管）|

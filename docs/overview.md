@@ -331,7 +331,7 @@ await Skill.fromFS(fs, "/.agents/skills/frontend-design") // 从任意 RunkoFS �
 | `@runko/persist-sqlite`     | 薄壳：吃 better-sqlite3 实例 → Kysely → 核心                                                                                                          | [packages/persist-sqlite](../packages/persist-sqlite/README.md)         |
 | `@runko/persist-postgres`   | 薄壳：吃 `pg.Pool`                                                                                                                                    | [packages/persist-postgres](../packages/persist-postgres/README.md)     |
 | `@runko/persist-mysql`      | 薄壳：吃 mysql2 连接池                                                                                                                                | [packages/persist-mysql](../packages/persist-mysql/README.md)           |
-| `@runko/persist-mongo`      | MongoDB 直接实现三个领域接口（不走 Kysely——那是 SQL 的东西）                                                                                          | [packages/persist-mongo](../packages/persist-mongo/README.md)           |
+| `@runko/persist-mongo`      | MongoDB 直接实现三个领域接口 + 租约版归属仲裁（不走 Kysely——那是 SQL 的东西）                                                                          | [packages/persist-mongo](../packages/persist-mongo/README.md)           |
 | `@runko/conformance`        | 契约一致性套件：写了自己的持久化 / 归属仲裁实现，拿它验合不合契约（**不依赖任何测试框架**）                                                            | [packages/conformance](../packages/conformance/README.md)               |
 
 **bash 分档说明**：`bash` 工具的命令执行环境（`RunkoExec`）分两档，按需二选一注入，一行代码互换、loop/session 代码零改动（[tech/core-sdk §4.5b](./logic/engine/tech/core-sdk.md)）——

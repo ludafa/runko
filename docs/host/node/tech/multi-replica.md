@@ -14,7 +14,7 @@ related: ["host/node/features/multi-replica.md", "host/node/features/deployment.
 > 相关：[使用手册](../features/multi-replica.md) · [施工计划](../plans/multi-replica.md) · [Node 长驻 · 功能](../features/deployment.md) · [Node 长驻 · 技术方案](./deployment.md)（四档形态的横向对照，本文不复述）。
 > 展开：[归属仲裁机制](../../../logic/arbitration/tech/arbitration-impl.md) · [流分发](../../contract/tech/stream-fanout.md) · [持久化](../../contract/tech/persistence.md)。
 >
-> **状态：两批都已交付（Mongo 版租约仲裁除外）。** 本文把
+> **状态：两批全部交付，Mongo 版租约仲裁也已补齐（2026-09-18）。** 本文把
 > [Node 长驻 · 技术方案 §2](./deployment.md) 那张表里的 **③ k8s 多副本**从「设计上成立」推到
 > 「可交付、可验收」。租约版[归属仲裁机制](../../../terms.md)已于 2026-09-01 落地（见
 > [施工计划](../../../logic/arbitration/plans/arbitration-impl.md) L0–L6）。
@@ -35,7 +35,7 @@ related: ["host/node/features/multi-replica.md", "host/node/features/deployment.
 
 | # | 要成立的事 | 靠什么 | 现状 |
 |---|---|---|---|
-| 1 | 同一时刻只有一个副本在推进这份对话 | 租约版归属仲裁机制 | ✅ Kysely 三方言与三个薄壳已交付；**Mongo 还没有** |
+| 1 | 同一时刻只有一个副本在推进这份对话 | 租约版归属仲裁机制 | ✅ Kysely 三方言、三个薄壳与 **Mongo 版**均已交付 |
 | 2 | 被误判出局的老持有者写不进账本 | [租期标识](../../../terms.md) + 每次取号 CAS | ✅ 已交付并有一致性套件钉住 |
 | 3 | 请求打到哪个副本都能被送到持有者手上 | 接入层转发（框架给 `holder`） | ✅ `holder` 结构化 + persist-demo 转发示范（§5） |
 | 4 | 正在看的人能看到正在产生的内容 | 转发[直播流](../../../terms.md)（不外挂广播） | ✅ `subscribe` 改用权威轮状态（§5.2） |
@@ -61,7 +61,7 @@ related: ["host/node/features/multi-replica.md", "host/node/features/deployment.
 | 轮编排对「失去独占权」的处置 | ✅ 已交付且有用例 | `packages/agent/src/runtime/turn.ts` |
 | `getActivity()` 会回退到 `arbitration.inspect()` | ✅ 已交付 | `packages/agent/src/runtime.ts` |
 | **三个薄壳的仲裁出口** | ✅ 第一批 M1 | `persist-sqlite` / `-postgres` / `-mysql` |
-| **Mongo 版仲裁** | ❌ 还没有（施工计划 M2） | `persist-mongo` |
+| **Mongo 版仲裁** | ✅ 第二批 M2（2026-09-18） | `persist-mongo` |
 | **`enqueue` 被拒时的结构化 `holder`** | ✅ 第一批 M4 | `packages/agent/src/types.ts` |
 | **`subscribe` 的[轮状态快照](../../../terms.md)** | ✅ 第一批 M3 | `packages/agent/src/runtime.ts` |
 | **接入层转发的示范** | ✅ 第一批 M5 | `apps/persist-demo` |
@@ -104,7 +104,10 @@ Kysely 实例。Kysely 是查询构建器、不自己持连接（连接池是你
 共用同一个池，不多占资源；但**建表只能建一次**——`migrate()` 仍然只调一次，它已经把
 `agent_leases` 一起建了。
 
-### 4.2 Mongo 版：不是薄壳，要重写一份
+### 4.2 Mongo 版：不是薄壳，要重写一份 ✅
+
+> **已交付**（2026-09-18，施工计划 M2）：`mongoArbitration(db, { holder })`，与
+> `mongoPersistence(db)` 吃同一个 `Db`。下面描述的就是落地后的样子。
 
 `@runko/persist-mongo` 底下没有 Kysely（Kysely 是 SQL 查询构建器），所以它得直接实现
 `Arbitration`。好消息是 **Mongo 在这件事上比 SQL 顺手**：
@@ -124,21 +127,42 @@ Kysely 实例。Kysely 是查询构建器、不自己持连接（连接池是你
 ```js
 // 集合 agent_leases
 {
-  _id: "conv_abc",           // = conversationId
+  _id: "conv_abc",                  // = conversationId
   holder: "http://10.1.2.3:3910",   // 可空：为空 = 没人持有
-  lease_token: "9f1c…",             // 可空：一次租期的唯一标识
-  seq_watermark: 42,                // 账本水位，跨释放保留
-  heartbeat_at: 1757400000000,
-  acquired_at:  1757399000000,
+  leaseToken: "9f1c…",              // 可空：一次租期的唯一标识
+  seqWatermark: 42,                 // 账本水位，跨释放保留
+  heartbeatAt: 1757400000000,
+  acquiredAt:  1757399000000,
 }
 ```
+
+**字段名跟着本包走驼峰，不跟 SQL 表的下划线。** 施工时改的：同一个 database 里另外三个
+集合（`agent_ledger` / `agent_decisions` / `agent_queue`）全是驼峰，而这两边永远不会
+join、也不会互相迁移——为了「对齐一张永远碰不到的表」把唯一一个集合写成另一种风格，
+只会让翻库的人每次多愣一下。
 
 抢占仍走**四步**，与 SQL 版同形（下面 §7.1 的图是同一条路）：
 
 1. 读一次：有人持有且心跳没超时 → 直接报 `busy`，**不调 `seedSeq()`**（契约要求它惰性）；
 2. 行不存在 → `insertOne` 播种水位，**撞了 `E11000` 不算错**（另一个副本同时在插）；
-3. `findOneAndUpdate` 决胜负：filter 是 `{ _id, $or: [{ lease_token: null }, { heartbeat_at: { $lt: at - takeoverMs } }] }`；
+3. `findOneAndUpdate` 决胜负：filter 是 `{ _id, $or: [{ leaseToken: null }, { heartbeatAt: { $lt: at - takeoverMs } }] }`；
 4. 返回 `null` = 没抢到，带上当前 `holder` 报 `busy`。
+
+**`migrate()` 只多建一个索引**：`{ heartbeatAt: 1, leaseToken: 1 }`，服务 `listStale`
+（「有人持有 + 心跳已超时」）。其余每一次读写都是按 `_id` 的点查，走 Mongo 白送的主键索引。
+
+> **键序不能反。** `listStale` 的条件里 `leaseToken` 是 `$ne: null`，把它放前导列上给出的索引
+> 区间是 `[MinKey, null) ∪ (null, MaxKey]`——那是整条索引，等于全扫。把范围条件 `heartbeatAt`
+> 放前面才有一段窄区间。真库实测（5000 条租约、其中 4 条陈旧）：`heartbeatAt` 在前
+> `keysExamined: 6`，反过来 `keysExamined: 4991`。代码审查时发现并改掉的。
+
+> **一个套件覆盖不到的坑，施工时靠变异测试抓出来的。** 心跳那条 `updateOne` 必须看
+> `matchedCount`，不能看 `modifiedCount`——Mongo 在「匹配到但新值与旧值相同」时报
+> `matched=1, modified=0`，而 `acquire` / `nextSeq` 也写 `heartbeatAt`，跟一拍心跳落在
+> 同一毫秒里值就没变。用 `modifiedCount` 判断会把一次成功的心跳当成「被接管了」，把
+> 用户这一轮无缘无故掐断。四组一致性用例对这条**全绿**（套件是跨实现的，只能验语义），
+> 所以 `persist-mongo` 自己补了一条「把时钟冻住」的用例把它钉死。同一个坑本包在
+> `decisions.settle` 上已经踩过一次。
 
 > **别把第 2、3 步合成一次 upsert。** Mongo 的 upsert 只从 filter 里的**等值**子句推导要插入
 > 的文档，`$or` 那一段推不出来；行已存在且被别人持有时，它会试着插一条同 `_id` 的新文档，
@@ -153,8 +177,11 @@ Kysely 实例。Kysely 是查询构建器、不自己持连接（连接池是你
   `@runko/agent` 的公开 API——而那个包的仲裁接口**刻意一个 token 字段都没有**（[技术方案 §2](../../../logic/arbitration/tech/arbitration-impl.md)的约束一）；
 - `persist-mongo` 依赖 `persist-kysely` 只为拿这段 helper，会毁掉「它不是薄壳」这个定位，还得把
   Kysely 拖进 Mongo 用户的依赖树；
-- **漂移有东西挡**：仲裁一致性套件里「心跳自己发现被接管」「被误判的老持有者取号一律被拒」
-  两条会同时钉住两份实现，改坏一份当场红。
+- **漂移有东西挡，但要两层**：对外语义由仲裁一致性套件钉住（「心跳自己发现被接管」「被误判的
+  老持有者取号一律被拒」等，两份实现跑同一套）；**库坏掉时的那几支套件造不出来**（抛错 / 挂住 /
+  偶发失败），两个包各自有故障注入用例——`persist-kysely` 是一个会坏掉的 dialect，`persist-mongo`
+  是一个会坏掉的 `Db` 代理。只做第一层是不够的：M2 的代码审查实测过，把「偶发失败别判失去归属」
+  和「挂住不返回也要停手」改坏，四组一致性用例仍然全绿。
 
 本仓已有同款先例：`@runko/agent` 自己写了一份与 sdk 同款的文件工具默认装配。**两处都要写明
 「这是刻意的重复，改一处必须同步另一处」。**
@@ -759,7 +786,7 @@ sequenceDiagram
 
 - **时钟不同步**：所有容器共用宿主机内核的时钟。要测得引入 libfaketime 一类工具。
 - **审批与提问的转发**：回声模型不调工具，触发不了待裁决项。这两条由 §5.3 的转发矩阵保证。
-- **Mongo 档**：还没有租约版，demo 会直接报错。
+- **Mongo 档**：租约版已经有了（M2），但这套 compose 只起了 Postgres——换库要另加一组服务。
 - **跨机网络延迟**：容器之间走的是同一台机器的虚拟网桥，往返在 1 毫秒以内。
 
 ## 12. 取舍与已知限制
@@ -820,7 +847,7 @@ k8s 里 pod 是直接可寻址的（pod IP 或 service 地址），`holder` 里�
 | 同上 §4 正文 | 「`@runko/persist-sql` 是裸驱动实现……另外两条腿 `persist-drizzle` / `persist-prisma`」 | 同上 |
 | 同上 §3.1 时序图 | 用「影响 1 行 / 影响 0 行」表达 CAS 成败 | 实现**刻意不看影响行数**（MySQL 分不清「匹配到但没变」与「没匹配到」），判据是读回来比对令牌 |
 | `packages/persist-kysely/src/index.ts` 文件头 | 「这一版只出持久化，不含租约版归属仲裁——那是下一批」 | 已经出了，本文件就导出着 `leaseArbitration` |
-| `packages/persist-mongo/src/index.ts` 文件头 | 同款「那是下一批」 | 本计划 M2 交付后要更新 |
+| `packages/persist-mongo/src/index.ts` 文件头 | 同款「那是下一批」 | ✅ M2 交付时已更新，现在导出着 `mongoArbitration` |
 | `packages/agent/README.md` 「还没做的」 | 「租约版归属仲裁：多进程共享 DB」 | 已交付；剩的是薄壳出口与 Mongo 版 |
 | `logic/arbitration/plans/arbitration-impl.md` §1 | 「租约版实现 ❌ 不存在」 | 那是立项时的盘点，§3 的阶段表才是当前事实。**加一行说明它是历史快照** |
 

@@ -100,10 +100,10 @@ related: ["logic/arbitration/features/arbitration-impl.md", "logic/arbitration/t
 | **L3** | 心跳 + 超时接管 | ✅ 同上 |
 | **L4** | `nextSeq` 的 CAS + 失效通知 | ✅ 同上（推 `signal` + 拉 `lost_ownership` 两条路） |
 | **L5** | `listStale` / `clearStale` 的租约语义 | ✅ 同上 |
-| **L6** | **仲裁一致性套件** | ✅ `@runko/conformance` 的 `arbitrationCases` / `arbitrationMultiNodeCases` / `arbitrationTakeoverCases` |
+| **L6** | **仲裁一致性套件** | ✅ `@runko/conformance` 的 `arbitrationCases` / `arbitrationMultiNodeCases` / `arbitrationTakeoverCases` / `arbitrationTakeoverReportCases` |
 | **L9 场景 3** | **被误判的老持有者写入被拒** | ✅ 四个方言全过（含真 Postgres / 真 MySQL） |
 | **L7** | 三个薄壳导出 `*Arbitration()` | ✅ 2026-09-09，见[多副本部署 · 施工](../../../host/node/plans/multi-replica.md) M1 |
-| **L8** | Mongo 版 | ⬜ 未开工，见[多副本部署 · 施工](../../../host/node/plans/multi-replica.md) M2 |
+| **L8** | Mongo 版 | ✅ 2026-09-18，`persist-mongo/src/arbitration.ts`，见[多副本部署 · 施工](../../../host/node/plans/multi-replica.md) M2 |
 | **L9 完整版** | 两个**真进程**的 e2e | ✅ 2026-09-09（SQLite 文件档四场景），真 Postgres 档见[多副本部署 · 施工](../../../host/node/plans/multi-replica.md) M6 |
 | **L10** | 接入层转发（`held_by_other` 不再回 500） | ✅ 2026-09-09，示范在 `persist-demo`，见[多副本部署 · 施工](../../../host/node/plans/multi-replica.md) M5 |
 
@@ -277,3 +277,4 @@ L9 的多进程 e2e 最花时间但也最不可省——**没有它，这个功�
 | 2026-09-02 | **心跳自我围栏改成「每拍开头先判」**。此前围栏判断只写在 `catch` 里，只覆盖「库抛错」；库**挂住不返回**（TCP 黑洞 / 连接池耗尽）时防重入标志永久为真，后面每一拍都提前 return，老持有者永不停手。同批把围栏的时间基准从「往返回来之后的 `now()`」改成「写进 `heartbeat_at` 的那个时刻」——别的节点判死看的就是后者，用前者会在往返接近心跳间隔时把余量吃光 |
 | 2026-09-02 | **`nextSeq` 一律不抛**。接口注释写死了「不抛错」，三个调用点也都没有 try，但库抖动时异常会从 `appendSettleMessage` 里逃出去——那是收尾的最后一段。现在库出错归到 `lost_ownership`（含义是「你现在不许写」），是否真的失去归属仍由心跳的自我围栏判定 |
 | 2026-09-02 | **`expire` 测试钩子改成冻结持有者那一侧的时钟**。只改 `heartbeat_at` 会被持有者的下一拍心跳刷回来，接管随机失败（真库上尤其明显）；一致性套件里 `listStale` / `clearStale` 那条也改成从**另一个节点**扫——那才是这个接口的真实场景 |
+| 2026-09-18 | **L8 交付**：Mongo 版租约仲裁。整套逻辑重写落在 Mongo 驱动上（不走 Kysely），条件写比 SQL 版**少一次往返**——`findOneAndUpdate` 直接返回更新后的文档，不必为绕开 MySQL 的 `affectedRows` 再读回来。心跳与自我围栏那 60 行是**刻意从 `persist-kysely` 复制的**（不抽包，理由见[多副本 · 技术方案 §4.3](../../../host/node/tech/multi-replica.md)），两份实现由一致性套件里「心跳自己发现被接管」「被误判的老持有者取号一律被拒」两条同时钉住。变异测试另发现一条套件守不住的 Mongo 特有缺陷（心跳必须看 `matchedCount`），由 `persist-mongo` 自己补用例 |

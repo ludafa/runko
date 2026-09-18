@@ -33,7 +33,7 @@ related: ["architecture/features/agent-kernel.md", "architecture/tech/agent-kern
 | **K3** | 挂起与恢复 | `@runko/agent` + core | 等人超时挂起、人回来在任意节点恢复 | ⬜ **可开工**——2026-08-22 前置解开：core 入口定为 `settleAndRun(callId, decision)`（下面第 3 条）。`suspended` 收尾态与 `TurnStatus` 已先行落地 |
 | **K4** | 队列与插话回到框架 | `@runko/agent` | `enqueue` + `conversation-drained`，竞态框架内处理一次 | ✅ 已交付 |
 | **K5** | 持久化实现 | `persist-kysely` + `-sqlite` / `-postgres` / `-mysql` | 三个方言跑绿 | ✅ **已交付**（2026-08-23，见[持久化 · 施工](../../host/contract/plans/persistence.md)）。**产出物与原计划不同**：单包 `persist-sql` 被推翻，改成「Kysely 核心 + 一种库一个薄壳」 |
-| **K6** | 租约版归属仲裁 | `persist-kysely` + 三个薄壳 | 多进程 cluster 端到端 | ✅ **已交付**（2026-09-01，见[归属仲裁机制 · 施工](../../logic/arbitration/plans/arbitration-impl.md) L0–L6）。**产出物与原计划不同**：`persist-sql` 不存在，落在 `persist-kysely` 的 `leaseArbitration`，三个薄壳各导出 `*Arbitration()`。端到端跑了两档——两个进程共用 SQLite 文件、三个容器共用真 Postgres（[多副本部署 · 施工](../../host/node/plans/multi-replica.md)）。**Mongo 版还没有**（M2） |
+| **K6** | 租约版归属仲裁 | `persist-kysely` + 三个薄壳 | 多进程 cluster 端到端 | ✅ **已交付**（2026-09-01，见[归属仲裁机制 · 施工](../../logic/arbitration/plans/arbitration-impl.md) L0–L6）。**产出物与原计划不同**：`persist-sql` 不存在，落在 `persist-kysely` 的 `leaseArbitration`，三个薄壳各导出 `*Arbitration()`。端到端跑了两档——两个进程共用 SQLite 文件、三个容器共用真 Postgres（[多副本部署 · 施工](../../host/node/plans/multi-replica.md)）。**Mongo 版已于 2026-09-18 补齐**（M2，`mongoArbitration`）——四档库现在都能跑多副本 |
 | **K7** | chat 应用迁移到新包 | `apps/node-server` | 行为不变，代码减少 | ✅ 已交付 |
 | **K8** | `@runko/cli` | 新包 | `npx` 一条命令可用 | ⬜ 未开工 |
 | **K9** | 其余实现包 | `durable-object` / `stream-redis` | Cloudflare（④a）与 Vercel（④b）两档各自跑通 | ⬜ 未开工。**范围比原计划小**：`persist-drizzle` / `persist-prisma` 随 K5 改道取消——持久化统一走 Kysely 核心 + 薄壳，chat 应用用自己的 drizzle 实现领域接口（K7） |
@@ -60,7 +60,7 @@ related: ["architecture/features/agent-kernel.md", "architecture/tech/agent-kern
 | **2** | **K3 挂起与恢复** | 框架主线里唯一还没做的核心能力。多副本让它更值钱：今天一轮等人时一直占着租约与沙盒，挂起后才能释放 | 本表 K3 · [已定案第 3、4 条](#已定案2026-08-22) | 🟡 需补施工计划（设计散在 issue #2 与轮编排文档） |
 | **3** | **幂等键**（转发超时后重试会多一条消息）+ **冻住之后无人接管补不上「已停止」** | 正确性问题，重复消息用户看得见。前者要改持久化契约（队列表与账本表各一个唯一约束）与 wire 协议 | [多副本 · 技术方案](../../host/node/tech/multi-replica.md) 附录 C · §9.6 | ⬜ 需另立三份文档 |
 | **4** | **K9 + K11**：`durable-object`、`stream-redis`，与两档上的调用链 | 宿主与调用链同期落地，免得调用链先做出来却没有宿主可验 | 本表 K9 · K11 | ⬜ 需另立 |
-| **5** | **K8 `@runko/cli`** · **Mongo 版租约**（多副本 M2） | 按需排。Mongo 那项要先有可用的 MongoDB 环境，否则一条都验不了 | 本表 K8 · [多副本 · 施工](../../host/node/plans/multi-replica.md) M2 | M2 已有设计（多副本技术方案 §4.2） |
+| **5** | **K8 `@runko/cli`** | 按需排。同批原有的「Mongo 版租约」已于 2026-09-18 提前做掉（本机有了可用的 MongoDB） | 本表 K8 | ⬜ 需另立 |
 | **随时** | **人工验收欠账**（需要真浏览器或真机，要用户起环境） | 不阻塞主线，可以插在任何两项之间 | 见下表 | — |
 
 **人工验收欠账**：
