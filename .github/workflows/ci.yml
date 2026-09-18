@@ -76,3 +76,7 @@ jobs:
       # 它的脚本名是 `check`，不在 `pnpm -r` 跑的那三个里，写错字段会让文档
       # 静默漏出侧栏，必须单列一步。
       - run: pnpm docs:check
+
+      # 源码注释里的文档链接死链检查。docs 站的死链检查藏在 pnpm -r build 里，
+      # 但它管不到源码注释——那 800 多处失效引用就是这么攒出来的。
+      - run: pnpm check:doc-links
