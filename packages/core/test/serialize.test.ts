@@ -1,12 +1,12 @@
 /**
- * P7-2: `Session.toJSON`/`SessionOptions.resume` — docs/tech/core-sdk.md §4.2/§4.8
+ * P7-2: `Session.toJSON`/`SessionOptions.resume` — docs/logic/engine/tech/core-sdk.md §4.2/§4.8
  * "会话恢复" 段. `@runko/virtual-fs` is a devDependency here (not a runtime
  * dependency of `@runko/core`, see `session.ts`'s header "fs 缺省" note) —
  * this file plays the same "host" role `integration.test.ts` already does,
  * supplying a real snapshot()/restore()-capable `RunkoFS` to exercise the
  * structural capability probes end to end.
  *
- * P13-5-2（docs/tech/single-ledger.md）迁移：messages 从 `ModelMessage[]`
+ * P13-5-2（docs/logic/orchestration/tech/single-ledger.md）迁移：messages 从 `ModelMessage[]`
  * 换成 `RunkoUIMessage[]`；"resume 后不重发 session.started" 一节随
  * `session.started`/`turn.started` 事件整体退役直接删除（`session.ts` 头注释：
  * 两者不再有对应 chunk，没有"重发抑制"这回事）；新增两条 resume 边界用例

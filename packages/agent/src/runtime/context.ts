@@ -38,7 +38,7 @@ export interface RuntimeHooks {
 }
 
 /**
- * [插话](../../../docs/terms.md)策略：有轮在跑时，新来的这条是插进这一轮还是排队。
+ * [插话](../../../../docs/terms.md)策略：有轮在跑时，新来的这条是插进这一轮还是排队。
  *
  * - `never` —— 一律排队。
  * - `always` —— 有轮在跑就插话。

@@ -1,6 +1,6 @@
 /**
- * 输入框上方的**待发区**（docs/features/steer-and-queue.md §2.3）：列出这个会话
- * [排队](../../../../../docs/terms.md)中、还没发出的消息，每条可删、可**插进本轮**，可一键清空。
+ * 输入框上方的**待发区**（docs/logic/orchestration/features/steer-and-queue.md §2.3）：列出这个会话
+ * [排队](../../../../../../docs/terms.md)中、还没发出的消息，每条可删、可**插进本轮**，可一键清空。
  *
  * 队列是**服务端**状态（`use-chat-messages.ts` 的 `queuedMessages`，由直播流的
  * `QueueFrame` 快照驱动），所以这个组件是纯展示 + 回调：删除/清空/插入都不做本地
@@ -39,7 +39,7 @@ export function QueuedMessages({
   messages: QueuedMessage[];
   onRemove: (messageId: string) => void;
   onClear: () => void;
-  /** 把这一条从队列取出、立刻插进当前这一轮（[steer](../../../../../docs/terms.md)）。 */
+  /** 把这一条从队列取出、立刻插进当前这一轮（[steer](../../../../../../docs/terms.md)）。 */
   onPromote?: (message: QueuedMessage) => void;
   /** 没有进行中的一轮时不显示「插进本轮」——没有「本轮」可插。 */
   streaming?: boolean;

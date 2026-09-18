@@ -80,10 +80,10 @@ import type { TelemetryStore } from '../telemetry.js';
 import { getChatTelemetry, getChatTelemetryStore } from '../telemetry.js';
 
 // ---------------------------------------------------------------------------
-// docs/tech/chat-webapp.md §2.2 `routes/chat.ts` (+ §2.2c（审批链）'s
+// docs/ingress/tech/chat-webapp.md §2.2 `routes/chat.ts` (+ §2.2c（审批链）'s
 // `POST .../approvals/:callId` and `POST .../questions/:callId`, + the queue
-// endpoints of docs/tech/steer-and-queue.md §4.2, + `POST .../abort` of
-// docs/tech/turn-abort.md §3.2) — login required on all of them (same
+// endpoints of docs/logic/orchestration/tech/steer-and-queue.md §4.2, + `POST .../abort` of
+// docs/logic/orchestration/tech/turn-abort.md §3.2) — login required on all of them (same
 // `requireAuth` middleware as `routes/example.ts`).
 // ---------------------------------------------------------------------------
 
@@ -113,12 +113,12 @@ export interface ChatRouteDeps {
    * `requireAuth`, so production behavior is unchanged.
    */
   authMiddleware: MiddlewareHandler<ChatEnv>;
-  /** telemetry 事件集成（`@runko/core` `SessionTelemetry`，docs/tech/chat-webapp.md §11.4）——注入后逐 turn 的模型调用事件落 SQLite；缺省 undefined = 不采集。生产默认装配见文件底部（`getChatTelemetry`）。 */
+  /** telemetry 事件集成（`@runko/core` `SessionTelemetry`，docs/ingress/tech/chat-webapp.md §11.4）——注入后逐 turn 的模型调用事件落 SQLite；缺省 undefined = 不采集。生产默认装配见文件底部（`getChatTelemetry`）。 */
   telemetry?: SessionTelemetry;
   /**
    * 同一个遥测库的另一个口，两处在用：turn 遥测明细端点用它**查数**
    * （`TelemetryStore.list`），`agent/runtime.ts` 的钩子用它**写**起轮装配事件
-   * （docs/tech/telemetry.md §2.4，声明在 `TurnLauncherDeps` 上）。缺省 undefined =
+   * （docs/ingress/tech/telemetry.md §2.4，声明在 `TurnLauncherDeps` 上）。缺省 undefined =
    * 端点恒返回空数组、装配事件不采集。
    */
   telemetryStore?: TelemetryStore;
@@ -131,7 +131,7 @@ function describeError(error: unknown): string {
 function toConversationDto(row: ConversationRow): ConversationDto {
   // `sleeping` is derived at read time, never stored: hibernation happens on
   // Vercel's side when the idle timeout elapses (no server-side timer to flip
-  // the row — docs/tech/chat-webapp.md §2.2), so a stored `active` whose idle window has passed
+  // the row — docs/ingress/tech/chat-webapp.md §2.2), so a stored `active` whose idle window has passed
   // is presented as `sleeping`. P12-3 live verification caught the stored
   // status going stale exactly this way. The next message's `acquire` resumes
   // the sandbox and `touch` refreshes `lastActiveAt`, flipping it back.
@@ -146,11 +146,11 @@ function toConversationDto(row: ConversationRow): ConversationDto {
     provider: row.provider,
     status: row.status === 'active' && idleElapsed ? 'sleeping' : row.status,
     lastActiveAt: row.lastActiveAt.toISOString(),
-    // 直接解析手上这一行已经 select 出来的列，不再查一次库（docs/tech/steer-and-queue.md §4.2）。
+    // 直接解析手上这一行已经 select 出来的列，不再查一次库（docs/logic/orchestration/tech/steer-and-queue.md §4.2）。
     queuedMessages: toQueueDto(
       parseQueuedInputs(row.queuedMessagesJson, row.id),
     ),
-    // 同上，[skill 清单](../../../../docs/terms.md)缓存（docs/tech/composer-skill-mention.md §2.1）
+    // 同上，[skill 清单](../../../../docs/terms.md)缓存（docs/ingress/tech/composer-skill-mention.md §2.1）
     // ——读的是库里的快照，这条路径**不碰沙盒**，休眠会话也能列菜单。缓存为空时
     // 退到兜底清单（本功能上线前建的会话就是这一档），否则用户打 `/` 什么都没有。
     availableSkills: resolveSkillCatalog(
@@ -302,7 +302,7 @@ export function createChatApp(deps: ChatRouteDeps) {
       sandboxId: provider === 'e2b' ? acquired.resumeToken : null,
     });
 
-    // [skill 清单](../../../../docs/terms.md)首次填充（docs/tech/composer-skill-mention.md §2.1）：
+    // [skill 清单](../../../../docs/terms.md)首次填充（docs/ingress/tech/composer-skill-mention.md §2.1）：
     // 沙盒此刻刚 clone 完、刚装完 frontend-design，就地扫一次写库——否则新会话要等
     // 第一轮跑完才有菜单可用。`loadSkillsFromWorkspace` 自身不抛（扫不到就是空数组），
     // 所以这一步不会让建会话失败。
@@ -431,7 +431,7 @@ export function createChatApp(deps: ChatRouteDeps) {
     return c.json({ frames }, 200);
   });
 
-  // ---- GET /api/chat/conversations/{id}/turns/{turn}/telemetry (docs/tech/chat-webapp.md §11.4) ----
+  // ---- GET /api/chat/conversations/{id}/turns/{turn}/telemetry (docs/ingress/tech/chat-webapp.md §11.4) ----
 
   const turnTelemetryRoute = createRoute({
     method: 'get',
@@ -484,14 +484,14 @@ export function createChatApp(deps: ChatRouteDeps) {
     return c.json({ events }, 200);
   });
 
-  // ---- POST /api/chat/conversations/{id}/messages (starts a turn, docs/tech/chat-webapp.md §2.2b) ----
+  // ---- POST /api/chat/conversations/{id}/messages (starts a turn, docs/ingress/tech/chat-webapp.md §2.2b) ----
 
   const postMessageRoute = createRoute({
     method: 'post',
     path: '/api/chat/conversations/{id}/messages',
     tags: ['Chat'],
     summary:
-      'Start a turn, queue this message for the next one, or steer the in-progress turn (docs/tech/steer-and-queue.md §4.1): with no turn running this acquires the sandbox, builds the session and hands off to the in-process turn runner (mode "started"); with one running it either queues `text` onto the conversation’s 待发队列 (mode "queued", the default) or injects it into the running turn via `Session.steer()` (mode "steered", `intent: "steer"`). Either way, events arrive over `GET .../stream`, not this response',
+      'Start a turn, queue this message for the next one, or steer the in-progress turn (docs/logic/orchestration/tech/steer-and-queue.md §4.1): with no turn running this acquires the sandbox, builds the session and hands off to the in-process turn runner (mode "started"); with one running it either queues `text` onto the conversation’s 待发队列 (mode "queued", the default) or injects it into the running turn via `Session.steer()` (mode "steered", `intent: "steer"`). Either way, events arrive over `GET .../stream`, not this response',
     request: {
       params: ConversationParamsSchema,
       body: {
@@ -516,7 +516,7 @@ export function createChatApp(deps: ChatRouteDeps) {
       409: {
         content: { 'application/json': { schema: ErrorSchema } },
         description:
-          'Either the 待发队列 is full (docs/features/steer-and-queue.md §2.3 — nothing is ever silently dropped), or a turn was already in progress and could not be steered either (narrow race — the turn ended between the steer attempt and the fallback start)',
+          'Either the 待发队列 is full (docs/logic/orchestration/features/steer-and-queue.md §2.3 — nothing is ever silently dropped), or a turn was already in progress and could not be steered either (narrow race — the turn ended between the steer attempt and the fallback start)',
       },
       500: {
         content: { 'application/json': { schema: ErrorSchema } },
@@ -525,7 +525,7 @@ export function createChatApp(deps: ChatRouteDeps) {
       503: {
         content: { 'application/json': { schema: ErrorSchema } },
         description:
-          'The server is shutting down (docs/tech/graceful-shutdown.md §3.3) — no new turn is accepted during shutdown. Retryable: resend once the new process is up',
+          'The server is shutting down (docs/logic/orchestration/tech/graceful-shutdown.md §3.3) — no new turn is accepted during shutdown. Retryable: resend once the new process is up',
       },
     },
   });
@@ -591,14 +591,14 @@ export function createChatApp(deps: ChatRouteDeps) {
     return c.json({ error: outcome.message }, 500);
   });
 
-  // ---- POST /api/chat/conversations/{id}/abort (docs/tech/turn-abort.md §3.2) ----
+  // ---- POST /api/chat/conversations/{id}/abort (docs/logic/orchestration/tech/turn-abort.md §3.2) ----
 
   const abortTurnRoute = createRoute({
     method: 'post',
     path: '/api/chat/conversations/{id}/abort',
     tags: ['Chat'],
     summary:
-      '[停止](docs/terms.md)这个会话进行中的那一轮（docs/tech/turn-abort.md）：中止当前轮并清空[待发队列](docs/terms.md)。200 只表示「停止已请求」——真正停下的时刻取决于 agent 当时在做什么（最坏情况是一条 bash 命令响应中断信号的时间），「已停止」这个结果走 `GET .../stream` 上那条 `status: "interrupted"` 的 `message-metadata` chunk 送达',
+      '[停止](docs/terms.md)这个会话进行中的那一轮（docs/logic/orchestration/tech/turn-abort.md）：中止当前轮并清空[待发队列](docs/terms.md)。200 只表示「停止已请求」——真正停下的时刻取决于 agent 当时在做什么（最坏情况是一条 bash 命令响应中断信号的时间），「已停止」这个结果走 `GET .../stream` 上那条 `status: "interrupted"` 的 `message-metadata` chunk 送达',
     request: { params: ConversationParamsSchema },
     responses: {
       200: {
@@ -641,7 +641,7 @@ export function createChatApp(deps: ChatRouteDeps) {
     return c.json({ ok: true as const, queue: [] }, 200);
   });
 
-  // ---- DELETE /api/chat/conversations/{id}/queue/{messageId} (docs/tech/steer-and-queue.md §4.2) ----
+  // ---- DELETE /api/chat/conversations/{id}/queue/{messageId} (docs/logic/orchestration/tech/steer-and-queue.md §4.2) ----
 
   const deleteQueuedMessageRoute = createRoute({
     method: 'delete',
@@ -685,7 +685,7 @@ export function createChatApp(deps: ChatRouteDeps) {
     return c.json({ queue: toQueueDto(queue) }, 200);
   });
 
-  // ---- DELETE /api/chat/conversations/{id}/queue (docs/tech/steer-and-queue.md §4.2) ----
+  // ---- DELETE /api/chat/conversations/{id}/queue (docs/logic/orchestration/tech/steer-and-queue.md §4.2) ----
 
   const clearQueueRoute = createRoute({
     method: 'delete',
@@ -723,14 +723,14 @@ export function createChatApp(deps: ChatRouteDeps) {
     return c.json({ queue: toQueueDto(queue) }, 200);
   });
 
-  // ---- GET /api/chat/conversations/{id}/stream?after=<seq> (resumable live tail, docs/tech/chat-webapp.md §2.2b) ----
+  // ---- GET /api/chat/conversations/{id}/stream?after=<seq> (resumable live tail, docs/ingress/tech/chat-webapp.md §2.2b) ----
 
   const streamTurnRoute = createRoute({
     method: 'get',
     path: '/api/chat/conversations/{id}/stream',
     tags: ['Chat'],
     summary:
-      'Resumable live tail of a session’s in-progress turn (docs/tech/chat-webapp.md §2.2b): replays persisted frames after `after`, then forwards the turn’s live chunks until it ends — reconnect-safe (page refresh/HMR/network blip never lose events)',
+      'Resumable live tail of a session’s in-progress turn (docs/ingress/tech/chat-webapp.md §2.2b): replays persisted frames after `after`, then forwards the turn’s live chunks until it ends — reconnect-safe (page refresh/HMR/network blip never lose events)',
     request: {
       params: ConversationParamsSchema,
       query: ConversationReplayQuerySchema,
@@ -739,7 +739,7 @@ export function createChatApp(deps: ChatRouteDeps) {
       200: {
         content: { 'text/event-stream': { schema: chatReplayFrameSchema } },
         description:
-          'SSE stream of `ChatReplayFrame`s (`{seq,message}` or `{seq?,chunk}`): replay, then live tail (closes once the turn ends, or immediately after replay if no turn is in progress). Live `chunk` frames omit `seq` when ephemeral (docs/tech/single-ledger.md §5 单-3 — `text-delta`/`reasoning-delta`/`transient` data parts), never persisted and never replayed; every other frame always carries one',
+          'SSE stream of `ChatReplayFrame`s (`{seq,message}` or `{seq?,chunk}`): replay, then live tail (closes once the turn ends, or immediately after replay if no turn is in progress). Live `chunk` frames omit `seq` when ephemeral (docs/logic/orchestration/tech/single-ledger.md §5 单-3 — `text-delta`/`reasoning-delta`/`transient` data parts), never persisted and never replayed; every other frame always carries one',
       },
       401: {
         content: { 'application/json': { schema: ErrorSchema } },
@@ -784,14 +784,14 @@ export function createChatApp(deps: ChatRouteDeps) {
     });
   });
 
-  // ---- POST /api/chat/conversations/{id}/presence (在场心跳, docs/tech/push-notification.md §5.2) ----
+  // ---- POST /api/chat/conversations/{id}/presence (在场心跳, docs/ingress/tech/push-notification.md §5.2) ----
 
   const presenceRoute = createRoute({
     method: 'post',
     path: '/api/chat/conversations/{id}/presence',
     tags: ['Chat'],
     summary:
-      '上报[在场](../../../../docs/terms.md)：这条会话此刻是否正在调用者眼前（docs/tech/push-notification.md §5.2）。在场期间不向这个人推送本会话的通知',
+      '上报[在场](../../../../docs/terms.md)：这条会话此刻是否正在调用者眼前（docs/ingress/tech/push-notification.md §5.2）。在场期间不向这个人推送本会话的通知',
     request: {
       params: ConversationParamsSchema,
       body: {
@@ -837,14 +837,14 @@ export function createChatApp(deps: ChatRouteDeps) {
     return c.json({ ok: true as const }, 200);
   });
 
-  // ---- POST /api/chat/conversations/{id}/approvals/{callId} (resolve a pending approval, docs/tech/chat-webapp.md §2.2c（审批链）) ----
+  // ---- POST /api/chat/conversations/{id}/approvals/{callId} (resolve a pending approval, docs/ingress/tech/chat-webapp.md §2.2c（审批链）) ----
 
   const postApprovalRoute = createRoute({
     method: 'post',
     path: '/api/chat/conversations/{id}/approvals/{callId}',
     tags: ['Chat'],
     summary:
-      '批准或拒绝一个待处理的工具调用审批请求（docs/tech/chat-webapp.md §2.2c（审批链），docs/tech/single-ledger.md §6）：结果通过 `GET .../stream` 的 `tool-approval-response` chunk 送达，本响应只是一个 ack',
+      '批准或拒绝一个待处理的工具调用审批请求（docs/ingress/tech/chat-webapp.md §2.2c（审批链），docs/logic/orchestration/tech/single-ledger.md §6）：结果通过 `GET .../stream` 的 `tool-approval-response` chunk 送达，本响应只是一个 ack',
     request: {
       params: ChatApprovalParamsSchema,
       body: {
@@ -930,14 +930,14 @@ export function createChatApp(deps: ChatRouteDeps) {
     return c.json({ ok: true as const }, 200);
   });
 
-  // ---- POST /api/chat/conversations/{id}/questions/{callId} (answer a pending ask-user question, docs/tech/chat-webapp.md §2.2c（审批链）) ----
+  // ---- POST /api/chat/conversations/{id}/questions/{callId} (answer a pending ask-user question, docs/ingress/tech/chat-webapp.md §2.2c（审批链）) ----
 
   const postAnswerRoute = createRoute({
     method: 'post',
     path: '/api/chat/conversations/{id}/questions/{callId}',
     tags: ['Chat'],
     summary:
-      '回答一个待处理的 ask-user 提问（docs/tech/chat-webapp.md §2.2c（审批链））：结果通过 `GET .../stream` 的 `tool-ask-user` 部件 output-available 状态送达，本响应只是一个 ack',
+      '回答一个待处理的 ask-user 提问（docs/ingress/tech/chat-webapp.md §2.2c（审批链））：结果通过 `GET .../stream` 的 `tool-ask-user` 部件 output-available 状态送达，本响应只是一个 ack',
     request: {
       params: ChatApprovalParamsSchema,
       body: {
@@ -998,7 +998,7 @@ export function createChatApp(deps: ChatRouteDeps) {
  * 以及路由自己那几个可选外围（推送、遥测）。
  *
  * `chatRuntime` 单独导出，是因为 `index.ts` 还要用它两次：启动时 `recover()` 扫
- * [孤儿轮](../../docs/terms.md)，收到 SIGTERM 时 `shutdown()` [交权](../../docs/terms.md)。
+ * [孤儿轮](../../../../docs/terms.md)，收到 SIGTERM 时 `shutdown()` [交权](../../../../docs/terms.md)。
  */
 const defaultSandboxManager = createSandboxManager({
   vercel: createVercelProvider(),

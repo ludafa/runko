@@ -21,7 +21,7 @@ describe('agent/store', () => {
     seedUser(db, 'user-2');
   });
 
-  it('conversations: create/list/get scoped by user — a fresh row has a null runko header (docs/tech/single-ledger.md §5 单-3)', () => {
+  it('conversations: create/list/get scoped by user — a fresh row has a null runko header (docs/logic/orchestration/tech/single-ledger.md §5 单-3)', () => {
     const row = createConversation(db, {
       id: 'sess-1',
       userId: 'user-1',
@@ -56,7 +56,7 @@ describe('agent/store', () => {
     expect(getConversation(db, 'does-not-exist', 'user-1')).toBeUndefined();
   });
 
-  it('createConversation: provider/sandboxId default to vercel/null when omitted (docs/tech/sandbox-provider.md §2)', () => {
+  it('createConversation: provider/sandboxId default to vercel/null when omitted (docs/host/contract/tech/sandbox-provider.md §2)', () => {
     const row = createConversation(db, {
       id: 'sess-1',
       userId: 'user-1',
@@ -84,7 +84,7 @@ describe('agent/store', () => {
     expect(row.sandboxId).toBe('sbx_123');
   });
 
-  it('updateConversation: a sandboxId-only patch persists in isolation — status/lastActiveAt and the runko header columns are untouched (docs/tech/sandbox-provider.md §3.1)', () => {
+  it('updateConversation: a sandboxId-only patch persists in isolation — status/lastActiveAt and the runko header columns are untouched (docs/host/contract/tech/sandbox-provider.md §3.1)', () => {
     createConversation(db, {
       id: 'sess-1',
       userId: 'user-1',
@@ -141,7 +141,7 @@ describe('agent/store', () => {
     expect(updated?.agentSessionTurn).toBeNull();
   });
 
-  it('updateConversation: agentSessionHeader patch writes all three scalar columns together (docs/tech/single-ledger.md §5 单-3 "session header")', () => {
+  it('updateConversation: agentSessionHeader patch writes all three scalar columns together (docs/logic/orchestration/tech/single-ledger.md §5 单-3 "session header")', () => {
     createConversation(db, {
       id: 'sess-1',
       userId: 'user-1',

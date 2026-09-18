@@ -82,7 +82,7 @@ describe("sessionStateSchema", () => {
 });
 
 describe("SessionState.messages type", () => {
-  it("is RunkoUIMessage[] (the single-ledger working format, docs/tech/single-ledger.md §5-2)", () => {
+  it("is RunkoUIMessage[] (the single-ledger working format, docs/logic/orchestration/tech/single-ledger.md §5-2)", () => {
     expectTypeOf<SessionState["messages"]>().toEqualTypeOf<RunkoUIMessage[]>();
 
     const fromLedger: RunkoUIMessage[] = [{ id: "m1", role: "user", parts: [{ type: "text", text: "hi" }] }];

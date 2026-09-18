@@ -1,5 +1,5 @@
 /**
- * 内置的**平凡[流分发](../../../docs/terms.md)**：一个 `Map<conversationId, Set<listener>>`。
+ * 内置的**平凡[流分发](../../../../docs/terms.md)**：一个 `Map<conversationId, Set<listener>>`。
  *
  * 单进程下流分发平时是看不见的——发布方与订阅方在同一个进程里，转发一下就完了。
  * 跨实例时才需要外部实现（Redis Streams，`@runko/stream-redis`）。

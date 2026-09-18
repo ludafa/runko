@@ -1,6 +1,6 @@
 /**
  * Web-side counterpart to `apps/node-server/test/helpers/runko-chunks.ts` /
- * `packages/core/test/helpers/runko-chunks.ts` (docs/tech/single-ledger.md §5/§6, P13-5-5): small factories for `RunkoChunk`s and the wire's
+ * `packages/core/test/helpers/runko-chunks.ts` (docs/logic/orchestration/tech/single-ledger.md §5/§6, P13-5-5): small factories for `RunkoChunk`s and the wire's
  * `ChatReplayFrame` envelopes around them, trimmed to what this package's own
  * tests need (`MessageLedger`/`useChatMessages`/component fixtures) — no
  * `drainTurn`/`fingerprintChunk` (nothing here drives a real `@runko/core`
@@ -146,7 +146,7 @@ export function dataErrorChunk(data: ErrorData): RunkoChunk {
   return { type: 'data-error', id: 'turn-error', data };
 }
 
-/** `transient` defaults to `true` — the only shape `@runko/core`'s loop actually produces for this chunk type (docs/tech/single-ledger.md §2.2b). */
+/** `transient` defaults to `true` — the only shape `@runko/core`'s loop actually produces for this chunk type (docs/logic/orchestration/tech/single-ledger.md §2.2b). */
 export function dataToolProgressChunk(
   toolCallId: string,
   text: string,
@@ -313,7 +313,7 @@ export function toolReviewDeniedChunks(opts: {
   ];
 }
 
-/** A step whose tool call is denied outright (`ApprovalOutcome === 'deny'`, or no arbiter): no approval-request/-response, straight to `output-denied` (docs/tech/single-ledger.md §6.1). */
+/** A step whose tool call is denied outright (`ApprovalOutcome === 'deny'`, or no arbiter): no approval-request/-response, straight to `output-denied` (docs/logic/orchestration/tech/single-ledger.md §6.1). */
 export function toolDirectDeniedStepChunks(opts: {
   messageId: string;
   toolCallId: string;

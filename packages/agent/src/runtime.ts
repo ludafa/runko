@@ -1,13 +1,13 @@
 /**
  * `createAgentRuntime` —— 本包的门面。
  *
- * `@runko/core` 的 `Session` 管「跑一轮」，这里管「**一轮接一轮**」：起、[停止](../../docs/terms.md)、
- * 收尾、[排队](../../docs/terms.md)与[插话](../../docs/terms.md)、人在回路、[交权](../../docs/terms.md)、
- * [崩溃恢复](../../docs/terms.md)。四样宿主能力全部可替换，**都带内置的平凡实现**，所以
+ * `@runko/core` 的 `Session` 管「跑一轮」，这里管「**一轮接一轮**」：起、[停止](../../../docs/terms.md)、
+ * 收尾、[排队](../../../docs/terms.md)与[插话](../../../docs/terms.md)、人在回路、[交权](../../../docs/terms.md)、
+ * [崩溃恢复](../../../docs/terms.md)。四样宿主能力全部可替换，**都带内置的平凡实现**，所以
  * 零配置就能跑。
  *
  * 框架**不碰 HTTP**：`subscribe` 给的是中立的 `AsyncIterable`，序列化成 SSE / WebSocket
- * 是[接入层](../../docs/terms.md)的事。
+ * 是[接入层](../../../docs/terms.md)的事。
  */
 import type { AgentDefinition, RunkoUIMessage } from "@runko/core";
 
@@ -44,7 +44,7 @@ const LOG_SCOPE = "agent:runtime";
 /** 默认值：人多久不理算放弃。纯产品决策，宿主可改。 */
 const DEFAULT_APPROVAL_TIMEOUT_MS = 240_000;
 const DEFAULT_ASK_USER_TIMEOUT_MS = 240_000;
-/** [交权](../../docs/terms.md)宽限期：正在干活的轮，等多久还没收尾就不等了。 */
+/** [交权](../../../docs/terms.md)宽限期：正在干活的轮，等多久还没收尾就不等了。 */
 const DEFAULT_SHUTDOWN_GRACE_MS = 15_000;
 const DEFAULT_QUEUE_MAX = 10;
 
@@ -68,7 +68,7 @@ export interface AgentRuntimeOptions {
   logger?: Logger;
   /** 观测/通知挂钩，全部可选、全部只报告。 */
   hooks?: RuntimeHooks;
-  /** [排队](../../docs/terms.md)与[插话](../../docs/terms.md)的产品策略。 */
+  /** [排队](../../../docs/terms.md)与[插话](../../../docs/terms.md)的产品策略。 */
   queue?: {
     enabled?: boolean;
     max?: number;
@@ -94,7 +94,7 @@ export interface SubscribeOptions {
 }
 
 export interface ShutdownResult {
-  /** 这次关闭中止了几个轮（含还在[起轮装配](../../docs/terms.md)里的）。 */
+  /** 这次关闭中止了几个轮（含还在[起轮装配](../../../docs/terms.md)里的）。 */
   aborted: number;
   /** 是否全部收尾完毕。`false` = 撞了宽限期上限，还有轮没等到。 */
   settled: boolean;
@@ -103,7 +103,7 @@ export interface ShutdownResult {
 }
 
 export interface RecoveryResult {
-  /** 扫到几个还留着[起轮标记](../../docs/terms.md)的会话。 */
+  /** 扫到几个还留着[起轮标记](../../../docs/terms.md)的会话。 */
   scanned: number;
   /** 给几个补了「已停止」收尾。 */
   recovered: number;
@@ -118,20 +118,20 @@ export interface AgentRuntime {
   submitDecision(conversationId: string, callId: string, decision: SubmittedDecision): Promise<boolean>;
   /** 人回答了 `ask-user`。语义同上。 */
   submitAnswer(conversationId: string, callId: string, answer: string): Promise<boolean>;
-  /** [停止](../../docs/terms.md)进行中的那一轮 + 清空[待发队列](../../docs/terms.md)。`false` = 没有轮可停。 */
+  /** [停止](../../../docs/terms.md)进行中的那一轮 + 清空[待发队列](../../../docs/terms.md)。`false` = 没有轮可停。 */
   abort(conversationId: string, reason?: string): Promise<boolean>;
   /** 这个会话此刻在不在跑、谁在跑（多节点时接入层据 `holder` 转发）。 */
   getActivity(conversationId: string): Promise<ConversationActivity>;
   listQueue(conversationId: string): Promise<QueuedInput[]>;
   removeQueued(conversationId: string, id: string): Promise<{ removed: boolean; queue: QueuedInput[] }>;
   clearQueue(conversationId: string): Promise<QueuedInput[]>;
-  /** 读[账本](../../docs/terms.md)（回放历史用；`subscribe` 已经包含回放，这个给「只要历史」的端点）。 */
+  /** 读[账本](../../../docs/terms.md)（回放历史用；`subscribe` 已经包含回放，这个给「只要历史」的端点）。 */
   readLedger(conversationId: string, opts?: { afterSeq?: number }): Promise<{ seq: number; message: RunkoUIMessage }[]>;
-  /** 启动扫描：给[孤儿轮](../../docs/terms.md)补「已停止」收尾。只在进程启动、开始服务之前跑一次。 */
+  /** 启动扫描：给[孤儿轮](../../../docs/terms.md)补「已停止」收尾。只在进程启动、开始服务之前跑一次。 */
   recover(): Promise<RecoveryResult>;
-  /** [交权](../../docs/terms.md)：停掉在跑的轮并等它们收尾。**不退进程**——那是宿主的事。 */
+  /** [交权](../../../docs/terms.md)：停掉在跑的轮并等它们收尾。**不退进程**——那是宿主的事。 */
   shutdown(opts?: { graceMs?: number }): Promise<ShutdownResult>;
-  /** 进程是否正在[优雅关闭](../../docs/terms.md)（接入层据此转 503）。 */
+  /** 进程是否正在[优雅关闭](../../../docs/terms.md)（接入层据此转 503）。 */
   isShuttingDown(): boolean;
 }
 
@@ -240,7 +240,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
         maxSeq = Math.max(maxSeq, entry.seq);
       }
 
-      // ③ **同步临界区**：取[进行中草稿](../../docs/terms.md)快照，并把回放期间攒下的
+      // ③ **同步临界区**：取[进行中草稿](../../../docs/terms.md)快照，并把回放期间攒下的
       //    缓冲丢掉——那些帧要么已经在快照里（重复发无害，重放是幂等的），要么是纯增量
       //    （`text-delta` 之类，脱离顺序重放反而会写坏）。中间**不能有 `await`**：Node
       //    单线程，同步段内没有别的东西能插进来，所以这样写就是零空隙。
@@ -270,15 +270,15 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
         yield frame;
       }
 
-      // ④ 两帧权威快照：队列、以及[轮状态](../../docs/terms.md)。**每条连接必发**——任何
+      // ④ 两帧权威快照：队列、以及[轮状态](../../../docs/terms.md)。**每条连接必发**——任何
       //    时候连上/重连拿到的都是当下的真实状态，而不是靠客户端猜。
       yield { kind: "queue", queue: await persistence.queue.list(conversationId) };
 
       // **轮状态必须是权威答案，不能只看本进程的登记表。** 多副本下这份对话可能正跑在别的
-      // 副本上，那时本地登记表是空的——报「没有轮在跑」是错的，[接入层](../../docs/terms.md)
+      // 副本上，那时本地登记表是空的——报「没有轮在跑」是错的，[接入层](../../../docs/terms.md)
       // 据此既不知道该转发、也没法告诉用户这一轮在别处。取法与 `getActivity()` 同一套：
       // 本地登记表命中就用它，**单进程下 `inspect()` 一次都不会被调到**；没命中才去问
-      // [归属仲裁](../../docs/terms.md)（租约版下是一次 SELECT）。
+      // [归属仲裁](../../../docs/terms.md)（租约版下是一次 SELECT）。
       //
       // 判据刻意仍用**第 ③ 步捕获的那个 `turn`**，不重新查登记表：这里到第 ⑤ 步之间要是
       // 换了判据，「这一轮刚好在 ③④ 之间收尾」那条窄路上会把已经躺在缓冲里的收尾
@@ -350,7 +350,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       // 一次丢消息（队列本来要等下一次轮收尾才发）。
       if (turn === undefined) {return false;}
 
-      // 清队列必须在 abort **之前**：这一轮收尾时会自动[出队](../../docs/terms.md)起下一轮，
+      // 清队列必须在 abort **之前**：这一轮收尾时会自动[出队](../../../docs/terms.md)起下一轮，
       // 先 abort 再清存在真实竞态——abort 解开挂起的审批后这一轮可能立刻收尾，队首那条
       // 就被发出去了，而用户刚按的是「停止」。先清后 abort 则结构上不可能。
       const queue = await persistence.queue.clear(conversationId);
@@ -401,7 +401,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     },
 
     /**
-     * [崩溃恢复](../../docs/terms.md)：库里还留着[起轮标记](../../docs/terms.md)= 那一轮
+     * [崩溃恢复](../../../docs/terms.md)：库里还留着[起轮标记](../../../docs/terms.md)= 那一轮
      * 没人管了（进程被强杀、OOM、断电），补一条「已停止」。
      *
      * **判据是直接的**——不再依赖「chunk 行会被 GC 掉」这个副作用，GC 漏跑不会再把活着
@@ -452,15 +452,15 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     },
 
     /**
-     * [交权](../../docs/terms.md)。四步的顺序都是硬要求：
+     * [交权](../../../docs/terms.md)。四步的顺序都是硬要求：
      *
-     * 1. **先置关闭闸门**，否则收尾期间[自动出队](../../docs/terms.md)会源源不断起新轮，
+     * 1. **先置关闭闸门**，否则收尾期间[自动出队](../../../docs/terms.md)会源源不断起新轮，
      *    这个函数永远等不完。
      * 2. 快照当前全部活跃轮 + 各自的「收尾了」promise。
      * 3. 逐个中止，理由是 `ABORT_REASON_SHUTDOWN`——经 core 透传进收尾 metadata，界面据此
      *    显示「服务重启，这一轮已中断」而不是「已停止」。**不清队列**：服务重启不该吞掉
      *    用户排的消息，重启后自然重试。
-     * 4. 等齐或撞宽限期。撞了不抛错也不强制清理登记：那些轮成了[孤儿轮](../../docs/terms.md)，
+     * 4. 等齐或撞宽限期。撞了不抛错也不强制清理登记：那些轮成了[孤儿轮](../../../docs/terms.md)，
      *    交给下次启动的 `recover()`——两道防线在这里接上。
      */
     async shutdown(opts) {

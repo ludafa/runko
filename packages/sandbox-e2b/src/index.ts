@@ -1,5 +1,5 @@
 /**
- * @runko/sandbox-e2b 公共入口（docs/tech/sandbox.md §8.2）：`e2bWorkspace(sandbox, opts?)`
+ * @runko/sandbox-e2b 公共入口（docs/host/contract/tech/sandbox.md §8.2）：`e2bWorkspace(sandbox, opts?)`
  * 把一个 BYO 的 e2b 沙盒包成 `RunkoFS & RunkoExec`；`E2bSandboxLike` 是它接受
  * 的结构化最小接口（`e2b` 只作类型对照依赖，见 `types.ts` 头注释与
  * `test/type-conformance.ts`），不在此包运行时 import "e2b"。

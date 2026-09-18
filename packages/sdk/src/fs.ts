@@ -1,5 +1,5 @@
 /**
- * `RunkoFS` 值命名空间（docs/tech/core-sdk.md §4.4 原文字面调用形态：`RunkoFS.fromMemory(...)`/
+ * `RunkoFS` 值命名空间（docs/logic/engine/tech/core-sdk.md §4.4 原文字面调用形态：`RunkoFS.fromMemory(...)`/
  * `RunkoFS.fromDirectory(...)`）。P2-1 施工时把工厂拆成 `@runko/virtual-fs` 的
  * 独立函数 `fromMemory`/`fromDirectory`——因为 `RunkoFS` 本身已经是 `@runko/core`
  * 导出的**接口类型**名，interface（跨包）与值命名空间没法通过声明合并凑到一起

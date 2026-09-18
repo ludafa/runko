@@ -30,7 +30,7 @@ export type PostApiChatConversationsIdMessages401 = ApiError;
 export type PostApiChatConversationsIdMessages404 = ApiError;
 
 /**
- * @description Either the 待发队列 is full (docs/features/steer-and-queue.md §2.3 — nothing is ever silently dropped), or a turn was already in progress and could not be steered either (narrow race — the turn ended between the steer attempt and the fallback start)
+ * @description Either the 待发队列 is full (docs/logic/orchestration/features/steer-and-queue.md §2.3 — nothing is ever silently dropped), or a turn was already in progress and could not be steered either (narrow race — the turn ended between the steer attempt and the fallback start)
  */
 export type PostApiChatConversationsIdMessages409 = ApiError;
 
@@ -40,7 +40,7 @@ export type PostApiChatConversationsIdMessages409 = ApiError;
 export type PostApiChatConversationsIdMessages500 = ApiError;
 
 /**
- * @description The server is shutting down (docs/tech/graceful-shutdown.md §3.3) — no new turn is accepted during shutdown. Retryable: resend once the new process is up
+ * @description The server is shutting down (docs/logic/orchestration/tech/graceful-shutdown.md §3.3) — no new turn is accepted during shutdown. Retryable: resend once the new process is up
  */
 export type PostApiChatConversationsIdMessages503 = ApiError;
 

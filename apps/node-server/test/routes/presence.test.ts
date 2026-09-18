@@ -1,5 +1,5 @@
 /**
- * [在场](../../../../docs/terms.md)心跳接口（docs/tech/push-notification.md §5.2）
+ * [在场](../../../../docs/terms.md)心跳接口（docs/ingress/tech/push-notification.md §5.2）
  * ——`POST .../presence`。
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';

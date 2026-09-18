@@ -1,8 +1,8 @@
 /**
- * [composer](../../../../../docs/terms.md) 的输入区（docs/tech/composer-skill-mention.md §5.3/§6）。
+ * [composer](../../../../../../docs/terms.md) 的输入区（docs/ingress/tech/composer-skill-mention.md §5.3/§6）。
  *
  * 从 `<textarea>` 换成 tiptap，**只为一件事**：拿到「原子节点」这个能力——一枚删得
- * 干净、选得整体、不会被拆成半截字符的[skill 提及](../../../../../docs/terms.md)标记
+ * 干净、选得整体、不会被拆成半截字符的[skill 提及](../../../../../../docs/terms.md)标记
  * 块。textarea 里 `/frontend-design` 就是 17 个可以任意删改的字符，做不出这个。
  *
  * **不开放任何富文本格式**（tech §2.4）：只装 Document + Paragraph + Text +
@@ -47,14 +47,14 @@ import type {
 } from './skill-suggestion-list';
 import { SkillSuggestionList } from './skill-suggestion-list';
 
-/** 唤出 [skill 清单](../../../../../docs/terms.md)的触发键。`@` 留给将来的文件引用，本次不实现。 */
+/** 唤出 [skill 清单](../../../../../../docs/terms.md)的触发键。`@` 留给将来的文件引用，本次不实现。 */
 const TRIGGER_CHAR = '/';
 
 export interface ComposerEditorProps {
   /** 受控的**纯文本**形态——标记块在这里就是 `/<name>` 字面量。 */
   value: string;
   onChange: (text: string) => void;
-  /** Enter = [排队](../../../../../docs/terms.md)，⌥⏎ = [中途插话](../../../../../docs/terms.md)。 */
+  /** Enter = [排队](../../../../../../docs/terms.md)，⌥⏎ = [中途插话](../../../../../../docs/terms.md)。 */
   onSubmit: (intent: SendIntent) => void;
   skills: readonly SkillSummary[];
   placeholder: string;

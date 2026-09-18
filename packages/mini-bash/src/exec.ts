@@ -1,5 +1,5 @@
 /**
- * `miniBash(fs)`：RunkoExec 的纯 TS 解释器实现（docs/tech/core-sdk.md §4.5a）。不 fork
+ * `miniBash(fs)`：RunkoExec 的纯 TS 解释器实现（docs/logic/engine/tech/core-sdk.md §4.5a）。不 fork
  * 子进程，全部命令跑在注入的 RunkoFS 七方法上，只读。模式 A（同源工作区）
  * 的典型消费方式是 `createSession({ fs, exec: miniBash(fs) })`——同一个
  * fs 实例既是文件工具的后端，也是 bash 命令的执行环境，天然一致。
@@ -228,7 +228,7 @@ export function miniBash(fs: RunkoFS): RunkoExec {
   let instanceCwd = "/";
 
   return {
-    // docs/tech/single-ledger.md §6.1（@runko/core 审批三值重构，
+    // docs/logic/orchestration/tech/single-ledger.md §6.1（@runko/core 审批三值重构，
     // P13-5-2c）：旧 "never" → "allow"（沙盒/只读实现，隔离即边界）。
     defaultApproval: "allow",
     describe(): string {

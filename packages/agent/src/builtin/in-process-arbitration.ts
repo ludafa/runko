@@ -1,15 +1,15 @@
 /**
- * 内置的**平凡[归属仲裁机制](../../../docs/terms.md)**：进程内一个 Map。
+ * 内置的**平凡[归属仲裁机制](../../../../docs/terms.md)**：进程内一个 Map。
  *
- * 「[独占](../../../docs/terms.md)」在单进程下同样成立，只是内存里一个 Map 就满足了，
+ * 「[独占](../../../../docs/terms.md)」在单进程下同样成立，只是内存里一个 Map 就满足了，
  * 看不出来——这一步把**要求**（永远成立）和**实现**（部署形态的函数）分开了。
  *
- * 三样东西这一档全都没有：没有[租期标识](../../../docs/terms.md)、不用 CAS、`holder`
+ * 三样东西这一档全都没有：没有[租期标识](../../../../docs/terms.md)、不用 CAS、`holder`
  * 与心跳不落库。`signal` 因此永不 abort，`nextSeq` 永远 `ok`——但轮编排照样要写那两支，
  * 否则换成租约版就是静默数据损坏。
  *
  * `listStale()` 恒空**不是偷懒**：标记跟进程同生共死，进程一没标记也没了，所以它
- * 结构上就看不到自己上次崩溃的残留。要做[崩溃恢复](../../../docs/terms.md)就得有一个
+ * 结构上就看不到自己上次崩溃的残留。要做[崩溃恢复](../../../../docs/terms.md)就得有一个
  * 跨进程的落地实现（宿主提供，见 `apps/node-server` 的 drizzle 版）。
  */
 import type {
@@ -32,7 +32,7 @@ interface Entry {
 
 export interface InProcessArbitrationOptions {
   /**
-   * 这个进程的不透明标识——框架原样透传给 `getActivity`，[接入层](../../../docs/terms.md)
+   * 这个进程的不透明标识——框架原样透传给 `getActivity`，[接入层](../../../../docs/terms.md)
    * 拿它做转发。单进程用不上，给个默认值即可。
    */
   holder?: string;

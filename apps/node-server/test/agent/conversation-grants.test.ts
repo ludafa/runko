@@ -128,7 +128,7 @@ describe('conversation-grants', () => {
   });
 
   // -------------------------------------------------------------------------
-  // 分段授权（docs/tech/approval-grant-split.md）：bash 按命令段记账。
+  // 分段授权（docs/logic/engine/tech/approval-grant-split.md）：bash 按命令段记账。
   // -------------------------------------------------------------------------
 
   describe('分段授权（bash 按命令段记）', () => {

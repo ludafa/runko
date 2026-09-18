@@ -41,7 +41,7 @@ export interface CreateConversationInput {
   repo: string;
   branchName: string;
   sandboxName: string;
-  /** 沙盒 provider（docs/tech/sandbox-provider.md）。省略时默认 `'vercel'`，与列默认一致——路由侧始终显式传，省略仅便于测试夹具。 */
+  /** 沙盒 provider（docs/host/contract/tech/sandbox-provider.md）。省略时默认 `'vercel'`，与列默认一致——路由侧始终显式传，省略仅便于测试夹具。 */
   provider?: ConversationRow['provider'];
   /** E2B 的[重连令牌](docs/terms.md) sandboxId（建盒后由路由回填）；Vercel/建会话初始为 null。 */
   sandboxId?: string | null;
@@ -115,10 +115,10 @@ export function getConversationById(
 export interface ConversationPatch {
   status?: ConversationStatus;
   lastActiveAt?: Date;
-  /** E2B 的[重连令牌](docs/terms.md) sandboxId——首建落库、或过期重建后换了新 sandbox 时由路由回写（docs/tech/sandbox-provider.md §3.1）。 */
+  /** E2B 的[重连令牌](docs/terms.md) sandboxId——首建落库、或过期重建后换了新 sandbox 时由路由回写（docs/host/contract/tech/sandbox-provider.md §3.1）。 */
   sandboxId?: string;
   /**
-   * The runko session-scalar header (docs/tech/single-ledger.md §5 单-3, schema.ts's own doc
+   * The runko session-scalar header (docs/logic/orchestration/tech/single-ledger.md §5 单-3, schema.ts's own doc
    * comment) — all three always written together, at the end of every turn
    * that finishes gracefully (`@runko/agent`'s `finalize`).
    * There is no partial-update case, so this is one combined optional group
@@ -152,7 +152,7 @@ export function updateConversation(
     .run();
 }
 
-/** 同 `queuedMessagesSchema`：JSON 列的反序列化边界（docs/tech/composer-skill-mention.md §3）。 */
+/** 同 `queuedMessagesSchema`：JSON 列的反序列化边界（docs/ingress/tech/composer-skill-mention.md §3）。 */
 const availableSkillsSchema = z.array(SkillSummarySchema);
 
 /**
@@ -195,7 +195,7 @@ export function parseAvailableSkills(
 
 /**
  * 刷新 [skill 清单](../../../../docs/terms.md)缓存，**内容没变就不写**
- * （docs/tech/composer-skill-mention.md §2.1）。返回落库的 JSON，调用方可直接拿去
+ * （docs/ingress/tech/composer-skill-mention.md §2.1）。返回落库的 JSON，调用方可直接拿去
  * 拼 DTO，不必再查一次库。
  *
  * 调用点两处：会话创建时沙盒首次就绪（`routes/chat.ts`）、以及每轮

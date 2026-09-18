@@ -1,6 +1,6 @@
 /**
  * P7-1 acceptance: `RunkoFS.fromMemory`/`RunkoFS.fromDirectory` value-namespace calls
- * (docs/features/core-sdk.md §4.1: `RunkoFS.fromDirectory("./project")`).
+ * (docs/logic/engine/features/core-sdk.md §4.1: `RunkoFS.fromDirectory("./project")`).
  */
 import * as nodeFs from "node:fs/promises";
 import * as nodePath from "node:path";

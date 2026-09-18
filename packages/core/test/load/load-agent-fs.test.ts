@@ -1,5 +1,5 @@
 /**
- * `loadAgentFromFS` (P7-3 task 3, docs/tech/core-sdk.md §4.7) — the virtual-FS counterpart
+ * `loadAgentFromFS` (P7-3 task 3, docs/logic/engine/tech/core-sdk.md §4.7) — the virtual-FS counterpart
  * of `loadAgent`, deliberately narrower: only `instructions.md` and `skills/`
  * are read; `agent.ts`/`agent.json`/`tools/*` are never touched (§4.7 "不引入
  * 任意代码执行面"). `@runko/virtual-fs` is a devDependency (not a runtime

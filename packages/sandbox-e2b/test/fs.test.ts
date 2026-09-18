@@ -1,7 +1,7 @@
 /**
  * RunkoFS 七方法契约（工单验收点：逐条覆盖 + NotFoundError/DirectoryNotEmptyError
  * + glob 匹配与排序 + mtime 抬升 + 路径锚定与 `..`），对照 `@runko/virtual-fs`
- * 的 `MemoryFS` 语义（docs/tech/sandbox.md §8.2）。
+ * 的 `MemoryFS` 语义（docs/host/contract/tech/sandbox.md §8.2）。
  */
 import { DirectoryNotEmptyError, NotFoundError, PathEscapesRootError } from "@runko/virtual-fs";
 import { describe, expect, it } from "vitest";

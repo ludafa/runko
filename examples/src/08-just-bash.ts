@@ -1,6 +1,6 @@
 /**
  * 08-just-bash — the "full-syntax bash" upgrade path from
- * docs/tech/core-sdk.md §4.5b: `@runko/mini-bash`'s six read-only commands
+ * docs/logic/engine/tech/core-sdk.md §4.5b: `@runko/mini-bash`'s six read-only commands
  * can't carry a Claude-style model's high-frequency `if`/`for`/`while`/
  * `case` scripts, so runko ships a second, *optional* `RunkoExec`
  * implementation — `@runko/just-bash`, an adapter over

@@ -1,6 +1,6 @@
 /**
- * 打 `/` 后弹出的 [skill 清单](../../../../../docs/terms.md)菜单
- * （docs/tech/composer-skill-mention.md §6.1/§6.2）。
+ * 打 `/` 后弹出的 [skill 清单](../../../../../../docs/terms.md)菜单
+ * （docs/ingress/tech/composer-skill-mention.md §6.1/§6.2）。
  *
  * 由 tiptap 的 suggestion 工具经 `ReactRenderer` 挂载，**键盘事件不走 React 的
  * onKeyDown**：suggestion 插件在 ProseMirror 层先拿到按键，再转调这里
@@ -8,7 +8,7 @@
  * （↑↓ 不移动光标、Enter 不发消息）；返回 `false` = 菜单不管，交还给编辑器。
  *
  * 这个「菜单开着时 Enter 归菜单」的优先级是本功能回归风险最高的一处——
- * [composer](../../../../../docs/terms.md) 的 Enter 平时是[排队](../../../../../docs/terms.md)
+ * [composer](../../../../../../docs/terms.md) 的 Enter 平时是[排队](../../../../../../docs/terms.md)
  * 发送，绝不能因为菜单开着就把消息发出去。
  */
 import type { SuggestionKeyDownProps } from '@tiptap/suggestion';

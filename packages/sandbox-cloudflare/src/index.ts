@@ -1,6 +1,6 @@
 /**
  * `.`：Cloudflare Sandbox 网关的纯 fetch 客户端（任意 Node ≥20 进程）——`cloudflareWorkspace(opts)`
- * 返回 `RunkoFS & RunkoExec`，供 `createSession({ workspace })` 一次注入（docs/tech/core-sdk.md §4.5a 模式 A）。
+ * 返回 `RunkoFS & RunkoExec`，供 `createSession({ workspace })` 一次注入（docs/logic/engine/tech/core-sdk.md §4.5a 模式 A）。
  * 本文件与 `./worker`（`src/worker.ts`）通过 `src/protocol.ts` 的 zod schema 共用同一份 wire 契约；
  * 不 import `@cloudflare/sandbox`——这一侧只说 HTTP，不知道也不需要知道对面跑的是不是真沙盒。
  */
@@ -352,7 +352,7 @@ export function cloudflareWorkspace(opts: CloudflareWorkspaceOptions): RunkoFS &
   };
 
   return {
-    // docs/tech/single-ledger.md §6.1（@runko/core 审批三值重构，P13-5-2c）：旧 "never" → "allow"（沙盒实现，隔离即边界）。
+    // docs/logic/orchestration/tech/single-ledger.md §6.1（@runko/core 审批三值重构，P13-5-2c）：旧 "never" → "allow"（沙盒实现，隔离即边界）。
     defaultApproval: "allow",
     describe(): string {
       return DESCRIBE;

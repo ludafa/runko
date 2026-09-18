@@ -16,8 +16,8 @@ import type { PendingUserEcho } from '../timeline';
 const T0 = Date.UTC(2026, 6, 25, 6, 14, 3);
 
 /**
- * [skill 清单](../../../../../docs/terms.md)的假数据（docs/features/composer-skill-mention.md）——
- * 让 [composer](../../../../../docs/terms.md) 的 `/` 菜单在设计工作台里也能开出来，
+ * [skill 清单](../../../../../../docs/terms.md)的假数据（docs/ingress/features/composer-skill-mention.md）——
+ * 让 [composer](../../../../../../docs/terms.md) 的 `/` 菜单在设计工作台里也能开出来，
  * 不必连服务端、不必等真沙盒。名字与描述照抄真实 skill 的口吻，好看出菜单在长
  * 描述下的换行表现。
  */
@@ -382,7 +382,7 @@ export const previewFailedMessages: RunkoUIMessage[] = [
 ];
 
 /**
- * 第三组：一轮被[停止](../../../../../docs/terms.md)收尾（docs/features/turn-abort.md）
+ * 第三组：一轮被[停止](../../../../../../docs/terms.md)收尾（docs/logic/orchestration/features/turn-abort.md）
  * ——中性的「已停止」标记，摆在失败那组旁边正是为了比对：同样是「没跑完」，但一个是
  * 故障（红），一个是用户自己按的（中性）。
  */
@@ -414,7 +414,7 @@ export const previewStoppedMessages: RunkoUIMessage[] = [
 
 /**
  * 第三组之二：同样是 `code: 'aborted'`，但**不是用户按的**——服务端
- * [优雅关闭](../../../../../docs/terms.md)时中止的（docs/features/graceful-shutdown.md）。
+ * [优雅关闭](../../../../../../docs/terms.md)时中止的（docs/logic/orchestration/features/graceful-shutdown.md）。
  * 与上面那组并排，是为了盯住唯一的差别：标题与正文如实说「服务重启」，而不是让用户
  * 以为自己按过停止。`message` 必须与 `turn-marker.tsx` 的 `SHUTDOWN_ABORT_MESSAGE`
  * 逐字一致，否则这一档就退回成「已停止」——这组样例同时也是那个文案契约的哨兵。

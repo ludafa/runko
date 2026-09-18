@@ -1,5 +1,5 @@
 /**
- * 07-streaming — consuming `session.stream()` live (docs/tech/single-ledger.md
+ * 07-streaming — consuming `session.stream()` live (docs/logic/orchestration/tech/single-ledger.md
  * §5 单账本): `session.stream(input)` returns an
  * `AsyncGenerator<RunkoChunk, TurnResult>` — every `yield` is a `RunkoChunk`
  * (ai 的 `UIMessageChunk` 词汇表，对 `RunkoUIMessage` 实例化) the host can

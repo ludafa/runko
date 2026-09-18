@@ -4,7 +4,7 @@ import type { RunkoChunk, RunkoDataParts, RunkoMessageMetadata } from "../src/st
 import type { RunkoError, Usage } from "../src/events.js";
 
 /**
- * 编译期穷尽性断言（docs/tech/single-ledger.md §5 单-2 工单原文
+ * 编译期穷尽性断言（docs/logic/orchestration/tech/single-ledger.md §5 单-2 工单原文
  * "改写为对 RunkoChunk/RunkoDataParts/RunkoMessageMetadata 的等价穷尽性检查，
  * 保持漏成员编译即炸的防线精神"）：只要下面任一 switch 漏了一个变体，
  * default 分支里的实参类型就不再是 never，`pnpm typecheck` 直接编译失败。
@@ -86,7 +86,7 @@ function describeChunk(chunk: RunkoChunk): string {
 }
 
 describe("RunkoChunk", () => {
-  it("covers all 31 UIMessageChunk variants exhaustively (docs/tech/single-ledger.md §5-2)", () => {
+  it("covers all 31 UIMessageChunk variants exhaustively (docs/logic/orchestration/tech/single-ledger.md §5-2)", () => {
     const chunks: RunkoChunk[] = [
       { type: "text-start", id: "t1" },
       { type: "text-delta", id: "t1", delta: "hi" },
@@ -165,7 +165,7 @@ describe("RunkoChunk", () => {
 });
 
 /**
- * 穷尽 `RunkoDataParts` 的全部五个 data 部件名（docs/tech/single-ledger.md
+ * 穷尽 `RunkoDataParts` 的全部五个 data 部件名（docs/logic/orchestration/tech/single-ledger.md
  * §2.2b：`tool-progress` 是 transient；`tool-timing` 是 chat 可观测性新增的
  * **持久**部件，与 `tool-progress` 相反——见 state.ts 头注释）。
  */

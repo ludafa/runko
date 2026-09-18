@@ -22,7 +22,7 @@ export function buildInstructions(opts: {
   repoName: string;
   defaultBranch: string;
   branchName: string;
-  /** `web-search` 是否注册进了工具表——没注册就不提它，免得指令让模型去找一个不存在的工具（docs/tech/web-search.md §5）。 */
+  /** `web-search` 是否注册进了工具表——没注册就不提它，免得指令让模型去找一个不存在的工具（docs/logic/engine/tech/web-search.md §5）。 */
   hasWebSearch: boolean;
 }): string {
   const { repoOwner, repoName, defaultBranch, branchName } = opts;
@@ -43,8 +43,8 @@ export function buildInstructions(opts: {
 }
 
 /**
- * Forces `workspace`'s `bash` tool to always require approval (docs/tech/chat-webapp.md §2.2c
- * （审批链）, docs/tech/single-ledger.md §6.4): `createBashTool` (packages/core/src/tools/builtin/bash.ts)
+ * Forces `workspace`'s `bash` tool to always require approval (docs/ingress/tech/chat-webapp.md §2.2c
+ * （审批链）, docs/logic/orchestration/tech/single-ledger.md §6.4): `createBashTool` (packages/core/src/tools/builtin/bash.ts)
  * picks its per-tool `ApprovalPolicy` from `exec.defaultApproval`, and the
  * Vercel sandbox's own `RunkoExec` implementation declares `"allow"` there
  * (it has no notion of a human in the loop) — left as-is, every bash command
@@ -62,7 +62,7 @@ export function buildInstructions(opts: {
  * with `undefined` where every `RunkoFS`/`RunkoExec` method should be.
  *
  * 显式逐方法转发的对价：`RunkoFS` 的**可选能力方法**（`searchFiles`/
- * `searchContent`，原生搜索快路径——docs/tech/builtin-tools.md §3.7/§3.8）也必须
+ * `searchContent`，原生搜索快路径——docs/logic/engine/tech/builtin-tools.md §3.7/§3.8）也必须
  * 在这里显式跟上，否则会被这层包装静默剥掉、grep/glob 永远走 JS 逐文件回退
  * （在远端沙盒上是每文件一次网络往返的慢路径）——这正是 2026-07-16 线上
  * "grep 依旧十几秒"的事故根因。往 `RunkoFS` 再加可选方法时，这里要同步。

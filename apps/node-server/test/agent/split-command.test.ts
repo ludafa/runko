@@ -1,5 +1,5 @@
 /**
- * 命令拆分器（src/agent/split-command.ts，docs/tech/approval-grant-split.md §3）。
+ * 命令拆分器（src/agent/split-command.ts，docs/logic/engine/tech/approval-grant-split.md §3）。
  *
  * 两组用例对应拆分器的两个方向：
  *

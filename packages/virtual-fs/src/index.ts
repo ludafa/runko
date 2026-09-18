@@ -1,5 +1,5 @@
 /**
- * @runko/virtual-fs 公共入口（docs/tech/core-sdk.md §4.4）：MemoryFS/OverlayFS/DirFS 三个
+ * @runko/virtual-fs 公共入口（docs/logic/engine/tech/core-sdk.md §4.4）：MemoryFS/OverlayFS/DirFS 三个
  * RunkoFS 实现，mime 推断，diff/patch，reference 条目相关类型与错误。
  *
  * 工厂函数是独立导出的 fromMemory/fromDirectory，不是 `RunkoFS.fromMemory` 这种
