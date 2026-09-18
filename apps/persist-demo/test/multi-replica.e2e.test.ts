@@ -19,6 +19,8 @@ import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { mongoUrlWithDb } from "./helpers/mongo-url.js";
+
 const ENTRY = fileURLToPath(new URL("../src/index.ts", import.meta.url));
 const HEARTBEAT_MS = 200;
 const TAKEOVER_MS = 900;
@@ -45,15 +47,19 @@ async function waitFor(check: () => Promise<boolean>, timeoutMs = 15_000): Promi
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function start(name: string, port: number, dbPath: string): Promise<Replica> {
+/** 选库的那几个环境变量。SQLite 给文件路径，Mongo 给连接串。 */
+type DbEnv = Record<string, string>;
+
+const sqliteEnv = (dbPath: string): DbEnv => ({ DEMO_DB: "sqlite", DEMO_DB_PATH: dbPath });
+
+async function start(name: string, port: number, dbEnv: DbEnv): Promise<Replica> {
   const url = `http://127.0.0.1:${String(port)}`;
   // 跟 `pnpm start` 同一条命令：`src/index.ts` 是 TypeScript，得带上 tsx。
   const child = spawn(process.execPath, ["--import", "tsx", ENTRY], {
     env: {
       ...process.env,
       PORT: String(port),
-      DEMO_DB: "sqlite",
-      DEMO_DB_PATH: dbPath,
+      ...dbEnv,
       RUNKO_NODE_URL: url,
       RUNKO_HEARTBEAT_MS: String(HEARTBEAT_MS),
       RUNKO_TAKEOVER_MS: String(TAKEOVER_MS),
@@ -111,8 +117,8 @@ let b: Replica;
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "runko-multi-"));
   const dbPath = join(dir, "demo.db");
-  a = await start("A", 3921, dbPath);
-  b = await start("B", 3922, dbPath);
+  a = await start("A", 3921, sqliteEnv(dbPath));
+  b = await start("B", 3922, sqliteEnv(dbPath));
 }, 60_000);
 
 afterAll(() => {
@@ -190,7 +196,7 @@ describe("多副本：两个真进程共用一个库", () => {
   it("场景 ④：被误判的老持有者活过来之后，写不进账本（这条是核心）", async () => {
     // A 已经在场景 ③ 里死了，这一条用 B 当老持有者、重新起一个 C 当接管方。
     const dbPath = join(dir, "demo.db");
-    const c = await start("C", 3923, dbPath);
+    const c = await start("C", 3923, sqliteEnv(dbPath));
 
     const id = await createConversation(b);
     await send(b, id, "冻住我");
@@ -216,4 +222,78 @@ describe("多副本：两个真进程共用一个库", () => {
     expect(rows.map((r) => r.seq)).toEqual([...rows.map((r) => r.seq)].sort((x, y) => x - y));
     expect(rows.length).toBe(afterTakeover.length);
   }, 90_000);
+});
+
+// ---------------------------------------------------------------------------
+// Mongo 那一档：换一个**不是 Kysely 写的**仲裁实现，跑同样两条
+// ---------------------------------------------------------------------------
+
+/**
+ * 上面四条走的是 `@runko/persist-kysely` 的 `leaseArbitration`（SQLite 方言）。
+ * Mongo 版是**另写的一份实现**（`@runko/persist-mongo` 的 `mongoArbitration`，不走 Kysely），
+ * 所以它跨进程能不能用，上面那四条一条也证明不了。
+ *
+ * 这里只挑两条最能说明问题的跑：**转发**（归属只落在一个副本上）与**接管**（持有者
+ * `kill -9` 之后另一个副本抢得到）。其余语义由 `@runko/persist-mongo` 的四组一致性用例覆盖。
+ *
+ * 只能对真库跑（Mongo 没有进程内替身），门禁 `RUNKO_TEST_MONGO_URL`。
+ */
+const MONGO_URL = process.env["RUNKO_TEST_MONGO_URL"];
+
+describe.skipIf(MONGO_URL === undefined)("多副本 · Mongo 档：两个真进程共用一个 MongoDB", () => {
+  // 每次跑一个新 database，跑完删掉——免得上一次的租约文档影响这一次。
+  const dbName = `persist_demo_mr_${crypto.randomUUID().slice(0, 8)}`;
+  let m1: Replica;
+  let m2: Replica;
+
+  beforeAll(async () => {
+    const dbEnv = { DEMO_DB: "mongo", DATABASE_URL: mongoUrlWithDb(String(MONGO_URL), dbName) };
+    m1 = await start("M1", 3924, dbEnv);
+    m2 = await start("M2", 3925, dbEnv);
+  }, 60_000);
+
+  afterAll(async () => {
+    // 两个进程由文件级的 afterAll 统一杀（它们已经进了 `replicas`），这里只清库。
+    const { MongoClient } = await import("mongodb");
+    const client = new MongoClient(String(MONGO_URL));
+    await client.connect();
+    await client.db(dbName).dropDatabase();
+    await client.close();
+  });
+
+  it("归属只落在一个副本上，打到另一个副本的请求被转过去", async () => {
+    const id = await createConversation(m1);
+    expect(await json(await send(m1, id, "第一条"))).toMatchObject({ mode: "started" });
+    await waitFor(async () => (await activity(m1, id))["active"] === true);
+
+    // M2 看同一份对话：权威答案说有轮在跑、不在本地、持有者是 M1。
+    expect(await activity(m2, id)).toMatchObject({ active: true, local: false, holder: m1.url });
+
+    const second = await send(m2, id, "第二条");
+    expect(second.status).toBe(202);
+    expect(await json(second)).toMatchObject({ mode: "queued" });
+
+    await waitFor(async () => {
+      const rows = await ledger(m1, id);
+      return rows.filter((r) => r.message.role === "user").length === 2;
+    }, 30_000);
+    const rows = await ledger(m2, id);
+    expect(new Set(rows.map((r) => r.seq)).size).toBe(rows.length);
+  }, 60_000);
+
+  it("持有者被 kill -9，另一个副本在租约过期后接管得了", async () => {
+    const id = await createConversation(m1);
+    await send(m1, id, "跑一半就死");
+    await waitFor(async () => (await activity(m1, id))["active"] === true);
+
+    signal(m1, "SIGKILL");
+    await waitFor(async () => m1.child.killed || m1.child.exitCode !== null);
+
+    await sleep(TAKEOVER_MS + 300);
+    expect(await json(await send(m2, id, "我来接手"))).toMatchObject({ mode: "started" });
+
+    await waitFor(async () => (await activity(m2, id))["active"] === false, 30_000);
+    const rows = await ledger(m2, id);
+    expect(new Set(rows.map((r) => r.seq)).size).toBe(rows.length);
+  }, 60_000);
 });

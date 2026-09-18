@@ -35,7 +35,10 @@ export interface OpenedDriver {
   persistence: Persistence;
   /**
    * 把**同一个驱动实例**装成租约版归属仲裁——多副本要它。缺席 = 这一档还没有租约版
-   * 实现（Mongo 目前如此），调用方应当退回单副本。
+   * 实现，调用方应当退回单副本。
+   *
+   * **四档库现在都有**（Mongo 版见 `@runko/persist-mongo` 的 `mongoArbitration`）；
+   * 只有 `memory` 那一档没有——它本来就只活在一个进程里。
    */
   makeArbitration?: (settings: ArbitrationSettings) => Arbitration;
   /** 库名，用于日志与 e2e 断言。 */
@@ -124,7 +127,7 @@ export async function openDriver(opts: OpenDriverOptions = {}): Promise<OpenedDr
   }
 
   if (kind === "mongo") {
-    const [{ MongoClient }, { migrate, mongoPersistence }] = await Promise.all([
+    const [{ MongoClient }, { migrate, mongoArbitration, mongoPersistence }] = await Promise.all([
       import("mongodb"),
       import("@runko/persist-mongo"),
     ]);
@@ -137,6 +140,7 @@ export async function openDriver(opts: OpenDriverOptions = {}): Promise<OpenedDr
     await migrate(db);
     return {
       persistence: mongoPersistence(db),
+      makeArbitration: (settings) => mongoArbitration(db, settings),
       kind: "mongo",
       makeStore: () => createMongoStore(db),
       close: async () => {

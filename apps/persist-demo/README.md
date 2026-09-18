@@ -70,6 +70,8 @@ PORT=3922 DEMO_DB_PATH=/tmp/runko-demo.db RUNKO_NODE_URL=http://127.0.0.1:3922 \
 ```
 
 跨机就把 `DEMO_DB=postgres` + `DATABASE_URL` 换上，`RUNKO_NODE_URL` 填 pod 的可达地址。
+**四档库都行**（`sqlite` / `postgres` / `mysql` / `mongo`），换一个 `DEMO_DB` 而已；
+只有 `memory` 那一档不行——它本来就只活在一个进程里，这时开多副本会直接报错。
 
 | 变量 | 说明 |
 | --- | --- |
@@ -99,6 +101,14 @@ PORT=3922 DEMO_DB_PATH=/tmp/runko-demo.db RUNKO_NODE_URL=http://127.0.0.1:3922 \
 验收跑的是 `test/multi-replica.e2e.test.ts`：两个真进程、一个 SQLite 文件、四个场景，
 其中「被误判的老持有者活过来之后写不进账本」是核心那条。设计见
 [多副本部署](../../docs/host/node/tech/multi-replica.md)。
+
+同一个文件里还有 **Mongo 那一档**（转发 + 接管两条）：Mongo 版租约仲裁是**另写的一份实现**
+（不走 Kysely），上面四条一条也证明不了它。给了 `RUNKO_TEST_MONGO_URL` 才跑：
+
+```sh
+RUNKO_TEST_MONGO_URL=mongodb://127.0.0.1:27018 \
+  pnpm --filter @runko-demo/persist-demo test
+```
 
 ## 多副本验证环境（docker-compose）
 

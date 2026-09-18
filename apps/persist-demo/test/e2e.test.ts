@@ -18,6 +18,8 @@ import type { RunkoUIMessage } from "@runko/core";
 import type { LanguageModel } from "ai";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { mongoUrlWithDb } from "./helpers/mongo-url.js";
+
 import type { DemoApp } from "../src/app.js";
 import { createDemoApp } from "../src/app.js";
 import type { DriverKind } from "../src/driver.js";
@@ -44,7 +46,13 @@ const DIALECTS: { name: string; kind: DriverKind; url?: string }[] = [
     ? [{ name: "mysql (真库)", kind: "mysql" as const, url: process.env["RUNKO_TEST_MYSQL_URL"] }]
     : []),
   ...(process.env["RUNKO_TEST_MONGO_URL"] !== undefined
-    ? [{ name: "mongo (真库)", kind: "mongo" as const, url: `${process.env["RUNKO_TEST_MONGO_URL"]}/persist_demo_e2e` }]
+    ? [
+        {
+          name: "mongo (真库)",
+          kind: "mongo" as const,
+          url: mongoUrlWithDb(process.env["RUNKO_TEST_MONGO_URL"], "persist_demo_e2e"),
+        },
+      ]
     : []),
 ];
 
