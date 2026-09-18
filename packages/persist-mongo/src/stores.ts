@@ -40,20 +40,9 @@ import {
   QUEUE_COLLECTION,
   toBson,
 } from "./collections.js";
+import { isDuplicateKeyError } from "./errors.js";
 
 const OK: WriteResult = { ok: true };
-
-/** 重复键。并发 upsert 撞同一个唯一索引时驱动抛这个，见 `upsertOnce`。 */
-const DUPLICATE_KEY = 11000;
-
-function isDuplicateKeyError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: unknown }).code === DUPLICATE_KEY
-  );
-}
 
 /**
  * 幂等插入的**兜底那一半**：吞掉重复键，其余错误照抛。

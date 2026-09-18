@@ -1,14 +1,19 @@
 /**
- * 三个集合的文档形状，以及**唯一一处需要小心的类型边界**：BSON ↔ JSON。
+ * 四个集合的文档形状，以及**唯一一处需要小心的类型边界**：BSON ↔ JSON。
  *
- * 集合名固定：`agent_ledger` / `agent_decisions` / `agent_queue`。理由同 SQL 那几家
- * ——要隔离请用**另一个 database**（Mongo 里那是一等公民，比表名前缀干净得多）。
+ * 集合名固定：`agent_ledger` / `agent_decisions` / `agent_queue` / `agent_leases`。理由同
+ * SQL 那几家——要隔离请用**另一个 database**（Mongo 里那是一等公民，比表名前缀干净得多）。
+ *
+ * 前三个是[持久化](../../../docs/host/contract/features/persistence.md)的，第四个是
+ * [归属仲裁](../../../docs/terms.md)的——**两件事，装配时各传各的**，只是恰好住在同一个
+ * database 里。
  */
 import type { JsonValue } from "@runko/core";
 
 export const LEDGER_COLLECTION = "agent_ledger";
 export const DECISIONS_COLLECTION = "agent_decisions";
 export const QUEUE_COLLECTION = "agent_queue";
+export const LEASES_COLLECTION = "agent_leases";
 
 /**
  * [账本](../../../docs/terms.md)文档。
@@ -39,6 +44,32 @@ export interface DecisionDoc {
   message: string | null;
   requestedAt: number;
   decidedAt: number | null;
+}
+
+/**
+ * [租约](../../../docs/terms.md)文档——一个会话一条，**`_id` 就是会话 id**。
+ *
+ * 唯一性于是由 `_id` 白送（不用额外建唯一索引），而且每一次读写都是按 `_id` 的点查，
+ * 这正是 Mongo 最快的那条路。
+ *
+ * **字段名跟着本包走驼峰，不跟 SQL 表的下划线。** 它与 `agent_leases` 表一一对应
+ * （[技术方案 §4.2](../../../docs/host/node/tech/multi-replica.md)），但同一个 database 里
+ * 另外三个集合都是驼峰，为了「对齐一张永远不会跟它 join 的表」把这一个写成下划线，
+ * 只会让用 Compass 翻库的人多一次愣神。
+ */
+export interface LeaseDoc {
+  /** = `conversationId`。 */
+  _id: string;
+  /** 当前持有者（不透明字符串）。`null` = 没人持有。 */
+  holder: string | null;
+  /** 一次租期的唯一标识（[租期标识](../../../docs/terms.md)）。`null` = 没人持有。 */
+  leaseToken: string | null;
+  /** [账本](../../../docs/terms.md)水位，**跨释放保留**——下次抢占才不用回账本重新问。 */
+  seqWatermark: number;
+  /** 最后一次心跳写进来的时刻。别的副本判它死活看的就是这个值。 */
+  heartbeatAt: number;
+  /** 这次租期是什么时候抢到的。只用于排障，不参与任何判断。 */
+  acquiredAt: number;
 }
 
 /** [待发队列](../../../docs/terms.md)文档。`_id` 直接用队列条目自己的 id。 */

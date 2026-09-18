@@ -13,22 +13,11 @@ import type { Db, IndexSpecification, CreateIndexesOptions } from "mongodb";
 
 import {
   DECISIONS_COLLECTION,
+  LEASES_COLLECTION,
   LEDGER_COLLECTION,
   QUEUE_COLLECTION,
 } from "./collections.js";
-
-/** 同名索引已存在但选项不同时 Mongo 报的两个 code。 */
-const INDEX_CONFLICT_CODES = new Set([85, 86]);
-
-function isIndexConflict(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    typeof (error as { code?: unknown }).code === "number" &&
-    INDEX_CONFLICT_CODES.has((error as { code: number }).code)
-  );
-}
+import { isIndexConflict } from "./errors.js";
 
 /**
  * 建一个具名索引，**同名不同选项时删了重建**。
@@ -76,6 +65,20 @@ export async function migrate(db: Db): Promise<void> {
     ensureIndex(db, QUEUE_COLLECTION, { conversationId: 1, seq: 1 }, {
       unique: true,
       name: "agent_queue_conversation_seq",
+    }),
+    // 租约：**只为 `listStale` 建**（「有人持有 + 心跳已超时」）。租约的其余每一次读写
+    // 都是按 `_id` 点查，走的是 Mongo 白送的那个主键索引，不需要也不该再加。
+    //
+    // ⚠️ **键序是 `heartbeatAt` 在前，不能反过来。** `listStale` 的条件是
+    // `{ leaseToken: { $ne: null }, heartbeatAt: { $lt: 阈值 } }`：`$ne` 在前导列上给出的
+    // 索引区间是 `[MinKey, null) ∪ (null, MaxKey]`——那是**整条索引**，等于全扫。把范围条件
+    // `heartbeatAt` 放前面才有一段窄区间，`leaseToken` 退成索引内的过滤（不用回表）。
+    // 真库实测（5000 条租约、其中 4 条陈旧）：`heartbeatAt` 在前 `keysExamined: 6`，
+    // 反过来 `keysExamined: 4991`。
+    //
+    // 不加唯一约束：`_id` 已经保证了一个会话一条。
+    ensureIndex(db, LEASES_COLLECTION, { heartbeatAt: 1, leaseToken: 1 }, {
+      name: "agent_leases_heartbeat_token",
     }),
   ]);
 }

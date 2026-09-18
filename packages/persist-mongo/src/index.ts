@@ -11,7 +11,13 @@
  * const db = client.db("myapp");
  *
  * await migrate(db);                    // 建索引，幂等
- * createAgentRuntime({ agent, prepareTurn, persistence: mongoPersistence(db) });
+ * createAgentRuntime({
+ *   agent,
+ *   prepareTurn,
+ *   persistence: mongoPersistence(db),
+ *   // 多副本才要这一行；单进程不传，走内置的内存版归属仲裁
+ *   arbitration: mongoArbitration(db, { holder: process.env.POD_URL }),
+ * });
  * ```
  *
  * **它不是薄壳。** SQLite / Postgres / MySQL 那三个包底下共用 `@runko/persist-kysely`
@@ -24,7 +30,7 @@
  * | 准则 | 结论 |
  * |---|---|
  * | 不假设事务能跨接口 | ✅ 需要原子的只有 `dequeue`，Mongo 的 `findOneAndDelete` 原生原子 |
- * | 不要求 CAS | ✅ 一次都没用上 |
+ * | 不要求 CAS | ✅ 一次都没用上（租约版仲裁用 CAS，但那是**另一个接口**，持久化这三个没有） |
  * | 不支持跨会话查询 | ✅ 每个查询都以 `conversationId` 打头，正好是索引前缀 |
  *
  * 三条全成立，接口**没有漏掉关系型假设**。
@@ -34,7 +40,14 @@
  * **MongoDB 5.0+**。工具入参是任意 JSON，键里可能有 `.` 或 `$`——5.0 之前的 MongoDB
  * 不接受这种字段名。实测 MongoDB 8 全放行。
  *
- * **这一版只出持久化，不含租约版[归属仲裁](../../../docs/terms.md)**——那是下一批。
+ * ## 两样能力，装配时各传各的
+ *
+ * | 给什么 | 是什么 | 什么时候要 |
+ * |---|---|---|
+ * | `mongoPersistence(db)` | [持久化](../../../docs/host/contract/features/persistence.md)：账本 · 裁决表 · 待发队列 | 总是 |
+ * | `mongoArbitration(db, { holder })` | 租约版[归属仲裁](../../../docs/terms.md)：同一时刻只有一个副本在推进一份对话 | **多副本才要**（[多副本部署](../../../docs/host/node/features/multi-replica.md)） |
+ *
+ * 两样吃的是**同一个 `Db`**，`migrate(db)` 也把两边要的索引一起建了。
  */
 import type { Persistence } from "@runko/agent";
 import type { Db } from "mongodb";
@@ -43,12 +56,19 @@ import { createDecisionStore, createLedgerStore, createQueueStore } from "./stor
 
 export const RUNKO_PERSIST_MONGO_VERSION = "0.0.0" as const;
 
-export type { DecisionDoc, LedgerDoc, QueueDoc } from "./collections.js";
+export type { DecisionDoc, LeaseDoc, LedgerDoc, QueueDoc } from "./collections.js";
 export {
   DECISIONS_COLLECTION,
+  LEASES_COLLECTION,
   LEDGER_COLLECTION,
   QUEUE_COLLECTION,
 } from "./collections.js";
+export type { MongoArbitrationOptions } from "./arbitration.js";
+export {
+  DEFAULT_HEARTBEAT_MS,
+  DEFAULT_TAKEOVER_MS,
+  mongoArbitration,
+} from "./arbitration.js";
 export { migrate } from "./migrate.js";
 
 /**

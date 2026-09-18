@@ -35,7 +35,7 @@ SQLite / PostgreSQL / MySQL 那三个包底下共用 `@runko/persist-kysely`。K
 | 准则 | 结论 |
 | --- | --- |
 | 不假设事务能跨接口 | ✅ 需要原子的只有 `dequeue`，Mongo 的 `findOneAndDelete` 原生原子 |
-| 不要求 CAS | ✅ 一次都没用上 |
+| 不要求 CAS | ✅ 一次都没用上（租约版仲裁用 CAS，但那是**另一个接口**） |
 | 不支持跨会话查询 | ✅ 每个查询都以 `conversationId` 打头，正好是索引前缀 |
 
 三条全成立——接口**没有漏掉关系型假设**。
@@ -46,7 +46,8 @@ Mongo 的 `findOneAndDelete({...}, {sort})` **是数据库直接给的**。
 
 ## 它存什么
 
-三个集合：`agent_ledger`（账本）· `agent_decisions`（人工裁决留底）· `agent_queue`（待发队列）。
+四个集合：`agent_ledger`（账本）· `agent_decisions`（人工裁决留底）· `agent_queue`（待发队列）·
+`agent_leases`（租约，**只有多副本才会用到**）。
 
 集合名固定，不提供前缀开关——**要隔离请用另一个 database**，那在 Mongo 里是一等公民，
 比集合名前缀干净得多。
@@ -56,6 +57,34 @@ Mongo 的 `findOneAndDelete({...}, {sort})` **是数据库直接给的**。
 
 **它不存你的东西。** runko 只认一个不透明的 `conversationId`，会话叫什么、属于谁，
 全归你自己存。
+
+## 多副本怎么配
+
+跑不止一个进程时，光换持久化不够——还得把[归属仲裁机制](../../docs/terms.md)换成**租约版**，
+否则同一份对话会被两个副本同时推进。同一个 `Db` 装两次就行：
+
+```ts
+createAgentRuntime({
+  agent,
+  prepareTurn,
+  persistence: mongoPersistence(db),
+  arbitration: mongoArbitration(db, { holder: process.env.RUNKO_NODE_URL }),
+});
+```
+
+`holder` 是**本副本的可达地址**，框架原样存、原样传、不解释它：别的副本抢不到归属时会拿到它，
+由接入代码决定把请求转给谁——**转发是你写的，不是框架做的**。
+
+`migrate()` 仍然只调一次，租约那个索引已经在里面了。
+
+单进程别装它：`@runko/agent` 内置的内存版更快，[独占](../../docs/terms.md)还是**真保证**，
+而租约版只能做到**尽力 + 可检测**。完整取舍见
+[多副本部署](../../docs/host/node/tech/multi-replica.md)。
+
+> **这一份是重写的，不是薄壳。** SQL 那三个包的租约版底下共用 `@runko/persist-kysely`；
+> 本包直接落在 Mongo 驱动上，条件写只要**一次往返**（`findOneAndUpdate` 直接返回更新后的
+> 文档），不必像 SQL 版那样「条件 UPDATE + 读回来比对令牌」两步——那两步是为了绕开 MySQL
+> 把「匹配到了但值没变」也报成 0 行。
 
 ## 要求 MongoDB 5.0+
 
@@ -83,7 +112,8 @@ Mongo 在「匹配到但新值与旧值完全相同」时报 `matched=1, modifie
 RUNKO_TEST_MONGO_URL=mongodb://127.0.0.1:27018 pnpm --filter @runko/persist-mongo test
 ```
 
-跟其余三个持久化包**跑同一套一致性用例**。不给连接串时整档跳过并说明原因——
+跟其余三个持久化包**跑同一套一致性用例**，租约版另跑[仲裁一致性套件](../conformance/README.md)的
+四组（通用 / 多节点 / 超时接管 / 报 takeover）。不给连接串时整档跳过并说明原因——
 Mongo 没有 pglite 那样的进程内替身（`mongodb-memory-server` 是下载一个真 mongod 来跑）。
 
 ## 不是只有这一条路
