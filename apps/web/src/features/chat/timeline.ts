@@ -1,18 +1,13 @@
 /**
- * Render-shaping helpers for the `RunkoUIMessage[]` ledger `materialize.ts`
- * produces (docs/tech/single-ledger.md §5/§6). Two concerns live
- * here:
+ * 给 `materialize.ts` 产出的那份 `RunkoUIMessage[]` [账本](../../../../../docs/terms.md)
+ * 做渲染整形（docs/logic/orchestration/tech/single-ledger.md §5/§6）。这里只管两件事：
  *
- * - Interleaving `use-chat-messages.ts`'s short-lived optimistic user echoes
- *   (`buildRenderEntries` — see that hook's own file header for why they're
- *   only short-lived now, popped as soon as the real turn-start
- *   `MessageFrame` arrives, not permanent) with the materialized messages, in
- *   the position they were sent.
- * - Narrowing a tool part's `input`/`output` (typed `unknown` — `RunkoUIMessage`'s
- *   `TOOLS` type parameter is necessarily the generic `UITools`, see
- *   `@runko/core`'s `state.ts` own `RunkoUIMessage` doc comment for why no
- *   compile-time-known tool name union exists to do better) into the shapes
- *   the tool-specific cards need (`bash`'s command, `ask-user`'s question).
+ * - **交错**：把 `use-chat-messages.ts` 那些短命的乐观用户回显按发出时的位置插进物化
+ *   出来的消息里（`buildRenderEntries`；它们为什么是短命的，见那个 hook 的文件头）。
+ * - **收窄**：工具部件的 `input`/`output` 类型是 `unknown`，这里把它们收成各个工具卡片
+ *   要的形状（`bash` 的命令、`ask-user` 的问题）。之所以是 `unknown`：
+ *   `RunkoUIMessage` 的 `TOOLS` 类型参数只能是通用的 `UITools`，没有编译期已知的工具
+ *   名联合可用（理由见 `@runko/core` 的 `state.ts` 里 `RunkoUIMessage` 的注释）。
  */
 import type {
   RunkoDataParts,
@@ -26,13 +21,13 @@ import { z } from 'zod';
 import type { JsonValue } from './schema';
 import { jsonValueSchema } from './schema';
 
-// ---- optimistic user-message echo interleaving ----
+// ---- 乐观用户回显的交错 ----
 
 export interface PendingUserEcho {
-  /** Assigned in send order (`use-chat-messages.ts`'s `nextEchoIdRef`) — the tie-break `buildRenderEntries` sorts same-anchor echoes by, below. */
+  /** 按发送顺序分配（`use-chat-messages.ts` 的 `nextEchoIdRef`）——下面 `buildRenderEntries` 给同锚点的回显排序时用它做平手判定。 */
   id: number;
   text: string;
-  /** `messages.length` at the moment this was sent (`use-chat-messages.ts`'s `sendMessage`) — anchors where it renders relative to the materialized ledger, since it briefly has no wire position of its own yet (until the real `MessageFrame` arrives and pops it — that hook's own file header). */
+  /** 这条回显发出时的 `messages.length`（`use-chat-messages.ts` 的 `sendMessage`）——它自己暂时还没有 wire 上的位置（要等真实 `MessageFrame` 到达把它弹掉，见那个 hook 的文件头），所以用这个锚点决定它相对于已物化账本渲染在哪。 */
   afterMessageCount: number;
   /**
    * 这条回显来自 [steer 中途插话](../../../../../docs/terms.md)（而不是「起新一轮」）。
@@ -50,27 +45,22 @@ export type RenderEntry =
   | { kind: 'pending-echo'; echo: PendingUserEcho };
 
 /**
- * Splices `pendingEchoes` into `messages` at each one's `afterMessageCount`
- * anchor — stable under `messages` growing (new messages append past
- * whatever index an echo was anchored at, never shifting it), so an echo
- * sent mid-turn-1 still renders between turn 1 and turn 2 once turn 2 starts
- * appending its own messages.
+ * 把 `pendingEchoes` 按各自的 `afterMessageCount` 锚点插进 `messages`。
  *
- * Defensive tie-break for same-anchor echoes (`use-chat-messages.ts`'s own
- * fix makes at most one echo pending at a time in the normal flow, but this
- * stays correct even if a stale-closure race — the exact mechanism behind
- * this codebase's original "连发两条消息乱序" bug report — ever produces two):
- * `Array.prototype.sort` is stable, so a `b - a` (descending-anchor)
- * comparator alone would, for a tie, insert the earlier-sent echo *first* —
- * but each `splice(index, 0, …)` below pushes whatever was already at
- * `index` one slot to the right, so inserting earlier-sent-first actually
- * ends up placing it *after* the later-sent one once both share that same
- * index (the exact reversal that used to surface as the bug). Breaking ties
- * by `id` **descending** — the later-sent echo processed (and therefore
- * inserted) first, so the earlier-sent one's later insertion at the same
- * index pushes it back to the left — is what makes the final splice order
- * come out ascending-`id` (send order), matching how `messages` itself is
- * always in send order.
+ * 锚点在 `messages` 变长时是稳定的：新消息追加在锚点索引之后，不会把已锚定的回显推走。
+ * 所以第 1 轮中途发的一条回显，在第 2 轮开始追加自己的消息之后，仍然渲染在第 1 轮与
+ * 第 2 轮之间。
+ *
+ * **同锚点回显的平手判定是防御性的。** 正常流程下同时最多只有一条回显在等
+ * （`use-chat-messages.ts` 那边保证），但万一闭包过期之类的竞态产生了两条，这里也不能
+ * 乱序——「连发两条消息乱序」正是这么来的。
+ *
+ * 为什么按 `id` **降序**破平手：`Array.prototype.sort` 是稳定排序，只按 `b - a`
+ * （锚点降序）比较的话，平手时先处理的是**先发**的那条；而下面每次
+ * `splice(index, 0, …)` 都会把原本在 `index` 上的东西往右推一格，于是先插先发的那条，
+ * 结果反而排到了后发那条的**后面**。改成按 `id` 降序：后发的先处理、先插入，先发的那条
+ * 随后插在同一个索引上、把后发的顶回右边，最终顺序就成了 `id` 升序（= 发送顺序），
+ * 与 `messages` 自身恒按发送顺序排列一致。
  */
 export function buildRenderEntries(
   messages: readonly RunkoUIMessage[],
@@ -80,9 +70,8 @@ export function buildRenderEntries(
     kind: 'message',
     message,
   }));
-  // Insert from the highest anchor down so earlier insertions don't shift
-  // the index a later (smaller-anchor) one needs to splice at; ties broken
-  // by `id` descending (see doc comment above).
+  // 从锚点最大的那条开始往下插：这样先插入的不会挪动后面（锚点更小的）那条要用的
+  // 索引。平手时按 `id` 降序（见上面的注释）。
   const sorted = [...pendingEchoes].sort(
     (a, b) => b.afterMessageCount - a.afterMessageCount || b.id - a.id,
   );
@@ -93,11 +82,11 @@ export function buildRenderEntries(
   return entries;
 }
 
-// ---- tool part narrowing (`input`/`output: unknown`, see file header) ----
+// ---- 工具部件的收窄（`input`/`output` 是 `unknown`，见文件头） ----
 
 export type RunkoToolPart = ToolUIPart<UITools>;
 
-/** `ai`'s own `isToolUIPart` also accepts a `DynamicToolUIPart` — runko never produces one (every tool part is a static `tool-${name}`, `@runko/core`'s `loop.ts`), so this narrows one step further to just the shape this app's cards render. */
+/** `ai` 自带的 `isToolUIPart` 还会放过 `DynamicToolUIPart`，而 runko 从不产生这种部件（每个工具部件都是静态的 `tool-${name}`，见 `@runko/core` 的 `loop.ts`），所以这里再往下收一步，只留这个应用的卡片真正会渲染的那个形状。 */
 export function isRunkoToolPart(
   part: UIMessagePart<RunkoDataParts, UITools>,
 ): part is RunkoToolPart {
@@ -113,7 +102,7 @@ function parseUnknownJsonValue(value: unknown): JsonValue {
   return parsed.success ? parsed.data : null;
 }
 
-/** `bash`'s own input shape (docs/tech/builtin-tools.md): `{ command: string, timeout_ms？ }`. */
+/** `bash` 自己的入参形状（docs/logic/engine/tech/builtin-tools.md）：`{ command: string, timeout_ms？ }`。 */
 export function bashCommandFromInput(input: unknown): string | undefined {
   const value = parseUnknownJsonValue(input);
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -130,13 +119,13 @@ const askUserInputSchema = z.object({
 
 export type AskUserInput = z.infer<typeof askUserInputSchema>;
 
-/** `ask-user`'s own input shape (`apps/node-server/src/agent/chat-agent.ts`'s `askUserInputSchema`): `{ question, options？ }`. */
+/** `ask-user` 自己的入参形状（`apps/node-server/src/agent/chat-agent.ts` 的 `askUserInputSchema`）：`{ question, options？ }`。 */
 export function askUserInputFrom(input: unknown): AskUserInput | undefined {
   const result = askUserInputSchema.safeParse(input);
   return result.success ? result.data : undefined;
 }
 
-/** `ask-user`'s `execute()` returns a plain string (the answer, or the timeout's fixed message) — `output: unknown` narrowed the same defensive way as `bashCommandFromInput`. */
+/** `ask-user` 的 `execute()` 返回一个普通字符串（真实回答，或超时那句固定文案）——`output: unknown` 的收窄方式与 `bashCommandFromInput` 一样防御性。 */
 export function askUserAnswerFromOutput(output: unknown): string | undefined {
   return typeof output === 'string' ? output : undefined;
 }
@@ -150,18 +139,20 @@ export function summarizeJson(value: unknown): string {
   return json.length > 120 ? `${json.slice(0, 120)}…` : json;
 }
 
-// ---- tool timing (`data-tool-timing`, `@runko/core`'s `state.ts` —
-// persistent, unlike `data-tool-progress`) ----
+// ---- 工具耗时（`data-tool-timing`，见 `@runko/core` 的 `state.ts`——它会落盘，
+// 与 `data-tool-progress` 不同） ----
 
 /**
- * Finds the `data-tool-timing` part matching `toolCallId` (its `id`, per
- * `@runko/core`'s `loop.ts` `upsertToolTimingPart`) — never rendered as its
- * own card (`message-entry.tsx`'s switch has no case for it, falling through
- * to the generic tool-part guard, which rejects it), only joined into the
- * matching tool-call entry's own card (`tool-call-card.tsx`). Absent for a
- * tool part whose input is still streaming (`startToolTiming` only fires
- * once `tool-input-available` has, `loop.ts`), or for a message persisted
- * before this part existed.
+ * 按 `toolCallId` 找出对应的 `data-tool-timing` 部件（匹配它的 `id`，见 `@runko/core`
+ * 的 `loop.ts` 里 `upsertToolTimingPart`）。
+ *
+ * 这个部件**从不**单独渲染成一张卡片：`message-entry.tsx` 的 switch 里没有它的 case，
+ * 会掉到通用的工具部件判定上被拒掉；它只是被并进对应那次工具调用自己的卡片里
+ * （`tool-call-card.tsx`）。
+ *
+ * 两种情况下它不存在：工具部件的入参还在流式产出（`startToolTiming` 要等
+ * `tool-input-available` 之后才触发，见 `loop.ts`），或者这条消息是在这个部件出现之前
+ * 落盘的。
  */
 export function findToolTiming(
   message: RunkoUIMessage,
@@ -179,21 +170,20 @@ function pad2(value: number): string {
   return String(value).padStart(2, '0');
 }
 
-/** `HH:MM:SS`, local time — deliberately not `toLocaleTimeString()` (this repo's existing `count` precedent, `turn-stats-dialog.tsx`): keeps the rendered text independent of ICU data availability/locale. */
+/** `HH:MM:SS`，本地时间。刻意不用 `toLocaleTimeString()`（沿用本仓库 `turn-stats-dialog.tsx` 里 `count` 的先例）：让渲染出来的文本不依赖 ICU 数据是否可用、也不随 locale 变。 */
 export function formatClockTime(epochMs: number): string {
   const date = new Date(epochMs);
   return `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
 }
 
-/** `<1s` → ms, `<60s` → one decimal place of seconds, longer → `Xm Ys` — the one humanization ladder `tool-call-card.tsx` uses for both a settled duration and a still-running elapsed tick. Negative input (clock skew between `Date.now()` calls) clamps to zero rather than rendering a nonsensical negative duration. */
+/** 不到 1 秒显示毫秒，不到 60 秒显示一位小数的秒，再长显示 `Xm Ys`。`tool-call-card.tsx` 无论是已结束的耗时还是还在跑的计时，都用这一套。负数输入（两次 `Date.now()` 之间的时钟回拨）夹到 0，而不是渲染出一个没有意义的负耗时。 */
 export function formatDuration(ms: number): string {
   const clamped = Math.max(0, ms);
   if (clamped < 1000) {
     return `${String(Math.round(clamped))}ms`;
   }
-  // Rounds to the same one-decimal precision the render below uses before
-  // comparing against the 60s boundary — otherwise e.g. 59999ms would
-  // display as the nonsensical "60.0s" instead of rolling over to "1m 0s".
+  // 先按下面渲染时用的同一个「一位小数」精度四舍五入，再去和 60 秒的边界比。否则
+  // 59999ms 会显示成没有意义的「60.0s」，而不是进位成「1m 0s」。
   const roundedSeconds = Math.round(clamped / 100) / 10;
   if (roundedSeconds < 60) {
     return `${roundedSeconds.toFixed(1)}s`;

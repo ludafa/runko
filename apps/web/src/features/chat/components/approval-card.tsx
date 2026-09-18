@@ -1,13 +1,13 @@
 /**
- * Renders a gated tool call's pending human-in-the-loop approval (docs/tech/single-ledger.md §6) — driven directly by the tool part's own
- * `approval-requested` state (`part.toolCallId` *is* the approval's
- * `callId`, `part.approval.id` the same value again — no separate id space
- * to reconcile, unlike the retired `ApprovalTimelineEntry`/`callId` bridge
- * this replaces). Only ever rendered for a part in that one state
- * (`message-entry.tsx` intercepts it before it reaches `ToolCallCard`) —
- * once resolved (`approval-responded`/`output-denied`/`output-available`/
- * `output-error`), the *same* tool part renders via `ToolCallCard` instead,
- * which shows the resolution (including the deny reason) inline.
+ * 渲染一次受控工具调用正挂起的人工审批（docs/logic/orchestration/tech/single-ledger.md §6）。
+ *
+ * 它直接由工具部件自己的 `approval-requested` 状态驱动：`part.toolCallId` **就是**这次
+ * 审批的 `callId`，`part.approval.id` 也是同一个值，没有第二套 id 空间需要对账。
+ *
+ * 只有处于那一个状态的部件才会渲染成这张卡片（`message-entry.tsx` 在它到达
+ * `ToolCallCard` 之前就拦下了）。一旦落定（`approval-responded`/`output-denied`/
+ * `output-available`/`output-error`），**同一个**工具部件改由 `ToolCallCard` 渲染，
+ * 在卡片里就地显示裁决结果（包括拒绝理由）。
  *
  * 外壳用 ai-elements 的 `Confirmation`（Alert + 请求/接受/拒绝三态插槽）。三个
  * 按钮是 runko 自己的三值裁决（允许 / 会话内都允许 / 拒绝），比官方示例的两值多
@@ -28,7 +28,7 @@ import { Button } from '@/components/ui/button';
 import type { RunkoToolPart } from '../timeline';
 import { bashCommandFromInput, prettyJson, toolPartName } from '../timeline';
 
-/** Only the one state this card ever renders (see file header) — narrowed so `part.input`/`part.approval.id` don't need an `undefined` check that can never actually happen for this state. */
+/** 这张卡片只渲染这一个状态（见文件头）。收窄之后，`part.input`/`part.approval.id` 就不用再写那种在这个状态下永远不会成立的 `undefined` 判断。 */
 export type PendingApprovalPart = Extract<
   RunkoToolPart,
   { state: 'approval-requested' }
@@ -57,7 +57,7 @@ export function ApprovalCard({
 }: {
   part: PendingApprovalPart;
   submitting: boolean;
-  /** `useChatMessages`'s `locallyExpiredCallIds` (a 404 on submit — the server no longer has this pending) — not part of the tool part's own state, which has no "expired" concept. */
+  /** 来自 `useChatMessages` 的 `locallyExpiredCallIds`（提交时吃了 404 = 服务端已经不挂着它了）。工具部件自己的状态里没有「已失效」这个概念，所以它是单独一个 prop。 */
   expired: boolean;
   /** `'allow-session'` = 会话级授权（docs/terms.md §四）：放行本次并记住这次具体调用，本会话内相同调用后续不再弹卡片。 */
   onDecide: (behavior: 'allow' | 'allow-session' | 'deny') => void;

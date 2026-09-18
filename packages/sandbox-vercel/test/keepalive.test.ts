@@ -1,8 +1,8 @@
 /**
  * Vercel [保活](../../../docs/terms.md)接线验收测试 —— KA-3。
  *
- * 规格见 docs/tech/sandbox-keepalive.md §5.5，验收清单见
- * docs/plans/sandbox-keepalive.md KA-3。
+ * 规格见 docs/logic/orchestration/tech/sandbox-keepalive.md §5.5，验收清单见
+ * docs/logic/orchestration/plans/sandbox-keepalive.md KA-3。
  *
  * [续期闸门](../../../docs/terms.md)本身（补足语义、审批状态机、两个上限）已在
  * `@runko/core` 的 `test/keepalive.test.ts` 里测透，这里只覆盖 Vercel 这一层——
@@ -11,8 +11,8 @@
  * 1. `extendTimeout` 是**加时**，所以要算差额；
  * 2. `expiresAt` 能查真实到期时刻（E2B 查不到）。
  *
- * 其中「连发多条消息租期不累加」是一条**回归测试**：既有实现把两家当同义词
- * （`sandbox-manager.ts` 的 `extendIdle`），每条消息盲加 5 分钟。
+ * 其中「连发多条消息租期不累加」是一条**回归测试**，防的是把两家的语义当同义词：那样
+ * 每条用户消息都会盲加 5 分钟，高频对话后沙盒白活几十分钟。
  *
  * 全程假时钟 + 进程内假沙盒，零网络零凭证。
  */

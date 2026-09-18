@@ -22,7 +22,7 @@ function setup(): FakeChatFetch {
   return fake;
 }
 
-/** 一条[待发队列](../../../../../docs/terms.md)条目（docs/tech/steer-and-queue.md §2.2）。 */
+/** 一条[待发队列](../../../../../../docs/terms.md)条目（docs/logic/orchestration/tech/steer-and-queue.md §2.2）。 */
 function queuedMessage(id: string, text: string): QueuedMessage {
   return { id, text, userId: 'user-1', createdAt: 1_700_000_000_000 };
 }
@@ -104,13 +104,12 @@ describe('useChatMessages — 挂载', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 轮状态快照（docs/tech/chat-webapp.md §5.1）——服务端在每条 tail 连上时下发的权威
-// 「这个会话有没有轮在跑」。它取代了 `lastFrameIsChunk` 那个猜测：崩溃残留会让那个
-// 猜法长期失准且永不自愈（用户发的消息一律走排队、没有乐观回显、还等不到出队）。
+// 轮状态快照（docs/ingress/tech/chat-webapp.md §5.1）——服务端在每条 tail 连上时下发的权威
+// 「这个会话有没有轮在跑」。任何前端与服务端的分叉都会被下一次 tail 连接纠正。
 // ---------------------------------------------------------------------------
 
 describe('useChatMessages — 轮状态快照（turn-state 帧）', () => {
-  /** 崩溃残留的会话：历史以 chunk 收尾，所以挂载时 `lastFrameIsChunk` 猜「有轮在跑」。 */
+  /** 崩溃残留的会话：历史以 chunk 收尾，挂载时初值说「有轮在跑」。 */
   const crashResidueHistory: ChatReplayFrame[] = [
     { seq: 1, chunk: startChunk('m1') },
   ];
@@ -306,9 +305,9 @@ describe('useChatMessages — seq dedup', () => {
     });
 
     act(() => {
-      // Same seq (5) as above but a *different* payload — if dedup is keyed
-      // on seq alone (as `applyFrame`'s `seenSeqs` is), this must never reach
-      // the ledger at all, so status must stay 'idle', not flip to 'error'.
+      // 与上面同一个 seq（5），但载荷**不同**。去重只按 seq 判（`applyFrame` 的
+      // `seenSeqs` 就是这么做的），所以这一帧根本不该进账本：status 必须还是
+      // 'idle'，不能翻成 'error'。
       stream.pushChunk(
         messageMetadataChunk({
           turn: 1,
@@ -319,7 +318,7 @@ describe('useChatMessages — seq dedup', () => {
         5,
       );
     });
-    // Give the (would-be, if not deduped) update a chance to land.
+    // 给那个「万一没被去重」的更新一点时间落地。
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
@@ -334,9 +333,8 @@ describe('useChatMessages — reconnect backoff', () => {
   it('reconnects with exponential backoff (1s, 2s, 4s, 8s, 16s) after a non-abort disconnect while a turn is in progress, then gives up quietly', async () => {
     vi.useFakeTimers();
     const fake = setup();
-    // Turn already in progress at mount (history ends in a raw chunk) — the
-    // mount's own tail attempt plus 5 reconnect attempts, all failing with a
-    // non-2xx status (a disconnect, not an AbortError).
+    // 挂载时就有一轮在跑（历史以一条裸 chunk 结尾）——挂载自己那次 tail 尝试，加上
+    // 5 次重连尝试，全部以非 2xx 状态失败（算掉线，不是 AbortError）。
     for (let i = 0; i < 6; i++) {
       fake.queueStreamError(503);
     }
@@ -368,8 +366,8 @@ describe('useChatMessages — reconnect backoff', () => {
       });
     }
 
-    // All 5 reconnect attempts (plus the initial one) are exhausted — advancing
-    // further (well past a 6th backoff delay) must not schedule another.
+    // 5 次重连（加上最初那次）全部用完——再往后推时间（远超第 6 档退避延迟）也不
+    // 能再排一次重连。
     await vi.advanceTimersByTimeAsync(60_000);
     expect(fake.streamRequests).toHaveLength(6);
     expect(fake.streamRequests.every((r) => r.after === 1)).toBe(true);
@@ -386,21 +384,20 @@ describe('useChatMessages — reconnect backoff', () => {
         true,
       ),
     );
-    unmount(); // aborts the tail — streamConversationTail rejects with AbortError
+    unmount(); // 断掉 tail——streamConversationTail 会以 AbortError reject
     stream.error(new DOMException('aborted', 'AbortError'));
 
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(fake.streamRequests).toHaveLength(1); // no reconnect attempt
+    expect(fake.streamRequests).toHaveLength(1); // 一次重连都没发起
   });
 });
 
 describe('useChatMessages — pendingUserEchoes', () => {
   it('anchors each echo at messages.length at send time; an echo is only ever popped by the real turn-start user MessageFrame (a separate coverage below) — a turn whose tail never sends one (this test only ever pushes plain chunks) leaves an earlier echo in place', async () => {
     const fake = setup();
-    // `sendMessage` always (re)opens the tail once its POST resolves — even
-    // for a session with no turn in flight yet (`use-chat-messages.ts`'s own
-    // file header) — so the mount's own tail is a separate, short-lived
-    // connection from the one that actually carries turn 1's frames.
+    // `sendMessage` 的 POST 一 resolve 就会（重）开 tail，哪怕这个会话此刻还没有轮在跑
+    // （见 `use-chat-messages.ts` 的文件头）。所以挂载自己开的那条 tail，与真正承载第 1
+    // 轮帧的那条，是两条不同的、前者很短命的连接。
     const mountStream = fake.queueStream();
     const { result } = renderHook(() => useChatMessages('sess_1', []));
 
@@ -416,10 +413,10 @@ describe('useChatMessages — pendingUserEchoes', () => {
       afterMessageCount: 0,
     });
     await waitFor(() => {
-      expect(fake.streamRequests).toHaveLength(2); // mount + reopened-after-POST
+      expect(fake.streamRequests).toHaveLength(2); // 挂载那条 + POST 之后重开的那条
     });
 
-    // The turn completes — messages grows by one assistant message.
+    // 这一轮跑完——messages 多出一条 assistant 消息。
     act(() => {
       turn1Stream.pushChunk(startChunk('a1'), 1);
       turn1Stream.pushChunk(finishChunk('stop'), 2);
@@ -444,10 +441,9 @@ describe('useChatMessages — pendingUserEchoes', () => {
       expect(result.current.pendingUserEchoes).toHaveLength(2);
     });
 
-    // Both echoes are still present (this test's turns never send a
-    // turn-start MessageFrame — plain chunks only — so nothing ever pops
-    // either one) — the first is still anchored at 0, the second at
-    // messages.length when *it* was sent (after turn 1 already landed).
+    // 两条回显都还在：这个用例里的轮从不发起轮 MessageFrame（只推裸 chunk），所以
+    // 没有任何东西会把它们弹出去。第一条仍锚在 0，第二条锚在**它自己**发出时的
+    // messages.length（那时第 1 轮已经落定）。
     expect(result.current.pendingUserEchoes[0]).toMatchObject({
       text: '第一条',
       afterMessageCount: 0,
@@ -498,7 +494,7 @@ describe('useChatMessages — pendingUserEchoes', () => {
       expect(result.current.pendingUserEchoes).toHaveLength(0);
     });
     expect(result.current.messages.map((m) => m.role)).toEqual(['user']);
-    expect(result.current.messages[0]?.id).toBe('u1'); // the real message, not the echo
+    expect(result.current.messages[0]?.id).toBe('u1'); // 是真实消息，不是那条回显
 
     mountStream.close();
     turnStream.close();
@@ -520,7 +516,7 @@ describe('useChatMessages — pendingUserEchoes', () => {
       turn1Stream.pushMessage(1, userMessage('u1', '第一条'));
     });
     await waitFor(() => {
-      expect(result.current.pendingUserEchoes).toHaveLength(0); // popped via the MessageFrame path
+      expect(result.current.pendingUserEchoes).toHaveLength(0); // 走 MessageFrame 那条路弹掉了
     });
     act(() => {
       turn1Stream.pushChunk(startChunk('a1'), 2);
@@ -535,20 +531,20 @@ describe('useChatMessages — pendingUserEchoes', () => {
     });
 
     fake.setMessagePostStatus(500);
-    const unusedStream = fake.queueStream(); // never consumed — the POST fails before the tail is ever reopened
+    const unusedStream = fake.queueStream(); // 不会被消费——POST 先失败了，tail 根本没重开
     act(() => {
       result.current.sendMessage('第二条（会失败）');
     });
     await waitFor(() => {
       expect(result.current.status).toBe('error');
     });
-    // Rolled back via the filter-by-id path — not the FIFO pop path — and
-    // ends up empty either way, not double-removed nor left dangling.
+    // 走的是「按 id 过滤」那条回滚路径，不是 FIFO 弹出那条。两条路最后都归空，既不会
+    // 重复删，也不会留下一条挂着不管。
     expect(result.current.pendingUserEchoes).toHaveLength(0);
     expect(result.current.messages.map((m) => m.role)).toEqual([
       'user',
       'assistant',
-    ]); // turn 1's messages untouched by turn 2's failed send
+    ]); // 第 2 轮那次失败的发送没有动到第 1 轮的消息
 
     mountStream.close();
     turn1Stream.close();
@@ -597,8 +593,8 @@ describe('useChatMessages — pendingUserEchoes', () => {
     await waitFor(() => {
       expect(result.current.pendingUserEchoes).toHaveLength(1);
     });
-    // Mid-flight (echo2 still pending, msg2's real message not landed yet):
-    // the interleaved render order is already correct.
+    // 半途状态（echo2 还挂着，msg2 的真实消息还没落地）：交错之后的渲染顺序此刻就已经
+    // 是对的。
     expect(
       buildRenderEntries(
         result.current.messages,
@@ -703,12 +699,11 @@ describe('useChatMessages — submitApproval / submitAnswer', () => {
       expect(result.current.messages.length).toBeGreaterThan(0);
     });
 
-    // Two *separate* `act()` calls (not one batch): `submittingCallIds` is
-    // `useState`, so the guard in `submitDecision` only sees it updated once
-    // React has actually re-rendered between the two calls (matching real
-    // usage: the card's own `disabled={submitting}` prop is what stops a
-    // literal same-tick double click at the DOM level; this in-hook guard
-    // covers a second *programmatic* call arriving after that re-render).
+    // 刻意分成**两次** `act()`，不是一批：`submittingCallIds` 是 `useState`，只有 React
+    // 在两次调用之间真的重渲染过一次，`submitDecision` 里的那道判断才看得到它已更新。
+    //
+    // 这也对应真实用法：同一 tick 内的连点由卡片自己的 `disabled={submitting}` 在 DOM
+    // 层挡住；hook 里这道判断挡的是重渲染之后又来的第二次**程序化**调用。
     act(() => {
       result.current.submitApproval('call-1', 'allow');
     });
@@ -767,7 +762,7 @@ describe('useChatMessages — submitApproval / submitAnswer', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 待发队列（[排队](../../../../../docs/terms.md)，docs/tech/steer-and-queue.md §6）
+// 待发队列（[排队](../../../../../../docs/terms.md)，docs/logic/orchestration/tech/steer-and-queue.md §6）
 // ---------------------------------------------------------------------------
 
 describe('useChatMessages — 待发队列', () => {
@@ -855,7 +850,7 @@ describe('useChatMessages — 待发队列', () => {
     // 排队不做乐观 echo（服务端的 QueueFrame 快照会把它回填到待发区，那里就是
     // 它的可见位置）；steer 做——它的真实注入点是 core 的下一个 step 边界，可能
     // 等几十秒，在那之前界面上什么都不发生用户会以为按钮没生效
-    //（docs/features/chat-ui.md、2026-07-25）。
+    //（docs/ingress/features/chat-ui.md、2026-07-25）。
     expect(result.current.pendingUserEchoes).toEqual([
       // 锚点恒为 MAX_SAFE_INTEGER：`buildRenderEntries` 把越界锚点夹到末尾，
       // 于是这条「待注入」在等待期间始终待在时间线最下面，不会被后续 step 产出的
@@ -870,8 +865,8 @@ describe('useChatMessages — 待发队列', () => {
     stream.close();
   });
 
-  // 请求 steer 但服务端回 `'queued'`：那一轮还卡在[起轮装配](../../../../../docs/terms.md)
-  // 里，没有 session 可插，服务端只能给它排队（docs/tech/turn-abort.md §3.3）。
+  // 请求 steer 但服务端回 `'queued'`：那一轮还卡在[起轮装配](../../../../../../docs/terms.md)
+  // 里，没有 session 可插，服务端只能给它排队（docs/logic/orchestration/tech/turn-abort.md §3.3）。
   it('steer 拿回 mode "queued" 时撤掉那条「待注入」回显——它永远等不到注入点', async () => {
     const fake = setup();
     fake.setMessagePostMode('queued');
@@ -1023,13 +1018,13 @@ describe('useChatMessages — 待发队列', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 停止本轮（docs/tech/turn-abort.md §4.1）——`stopTurn` / `stopping`。核心是「不做
+// 停止本轮（docs/logic/orchestration/tech/turn-abort.md §4.1）——`stopTurn` / `stopping`。核心是「不做
 // 乐观翻转」：按下停止只发请求 + 置中间态，界面回到空闲只认 wire 上那条
 // `status: 'interrupted'` 的 `message-metadata`。
 // ---------------------------------------------------------------------------
 
-describe('useChatMessages — 停止本轮（docs/tech/turn-abort.md）', () => {
-  /** 起一轮：`initialFrames` 以一条裸 chunk 结尾 = 有进行中的一轮（`lastFrameIsChunk`）。 */
+describe('useChatMessages — 停止本轮（docs/logic/orchestration/tech/turn-abort.md）', () => {
+  /** 起一轮：`initialFrames` 以一条裸 chunk 结尾 = 有进行中的一轮。 */
   const IN_PROGRESS_FRAMES: ChatReplayFrame[] = [
     { seq: 1, chunk: startChunk('m1') },
   ];

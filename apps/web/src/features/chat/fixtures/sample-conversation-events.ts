@@ -1,19 +1,16 @@
 /**
- * Rebuilt for the P13-5-4/P13-5-5 UIMessage-ledger migration (docs/tech/single-ledger.md §5/§6) — this fixture used to record a
- * `ChatStreamEnvelope[]` run against the retired `SessionEvent`/`SessionItem`
- * wire (see git history); it now exports full-conversation `LedgerFrame[]`
- * scenarios built from `../__tests__/helpers/runko-chunks`'s factories,
- * covering the two human-in-the-loop interaction shapes docs/tech/single-ledger.md §6 defines
- * (a gated tool call that needs `review`, and an `ask-user` question) plus a
- * plain text-only turn and an already-GC'd replay — `timeline-view.test.tsx`/
- * `timeline.test.ts` compose these into render/materialization assertions
- * instead of each test hand-rolling its own chunk sequence from scratch. Every
- * chunk sequence below follows the exact ordering `@runko/core`'s `loop.ts`
- * (`runOneStep`/`settleToolCall`/`finalizeTurn`) actually yields — see that
- * file's own doc comments for the rationale of each ordering choice mirrored
- * here (`finish-step` before tool settlement, `finish` only after every
- * pending tool call has settled, turn-end `message-metadata` as its own
- * standalone chunk after the last step's `finish`).
+ * 整段对话的 `LedgerFrame[]` 样例（docs/logic/orchestration/tech/single-ledger.md §5/§6），
+ * 用 `../__tests__/helpers/runko-chunks` 里的工厂函数拼出来。
+ *
+ * 覆盖四种场景：docs/logic/orchestration/tech/single-ledger.md §6 定义的两种人在回路形态
+ * （需要 `review` 的受控工具调用、一次 `ask-user` 提问），外加一轮纯文本、以及一段已经
+ * GC 过的回放。`timeline-view.test.tsx` 与 `timeline.test.ts` 直接拿这些拼渲染/物化断言，
+ * 不必每个用例自己从零手搓一串 chunk。
+ *
+ * 下面每串 chunk 的顺序都与 `@runko/core` 的 `loop.ts`（`runOneStep`/`settleToolCall`/
+ * `finalizeTurn`）实际产出的顺序一致：`finish-step` 在工具结算之前、`finish` 要等所有
+ * 挂起的工具调用都结算完、收尾的 `message-metadata` 是最后一个 step 的 `finish` 之后
+ * 一条独立 chunk。每条顺序选择的理由见 `loop.ts` 自己的注释。
  */
 import {
   assistantMessage,
@@ -42,10 +39,7 @@ function maxSeq(frames: readonly LedgerFrame[]): number {
   );
 }
 
-/**
- * Interaction 1: a plain text-only turn, no tool calls — the simplest shape,
- * one step, `finishReason: 'stop'`.
- */
+/** 形态 1：纯文本一轮，没有工具调用——最简单的形状，一个 step，`finishReason: 'stop'`。 */
 export const plainTextTurnFrames: LedgerFrame[] = toChunkEnvelopes([
   startChunk('msg-1'),
   startStepChunk(),
@@ -59,10 +53,10 @@ export const plainTextTurnFrames: LedgerFrame[] = toChunkEnvelopes([
 ]);
 
 /**
- * Interaction 2: a gated `bash` tool call that needs human `review` (docs/10
- * §6.1) — one step carries a leading text part *and* the tool call, gets
- * approved, tool executes, then a second step wraps up with closing text.
- * Turn metadata lands on the second (last) assistant message.
+ * 形态 2：一次需要人工 `review` 的受控 `bash` 调用（docs/10 §6.1）。
+ *
+ * 第一个 step 里同时带一段开场文本**和**这次工具调用，人批准后工具执行；第二个 step
+ * 用一段收尾文本结束。轮的 metadata 落在第二条（也就是最后一条）assistant 消息上。
  */
 export const approvalTurnFrames: LedgerFrame[] = toChunkEnvelopes([
   startChunk('msg-2'),
@@ -87,14 +81,15 @@ export const approvalTurnFrames: LedgerFrame[] = toChunkEnvelopes([
 ]);
 
 /**
- * Interaction 3: an `ask-user` question — pending (no answer yet, message
- * stays open with no `finish`, since `settleExecution` is still `await`ing
- * the tool's own `execute()`, which blocks on the human's answer) then, after
- * the human answers, the resolving half arrives as its own later batch of
- * frames (`askUserAnsweredFrames`, `seq` continuing from
- * `askUserPendingFrames`'s last one) — mirroring how a real answer arrives
- * over the tail well after the pending state was first seen (docs/tech/single-ledger.md §6,
- * `QuestionCard`'s pending/answered states).
+ * 形态 3：一次 `ask-user` 提问，分两批帧。
+ *
+ * 第一批是「还在等」：没有答案，消息也没有 `finish` 就一直开着——`settleExecution`
+ * 还在 `await` 工具自己的 `execute()`，而它阻塞在人的回答上。
+ *
+ * 人回答之后，收尾那一半作为**后到的另一批**帧出现（`askUserAnsweredFrames`，`seq`
+ * 接着 `askUserPendingFrames` 的最后一个往下排），对应真实情况下答案要在「等待中」
+ * 状态被看到之后好一会儿才经 tail 到达（docs/logic/orchestration/tech/single-ledger.md §6，
+ * 以及 `QuestionCard` 的等待/已回答两态）。
  */
 export const askUserPendingFrames: LedgerFrame[] = toChunkEnvelopes([
   startChunk('msg-4'),
@@ -121,13 +116,12 @@ export const askUserTurnFrames: LedgerFrame[] = [
 ];
 
 /**
- * An already-finished turn's replay, GC'd down to `MessageFrame`s only
- * (`apps/node-server`'s `turn-runner/persistence.ts` only keeps a finished turn's durable
- * chunks around until `finalizeTurnPersistence` GCs them — replay history
- * ends up as finished messages verbatim, `use-chat-messages.ts`'s
- * `lastFrameIsChunk` doc comment). A `MessageFrame` never goes through chunk
- * materialization on replay — these are hand-assembled already-finished
- * `RunkoUIMessage`s directly.
+ * 一轮已经结束的回放，GC 之后只剩 `MessageFrame`。
+ *
+ * `apps/node-server` 的 `turn-runner/persistence.ts` 只把一轮的可持久 chunk 留到
+ * `finalizeTurnPersistence` 把它们 GC 掉为止，所以回放出来的历史就是一条条已完成消息
+ * 的原文。回放里的 `MessageFrame` 不走 chunk 物化，下面这些是直接手写好的已完成
+ * `RunkoUIMessage`。
  */
 export const gcdReplayFrames: LedgerFrame[] = [
   messageFrame(1, userMessage('msg-5-user', '现在几点了？')),

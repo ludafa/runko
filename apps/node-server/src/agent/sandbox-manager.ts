@@ -1,63 +1,55 @@
 /**
- * Sandbox lifecycle (docs/tech/chat-webapp.md §2.2 `sandbox-manager.ts`,
- * generalized per docs/tech/sandbox-provider.md): every cloud-sandbox SDK
- * touch point in the whole server lives behind the structural
- * `SandboxProvider`/`ProvisionedSandbox` interfaces below — everything else
- * (routes/chat-agent) only ever sees `SandboxManager`, so tests inject fakes
- * with zero network/credentials (see test/agent/sandbox-manager.test.ts).
+ * 沙盒生命周期（docs/ingress/tech/chat-webapp.md §2.2 `sandbox-manager.ts`，按
+ * docs/host/contract/tech/sandbox-provider.md 泛化）。
  *
- * A [沙盒 provider](docs/terms.md) is "which cloud sandbox this conversation
- * runs on" — `vercel` (`@vercel/sandbox`) or `e2b` (`@runko/sandbox-e2b`).
- * The manager holds a registry keyed by that id and picks per-conversation
- * (`AcquireInput.provider`). All provider-specific differences (clone timing,
- * resume-by-token, keepalive) are sealed inside the `SandboxProvider`
- * implementations — the `acquire` state machine below is provider-agnostic.
+ * 整个服务端碰云沙盒 SDK 的地方，全部关在下面 `SandboxProvider`/`ProvisionedSandbox`
+ * 这两个结构化接口后面。其余代码（routes、chat-agent）只看得见 `SandboxManager`，所以
+ * 测试可以注入假实现，零网络零凭证（见 test/agent/sandbox-manager.test.ts）。
  *
- * `acquire()` is the single entry point for both "this conversation never had
- * a sandbox yet" (called once from `POST /api/chat/conversations`) and
- * "resume an existing conversation's sandbox" (called from every
- * `POST .../messages`) — three states:
+ * [沙盒 provider](docs/terms.md) 就是「这个会话跑在哪家云沙盒上」——`vercel`
+ * （`@vercel/sandbox`）或 `e2b`（`@runko/sandbox-e2b`）。manager 持有一张按 id 索引的
+ * 注册表，按会话选一家（`AcquireInput.provider`）。厂商之间的全部差异（什么时候 clone、
+ * 怎么按令牌重连、怎么保活）都封在各自的 `SandboxProvider` 实现里，下面 `acquire` 那个
+ * 状态机与厂商无关。
  *
- *   1. in-process memory hit (this process already acquired it)     → reuse, no provider calls at all
- *   2. `provider.resume(resumeToken)` succeeds (the platform resumed
- *      it from its snapshot) → reuse as-is, branch/skill already there
- *   3. no `resumeToken` yet (brand-new), or `resume()` reports
- *      `unavailable` (snapshot expired/gone) → `provider.create()`
- *      (repo already cloned at the workspace root) + re-run the init plan
- *      (skill install, git identity, remote auth, exclude) + recover the
- *      conversation branch (`git fetch && checkout` if it was ever pushed,
- *      else `git checkout -b` to create it fresh) — one code path covers
- *      both the "brand-new" and the "expired" sub-cases.
+ * `acquire()` 是唯一入口，两种场景共用——「这个会话还从没有过沙盒」（`POST
+ * /api/chat/conversations` 调一次）与「把已有会话的沙盒恢复出来」（每次
+ * `POST .../messages` 都调）。它有三态：
  *
- * The [重连令牌](docs/terms.md) (`resumeToken`) differs by provider: Vercel's
- * is the deterministic sandbox `name` (known upfront, carried in via
- * `AcquireInput.resumeToken`); E2B's is the server-assigned `sandboxId` (only
- * known after `create()`, so `acquire()` returns the current token in
- * `AcquiredSandbox.resumeToken` for the route to persist).
+ *   1. 进程内内存命中（本进程已经拿到过）→ 直接复用，一次远程调用都不发
+ *   2. `provider.resume(resumeToken)` 成功（平台从快照把它恢复了）→ 原样复用，
+ *      分支与 skill 都还在
+ *   3. 还没有 `resumeToken`（全新会话），或 `resume()` 报 `unavailable`（快照过期/没了）
+ *      → `provider.create()`（仓库已经 clone 在工作区根）+ 重跑一遍初始化脚本
+ *      （装 skill、配 git 身份、配远端鉴权、写 exclude）+ 恢复会话分支（推送过就
+ *      `git fetch && checkout`，没推送过就 `git checkout -b` 新建）。「全新」与「过期」
+ *      两种子情况走的是同一段代码。
  *
- * `ensureLifetime()` is the whole "sleep" mechanism (docs/tech/chat-webapp.md §1.4):
- * it only asks the workspace to top its own lifetime back up — there is no
- * server-side timer. When a conversation goes idle past
- * `SANDBOX_IDLE_TIMEOUT_MS`, the platform stops + snapshots the sandbox on its
- * own (Vercel `persistent`, E2B `onTimeout:'pause'`); the next `acquire()`
- * (state 2 or 3) recovers.
+ * [重连令牌](docs/terms.md)（`resumeToken`）各家不同：Vercel 的是那个确定性的沙盒
+ * `name`（事先就知道，经 `AcquireInput.resumeToken` 传进来）；E2B 的是服务端分配的
+ * `sandboxId`（只有 `create()` 之后才知道，所以 `acquire()` 会把当前令牌放在
+ * `AcquiredSandbox.resumeToken` 里返回，交给路由落库）。
  *
- * ---- 保活归 SDK 了（docs/tech/sandbox-keepalive.md，KA-5） ----
+ * `ensureLifetime()` 就是整个「休眠」机制（docs/ingress/tech/chat-webapp.md §1.4）：它只是
+ * 请工作区把自己的存活时长补回去，**服务端这边没有任何定时器**。一个会话闲置超过
+ * `SANDBOX_IDLE_TIMEOUT_MS` 之后，平台会自己停机并打快照（Vercel 的 `persistent`、E2B 的
+ * `onTimeout:'pause'`），下一次 `acquire()` 走第 2 或第 3 态把它恢复回来。
  *
- * 这个文件以前自己起过一个 turn 级心跳定时器（`startHeartbeat`），现在**整个删掉**：
+ * ---- 保活归 SDK（docs/logic/orchestration/tech/sandbox-keepalive.md，KA-5） ----
+ *
  * 一轮进行期间的续期由适配器自己做（`e2bWorkspace`/`vercelWorkspace` 的 `keepAlive`
- * 选项），它有两个这里拿不到的信号——core 推来的[活动信号](../../../../docs/terms.md)、
- * 以及 exec 调用自身的进行状态。这里只剩下**轮之外**的手动补足（起轮前、审批/提问
+ * 选项）：它有两个这里拿不到的信号——core 推来的[活动信号](../../../../docs/terms.md)，
+ * 以及 exec 调用自身的进行状态。这个文件只负责**轮之外**的手动补足（起轮前、审批/提问
  * 路由），走 `ensureLifetime()`。
  *
- * 两个语义变化值得记住：
+ * 两件事值得记住：
  *
- * 1. **「补足」不是「加时」。** 旧的 `extendIdle` 对 Vercel 调 `extendTimeout(idleTimeout)`，
- *    而那个 API 是**累加**的——每条用户消息盲加 5 分钟，高频对话后沙盒多活几十分钟
- *    白计费。新的 `ensureLifetime` 是「补到至少 X，够了就什么都不做」，天然免疫。
- * 2. **`expiresAt` 由 `onRenew` 回调驱动。** 续期发生在适配器内部，这里看不见；
- *    不接这个回调的话，一轮跑 30 分钟之后本地这本账还停在起轮时的值，下一条消息
- *    会误判缓存过期、白走一次 `resume()`（见 `keepAliveOptionsFor`）。
+ * 1. **`ensureLifetime` 是「补足」，不是「加时」。** 语义是「补到至少 X，够了就什么都
+ *    不做」。这条很关键：Vercel 的 `extendTimeout` 是**累加**的，照着它的语义每条用户
+ *    消息盲加 5 分钟，高频对话之后沙盒会多活几十分钟、白计费。
+ * 2. **`expiresAt` 由 `onRenew` 回调驱动。** 续期发生在适配器内部，这里看不见。不接这个
+ *    回调的话，一轮跑 30 分钟之后本地这本账还停在起轮时的值，下一条消息会误判缓存过期、
+ *    白走一次 `resume()`（见 `keepAliveOptionsFor`）。
  */
 import type {
   KeepAliveOptions,
@@ -91,11 +83,11 @@ export function resolveIdleTimeoutMs(): number {
     : DEFAULT_SANDBOX_IDLE_TIMEOUT_MS;
 }
 
-// ---- SandboxProvider: the sole seam onto a cloud-sandbox SDK (fake-able) ----
+// ---- SandboxProvider：对接云沙盒 SDK 的唯一接缝（可替换成假实现） ----
 
 export type SandboxProviderId = 'vercel' | 'e2b';
 
-/** The default [沙盒 provider](docs/terms.md) for a new conversation whose request omits one — `SANDBOX_PROVIDER` env, falling back to `'vercel'` (docs/tech/sandbox-provider.md §6). */
+/** 建会话的请求没指定 provider 时用的默认[沙盒 provider](docs/terms.md)——读 `SANDBOX_PROVIDER` 环境变量，没有就回落到 `'vercel'`（docs/host/contract/tech/sandbox-provider.md §6）。 */
 export function resolveDefaultProvider(): SandboxProviderId {
   return process.env.SANDBOX_PROVIDER?.trim().toLowerCase() === 'e2b' ?
       'e2b'
@@ -118,13 +110,12 @@ export type ManagedWorkspace = RunkoFS &
   RunkoKeepAliveCapable;
 
 /**
- * A ready sandbox whose repo is already cloned at the workspace root. The
- * provider hides three things behind this handle: the workspace view, the token
- * to persist for the next resume, and the keepalive call.
+ * 一个已就绪的沙盒，仓库已经 clone 在工作区根目录。provider 把三样东西藏在这个句柄
+ * 后面：工作区视图、下次重连要用的令牌、以及保活调用。
  */
 export interface ProvisionedSandbox {
   readonly workspace: ManagedWorkspace;
-  /** Persist this to resume later: Vercel = the sandbox name (= the input token), E2B = the newly assigned sandboxId. */
+  /** 落库保存，下次重连要用：Vercel 是沙盒名（= 传进来的那个令牌），E2B 是新分配的 sandboxId。 */
   readonly resumeToken: string;
   /**
    * 把沙盒剩余[存活时长](../../../../docs/terms.md)**补足**到 `targetMs`
@@ -139,26 +130,25 @@ export type ResumeResult =
 
 export interface SandboxProvider {
   readonly id: SandboxProviderId;
-  /** Create a fresh sandbox with the repo cloned at the workspace root. */
+  /** 新建一个沙盒，仓库 clone 在工作区根目录。 */
   create(params: CreateSandboxParams): Promise<ProvisionedSandbox>;
-  /** Resume by a previously persisted token; `unavailable` → caller re-creates. */
+  /** 用之前落库的令牌重连；返回 `unavailable` 就由调用方重新创建。 */
   resume(
     resumeToken: string,
     keepAlive: KeepAliveOptions,
   ): Promise<ResumeResult>;
   /**
-   * Does this error mean "the sandbox behind that handle is gone/unusable"
-   * (paused-and-not-reconnectable, stopped, deleted, never existed)?
+   * 这个错误是不是意味着「这个句柄背后的沙盒已经没了/不能用了」（被暂停且连不回来、
+   * 已停机、已删除、从来就不存在）？
    *
-   * Lives on the provider because each SDK spells it differently (Vercel:
-   * `APIError` 404/410; E2B: `SandboxNotFoundError` / a plain `Error` whose
-   * message reads "Sandbox … not found"). It is deliberately part of the
-   * **interface** rather than a provider-private helper: the manager has to
-   * classify failures raised by *any* operation — `ensureLifetime` on a stale
-   * handle, an `exec` against a paused sandbox — not just by `resume()`.
-   * Before this existed, only `resume()` consulted it, so a cached handle that
-   * went stale surfaced a raw 404 to the caller and never recovered
-   * (docs/plans/sandbox-provider.md SP-7).
+   * 放在 provider 上，是因为每家 SDK 的表达方式都不一样（Vercel 是 `APIError` 的
+   * 404/410；E2B 是 `SandboxNotFoundError`，或者一个消息写着 "Sandbox … not found" 的
+   * 普通 `Error`）。
+   *
+   * 它刻意放进**接口**而不是做成 provider 内部的私有辅助函数：manager 需要给**任何**
+   * 操作抛出的失败分类——对一个过期句柄调 `ensureLifetime`、对一个被暂停的沙盒跑
+   * `exec`——不只是 `resume()` 那一处。只在 `resume()` 里判的话，一个悄悄过期的缓存句柄
+   * 会把裸 404 直接甩给调用方，而且永远自愈不了（docs/host/contract/plans/sandbox-provider.md SP-7）。
    */
   isGone(error: unknown): boolean;
 }
@@ -200,7 +190,7 @@ function requireEnv(name: string): string {
 
 // ---- Vercel provider ----
 
-/** Any 404 ("this sandbox name was never created") or 410 ("stopped, and Vercel could not resume it from a snapshot") means "(re)create it". */
+/** 404（「这个沙盒名从来没被创建过」）或 410（「已停机，而且 Vercel 没能从快照恢复」）都意味着「重新创建一个」。 */
 function isRecoverableGetFailure(error: unknown): boolean {
   return (
     error instanceof APIError &&
@@ -208,7 +198,7 @@ function isRecoverableGetFailure(error: unknown): boolean {
   );
 }
 
-/** Wraps a live `@vercel/sandbox` instance as a `ProvisionedSandbox` (its name is the resume token; keepalive lives inside the adapter). */
+/** 把一个活着的 `@vercel/sandbox` 实例包成 `ProvisionedSandbox`（沙盒名就是重连令牌；保活在适配器内部做）。 */
 function vercelProvisioned(
   sandbox: VercelSandboxLike & { name: string },
   keepAlive: KeepAliveOptions,
@@ -234,7 +224,7 @@ export function createVercelProvider(): SandboxProvider {
         teamId,
         projectId,
         runtime: 'node24',
-        persistent: true, // the precondition for "sleep = Vercel's own snapshot-on-timeout" (docs/tech/chat-webapp.md §1.4/§2.2)
+        persistent: true, // 「休眠 = 交给 Vercel 自己超时打快照」的前提条件（docs/ingress/tech/chat-webapp.md §1.4/§2.2）
         timeout: params.timeoutMs,
         source: {
           type: 'git',
@@ -276,16 +266,16 @@ export function createVercelProvider(): SandboxProvider {
 // ---- E2B provider ----
 
 /**
- * Where the repo is cloned inside an E2B sandbox and thus the workspace root.
- * E2B has no create-time git source (unlike Vercel), so `create()` runs a
- * post-create `git clone` here; anchoring the workspace to this dir makes the
- * cwd-'/' shared init/branch commands (skill install, git config, fetch/
- * checkout) run inside the repo exactly as they do for Vercel's root
- * (docs/tech/sandbox-provider.md §1/§3).
+ * E2B 沙盒里仓库 clone 到哪，工作区根就是哪。
+ *
+ * E2B 不像 Vercel，创建时没法指定 git 源，所以 `create()` 之后要自己跑一次
+ * `git clone`。把工作区根锚在这个目录上，那些以 cwd `'/'` 跑的共用初始化/分支命令
+ * （装 skill、配 git、fetch/checkout）就和 Vercel 的根目录一样，正好落在仓库里
+ * （docs/host/contract/tech/sandbox-provider.md §1/§3）。
  */
 const E2B_WORKSPACE_ROOT = '/home/user/repo';
 
-/** An E2B sandbox is gone (deleted / snapshot unrecoverable) → treat as `unavailable` and re-create, mirroring Vercel's 404/410. Structural check (host and package hold different `e2b` copies, so no `instanceof`): e2b's own `SandboxNotFoundError`/`NotFoundError` by name (`this.name` set in their constructors), plus a message net for the plain-`Error("Sandbox … not found")` path e2b also has (dist/index.js ~L4347). "Invalid sandbox ID" (a 400, malformed token) is deliberately NOT matched — that signals a real bug worth surfacing, not a recreate. */
+/** E2B 沙盒已经没了（被删、快照恢复不了）→ 当作 `unavailable` 重新创建，与 Vercel 的 404/410 对齐。这里做的是结构化判断（宿主与包各自装了一份 `e2b`，所以不能用 `instanceof`）：按名字认 e2b 自己的 `SandboxNotFoundError`/`NotFoundError`（它们的构造函数里会设 `this.name`），再加一张消息网兜住 e2b 另一条抛普通 `Error("Sandbox … not found")` 的路（dist/index.js 约 L4347）。"Invalid sandbox ID"（400，令牌本身是坏的）刻意**不**匹配——那是真 bug，该暴露出来，不该悄悄重建。 */
 function isE2bSandboxGone(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false;
@@ -296,14 +286,14 @@ function isE2bSandboxGone(error: unknown): boolean {
   return /sandbox\b.*\bnot found/i.test(error.message);
 }
 
-/** Retry budget for `resume`'s `connect` (see `resume` below). */
+/** `resume` 里那次 `connect` 的重试预算（见下面的 `resume`）。 */
 const E2B_RESUME_ATTEMPTS = 4;
 const E2B_RESUME_BACKOFF_MS = 500;
 
 const delay = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Wraps a live `e2b` sandbox as a `ProvisionedSandbox` (its sandboxId is the resume token; keepalive lives inside the adapter). */
+/** 把一个活着的 `e2b` 沙盒包成 `ProvisionedSandbox`（sandboxId 就是重连令牌；保活在适配器内部做）。 */
 function e2bProvisioned(
   sandbox: E2bSandbox,
   keepAlive: KeepAliveOptions,
@@ -319,7 +309,7 @@ function e2bProvisioned(
   };
 }
 
-/** Rewrites `https://github.com/owner/repo.git` → `https://x-access-token:$GH_TOKEN@github.com/...`. `$GH_TOKEN` stays literal — the sandbox shell expands it from the env var set via `Sandbox.create`'s `envs` (never interpolates the PAT into the command string, same discipline as `remoteAuth`). */
+/** 把 `https://github.com/owner/repo.git` 改写成 `https://x-access-token:$GH_TOKEN@github.com/...`。`$GH_TOKEN` 保持字面量不展开——由沙盒里的 shell 从 `Sandbox.create` 的 `envs` 设进去的环境变量展开，绝不把 PAT 拼进命令字符串（与 `remoteAuth` 同一套纪律）。 */
 function withTokenAuth(cloneUrl: string): string {
   return cloneUrl.replace(/^https:\/\//, 'https://x-access-token:$GH_TOKEN@');
 }
@@ -331,17 +321,17 @@ export function createE2bProvider(): SandboxProvider {
       const apiKey = requireEnv('E2B_API_KEY');
       const sandbox = await E2bSandbox.create({
         apiKey,
-        // Our own template instead of E2B's stock `base` — the only way to get
-        // more than base's 512 MiB, which `npm install` blows through
-        // (resources are baked in at template build time; see e2b-template.ts).
+        // 用我们自己的模板，而不是 E2B 自带的 `base`——这是唯一能拿到超过 base 那
+        // 512 MiB 内存的办法，而 `npm install` 一跑就爆（资源规格是模板构建时定死的，
+        // 见 e2b-template.ts）。
         template: resolveE2bTemplate(),
         timeoutMs: params.timeoutMs,
-        // Parity with Vercel `persistent`: auto-pause on idle timeout + auto-resume on traffic (full memory snapshot). docs/tech/sandbox-provider.md §5.
+        // 与 Vercel 的 `persistent` 对齐：闲置超时自动暂停 + 来流量自动恢复（整份内存快照）。docs/host/contract/tech/sandbox-provider.md §5。
         lifecycle: { onTimeout: 'pause', autoResume: true },
         envs: { GH_TOKEN: params.githubPat },
         metadata: { name: params.name },
       });
-      // E2B has no create-time git source — clone into the workspace root now.
+      // E2B 创建时没法指定 git 源——现在把仓库 clone 进工作区根目录。
       const clone = await sandbox.commands.run(
         `git clone --depth 1 ${withTokenAuth(params.cloneUrl)} ${E2B_WORKSPACE_ROOT}`,
         { timeoutMs: 2 * 60_000 },
@@ -358,14 +348,13 @@ export function createE2bProvider(): SandboxProvider {
       keepAlive: KeepAliveOptions,
     ): Promise<ResumeResult> {
       const apiKey = requireEnv('E2B_API_KEY');
-      // A sandbox that just auto-paused (lifecycle.onTimeout:'pause') can
-      // transiently 404 on `connect` for a moment while the platform settles
-      // the pause snapshot — observed in real-machine acceptance
-      // (docs/plans/sandbox-provider.md SP-6): the sandbox is actually still
-      // there and reconnectable seconds later. So retry a few times before
-      // concluding it's gone; a *persistent* not-found means re-create (which
-      // would lose un-pushed WIP, so it must not fire on a transient blip).
-      // `connect` auto-resumes a paused sandbox (lifecycle.autoResume).
+      // 刚刚自动暂停（lifecycle.onTimeout:'pause'）的沙盒，在平台落定暂停快照的那一小
+      // 会儿里，`connect` 可能短暂返回 404——真机验收时实测到过
+      // （docs/host/contract/plans/sandbox-provider.md SP-6）：沙盒其实还在，几秒后就连得上。
+      //
+      // 所以先重试几次再下「它没了」的结论。**持续**的 not-found 才意味着要重建，而重建
+      // 会丢掉还没推送的改动，绝不能被一次瞬时抖动触发。
+      // `connect` 会自动把暂停的沙盒恢复起来（lifecycle.autoResume）。
       let lastError: unknown;
       for (let attempt = 1; attempt <= E2B_RESUME_ATTEMPTS; attempt++) {
         try {
@@ -387,7 +376,7 @@ export function createE2bProvider(): SandboxProvider {
   };
 }
 
-// ---- host-side init plan (skill install + git config), run only on (re)create ----
+// ---- 宿主侧初始化脚本（装 skill + 配 git），只在（重新）创建时跑 ----
 
 interface InitScripts {
   installSkill: string;
@@ -397,7 +386,7 @@ interface InitScripts {
   gitExclude: string;
 }
 
-/** Same six commands as examples/12's `buildInitPlan` (docs/tech/sandbox.md §2.3/§2.4), minus default-branch detection (kept separate, see `detectDefaultBranch`). */
+/** 与 examples/12 的 `buildInitPlan` 同样那六条命令（docs/host/contract/tech/sandbox.md §2.3/§2.4），不含默认分支探测——那一步单独放在 `detectDefaultBranch` 里。 */
 function buildInitScripts(owner: string, repo: string): InitScripts {
   return {
     installSkill:
@@ -408,7 +397,7 @@ function buildInitScripts(owner: string, repo: string): InitScripts {
       'mkdir -p .agents/skills && cp -r /tmp/runko-skills-src/skills/frontend-design .agents/skills/)',
     gitIdentity:
       'git config user.name "runko-agent" && git config user.email "runko-agent@users.noreply.github.com"',
-    // PAT read from the sandbox's own $GH_TOKEN env var (set at create time), never interpolated here.
+    // PAT 由沙盒自己的 $GH_TOKEN 环境变量（创建时设进去的）提供，绝不在这里拼进字符串。
     remoteAuth: `git remote set-url origin "https://x-access-token:$GH_TOKEN@github.com/${owner}/${repo}.git"`,
     gitExclude: "printf '%s\\n' '.agents/' '.skills/' >> .git/info/exclude",
   };
@@ -435,7 +424,7 @@ async function installSkillAndConfigureGit(
 ): Promise<void> {
   const scripts = buildInitScripts(owner, repo);
 
-  await runScript(workspace, scripts.installSkill, 5 * 60_000); // best-effort — cloneFallback below is the actual success gate
+  await runScript(workspace, scripts.installSkill, 5 * 60_000); // 尽力而为——下面的 cloneFallback 才是真正的成功判据
   const fallback = await runScript(
     workspace,
     scripts.cloneFallback,
@@ -461,10 +450,10 @@ async function installSkillAndConfigureGit(
     );
   }
 
-  await runScript(workspace, scripts.gitExclude); // best-effort, not fatal
+  await runScript(workspace, scripts.gitExclude); // 尽力而为，失败也不致命
 }
 
-/** Recovers the conversation's branch: `git fetch && checkout` if it was pushed before, else create it fresh. Covers both the brand-new and the expired-snapshot cases (see file header). */
+/** 恢复会话分支：之前推送过就 `git fetch && checkout`，没推送过就新建一条。全新会话与快照过期两种情况都走这里（见文件头）。 */
 async function recoverSessionBranch(
   workspace: RunkoFS & RunkoExec,
   branchName: string,
@@ -488,7 +477,7 @@ async function recoverSessionBranch(
 
 const DEFAULT_BRANCH_FALLBACK = 'main';
 
-/** Parses `git symbolic-ref refs/remotes/origin/HEAD`'s stdout (e.g. "refs/remotes/origin/main\n") down to "main". */
+/** 把 `git symbolic-ref refs/remotes/origin/HEAD` 的标准输出（形如 "refs/remotes/origin/main\n"）截成 "main"。 */
 function parseDefaultBranchRef(stdout: string): string | undefined {
   const trimmed = stdout.trim();
   const idx = trimmed.lastIndexOf('/');
@@ -511,7 +500,7 @@ async function detectDefaultBranch(
   return parseDefaultBranchRef(result.stdout) ?? DEFAULT_BRANCH_FALLBACK;
 }
 
-// ---- SandboxManager: acquire/touch/release state machine ----
+// ---- SandboxManager：acquire/touch/release 状态机 ----
 
 export interface AcquireInput {
   conversationId: string;
@@ -522,12 +511,12 @@ export interface AcquireInput {
   repoOwner: string;
   repoName: string;
   githubPat: string;
-  /** Previously persisted [重连令牌](docs/terms.md): Vercel = sandboxName, E2B = stored sandboxId. `undefined` for a brand-new conversation → straight to create. */
+  /** 之前落库的[重连令牌](docs/terms.md)：Vercel 是 sandboxName，E2B 是存下来的 sandboxId。全新会话是 `undefined`，直接走创建。 */
   resumeToken?: string;
 }
 
 /**
- * 这次 `acquire()` 实际走了文件头三态里的哪一条（docs/tech/telemetry.md §2.4）
+ * 这次 `acquire()` 实际走了文件头三态里的哪一条（docs/ingress/tech/telemetry.md §2.4）
  * ——三者的耗时量级差着两个数量级（`cache` 零远程调用、`resume` 一次连接 +
  * 续期 + 一次 `git` 探测、`create` 还要 clone + 装 skill + 切分支），是「这一轮
  * 起得慢」时第一个要看的字段。纯观测用途：调用方不得据此改变行为，三态返回的
@@ -538,7 +527,7 @@ export type AcquireMode = 'cache' | 'resume' | 'create';
 export interface AcquiredSandbox {
   workspace: RunkoFS & RunkoExec;
   defaultBranch: string;
-  /** Current resume token — the route persists it (E2B's sandboxId is only known after create; Vercel's equals the name and is a no-op). */
+  /** 当前的重连令牌，由路由负责落库（E2B 的 sandboxId 只有创建之后才知道；Vercel 的等于沙盒名，落库等于没变）。 */
   resumeToken: string;
   /** 观测字段，见 `AcquireMode`。 */
   mode: AcquireMode;
@@ -554,20 +543,21 @@ export interface SandboxManager {
    * 自己做，不需要也不该由这里驱动，见文件头。
    */
   ensureLifetime(conversationId: string): Promise<void>;
-  /** Evicts the in-process cache entry (no provider call) — forces the next `acquire()` to go through `SandboxProvider.resume()` again. */
+  /** 把进程内的缓存项踢掉（不发任何远程调用）——逼下一次 `acquire()` 重新走一遍 `SandboxProvider.resume()`。 */
   release(conversationId: string): void;
 }
 
 interface ActiveSandbox {
   provisioned: ProvisionedSandbox;
   defaultBranch: string;
-  /** The provider that produced `provisioned` — needed to classify errors (`isGone`) raised by later operations on this handle. */
+  /** 产出 `provisioned` 的那个 provider——后续在这个句柄上的操作抛错时，要靠它来分类（`isGone`）。 */
   provider: SandboxProvider;
   /**
-   * When the platform-side timeout is expected to fire, i.e. the last
-   * create/resume/`extendIdle` + `idleTimeoutMs`. This is the cache's
-   * invalidation clock: past it, the handle is presumed stale and `acquire()`
-   * goes back through `resume()` instead of handing out a dead sandbox.
+   * 预计平台侧超时会在什么时候触发，也就是最后一次 create/resume/续期的时刻 +
+   * `idleTimeoutMs`。
+   *
+   * 它是缓存的失效时钟：过了这个点就认为句柄已经过期，`acquire()` 会重新走一遍
+   * `resume()`，而不是把一个已经死掉的沙盒交出去。
    */
   expiresAt: number;
 }
@@ -590,7 +580,7 @@ export function createSandboxManager(
   const active = new Map<string, ActiveSandbox>();
   const inflight = new Map<string, Promise<AcquiredSandbox>>();
 
-  /** Records that the platform-side deadline was just rolled forward to now + `idleTimeoutMs`. */
+  /** 记一笔：平台侧的到期时刻刚被推到「现在 + `idleTimeoutMs`」。 */
   function markAlive(entry: ActiveSandbox): void {
     entry.expiresAt = Date.now() + idleTimeoutMs;
   }
@@ -642,7 +632,7 @@ export function createSandboxManager(
         }
 
         /**
-         * 保活的**唯一**可观测出口（docs/features/sandbox-keepalive.md §3.5）：
+         * 保活的**唯一**可观测出口（docs/logic/orchestration/features/sandbox-keepalive.md §3.5）：
          * 续期动作发生在适配器内部，不打这行日志的话运维完全看不见它在不在工作。
          *
          * 怎么看这行判断正常：
@@ -691,7 +681,7 @@ export function createSandboxManager(
     });
   }
 
-  /** Cache entry that is still within its platform deadline, else `undefined` (and evicted). */
+  /** 返回还没过平台到期时刻的缓存项；过期的返回 `undefined`（并顺手踢掉）。 */
   function liveEntry(conversationId: string): ActiveSandbox | undefined {
     const entry = active.get(conversationId);
     if (entry === undefined) {
@@ -700,9 +690,8 @@ export function createSandboxManager(
     if (Date.now() < entry.expiresAt) {
       return entry;
     }
-    // Presumed paused/expired platform-side. Dropping it here is what makes the
-    // next acquire() reconnect instead of handing out a handle whose every call
-    // 404s (docs/plans/sandbox-provider.md SP-7 层 2).
+    // 认为平台侧已经暂停/过期了。在这里丢掉它，下一次 acquire() 才会去重连，而不是
+    // 交出一个每次调用都 404 的句柄（docs/host/contract/plans/sandbox-provider.md SP-7 层 2）。
     log.info(LOG_SCOPE, 'sandbox cache entry expired, will reconnect', {
       conversationId,
     });
@@ -763,9 +752,9 @@ export function createSandboxManager(
   }
 
   async function doAcquire(input: AcquireInput): Promise<AcquiredSandbox> {
-    // State 1: a cached handle that is still inside its platform deadline.
-    // `liveEntry` (not `active.get`) is the fix for "the process happily reused
-    // a handle whose sandbox the platform had already paused".
+    // 第 1 态：缓存里那个句柄还在平台到期时刻之内。
+    // 这里用 `liveEntry` 而不是 `active.get`，是为了不出现「平台早把沙盒暂停了，进程还
+    // 在高高兴兴复用那个句柄」。
     const cached = liveEntry(input.conversationId);
     if (cached !== undefined) {
       return toAcquired(cached, 'cache');
@@ -773,23 +762,22 @@ export function createSandboxManager(
 
     const provider = resolveProvider(input.provider);
 
-    // State 2: resume an existing snapshot by its persisted token.
+    // 第 2 态：用落库的令牌把已有快照恢复出来。
     if (input.resumeToken !== undefined) {
       const resumed = await provider.resume(
         input.resumeToken,
         keepAliveOptionsFor(input.conversationId),
       );
       if (resumed.kind === 'ok') {
-        // Roll the deadline forward explicitly rather than assuming what the
-        // platform did on resume — it is what makes `expiresAt` truthful for
-        // both providers (E2B's auto-resume resets the countdown with a 5-min
-        // floor; Vercel's `get` makes no such promise). One extra call, only on
-        // the resume path, never on a cache hit.
+        // 显式把到期时刻往后推，而不是去猜平台在 resume 时做了什么——这样
+        // `expiresAt` 对两家都是真话（E2B 的自动恢复会把倒计时重置，且有 5 分钟下限；
+        // Vercel 的 `get` 没有这种承诺）。代价是多一次调用，且只在 resume 这条路上，
+        // 缓存命中时不会发生。
         try {
           await resumed.sandbox.ensureLifetime(idleTimeoutMs);
         } catch (error) {
-          // Raced with the platform tearing it down between connect and
-          // extend → fall through to create rather than hand back a dead handle.
+          // 在 connect 与续期之间，平台正好把它拆了——落到创建那条路，而不是把一个
+          // 死句柄交回去。
           if (!provider.isGone(error)) {
             throw error;
           }
@@ -813,7 +801,7 @@ export function createSandboxManager(
       }
     }
 
-    // State 3: brand-new, or snapshot unavailable → create + re-run init + recover branch.
+    // 第 3 态：全新会话，或快照恢复不了 → 创建 + 重跑初始化 + 恢复分支。
     return await createAndRegister(input, provider);
   }
 
@@ -842,7 +830,7 @@ export function createSandboxManager(
       provider,
       expiresAt: 0,
     };
-    markAlive(entry); // create() already set the platform timeout to idleTimeoutMs
+    markAlive(entry); // create() 已经把平台超时设成了 idleTimeoutMs
     register(input.conversationId, entry, 'create');
     return toAcquired(entry, 'create');
   }
@@ -861,13 +849,13 @@ export function createSandboxManager(
       return promise;
     },
     /**
-     * Reactive half of cache invalidation (the TTL check in `acquire` is the
-     * proactive half): clocks drift, the platform may pause early, and a sandbox
-     * can be deleted out-of-band — so a "gone" error is also taken as proof the
-     * cached handle is dead, and the entry is evicted so the very next
-     * `acquire()` reconnects. Still rethrows: this call genuinely failed, and
-     * each caller decides whether that is fatal (the approval/question routes
-     * deliberately swallow it).
+     * 缓存失效的「被动」那一半（`acquire` 里的 TTL 检查是主动那一半）。
+     *
+     * 时钟会漂、平台可能提前暂停、沙盒也可能被带外删掉，所以一个「gone」错误同样被当作
+     * 「这个缓存句柄已经死了」的证据：踢掉缓存项，下一次 `acquire()` 就会去重连。
+     *
+     * 但仍然把错误重新抛出——这次调用确实失败了，是否致命由各个调用方自己决定
+     * （审批/提问那两条路由刻意吞掉它）。
      */
     ensureLifetime: extendDeadline,
     release(conversationId: string): void {

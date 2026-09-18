@@ -1,36 +1,23 @@
 /**
- * Wire-level schemas for the chat agent API (docs/tech/chat-webapp.md
- * §2.2, docs/tech/single-ledger.md §5/§6 "UIMessage 单账本" — P13-5-4
- * migration). The old `SessionEvent`/`SessionItem` mirror (`sessionItemSchema`/
- * `sessionEventSchema`) plus every server-invented wire sentinel built on top
- * of it (`user.message`, `turn.result`/`turn.failed`,
- * `approval.requested`/`approval.resolved`, `question.asked`/
- * `question.answered`) are retired — `@runko/core` no longer exports
- * `SessionEvent`/`SessionItem` at all (see that package's `state.ts`), and
- * `apps/node-server`'s own `schemas/chat.ts` (already migrated, P13-5-3) confirms
- * there's nothing left to mirror them with.
+ * chat agent API 的 wire 层 schema（docs/ingress/tech/chat-webapp.md §2.2、
+ * docs/logic/orchestration/tech/single-ledger.md §5/§6「UIMessage 单账本」）。
  *
- * The wire is now a stream of `ChatReplayFrame`s — a `ChunkEnvelope`
- * (`{ seq?, chunk }`, `seq` present ⇔ durable/replayable) or a `MessageFrame`
- * (`{ seq, message }`, only ever appears in replay, a finished
- * `RunkoUIMessage` verbatim) — see `apps/node-server/src/schemas/chat.ts`'s own
- * file header for the full rationale (this file's frame shapes are a
- * hand-written mirror of that server-side zod, not the kubb-generated
- * `gen/zod/chatChunkEnvelopeSchema.ts`/`chatMessageFrameSchema.ts`: kubb
- * infers `chunk`/`message` as bare `z.any()` from the OpenAPI `{}` schema
- * `apps/node-server` emits for them — see that file's own "controlled exception"
- * comment for why no schema exists to generate from — with no `seq`/`chunk`
- * `required` list either, which is looser than the real wire shape; this file
- * follows this repo's existing convention of hand-rolling schemas that need
- * more precision than kubb's OpenAPI-derived output can express, same as
- * before this migration).
+ * wire 上是一串 `ChatReplayFrame`，两支：`ChunkEnvelope`（`{ seq?, chunk }`，带
+ * `seq` ⇔ 可持久、可回放）与 `MessageFrame`（`{ seq, message }`，只出现在回放里，
+ * 是一条已完成的 `RunkoUIMessage` 原文）。完整理由见
+ * `apps/node-server/src/schemas/chat.ts` 自己的文件头。
+ *
+ * 这里的帧形状是那份服务端 zod 的**手写镜像**，不是 kubb 生成的
+ * `gen/zod/chatChunkEnvelopeSchema.ts`/`chatMessageFrameSchema.ts`。原因：
+ * `apps/node-server` 给 `chunk`/`message` 发出的 OpenAPI schema 是 `{}`，kubb 只能
+ * 从它推出裸 `z.any()`，也推不出 `seq`/`chunk` 的 `required` 列表，比真实 wire 形状
+ * 松。需要比 kubb 的 OpenAPI 产物更精确时就手写一份，是本仓库既有的惯例。
  */
 import type { RunkoChunk, RunkoUIMessage } from '@runko/core';
 import { z } from 'zod';
 
-// ---- JsonValue (packages/core/src/types.ts) — still useful client-side for
-// narrowing a tool part's `unknown` input/output (see `timeline.ts`'s
-// `parseJsonValue`) ----
+// ---- JsonValue（packages/core/src/types.ts）——客户端这边用它把工具部件那个
+// `unknown` 的 input/output 收窄（见 `timeline.ts` 的 `parseUnknownJsonValue`） ----
 
 export type JsonValue =
   string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
@@ -46,37 +33,33 @@ export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   ]),
 );
 
-// ---- ChatReplayFrame (apps/node-server's `schemas/chat.ts`) ----
+// ---- ChatReplayFrame（`apps/node-server` 的 `schemas/chat.ts`） ----
 
 /**
- * Controlled exception (same rationale as `apps/node-server/src/schemas/chat.ts`'s
- * own `runkoChunkSchema`/`runkoUIMessageSchema`): `RunkoChunk`/`RunkoUIMessage`
- * (ai's `UIMessageChunk`/`UIMessage`, instantiated in `@runko/core`'s
- * `state.ts`) have no zod schema this file can reuse — `z.any()` is the same
- * escape hatch this file has always used for structurally-unschemaable
- * external types (`jsonValueSchema` above didn't need it, but this repo's
- * `apps/node-server` established the pattern for exactly this case), contained by
- * a `z.ZodType<T>` annotation so every consumer of the exported schema still
- * sees the precise TypeScript type — `any` never leaks past this one
- * declaration. Both only ever parse a value that has already round-tripped
- * through `JSON.parse()` (an SSE `data:` payload, or a fetched
- * `GET .../messages` JSON body) — the server already validated the real
- * `RunkoChunk`/`RunkoUIMessage` shape before ever serializing it, so this
- * boundary only needs "is this JSON, structurally, in the right envelope
- * shape" — not a redundant re-implementation of `@runko/core`'s own
- * `validateSessionMessages()`/ai's `validateUIMessages()`.
+ * 受控例外，理由与 `apps/node-server/src/schemas/chat.ts` 自己那份
+ * `runkoChunkSchema`/`runkoUIMessageSchema` 相同。
+ *
+ * `RunkoChunk`/`RunkoUIMessage`（ai 的 `UIMessageChunk`/`UIMessage`，在
+ * `@runko/core` 的 `state.ts` 里实例化）没有可复用的 zod schema，只能用 `z.any()`。
+ * 逃逸被 `z.ZodType<T>` 标注圈住：导出 schema 的每个消费者看到的仍是精确的
+ * TypeScript 类型，`any` 不会越过这一行声明。
+ *
+ * 这里只需要「结构上是不是这个信封形状」，不需要重做一遍深层校验：两者解析的值
+ * 都已经过 `JSON.parse()`（SSE 的 `data:` 载荷，或 `GET .../messages` 的 JSON 响应
+ * 体），而服务端在序列化之前就已经校验过真实的 `RunkoChunk`/`RunkoUIMessage` 形状。
  */
 const runkoChunkSchema: z.ZodType<RunkoChunk> = z.any();
 
-/** Same rationale as `runkoChunkSchema` above, for `RunkoUIMessage` (`MessageFrame.message`). */
+/** 同上，对应 `RunkoUIMessage`（`MessageFrame.message`）。 */
 const runkoUIMessageSchema: z.ZodType<RunkoUIMessage> = z.any();
 
 /**
- * `{ seq?, chunk }` — the live tail's own wire shape (`seq` present ⇔
- * durable/replayable, absent ⇔ ephemeral — `text-delta`/`reasoning-delta`/any
- * `transient: true` data part, docs/tech/single-ledger.md §5 单-3), also reused with `seq`
- * always present for a replayed `kind = 'chunk'` row (the in-progress or
- * crashed turn's durable chunks).
+ * `{ seq?, chunk }` —— 直播流自己的 wire 形状：带 `seq` ⇔ 可持久、可回放；没有
+ * `seq` ⇔ 一次性（`text-delta`/`reasoning-delta`/任何 `transient: true` 的数据部件，
+ * docs/logic/orchestration/tech/single-ledger.md §5 单-3）。
+ *
+ * 回放里 `kind = 'chunk'` 的行也复用这个形状，只是 `seq` 恒有（那是进行中或崩溃那
+ * 一轮留下的可持久 chunk）。
  */
 export const chunkEnvelopeSchema = z.object({
   seq: z.number().int().optional(),
@@ -86,10 +69,9 @@ export const chunkEnvelopeSchema = z.object({
 export type ChunkEnvelope = z.infer<typeof chunkEnvelopeSchema>;
 
 /**
- * `{ seq, message }` — replay-only: a finished `RunkoUIMessage`, read back
- * verbatim from a `kind = 'message'` row. Never appears on the live tail's
- * own broadcast path (a message row is only ever written once a turn has
- * already finished).
+ * `{ seq, message }` —— 只在回放里出现：一条已完成的 `RunkoUIMessage`，从
+ * `kind = 'message'` 的行原样读回。它不会走直播流的广播路径（message 行只有在
+ * 一轮已经结束之后才会写）。
  */
 export const messageFrameSchema = z.object({
   seq: z.number().int(),
@@ -100,7 +82,7 @@ export type MessageFrame = z.infer<typeof messageFrameSchema>;
 
 /**
  * 一条[排队](../../../../../docs/terms.md)中的待发消息（`apps/node-server` 的
- * `schemas/chat.ts` `QueuedMessageSchema` 的手写镜像，docs/tech/steer-and-queue.md §2.2）。
+ * `schemas/chat.ts` `QueuedMessageSchema` 的手写镜像，docs/logic/orchestration/tech/steer-and-queue.md §2.2）。
  */
 export const queuedMessageSchema = z.object({
   id: z.string(),
@@ -114,7 +96,7 @@ export type QueuedMessage = z.infer<typeof queuedMessageSchema>;
 /**
  * `{ queue }` — 队列状态快照。两处共用：直播流的第三种帧（每条连接回放后必发一帧，
  * 队列变化时再广播；**没有 `seq`**，因为它是状态快照而非[账本](../../../../../docs/terms.md)
- * 事件，docs/tech/steer-and-queue.md §4.3），以及两个队列端点的响应体。
+ * 事件，docs/logic/orchestration/tech/steer-and-queue.md §4.3），以及两个队列端点的响应体。
  */
 export const queueFrameSchema = z.object({
   queue: z.array(queuedMessageSchema),
@@ -124,14 +106,12 @@ export type QueueFrame = z.infer<typeof queueFrameSchema>;
 
 /**
  * `POST .../messages` 的响应（`apps/node-server` 的 `StartTurnAckSchema` 的手写镜像，
- * docs/tech/steer-and-queue.md §4.1）：`mode` 是服务端**实际**怎么处理了这条消息。
+ * docs/logic/orchestration/tech/steer-and-queue.md §4.1）：`mode` 是服务端**实际**怎么处理了这条消息。
  *
  * 分流完全由服务端判定、客户端不预判，所以 `mode` 可能与请求的 `intent` 不一致——
  * 目前有一档会：请求 [插话](../../../../../docs/terms.md) 但那一轮还卡在
  * [起轮装配](../../../../../docs/terms.md)里时插不进去，服务端只能给它
- * [排队](../../../../../docs/terms.md)，回 `'queued'`（docs/tech/turn-abort.md §3.3）。
- * 曾经还有一档 `'aborted'`，随[轮编排运行时](../../../../../docs/logic/orchestration/plans/agent-runtime.md)
- * 落地取消了——起轮占位成了装配的第一件事，服务端一登记就回 `'started'`。
+ * [排队](../../../../../docs/terms.md)，回 `'queued'`（docs/logic/orchestration/tech/turn-abort.md §3.3）。
  */
 export const startTurnAckSchema = z.object({
   ok: z.literal(true),
@@ -142,7 +122,7 @@ export type StartTurnMode = z.infer<typeof startTurnAckSchema>['mode'];
 
 /**
  * `POST .../abort` 的响应（`apps/node-server` 的 `AbortTurnAckSchema` 的手写镜像，
- * docs/tech/turn-abort.md §3.2）：`ok` 只表示[停止](../../../../../docs/terms.md)**已
+ * docs/logic/orchestration/tech/turn-abort.md §3.2）：`ok` 只表示[停止](../../../../../docs/terms.md)**已
  * 请求**，「已停止」这个结果照旧走直播流上那条 `status: 'interrupted'` 的
  * `message-metadata`；`queue` 是清空后的队列快照（恒为空数组，停止即清空队列）。
  */
@@ -153,26 +133,20 @@ export const abortTurnAckSchema = z.object({
 
 /**
  * `{ turnActive }` — [轮状态快照](../../../../../docs/terms.md)（`apps/node-server` 的
- * `turnStateFrameSchema` 的手写镜像，docs/tech/chat-webapp.md §5.1）。每条
+ * `turnStateFrameSchema` 的手写镜像，docs/ingress/tech/chat-webapp.md §5.1）。每条
  * `GET .../stream` 在回放之后、进入直播之前必发一帧，内容是**服务端**此刻对
  * 「这个会话有没有[轮](../../../../../docs/terms.md)在跑」的权威答案。
- *
- * 它取代了本文件曾经唯一的信息源——「回放最后一帧是不是 chunk」那个猜测
- * （`use-chat-messages.ts` 的 `lastFrameIsChunk`，现在只作 tail 连上前的临时初值）。
- * 那个猜测在一轮**崩溃**后会长期失准且永不自愈，后果是用户发的消息一律走
- * [排队](../../../../../docs/terms.md)、没有乐观回显、而且永远等不到
- * [出队](../../../../../docs/terms.md)。
  */
 export const turnStateFrameSchema = z.object({ turnActive: z.boolean() });
 
 export type TurnStateFrame = z.infer<typeof turnStateFrameSchema>;
 
 /**
- * Every wire frame this app can ever receive is a `ChunkEnvelope`, a
- * `MessageFrame`, a `QueueFrame`, or a `TurnStateFrame` — told apart
- * structurally (which of `chunk`/`message`/`queue`/`turnActive` the object
- * actually carries), same discipline `apps/node-server`'s own
- * `chatReplayFrameSchema` uses (no shared literal discriminant field).
+ * 这个应用能收到的 wire 帧只有四种：`ChunkEnvelope`、`MessageFrame`、`QueueFrame`、
+ * `TurnStateFrame`。靠**结构**区分（对象实际带的是 `chunk`/`message`/`queue`/
+ * `turnActive` 里的哪一个），没有共享的字面量判别字段——`apps/node-server` 自己的
+ * `chatReplayFrameSchema` 用的是同一套纪律。
+ *
  * 顺序无关紧要：zod v4 里 object schema 缺失的 `z.any()` 字段算校验失败，所以四支
  * 互不吞并（服务端同一份注释）。
  */
@@ -207,7 +181,7 @@ export function isTurnStateFrame(
 /**
  * 一个帧的 `seq`——`QueueFrame` 与 `TurnStateFrame` **恒无 seq**（都是状态快照，不是
  * [账本](../../../../../docs/terms.md)事件，所以不落盘、不参与 `after=` 续传；
- * docs/tech/steer-and-queue.md §4.3、docs/tech/chat-webapp.md §5.1），于是与 ephemeral
+ * docs/logic/orchestration/tech/steer-and-queue.md §4.3、docs/ingress/tech/chat-webapp.md §5.1），于是与 ephemeral
  * chunk 在去重/续传簿记上走同一条「没有 seq」的路径。
  */
 export function frameSeq(frame: ChatReplayFrame): number | undefined {
@@ -217,7 +191,7 @@ export function frameSeq(frame: ChatReplayFrame): number | undefined {
   return frame.seq;
 }
 
-/** `GET .../messages` response shape — `{ frames: ChatReplayFrame[] }`, not a bare array (docs/tech/chat-webapp.md §2.2 "契约细化"). */
+/** `GET .../messages` 的响应形状——`{ frames: ChatReplayFrame[] }`，不是一个裸数组（docs/ingress/tech/chat-webapp.md §2.2「契约细化」）。 */
 export const conversationMessagesListSchema = z.object({
   frames: z.array(chatReplayFrameSchema),
 });
@@ -225,10 +199,10 @@ export const conversationMessagesListSchema = z.object({
 export type ChatMessagesList = z.infer<typeof conversationMessagesListSchema>;
 
 /**
- * Parses one SSE `data:` payload's JSON text into a `ChatReplayFrame`.
- * `JSON.parse`'s stdlib return type is `any` — contained to this one
- * expression by assigning straight into a `zod.safeParse()` call rather than
- * a typed variable, so no `any` value ever escapes this function.
+ * 把一条 SSE `data:` 载荷的 JSON 文本解析成 `ChatReplayFrame`。
+ *
+ * `JSON.parse` 的标准库返回类型是 `any`。这里把它直接喂给 `zod.safeParse()`、不落进
+ * 任何具名的有类型变量，`any` 因此被圈在这一个表达式里，不会逃出本函数。
  */
 export type ParsedFrameResult =
   { ok: true; frame: ChatReplayFrame } | { ok: false; error: string };
@@ -250,8 +224,8 @@ export function parseChatReplayFrame(raw: string): ParsedFrameResult {
   return { ok: true, frame: result.data };
 }
 
-// ---- Conversation (apps/node-server's `conversations` row, camelCase over the
-// wire — unaffected by the UIMessage-ledger migration) ----
+// ---- Conversation（`apps/node-server` 的 `conversations` 行，wire 上走
+// camelCase） ----
 
 export const conversationStatusSchema = z.enum([
   'active',
@@ -261,13 +235,13 @@ export const conversationStatusSchema = z.enum([
 
 export type ConversationStatus = z.infer<typeof conversationStatusSchema>;
 
-/** 沙盒 provider（docs/tech/sandbox-provider.md）——这次会话跑在哪家云沙盒上，建会话时选定、1:1 绑定。 */
+/** 沙盒 provider（docs/host/contract/tech/sandbox-provider.md）——这次会话跑在哪家云沙盒上，建会话时选定、1:1 绑定。 */
 export const conversationProviderSchema = z.enum(['vercel', 'e2b']);
 
 export type ConversationProvider = z.infer<typeof conversationProviderSchema>;
 
 /**
- * [skill 清单](../../../../../docs/terms.md)的一条（docs/tech/composer-skill-mention.md §5.2）——
+ * [skill 清单](../../../../../docs/terms.md)的一条（docs/ingress/tech/composer-skill-mention.md §5.2）——
  * [composer](../../../../../docs/terms.md) 里打 `/` 时列的就是它：`name` 上屏做
  * [skill 提及](../../../../../docs/terms.md)的字面量，`description` 是菜单里那行灰字。
  */
@@ -287,10 +261,10 @@ export const conversationSchema = z.object({
   provider: conversationProviderSchema,
   status: conversationStatusSchema,
   lastActiveAt: z.string(),
-  /** 这个会话的[待发队列](../../../../../docs/terms.md)——页面加载时的初始快照，之后由 `QueueFrame` 与队列端点响应刷新（docs/tech/steer-and-queue.md §4.2）。 */
+  /** 这个会话的[待发队列](../../../../../docs/terms.md)——页面加载时的初始快照，之后由 `QueueFrame` 与队列端点响应刷新（docs/logic/orchestration/tech/steer-and-queue.md §4.2）。 */
   queuedMessages: z.array(queuedMessageSchema),
   /**
-   * 这个会话当前可选的 [skill 清单](../../../../../docs/terms.md)（docs/tech/composer-skill-mention.md §2.1）。
+   * 这个会话当前可选的 [skill 清单](../../../../../docs/terms.md)（docs/ingress/tech/composer-skill-mention.md §2.1）。
    *
    * `.default([])` 不是可有可无的宽容：服务端读的是库缓存列，会话建于本功能上线前、
    * 或那一列坏掉时都会给出空清单，前端这边应当照常渲染一个「没有 skill 可选」的
@@ -303,11 +277,12 @@ export const conversationSchema = z.object({
    * 挂载时的初值，撑到直播流那帧[轮状态快照](../../../../../docs/terms.md)到达为止。
    *
    * **必填，跟生成的契约一致**（`openapi.yml` 把它列进了 `required`，`gen/zod/` 也是
-   * `z.boolean()`）。这里曾经写 `.default(false)`，理由是「给本字段上线前建的会话留
-   * 兼容位」——但那个理由不成立：它是**每次请求现算**的（服务端读起轮标记那一列），
-   * 不是存在会话行上的值，老会话照样有。留着 default 的实际后果是：将来字段改名时
-   * 前端不会报错，而是静默退回 `false`——正好就是这个字段当初要修的那个 bug
-   * （有轮在跑却显示空闲）。
+   * `z.boolean()`）。
+   *
+   * **别给它加 `.default(false)`。** 它是**每次请求现算**的（服务端读起轮标记那一
+   * 列），不是存在会话行上的值，所以不存在「老会话没有这个字段」的兼容问题。加了
+   * default 的实际后果反而是：将来字段改名时前端不报错，而是静默退回 `false`——正好
+   * 就是这个字段要解决的那个 bug（有轮在跑却显示空闲）。
    */
   turnInProgress: z.boolean(),
   createdAt: z.string(),
@@ -317,7 +292,7 @@ export type Conversation = z.infer<typeof conversationSchema>;
 
 export const conversationListSchema = z.array(conversationSchema);
 
-// ---- turn 遥测明细（docs/tech/chat-webapp.md §11.4，GET .../turns/{turn}/telemetry） ----
+// ---- turn 遥测明细（docs/ingress/tech/chat-webapp.md §11.4，GET .../turns/{turn}/telemetry） ----
 
 /** 一条遥测事件：`payloadJson` 是服务端收敛后的事件 JSON 原文（形状随 ai 小版本演化，前端按需解析、缺字段跳过，不在这里深度建模）。 */
 export const turnTelemetryEventSchema = z.object({

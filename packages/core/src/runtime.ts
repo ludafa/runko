@@ -1,75 +1,53 @@
 /**
- * L2 运行层：`ToolRuntime` 的单次调用执行体（docs/tech/core-sdk.md §4.1 ToolContext 组装 /
- * §4.5 审批链集成点 / §4.2 file_change/plan_update 派生数据接缝；
- * docs/tech/single-ledger.md §6 P13-5-2c 三值重构）。只处理"一次工具
- * 调用"，不含 loop/session（P4-2）：不发 `SessionEvent`、不维护跨调用的
- * readState（那是文件工具 + session 的职责，见 `@runko/virtual-fs` 的
- * `createFileTools`），不做 abort 特判（execute() 因 abort 抛出时自然落入
- * "failed" 分支，与其他运行时错误同一条路径，不需要单独语义）。
+ * L2 运行层：**一次工具调用**的执行体。不含 loop / session 的任何东西——不维护跨调用的
+ * readState（那是文件工具与 session 的职责），也不对 abort 做特判（`execute()` 因 abort 抛出
+ * 时自然落进 "failed" 分支，与其它运行时错误走同一条路）。
  *
- * ---- 拆分为两步（P13-5-2c 核心变化，docs/tech/single-ledger.md §6.4） ----
+ * ## 为什么是两个函数，不是一个
  *
- * 旧实现把"输入校验 → 审批链 → 执行 → 输出校验"揉进一个原子 `executeToolCall`
- * 调用，`review`（旧 "always"/"once"）结果因此只能在**审批已经做完**之后被
- * 编码成 chunk——挂起等人审期间界面看不到待审批信号（P13-5-2c 工单原文，
- * docs/tech/single-ledger.md §6 引言"事后补记只对模型恢复正确，对直播交互失效"）。三值化之后，
- * `review` 需要 loop 先 `yield tool-approval-request` chunk、再 `await` 人工
- * 裁决——这个"先产出后阻塞"的中间点是一次 `await` 边界，不可能塞进一个返回
- * `Promise` 的普通函数内部让调用方在中途取值，因此本文件把原子调用拆成两个
- * 独立函数，由 `loop.ts`（一个 async generator）在中间插入 yield/await：
+ * 「输入校验 → 审批 → 执行 → 输出校验」刻意**没有**揉进一个原子调用：
  *
- *   1. `resolveToolCallApproval`：`tool.inputSchema.safeParse` 校验模型产生
- *      的（可能畸形的）JSON 输入 → 失败即 "invalid" 并回填指导性错误 →
- *      审批链（`evaluateApproval`，见 approval.ts）→ `allow`/`deny`/`review`
- *      三值直接映射为返回的 `status`；`deny` 回填拒绝理由，`review` 额外带
- *      `markOnceOnApprove`（是否要在人工 allow 后标记 once 记忆，见
- *      approval.ts 头注释）。这一步不执行工具、不建 `ToolContext`。
- *   2. `executeToolCall`：只做"执行"——组装 `ToolContext` → 调
- *      `tool.execute()` → throw 即 "failed" 并回填错误消息，不崩 loop →
- *      `outputSchema`（若声明）校验返回值，不匹配同样是 "failed" → 成功即
- *      "completed"。输入是调用方（`loop.ts`）已经从第 1 步拿到的、已校验/已
- *      获批的 `JsonValue`——这里不再重复 `safeParse`，也不再触碰审批。
+ * 1. **`resolveToolCallApproval`**——`tool.inputSchema.safeParse` 校验模型产生的（可能畸形的）
+ *    输入，失败即 "invalid" 并回填指导性错误；然后走审批链（`evaluateApproval`），
+ *    `allow` / `deny` / `review` 三值直接映射成返回的 `status`。**不执行工具，不建
+ *    `ToolContext`。**
+ * 2. **`executeToolCall`**——只做执行：组装 `ToolContext` → 调 `tool.execute()` → 抛错即
+ *    "failed" 并回填错误消息（不崩 loop）→ 声明了 `outputSchema` 就校验返回值，不匹配同样是
+ *    "failed" → 成功即 "completed"。入参是第 1 步已校验、已获批的值，**这里不重复
+ *    `safeParse`，也不碰审批**。
  *
- * `loop.ts` 对每次工具调用先调 1，`allow` 时立即调 2；`review` 时先 yield
- * 审批请求 chunk、`await` 人审通道拿到 `HumanDecision`，`allow` 才调 2、
- * `deny` 直接回填人工给出的理由；`deny`（第 1 步自己的结果）不调 2。
- * `ToolCallStatus`/`ToolCallResult` 因此只剩 "completed"/"failed"——"denied"
- * 整体从这一层移除，denial 的编码（`tool-output-denied` chunk + 拒绝理由回填）
- * 完全是 `loop.ts` 的职责，`executeToolCall` 不再需要认识"拒绝"这个概念。
- * `ToolReturn` 的模型可读序列化（string 直传/对象 `JSON.stringify`）同样不在
- * 这里做——那是"回填层"（`loop.ts`，把 `ToolReturn` 塞进工具部件/`tool-result`）
- * 的职责，这里 "completed" 状态的 `output` 字段原样是 `tool.execute()` 的
- * 返回值。
+ * 拆开的理由是 `review`：那条路要在两步之间先 yield 出审批请求、再 await 人工裁决，而
+ * 「先产出、后阻塞」是一个 `await` 边界，塞不进一个返回 `Promise` 的普通函数里让调用方中途
+ * 取值。所以中间那一段由 `loop.ts`（async generator）插入，见它的文件头。
  *
- * ---- 派生数据接缝（工单要求写清形状与理由） ----
+ * 由此，`ToolCallStatus` 只剩 "completed" / "failed"——**"denied" 不在这一层**。拒绝的编码
+ * （`tool-output-denied` chunk + 理由回填）整个是 `loop.ts` 的事，`executeToolCall` 根本不
+ * 认识「拒绝」这个概念。同理，`ToolReturn` 的模型可读序列化也不在这里做，"completed" 的
+ * `output` 字段原样就是 `tool.execute()` 的返回值。
  *
- * `file_change`/`plan_update` 派生数据的"生产者"是具体工具的 `execute()`
- * 实现（如 update-plan、未来的文件工具），"消费者"是 P4-2 的 loop（用它拼
- * `SessionItem`）。两者中间需要一个通道——`Tool.execute()` 的返回值类型被
- * spec 钉死为 `ToolReturn`（模型可读的单一值），没有第二个返回通道；
- * `ToolContext` 的字段也被 spec §4.1 钉死为 fs/abortSignal/callId/session/
- * getSkill/update 六个，本工单不允许改 `types.ts`，因此不能在 `ToolContext`
- * 上加一个新字段当通道。
+ * ## 派生数据为什么走「构造期回调」而不是 `ToolContext`
  *
- * 采用的方案与 `@runko/virtual-fs` 的 `createFileTools(opts).onFileChange`
- * 是同一个接缝家族（P2-2 已确立的先例，见该包 `tools/shared.ts` 顶部注释）：
- * 派生数据回调在**工具构造期**（`createUpdatePlanTool(opts)` 之类的工厂
- * 调用时）注入给工具，工具的 `execute()` 内部直接调用它上报——不经过
- * `ToolContext`，因此不需要改 spec 钉死的接口形状。这里的 `runtime.ts` 提供
- * `DerivedDataCollector`：一个在每次 `executeToolCall` 前后"清空 → 收集 →
- * 取走"的收集器，调用方在构造工具集时把它的 `recordFileChange`/
- * `recordPlanUpdate` 方法接成对应工具的回调选项，再把同一个收集器实例传给
- * 每次 `executeToolCall`。runtime 因此完全不需要认识"这次调用的是哪个具体
- * 工具"——它只是在 `execute()` 前后各读一次收集器的状态，把这次调用期间新
- * 增的记录归到这次调用的结果上。这个设计假设同一个收集器不会被并发的
- * `executeToolCall` 调用共享（P4-2 的 loop 目前是逐个工具调用顺序执行，
- * 该假设成立；未来若引入并发工具调用，需要给收集器加调用范围隔离，不在本
- * 工单范围）。
+ * `file_change` / `plan_update` 这类派生数据，生产者是具体工具的 `execute()`，消费者是 loop。
+ * 中间需要一条通道，而两条显而易见的路都堵死了：`Tool.execute()` 的返回值类型是
+ * `ToolReturn`（模型可读的单一值），没有第二个返回通道；`ToolContext` 的字段是定死的六个。
+ *
+ * 于是走**工具构造期注入**：工厂函数（如 `createUpdatePlanTool(opts)`）收下回调，`execute()`
+ * 内部直接调它上报——不经过 `ToolContext`，接口形状一个字不用改。这与
+ * `@runko/virtual-fs` 的 `createFileTools(opts).onFileChange` 是同一个接缝家族。
+ *
+ * 本文件提供 `DerivedDataCollector`：每次 `executeToolCall` 前后「清空 → 收集 → 取走」。
+ * 调用方构造工具集时把它的 `recordFileChange` / `recordPlanUpdate` 接成工具的回调选项，再把
+ * **同一个实例**传给每次 `executeToolCall`。runtime 因此完全不需要知道这次调的是哪个工具
+ * ——它只在 `execute()` 前后各读一次收集器，把这期间新增的记录归给这次调用。
+ *
+ * ⚠️ **这里有一个前提：同一个收集器不会被并发的 `executeToolCall` 共享。** 目前 loop 是逐个
+ * 工具顺序执行，前提成立。**将来若引入并发工具调用，必须先给收集器加调用范围隔离**，否则
+ * 派生数据会串到别的调用上。
  */
 import type { ApprovalContext, ApprovalPolicy, JsonValue, RunkoFS, SkillHandle, Tool, ToolContext, ToolReturn } from "./types.js";
 import { evaluateApproval, type OnceApprovalMemory } from "./approval.js";
 
-// ---- 派生数据（docs/tech/core-sdk.md §4.2 SessionItem 的 file_change.changes / plan_update.items 字段对齐） ----
+// ---- 派生数据：工具上报、loop 消费（形状与理由见文件头） ----
 
 export interface ToolCallFileChange {
   path: string;
@@ -203,7 +181,7 @@ export interface ExecuteToolCallOptions {
   /**
    * `ctx.getSkill` 的真实现（P5，`@runko/core/skills/registry.js` 的
    * `createGetSkill`）：`session.ts` 经 `loop.ts` 把它一路传下来。未提供时退回
-   * `createPlaceholderGetSkill()`（P4-1 遗留占位，见下）——这保持了
+   * `createPlaceholderGetSkill()`（占位实现，见下）——这保持了
    * `executeToolCall` 作为独立原语（不经 session/loop 直接调用，如本文件的
    * 单测）在未接线 skills 时行为不变，不需要任何调用方跟着改。
    */
@@ -227,10 +205,9 @@ function describeError(error: unknown): string {
 
 /**
  * `ctx.getSkill` 的占位实现：只在 `executeToolCall` 未接到真实
- * `getSkill`（`ExecuteToolCallOptions.getSkill`）时使用——`session.ts` 走的
- * 正常路径（经 `loop.ts`）总会传入 P5 的真实现（`createGetSkill`），这个占位
- * 只在绕过 session 直接调用 `executeToolCall` 时（如本文件/`loop.ts` 的既有
- * 单测）保留 P4-1 的原有行为，不需要那些测试跟着 P5 改。
+ * `getSkill`（`ExecuteToolCallOptions.getSkill`）时使用——`session.ts` 走的正常路径
+ * （经 `loop.ts`）总会传入真实现（`createGetSkill`）。这个占位只为「绕过 session 直接调
+ * `executeToolCall`」这种用法（比如本文件与 `loop.ts` 的单测）兜底。
  */
 function createPlaceholderGetSkill(): (name: string) => SkillHandle {
   return (name) => ({

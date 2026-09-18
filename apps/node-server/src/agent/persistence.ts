@@ -4,7 +4,7 @@
  * [待发队列](../../../../docs/terms.md)）+ [归属仲裁机制](../../../../docs/terms.md)，
  * 全部架在既有的 drizzle schema 上。
  *
- * **为什么不装 `@runko/persist-sql`**：这个应用本来就有自己的 ORM 和领域模型，再引一个
+ * **为什么不装官方的 `@runko/persist-*` 包**：这个应用本来就有自己的 ORM 和领域模型，再引一个
  * 持久化包等于在同一个进程里出现第二套数据访问方式。框架的设计正是「逻辑层定义模型、
  * 宿主负责存」——宿主自己实现这四个接口是**头等路径**，不是降级方案。顺带这也是对
  * 接口最真实的检验：它必须能架在别人已有的表上，而不是逼别人跑 runko 的迁移。
@@ -457,7 +457,8 @@ export interface ChatArbitrationOptions {
  *
  * 这一档**不需要 CAS**：better-sqlite3 全同步，单进程内「读-判断-写」中间插不进别的
  * 东西。上多进程时这里要换成带心跳与[租期标识](../../../../docs/terms.md)的租约版
- * （`@runko/persist-sql`），轮编排一行不用改。
+ * ——`@runko/persist-kysely` 的 `leaseArbitration()`，或四个薄壳的 `sqliteArbitration()` /
+ * `postgresArbitration()` / `mysqlArbitration()` / `mongoArbitration()`。轮编排一行不用改。
  */
 export function createChatArbitration(
   db: Db,

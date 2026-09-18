@@ -1,60 +1,54 @@
 /**
- * The chat feature's core deliverable (docs/tech/chat-webapp.md §2.2b, the P12-4 rewrite,
- * carried over verbatim through the P13-5-4 UIMessage-ledger migration): turn
- * *execution* and *connection* are decoupled — `sendMessage` only fires
- * `POST .../messages` (starts the turn server-side, independent of any
- * request/response lifetime) and then (re)opens the resumable live tail
- * (`GET .../stream?after=<seq>`); the tail is *also* opened unconditionally
- * on mount, so a page refresh/HMR reload/tab restore reconnects to whatever
- * turn was still in flight before the reload, picking its remaining frames
- * up exactly where the last connection left off.
+ * chat 功能的核心交付物（docs/ingress/tech/chat-webapp.md §2.2b）：把一轮的**执行**
+ * 与**连接**解耦。
  *
- * `turnInProgressRef` is the hook's own belief about whether *this* conversation
- * currently has a turn running. It gates: (a) which of the two `sendMessage`
- * branches below runs (start a new turn vs. queue/steer the in-progress one —
- * STEER-3B), (b) whether a tail that just ended (cleanly or via error) should
- * reconnect.
+ * `sendMessage` 只做两件事——发 `POST .../messages`（服务端就此起一轮，与任何一次
+ * 请求/响应的生命周期无关），然后（重）开那条可续传的直播流
+ * （`GET .../stream?after=<seq>`）。直播流在挂载时也会无条件开一次，所以刷新页面、
+ * HMR 重载、标签页恢复都能重新连上刷新前还在跑的那一轮，从上次断开的地方接着收帧。
+ *
+ * `turnInProgressRef` 是本 hook 自己对「**这个**会话现在有没有轮在跑」的判断。它决定
+ * 两件事：(a) `sendMessage` 走下面两条分支里的哪一条（起新一轮，还是排队/插话到进行
+ * 中的那一轮）；(b) 一条刚结束的直播流（正常结束或出错结束）要不要重连。
  *
  * 它有三个写入源，权威性递增：
  *
  * 1. **挂载时的初值**（会话详情的 `turnInProgress`，服务端读[起轮标记](../../../../../docs/terms.md)
  *    那一列给出）：只用来撑到 tail 连上的那几十毫秒。
- * 2. **`MessageLedger` 的 `onTurnEnd`**（docs/tech/single-ledger.md §5 单-3 那条收尾
+ * 2. **`MessageLedger` 的 `onTurnEnd`**（docs/logic/orchestration/tech/single-ledger.md §5 单-3 那条收尾
  *    `message-metadata`）：一轮真正结束的那一刻翻假。
  * 3. **[轮状态快照](../../../../../docs/terms.md)**（`applyTurnState`，
- *    docs/tech/chat-webapp.md §5.1）：**服务端的权威答案**，每条 tail 连上必发一帧。
+ *    docs/ingress/tech/chat-webapp.md §5.1）：**服务端的权威答案**，每条 tail 连上必发一帧。
  *
- * 第 3 条是后来加的，补的正是前两条都盖不住的那个洞：一轮**崩溃**时（进程重启、
- * `driveTurn` 的 catch 分支）收尾 metadata 永远不会到，而崩溃残留的 `kind = 'chunk'`
- * 行又永不 GC，于是第 1 条那个猜测此后**每次**打开这个会话都猜「有轮在跑」，且永不
- * 自愈。后果是用户发的消息一律走[排队](../../../../../docs/terms.md)、没有下面那套
- * 乐观回显、而且永远等不到[出队](../../../../../docs/terms.md)（没有轮会收尾去触发
- * 它）；按[停止](../../../../../docs/terms.md)也只会拿到 409。现在**任何**前端与服务端
+ * 第 3 条补的是前两条都盖不住的那个洞：一轮**崩溃**时（进程重启、`driveTurn` 的
+ * catch 分支）收尾 metadata 永远不会到，而崩溃残留的 `kind = 'chunk'` 行又永不 GC，
+ * 于是第 1 条那个初值此后**每次**打开这个会话都说「有轮在跑」，且永不自愈。后果是
+ * 用户发的消息一律走[排队](../../../../../docs/terms.md)、没有下面那套乐观回显、而且
+ * 永远等不到[出队](../../../../../docs/terms.md)（没有轮会收尾去触发它）；按
+ * [停止](../../../../../docs/terms.md)也只会拿到 409。有了第 3 条，**任何**前端与服务端
  * 的分叉都会被下一次 tail 连接纠正。
  *
- * ---- optimistic user echo (short-lived — this ticket's fix) ----
+ * ---- 乐观用户回显（只是个短命占位） ----
  *
- * `apps/node-server`'s `turn-runner/drive.ts` now gives a turn-starting user message a
- * real wire position: `driveTurn` synthesizes and broadcasts it as this
- * turn's very first `MessageFrame`, strictly before anything else that turn
- * produces (`schemas/chat.ts`'s file header). `pendingUserEchoes`
- * (`sendMessage`'s new-turn branch only, never the steer branch, which
- * *does* get a real materialized entry straight away) is therefore only ever
- * a **short-lived** placeholder now, covering the brief window between
- * `sendMessage` firing the `POST` and that real `MessageFrame` actually
- * arriving over the tail — each one anchored to `messages.length` at the
- * moment it was sent (`timeline.ts`'s `buildRenderEntries` splices it back
- * into its sent-at position) and popped, FIFO, the instant `MessageLedger`
- * reports a `role === 'user'` `MessageFrame` (`ledgerRef`'s construction
- * below, `onUserMessage` — see `materialize.ts`'s `UserMessageListener` doc
- * comment for why *only* a `MessageFrame` pops one, never a steer message's
- * chunk-materialized entry). Because a turn can't even start until the
- * previous one's `onTurnEnd` has fired — which is necessarily *after* that
- * turn's own user-message echo was already popped — at most one echo is ever
- * pending at a time in the normal flow; `buildRenderEntries` still sorts
- * same-anchor echoes into ascending-id (send) order as a defensive fallback
- * (its own doc comment) in case a stale-closure race ever produces more than
- * one anyway.
+ * 起一轮的那条用户消息在 wire 上有真实位置：`apps/node-server` 的
+ * `turn-runner/drive.ts` 里，`driveTurn` 会合成它并作为这一轮的**第一个**
+ * `MessageFrame` 广播出去，严格早于这一轮产出的任何别的东西（见 `schemas/chat.ts`
+ * 的文件头）。
+ *
+ * 所以 `pendingUserEchoes` 只是个**短命**占位，盖住「`sendMessage` 发出 `POST`」到
+ * 「那条真实 `MessageFrame` 经 tail 到达」之间的那一小段空窗。它只在 `sendMessage`
+ * 的「起新一轮」分支产生，插话分支不产生——插话会立刻拿到一条真实物化出来的条目。
+ *
+ * 每条回显锚在它发出时的 `messages.length` 上（`timeline.ts` 的 `buildRenderEntries`
+ * 据此把它插回发出时的位置），并在 `MessageLedger` 报出一条 `role === 'user'` 的
+ * `MessageFrame` 的那一刻按 FIFO 弹出（见下面构造 `ledgerRef` 时的 `onUserMessage`；
+ * 为什么**只有** `MessageFrame` 能弹、插话消息那条 chunk 物化出来的条目不能，见
+ * `materialize.ts` 的 `UserMessageListener` 注释）。
+ *
+ * 正常流程下同一时刻最多只有一条回显在等：一轮必须等上一轮的 `onTurnEnd` 触发之后
+ * 才起得来，而那必然晚于上一轮自己那条回显被弹出。`buildRenderEntries` 仍然把同锚点
+ * 的回显按 id 升序（= 发送顺序）排，那是防御性兜底（见它自己的注释），万一闭包过期
+ * 之类的竞态真产生了两条也不会乱序。
  */
 import type { RunkoMessageMetadata, RunkoUIMessage } from '@runko/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -77,7 +71,7 @@ import type { PendingUserEcho } from './timeline';
 export type ChatTurnStatus = 'idle' | 'streaming' | 'error';
 
 /**
- * 一条用户消息在**已有进行中的一轮**时该走哪条路（docs/tech/steer-and-queue.md §4.1）：
+ * 一条用户消息在**已有进行中的一轮**时该走哪条路（docs/logic/orchestration/tech/steer-and-queue.md §4.1）：
  * `'queue'` 排队到下一轮（composer 的 Enter 默认），`'steer'` 注入当前这一轮
  * （Alt+Enter / 插话按钮）。没有进行中的一轮时两者都是起新一轮。
  */
@@ -85,14 +79,14 @@ export type SendIntent = 'queue' | 'steer';
 
 export interface UseChatMessagesResult {
   messages: RunkoUIMessage[];
-  /** Short-lived — popped, FIFO, once the real turn-start `MessageFrame` arrives (see file header) — render these interleaved with `messages` via `timeline.ts`'s `buildRenderEntries`. */
+  /** 短命占位：起轮那条真实 `MessageFrame` 一到就按 FIFO 弹出（见文件头）。用 `timeline.ts` 的 `buildRenderEntries` 把它们与 `messages` 交错渲染。 */
   pendingUserEchoes: PendingUserEcho[];
   status: ChatTurnStatus;
   error: string | undefined;
-  /** True from `sendMessage` until the first frame of that turn arrives — docs/tech/chat-webapp.md §2.3's "沙盒恢复中…" gate. */
+  /** 从 `sendMessage` 起、到这一轮第一帧到达为止恒为 true——docs/ingress/tech/chat-webapp.md §2.3 那个「沙盒恢复中…」的闸门。 */
   awaitingFirstEvent: boolean;
   /**
-   * 服务端持有的[待发队列](../../../../../docs/terms.md)（docs/tech/steer-and-queue.md）
+   * 服务端持有的[待发队列](../../../../../docs/terms.md)（docs/logic/orchestration/tech/steer-and-queue.md）
    * ——初值来自会话详情，之后由直播流的 `QueueFrame` 与删除/清空的响应快照覆盖。
    * 服务端始终是权威，这里不做乐观合并。
    */
@@ -109,7 +103,7 @@ export interface UseChatMessagesResult {
   /** 清空待发队列。 */
   clearQueue: () => void;
   /**
-   * [停止](../../../../../docs/terms.md)进行中的那一轮（docs/tech/turn-abort.md §4.1）
+   * [停止](../../../../../docs/terms.md)进行中的那一轮（docs/logic/orchestration/tech/turn-abort.md §4.1）
    * ——`POST .../abort`，服务端真中止 + 清空待发队列。**不做乐观状态翻转**：界面回到空闲
    * 只认直播流上那条 `status: 'interrupted'` 的 `message-metadata`。没有进行中的一轮时
    * 是无操作。
@@ -118,29 +112,26 @@ export interface UseChatMessagesResult {
   /** 已按下停止、这一轮还没真正停住的中间态——停止键据此进禁用态，避免连点发出多次停止。 */
   stopping: boolean;
   /**
-   * `callId`s with an in-flight `POST .../approvals/:callId` or
-   * `.../questions/:callId` — cards use this to disable their own
-   * buttons/show a spinner and block a second submit for the same `callId`
-   * while one is already outstanding.
+   * 正有一个 `POST .../approvals/:callId` 或 `.../questions/:callId` 在飞的那些
+   * `callId`。卡片据此禁用自己的按钮、显示转圈，并挡住同一个 `callId` 的第二次提交。
    */
   submittingCallIds: ReadonlySet<string>;
   /**
-   * `submitApproval`/`submitAnswer` got a `404` back for these `callId`s —
-   * the server no longer has them pending (already timed out, or the turn
-   * already ended). Fed into the tool-part cards (via `TimelineView`/the
-   * page) to render the matching part as expired instead of pending.
+   * `submitApproval`/`submitAnswer` 对这些 `callId` 拿回了 `404`——服务端已经不再挂着
+   * 它们了（超时了，或者那一轮已经结束）。这份集合经 `TimelineView`/页面传给工具部件
+   * 的卡片，让对应部件画成「已失效」而不是「等待中」。
    */
   locallyExpiredCallIds: ReadonlySet<string>;
-  /** Resolve a pending tool-call approval (docs/tech/single-ledger.md §6) — result arrives back over the tail as the matching part's `tool-approval-response` chunk, not from this call's own resolution ("不做乐观翻转"). */
+  /** 裁决一条挂起的工具调用审批（docs/logic/orchestration/tech/single-ledger.md §6）。结果不从这次调用自己的返回值来，而是等 tail 上对应部件那条 `tool-approval-response` chunk（「不做乐观翻转」）。 */
   submitApproval: (
     callId: string,
     behavior: 'allow' | 'allow-session' | 'deny',
   ) => void;
-  /** Answer a pending `ask-user` question — same "wire is the only source of truth" posture as `submitApproval`. */
+  /** 回答一条挂起的 `ask-user` 提问——与 `submitApproval` 同一种「只认 wire」的姿态。 */
   submitAnswer: (callId: string, answer: string) => void;
 }
 
-/** Exponential backoff for tail reconnects — 1s, 2s, 4s, 8s, 16s, then give up quietly. */
+/** 直播流重连的指数退避——1s、2s、4s、8s、16s，然后安静放弃。 */
 const TAIL_RECONNECT_BASE_DELAY_MS = 1000;
 const TAIL_RECONNECT_MAX_ATTEMPTS = 5;
 
@@ -159,7 +150,7 @@ function describeError(error: unknown): string {
 }
 
 /**
- * `interrupted` 归 `idle` 而不是 `error`（docs/tech/turn-abort.md §4.1）：那是用户自己
+ * `interrupted` 归 `idle` 而不是 `error`（docs/logic/orchestration/tech/turn-abort.md §4.1）：那是用户自己
  * 按的[停止](../../../../../docs/terms.md)，不是故障——「已停止」的呈现落在时间线里那条
  * 收尾标记上（`turn-marker.tsx`），不占顶部那条红色的直播中断提示。
  */
@@ -179,11 +170,8 @@ export function useChatMessages(
    * 挂载时「这个会话有没有轮在跑」的初值——来自会话详情的 `turnInProgress`
    * （服务端读[起轮标记](../../../../../docs/terms.md)那一列给出的权威答案）。
    *
-   * 它取代了本 hook 曾经的那个猜测（「历史回放的最后一帧是不是 chunk」）：
-   * [进行中草稿](../../../../../docs/terms.md)搬进内存之后账本里根本不再有 chunk 行，
-   * 那个猜测**恒为假**，于是页面刚打开的几十毫秒里一个明明在跑的会话会被当成空闲。
-   * 这个初值只需要撑到 tail 连上——那一刻[轮状态快照](../../../../../docs/terms.md)
-   * 会再校正一次（见文件头写入源 3）。
+   * 它只需要撑到 tail 连上：那一刻[轮状态快照](../../../../../docs/terms.md)会再校正
+   * 一次（见文件头写入源 3）。
    */
   initialTurnInProgress = false,
 ): UseChatMessagesResult {
@@ -192,7 +180,7 @@ export function useChatMessages(
     () =>
       // 初值优先取 `initialFrames` 里最后一帧队列快照（纯防御——今天
       // `GET .../messages` 只返回账本帧，不会带 `QueueFrame`），否则用会话详情给的
-      // 那一份（docs/tech/steer-and-queue.md §4.2）。之后一律由直播流的快照接管。
+      // 那一份（docs/logic/orchestration/tech/steer-and-queue.md §4.2）。之后一律由直播流的快照接管。
       initialFrames.filter(isQueueFrame).at(-1)?.queue ?? initialQueuedMessages,
   );
   const [pendingUserEchoes, setPendingUserEchoes] = useState<PendingUserEcho[]>(
@@ -221,10 +209,9 @@ export function useChatMessages(
     undefined,
   );
 
-  // Only seq'd (persisted) frames are dedup-tracked (docs/tech/single-ledger.md §5 单-3) — an
-  // ephemeral `ChunkEnvelope` (no `seq`) has no `seq` to dedupe by, and
-  // doesn't need one (it's never redelivered by a replay/reconnect the way a
-  // persisted frame can be).
+  // 只有带 seq（已落盘）的帧才做去重簿记（docs/logic/orchestration/tech/single-ledger.md §5 单-3）。
+  // 一次性的 `ChunkEnvelope` 没有 `seq` 可以拿来去重，也不需要——它不会像落盘帧那样
+  // 被回放/重连重复投递一次。
   const seenSeqs = useRef(
     new Set(
       initialFrames
@@ -239,26 +226,23 @@ export function useChatMessages(
     }, 0),
   );
 
-  // One `MessageLedger` instance for this hook's whole lifetime (mirrors
-  // `initialFrames` being consumed exactly once — the parent remounts this
-  // hook fresh, `key={conversationId}`, on a conversation change, same as before this
-  // migration). Constructed *and* seeded inside an effect, not during render:
-  // some ledger paths (a steer message, or a standalone turn-end
-  // `message-metadata` chunk) call their `onChange`/`onTurnEnd` callbacks
-  // *synchronously* — unlike the `readUIMessageStream()`-driven path, which
-  // only ever resolves asynchronously via a microtask — and those callbacks
-  // close over `turnInProgressRef`/`reconnectAttemptRef` (`react-hooks/refs`
-  // flags a ref read inside a closure handed to a call that happens during
-  // render, since it can't prove `new MessageLedger(...)`'s constructor
-  // won't invoke it synchronously). `initializedRef` survives React
-  // StrictMode's deliberate mount→cleanup→mount double-invoke (the component
-  // itself is never actually unmounted in between, so the ref isn't reset)
-  // — without it, the second invocation would construct a second ledger and
-  // re-feed the same history. Declared *before* the tail-opening effect below
-  // so this (synchronous) bookkeeping is settled first; `[]` deps is
-  // intentional, not a lint oversight: this hook instance's `initialFrames`/
-  // `conversationId` are fixed for its whole lifetime (the parent remounts fresh,
-  // `key={conversationId}`, on a conversation change — `chat-conversation.tsx`).
+  // 本 hook 的整个生命周期里只有一个 `MessageLedger` 实例，与「`initialFrames` 只被
+  // 消费一次」对应——换会话时父组件靠 `key={conversationId}` 把本 hook 整个重挂。
+  //
+  // 它在 effect 里构造**并**灌种，不在 render 期间做。原因：账本有些路径（插话消息、
+  // 或一条独立的收尾 `message-metadata` chunk）会**同步**调 `onChange`/`onTurnEnd`
+  // 回调，而不是像 `readUIMessageStream()` 驱动的那条路那样必经一个微任务才异步落地；
+  // 这两个回调闭包里读了 `turnInProgressRef`/`reconnectAttemptRef`，`react-hooks/refs`
+  // 会拦——它没法证明 `new MessageLedger(...)` 的构造函数不会同步调用它们。
+  //
+  // `initializedRef` 用来扛住 React StrictMode 故意做的 mount→cleanup→mount 双调：
+  // 组件中间并没有真的卸载，所以这个 ref 不会被重置。没有它的话，第二次调用会再造一个
+  // 账本、把同一段历史重灌一遍。
+  //
+  // 这一段声明在下面开 tail 的 effect **之前**，让这段（同步的）簿记先落定。`[]` 依赖
+  // 数组是刻意的，不是 lint 疏漏：本 hook 实例的 `initialFrames`/`conversationId` 在它
+  // 整个生命周期里固定不变（换会话时父组件 `key={conversationId}` 重挂，见
+  // `chat-conversation.tsx`）。
   /** 队列的唯一写入口：ref 与 state 一起更新（ref 供 `onTurnEnd` 那个闭包同步读，见其注释）。服务端快照直接覆盖，不做合并——服务端始终是队列的权威。 */
   const applyQueueSnapshot = useCallback((queue: QueuedMessage[]) => {
     queuedMessagesRef.current = queue;
@@ -266,14 +250,10 @@ export function useChatMessages(
   }, []);
 
   /**
-   * [轮状态快照](../../../../../docs/terms.md)的唯一落点（docs/tech/chat-webapp.md §5.1）
+   * [轮状态快照](../../../../../docs/terms.md)的唯一落点（docs/ingress/tech/chat-webapp.md §5.1）
    * ——服务端在**每条** tail 连上时告诉我们「这个会话到底有没有轮在跑」，这里据它校正
-   * `turnInProgressRef` 与 `status`。
-   *
-   * 为什么需要它：本 hook 曾经只能**猜**这件事（`lastFrameIsChunk`，见文件头），而那个
-   * 猜测在一轮崩溃后长期失准、且永不自愈——用户发的消息一律走排队、没有乐观回显、
-   * 还永远等不到出队，按停止也只拿到 409。现在任何「前端与服务端的分叉」都会被下一次
-   * tail 连接纠正。
+   * `turnInProgressRef` 与 `status`。任何「前端与服务端的分叉」都会被下一次 tail 连接
+   * 纠正。
    *
    * 两处刻意的克制：
    *
@@ -312,7 +292,7 @@ export function useChatMessages(
         setStopping(false);
 
         // [待发队列](../../../../../docs/terms.md)非空 = 服务端**必然**会自动
-        // [出队](../../../../../docs/terms.md)起下一轮（docs/tech/steer-and-queue.md §5.1，
+        // [出队](../../../../../docs/terms.md)起下一轮（docs/logic/orchestration/tech/steer-and-queue.md §5.1，
         // 上一轮成功或失败都会走这一步）。所以这里不落回 idle：保持 `streaming` +
         // `turnInProgressRef`，让 tail 的既有退避重连去接住那一轮——否则用户会看到
         // 「转完 → 静止 → 又开始转」的闪烁，甚至以为排队的消息没发出去。
@@ -331,12 +311,10 @@ export function useChatMessages(
         setStatus(statusFromTurnEnd(metadata));
       },
       () => {
-        // The real turn-start user message just landed (see file header) —
-        // pop the oldest pending echo, FIFO. Guarded so an already-empty
-        // queue is a true no-op (returning the same array reference bails
-        // React out of a re-render) rather than a harmless-but-wasteful
-        // `setState` call — this branch is reachable on mount replay, where
-        // `pendingUserEchoes` is always still empty.
+        // 起轮那条真实的用户消息刚到（见文件头）——按 FIFO 弹掉最老的那条待发回显。
+        // 判空是为了让「本来就是空的」成为真正的无操作：返回同一个数组引用能让 React
+        // 跳过重渲染，而不是白调一次 `setState`。挂载回放时会走到这一支，那时
+        // `pendingUserEchoes` 一定还是空的。
         setPendingUserEchoes((prev) =>
           prev.length === 0 ? prev : prev.slice(1),
         );
@@ -344,8 +322,8 @@ export function useChatMessages(
     );
     ledgerRef.current = ledger;
     for (const frame of initialFrames) {
-      // 两种状态快照帧都不属于账本（`QueueFrame`，docs/tech/steer-and-queue.md §4.3；
-      // [轮状态快照](../../../../../docs/terms.md)，docs/tech/chat-webapp.md §5.1）
+      // 两种状态快照帧都不属于账本（`QueueFrame`，docs/logic/orchestration/tech/steer-and-queue.md §4.3；
+      // [轮状态快照](../../../../../docs/terms.md)，docs/ingress/tech/chat-webapp.md §5.1）
       // ——跳过，不喂 `MessageLedger`。队列快照对状态的贡献已经在 `queuedMessages` 的
       // 初值里算过了（见上）；轮状态快照根本不会出现在 `initialFrames` 里（`GET .../messages`
       // 只回放持久行，它只走直播流），这里跳过它纯粹是让类型收窄在一处说清。
@@ -354,7 +332,7 @@ export function useChatMessages(
       }
       ledger.applyFrame(frame);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `initialFrames` is this hook instance's fixed seed, not a reactive prop (see comment above)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `initialFrames` 是本 hook 实例固定的种子，不是响应式 prop（见上面的注释）
   }, []);
 
   const applyFrame = useCallback(
@@ -370,7 +348,7 @@ export function useChatMessages(
       }
       const seq = frame.seq;
       if (seq !== undefined) {
-        // dedupe: tail reconnect overlap / re-delivery safety net
+        // 去重：兜住 tail 重连时的重叠段与重复投递
         if (seenSeqs.current.has(seq)) {
           return;
         }
@@ -378,23 +356,22 @@ export function useChatMessages(
         lastSeqRef.current = Math.max(lastSeqRef.current, seq);
       }
       setAwaitingFirstEvent(false);
-      // `ledgerRef.current` is only ever `undefined` in the vanishingly brief
-      // window between mount and the construction effect above running — the
-      // tail's own mount effect is declared after it (same-phase passive
-      // effects run in declaration order), so by the time anything actually
-      // calls this, it's always set. Guarded rather than asserted non-null.
+      // `ledgerRef.current` 只在「挂载」到「上面那个构造 effect 跑完」之间那一瞬是
+      // `undefined`。开 tail 的那个 effect 声明在它后面（同一阶段的 passive effect
+      // 按声明顺序执行），所以真正调到这里时它一定已经就位。这里用可选链兜着，不用
+      // 非空断言。
       ledgerRef.current?.applyFrame(frame);
     },
     [applyQueueSnapshot, applyTurnState],
   );
 
-  // `openTailRef` always holds *this* render's `startTail` closure (fresh
-  // `conversationId`/`applyFrame` captured every render, assigned unconditionally
-  // below — the standard "ref to latest callback" idiom for a function that
-  // needs to schedule a call to its own latest version from a `setTimeout`
-  // without a lint-flagged self-reference-before-declaration on the `const`
-  // it's assigned to). `openTail` itself is the stable (never-recreated)
-  // handle every caller (the mount effect, `sendMessage`) actually uses.
+  // `openTailRef` 里永远是**本次** render 的 `startTail` 闭包（每次 render 都重新捕获
+  // 最新的 `conversationId`/`applyFrame`，并在下面无条件赋值）。这是「ref 指向最新回调」
+  // 的标准写法：这个函数要能从 `setTimeout` 里调起自己的最新版本，而直接引用会踩到
+  // 「`const` 声明前自引用」的 lint。
+  //
+  // `openTail` 才是稳定的（永不重建的）句柄，所有调用方（挂载 effect、`sendMessage`）
+  // 用的都是它。
   const openTailRef = useRef<() => void>(() => undefined);
 
   function startTail(): void {
@@ -403,15 +380,15 @@ export function useChatMessages(
     tailAbortRef.current = controller;
 
     function maybeReconnect(): void {
-      // intentionally stopped (unmount/cancel/superseded) — never auto-reconnect
+      // 主动停掉的（卸载/取消/被新连接顶替）——绝不自动重连
       if (controller.signal.aborted) {
         return;
       }
-      // turn already concluded — quiet, nothing to catch up on
+      // 那一轮已经结束了——安静收工，没有什么要追的
       if (!turnInProgressRef.current) {
         return;
       }
-      // give up quietly
+      // 退避次数用完，安静放弃
       if (reconnectAttemptRef.current >= TAIL_RECONNECT_MAX_ATTEMPTS) {
         return;
       }
@@ -430,10 +407,10 @@ export function useChatMessages(
       controller.signal,
     )
       .then(() => {
-        maybeReconnect(); // the tail closed — could be a finished turn (no-op above) or a server hiccup
+        maybeReconnect(); // 流关了——可能是这一轮跑完了（上面会直接 return），也可能是服务端抽了一下
       })
       .catch((tailError: unknown) => {
-        // intentional cancel/unmount/supersede, not a disconnect
+        // 主动取消/卸载/被顶替，不是掉线
         if (isAbortError(tailError)) {
           return;
         }
@@ -441,11 +418,10 @@ export function useChatMessages(
       });
   }
 
-  // Refs may only be written outside of render (event handlers/effects, not
-  // render itself) — this syncs `openTailRef` to *this* render's `startTail`
-  // after every commit (no dependency array), always ahead of the
-  // mount/reconnect effect below (same-phase passive effects run in
-  // declaration order).
+  // ref 只能在 render 之外写（事件处理器/effect 里，不能在 render 本身里）。这个不带
+  // 依赖数组的 effect 在每次 commit 之后把 `openTailRef` 同步成**本次** render 的
+  // `startTail`，而且总排在下面那个挂载/重连 effect 之前（同一阶段的 passive effect
+  // 按声明顺序执行）。
   useEffect(() => {
     openTailRef.current = startTail;
   });
@@ -475,7 +451,7 @@ export function useChatMessages(
 
       if (turnInProgressRef.current) {
         // 有进行中的一轮：`intent` 决定这条消息是排队还是插话
-        // （docs/tech/steer-and-queue.md §4.1，服务端才是判定方，这里只是把意图传过去）。
+        // （docs/logic/orchestration/tech/steer-and-queue.md §4.1，服务端才是判定方，这里只是把意图传过去）。
         // 都不需要重开 tail（这一轮的那条还开着）。失败不动
         // `status`/`turnInProgressRef`：这一轮本身跑得好好的，与这条消息有没有
         // 递进去无关。
@@ -509,7 +485,7 @@ export function useChatMessages(
             (mode) => {
               // 服务端可能**没有**真把它插进这一轮：那一轮还卡在
               // [起轮装配](../../../../../docs/terms.md)里时插不进去（还没有 session），
-              // 只能给它排队（docs/tech/turn-abort.md §3.3）。这条「待注入」回显因此
+              // 只能给它排队（docs/logic/orchestration/tech/turn-abort.md §3.3）。这条「待注入」回显因此
               // 永远等不到注入点，撤掉——它的可见位置改由队列快照给（待发区）。
               if (mode === 'queued') {
                 setPendingUserEchoes((prev) =>
@@ -552,11 +528,9 @@ export function useChatMessages(
       // 所以这里照旧走乐观 echo + 重开 tail 的老路。
       postChatMessage(conversationId, trimmed, intent)
         .then(() => {
-          // The turn is now running server-side, independent of this
-          // request — (re)connect the tail to observe it. A prior tail, if
-          // any, has necessarily already ended by now (`turnInProgressRef`
-          // gated the guard above), so this can't race an existing live
-          // connection for the *previous* turn.
+          // 这一轮此刻已经在服务端跑起来了，与这次请求无关——（重）开 tail 去观察它。
+          // 上一条 tail（如果有）到这里必然已经结束（上面那个判断由
+          // `turnInProgressRef` 把着），所以不会和**上一轮**那条还活着的连接抢。
           openTail();
         })
         .catch((postError: unknown) => {
@@ -564,7 +538,7 @@ export function useChatMessages(
           setAwaitingFirstEvent(false);
           setStatus('error');
           setError(describeError(postError));
-          // The turn never actually started — undo the optimistic echo.
+          // 这一轮根本没起来——把乐观回显撤掉。
           setPendingUserEchoes((prev) =>
             prev.filter((echo) => echo.id !== echoId),
           );
@@ -649,9 +623,7 @@ export function useChatMessages(
   }, [conversationId, applyQueueSnapshot]);
 
   /**
-   * [停止](../../../../../docs/terms.md)本轮（docs/tech/turn-abort.md §4.1）。取代了本
-   * hook 早先那个 `cancel`——它只 abort 本地那条 SSE 连接、把 status 拍成 idle，服务端
-   * 那一轮照样跑到底（刷新页面又全冒出来），从来没敢接到界面上。
+   * [停止](../../../../../docs/terms.md)本轮（docs/logic/orchestration/tech/turn-abort.md §4.1）。
    *
    * 两条刻意的姿态：
    *
@@ -694,20 +666,21 @@ export function useChatMessages(
   }, []);
 
   /**
-   * `POST .../approvals/:callId` / `.../questions/:callId` (docs/tech/single-ledger.md §6): both
-   * `submitApproval` and `submitAnswer` below funnel through this — mark
-   * `callId` submitting, fire the request, and on failure either flag it
-   * `locallyExpiredCallIds` (a `404`: the server no longer has it pending) or
-   * surface it via the hook's own `error` (anything else — the part stays
-   * pending, retryable). The *success* path deliberately does nothing to
-   * `messages`: the decision's real effect only lands once the matching
-   * `tool-approval-response` chunk (or the `ask-user` part's own
-   * `output-available`) arrives over the tail ("不做乐观翻转——多 tab 一致性
-   * 靠事件").
+   * `POST .../approvals/:callId` / `.../questions/:callId`
+   * （docs/logic/orchestration/tech/single-ledger.md §6）：下面的 `submitApproval` 与
+   * `submitAnswer` 都收口到这里。
+   *
+   * 流程是：把 `callId` 标成「提交中」→ 发请求 → 失败时分两档处理。`404` 说明服务端
+   * 已经不挂着它了，记进 `locallyExpiredCallIds`；其余错误经 hook 自己的 `error` 抛给
+   * 界面，对应部件保持挂起、可以重试。
+   *
+   * 成功这条路刻意**不动** `messages`：裁决的真实效果要等 tail 上对应那条
+   * `tool-approval-response` chunk（或 `ask-user` 部件自己的 `output-available`）到达才
+   * 落地（「不做乐观翻转——多 tab 一致性靠事件」）。
    */
   const submitDecision = useCallback(
     (callId: string, request: () => Promise<void>) => {
-      // one in flight per callId — the card also disables its own button, this is defense in depth
+      // 同一个 callId 同时只允许一个在飞。卡片自己也会禁用按钮，这里是第二道防线。
       if (submittingCallIds.has(callId)) {
         return;
       }

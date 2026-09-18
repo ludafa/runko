@@ -1,84 +1,45 @@
 /**
- * L2 运行层：单个 turn 的 step 循环 `runTurn`（docs/tech/single-ledger.md
- * §5 单-2，"UIMessage 单账本"迁移）。session.ts 拥有跨 turn 的持久状态
- * （messages/turn 计数/readState/onceMemory/planStore），本文件只负责"给定
- * 当前账本，把一个 turn 跑到底"——工作态是 `RunkoUIMessage[]`（不再是
- * `ModelMessage[]`），每步调模型前用 ai 官方 `convertToModelMessages()` 现场
- * 推导，loop 自己不再手拼任何 `ModelMessage`（docs/tech/single-ledger.md §0 TL;DR）。
+ * L2 运行层：把**一个 turn 跑到底**的 step 循环 `runTurn`。
  *
- * ---- 与迁移前的对应关系（语义映射表，供 tester / P13-5-3 参考） ----
+ * 分工：`session.ts` 拥有跨 turn 的持久状态（messages、turn 计数、readState、onceMemory、
+ * planStore），本文件只管「给定当前账本，跑完这一轮」。
  *
- * | 旧（SessionEvent/SessionItem，已退役） | 新 |
- * |---|---|
- * | `session.started` | 不需要部件/chunk（session.ts 不再发它，见其文件头） |
- * | `turn.started` | 不需要部件/chunk（turn 边界由调用方发起 `stream()` 本身体现） |
- * | `item.started/updated/completed`（`agent_message`） | `text-start`/`text-delta`/`text-end` chunk + `TextUIPart` |
- * | `item.started/updated/completed`（`reasoning`） | `reasoning-start`/`reasoning-delta`/`reasoning-end` chunk + `ReasoningUIPart` |
- * | `item.started/updated/completed`（`user_message`，steer） | `start`/`text-*`/`finish` chunk + 一条 `metadata.steered=true` 的 user `RunkoUIMessage`（见 `drainSteerMessages`） |
- * | `item.started/updated/completed`（`tool_call`，in_progress/completed/failed） | `tool-input-available` → `tool-output-available`/`tool-output-error` chunk + 工具部件（同一 toolCallId 原地覆盖，只记结算态——docs/tech/single-ledger.md §4.1 实现教训） |
- * | `item.started/updated/completed`（`tool_call`，denied，无 review） | `tool-input-available` → `tool-output-denied` chunk：`deny` 结果直接拒绝，不经审批请求/响应（docs/tech/single-ledger.md §6.1"deny：直接拒绝，output-denied"，P13-5-2c） |
- * | `item.started/updated/completed`（`tool_call`，review） | `tool-input-available` → `tool-approval-request`（先产出，见下）→ `await` 人审通道 → `tool-approval-response`（allow/deny 都发）→ `tool-output-available`/`tool-output-error`/`tool-output-denied` chunk + 工具部件状态迁移（ai 原生审批状态机字段形状，P13-5-2c 重构） |
- * | `item.completed`（`file_change`） | `data-file-change` chunk + 部件（每次工具执行各一条，不 upsert） |
- * | `item.completed`（`plan_update`） | `data-plan-update` chunk + 部件（同 id 覆盖，见 `upsertPlanUpdatePart`） |
- * | `item.completed`（`error`） | `data-error`（本文件当前无实际生产者，同旧实现——旧 `SessionItem.error` 变体此前也从未被 loop.ts 实际产出过，见 `state.ts`/`events.ts` 头注释） |
- * | `ctx.update()` 进度 | `data-tool-progress` chunk，**transient：只出流不物化**（docs/tech/single-ledger.md §4.1 发现 A，见 `settleToolCall`） |
- * | （新增，无旧对应）工具时间戳 | `data-tool-timing` chunk + **持久**部件（id = toolCallId，同 id 覆盖，见 `upsertToolTimingPart`）：`tool-input-available` 后立刻打 `startedAt`（入队），`executeToolCall` 前一刻打 `executionStartedAt`（真实执行起点；deny 路径恒缺席），每个结算 chunk（output-available/output-error/output-denied，含审批 deny）后立刻补 `completedAt`——三个时刻的语义见 `state.ts` 的 `toolTimingDataSchema` |
- * | `turn.completed`（`usage`） | `message-metadata` chunk，`messageMetadata: {turn, usage, status:'completed'}`，写在该轮最后一条 assistant 消息的 `.metadata` 上 |
- * | `turn.failed`（`error`） | 同上，`status: 'failed'`（`RunkoError.code !== 'aborted'`）或 `'interrupted'`（`code === 'aborted'`）+ `error` |
+ * 工作态是 `RunkoUIMessage[]`，**不是 `ModelMessage[]`**——每步调模型前用 ai 官方的
+ * `convertToModelMessages()` 现场推导，本文件不手拼任何 `ModelMessage`。
  *
- * ---- 一个 runko step = 一条 assistant `RunkoUIMessage`（裁量，见工单回报） ----
+ * 方案见[单一数据账本 · 技术方案](../../../docs/logic/orchestration/tech/single-ledger.md)。
  *
- * single-ledger 参考实现（原 `examples/13-uimessage-single-ledger.e2e.test.ts`——已随
- * examples 梳理移除：其离线结构断言迁至
- * `apps/node-server/test/agent/uimessage-single-ledger.test.ts`，手写真机 loop 见 git 历史）里每次
- * `runOneStep` 都新建一条 assistant 消息 push 进账本，不是把多步折进一条消息
- * 用内部 `step-start` 分隔——`convertToModelMessages()` 按 `step-start` 分块产出
- * `assistant → tool → assistant → …` 的方式对两种账本组织完全等价（每条
- * 顶层 UIMessage 处理完都会 flush 一次未完成的 block，效果与消息内部
- * step-start 分块相同），因此本文件延续这个已证实的姿态：一次 `runOneStep`
- * 调用 = 账本里新增一条 assistant 消息。
+ * ## 一个 step = 账本里一条新的 assistant 消息
  *
- * ---- 审批：三值 + 阻塞前显式产出（docs/tech/single-ledger.md §6，P13-5-2c 返工，取代 §5 引言
- * 定案的"事后补记"编码） ----
+ * 不是把多步折进一条消息、用内部 `step-start` 分隔。两种组织对
+ * `convertToModelMessages()` **完全等价**（它每处理完一条顶层 UIMessage 都会 flush 一次
+ * 未完成的 block，效果与消息内部分块相同），选前者只因为它更好读、也更好落库。
  *
- * P13-5-2 交付的版本把 `tool-approval-request` chunk 编码在"人已经做完决定
- * 之后"（`executeToolCall` 是原子调用，审批在其内部同步/异步 resolve 完才
- * 返回），导致挂起等人审期间直播流里没有待审批信号——客户端无法据此弹卡片，
- * 人在环上功能实质失效（docs/tech/single-ledger.md §6 引言）。本次返工把审批解析
- * （`resolveToolCallApproval`，runtime.ts）与工具执行（`executeToolCall`）
- * 拆成两个独立步骤（`settleToolCall` 下方），loop 在两者之间插入
- * "先 yield 审批请求 chunk、再 await 人工裁决"这一步：
+ * ## 审批：三值，且**先产出请求、再阻塞等人**
  *
- *   1. `outcome = resolveToolCallApproval(...)`（`approval.ts` 的
- *      `evaluateApproval` 三值解析——`allow`/`review`/`deny`，两层组合语义
- *      不变，见该文件头注释）。
- *   2. `allow` → 直接 `executeToolCall` → `tool-output-available`/`-error`。
- *   3. `deny` → 不执行，直接 `tool-output-denied`（拒绝理由 = 无仲裁者指导
- *      文案或分类器 `deny` 的默认文案，回填模型）——不经过审批请求/响应
- *      chunk（docs/tech/single-ledger.md §6.1"deny：直接拒绝"，与旧实现"denied 恒三态编码"的
- *      关键差异）。
- *   4. `review` → **先** `assistantMessage.parts` 落 `approval-requested` +
- *      yield `tool-approval-request` chunk，**再** `await`
- *      `opts.onReview`（`ApprovalReviewer`，session 的人审通道，见
- *      `RunTurnOptions.onReview`/`types.ts`）拿到 `HumanDecision`——这个
- *      顺序（先产出、后阻塞）是本次返工要修的根本问题，也是这个函数体是
- *      `async function*`（而非 runtime.ts 里返回单个 `Promise` 的普通异步
- *      函数）能够做到、旧的原子 `executeToolCall` 做不到的事：generator 的
- *      `yield` 是一个真实的挂起点，消费方（`for await`）在这一刻已经能看到
- *      这个 chunk，而不必等这次 `await` 完全 resolve。`onReview` 未注入时
- *      （`SessionOptions` 没接人审通道）视同无仲裁者——直接按 `deny` +
- *      同一份指导文案处理，不产出请求 chunk（见 `settleToolCall` 顶部的
- *      `opts.onReview === undefined` 分支）。拿到裁决后 `allow`/`deny` 都
- *      yield 一次 `tool-approval-response`（`approved` 字段区分，deny 带
- *      `reason`），`allow` 才继续 `executeToolCall`；`review-once` 且人工
- *      `allow` 时调 `onceMemory.markApproved(toolName)`（`resolveToolCallApproval`
- *      的 `markOnceOnApprove` 字段决定要不要调，见 approval.ts 头注释"once
- *      记忆的标记时机"）。
+ * `settleToolCall` 把「解析审批」与「执行工具」拆成两步，中间插入审批往返：
  *
- * 工具部件状态字段形状沿用 ai@7 原生审批状态机（`approval-requested`/
- * `approval-responded`/`output-denied`，`ToolUIPart` 的判别联合，见
- * `node_modules/ai` 的 `UIToolInvocation` 类型）——只是这次真正做到"物化的
- * 状态迁移顺序 = 实际发生顺序"，不再是把三态编码事后拼出来。
+ * 1. `resolveToolCallApproval()` 三值解析（`approval.ts` 的 `evaluateApproval`）：
+ *    `allow` / `review` / `deny`。
+ * 2. `allow` → 直接 `executeToolCall` → `tool-output-available` / `-error`。
+ * 3. `deny` → **不执行**，直接 `tool-output-denied`（拒绝理由回填模型）。
+ *    注意它**不经过审批请求 / 响应 chunk**——没人需要为一个注定被拒的调用弹卡片。
+ * 4. `review` → **先** yield `tool-approval-request` chunk，**再** `await` 人审通道
+ *    （`opts.onReview`）。拿到裁决后 `allow` / `deny` 都 yield 一次
+ *    `tool-approval-response`，只有 `allow` 才继续 `executeToolCall`。
+ *
+ * ⚠️ **第 4 步的顺序不能颠倒，这是整段最要紧的一条。** 先阻塞后产出的话，挂起等人审的
+ * 那段时间里直播流上**没有任何待审批信号**，客户端据此弹不出卡片——人在环上就形同虚设。
+ *
+ * 这也正是 `settleToolCall` 写成 `async function*` 的理由：`yield` 是一个真实的挂起点，
+ * 消费方（`for await`）在那一刻就能看到这个 chunk，不必等后面的 `await` resolve。返回单个
+ * `Promise` 的普通异步函数做不到这件事。
+ *
+ * 两个边角：`onReview` 没注入时视同无仲裁者，按 `deny` 处理且不产出请求 chunk；
+ * `review-once` 且人工放行时调 `onceMemory.markApproved(toolName)`。
+ *
+ * 工具部件的状态字段沿用 ai@7 原生的审批状态机（`approval-requested` /
+ * `approval-responded` / `output-denied`，`ToolUIPart` 的判别联合）。
  */
 import { randomUUID } from "node:crypto";
 import { convertToModelMessages, streamText } from "ai";
@@ -180,7 +141,7 @@ function statusForError(error: RunkoError): "failed" | "interrupted" {
  * 概念——用户按了停止键、进程要关闭、pod 要迁移——core 不该认识这些词，也没必要为
  * 它们各加一个 code。宿主把理由放进 `reason`，它的界面就能如实解释给用户看
  * （chat 应用正是这么区分「已停止」与「服务重启，这一轮已中断」的，见
- * docs/tech/graceful-shutdown.md §2）。
+ * docs/logic/orchestration/tech/graceful-shutdown.md §2）。
  *
  * `abort()` **不带参数**时 `reason` 是运行时自造的 `AbortError`（"This operation was
  * aborted"）——那不是宿主的解释，当作没给：否则收尾消息里会出现这句与调用方无关的
@@ -393,7 +354,7 @@ function upsertPlanUpdatePart(message: RunkoUIMessage, data: PlanUpdateData): Da
   return part;
 }
 
-// ---- data-tool-timing（持久部件，工具起止时间戳；docs/tech/single-ledger.md §2.2b 之后
+// ---- data-tool-timing（持久部件，工具起止时间戳；docs/logic/orchestration/tech/single-ledger.md §2.2b 之后
 // 补充，state.ts 的 `toolTimingDataSchema` 头注释有完整语义）：id = toolCallId，
 // 同 id 覆盖，物化方式照 `upsertPlanUpdatePart` 先例，唯一差别是每个工具调用
 // 各一个 id（不是单例）。----
@@ -507,7 +468,7 @@ interface PendingToolCall {
   toolCallId: string;
   toolName: string;
   input: JsonValue;
-  /** `assistantMessage.parts` 里 input-available 占位部件的下标——结算时原地替换，不新增数组项（docs/tech/single-ledger.md §4.1 实现教训：占位+结算双记会被服务商 400）。 */
+  /** `assistantMessage.parts` 里 input-available 占位部件的下标——结算时原地替换，不新增数组项（docs/logic/orchestration/tech/single-ledger.md §4.1 实现教训：占位+结算双记会被服务商 400）。 */
   partIndex: number;
 }
 
@@ -608,11 +569,11 @@ async function* settleExecution(
   });
 
   // transient `data-tool-progress`：只出流,绝不 push 进 assistantMessage.parts
-  // （docs/tech/single-ledger.md §4.1 发现 A）。`ctx.update()` 是同步回调，生成器不能从回调内部
+  // （docs/logic/orchestration/tech/single-ledger.md §4.1 发现 A）。`ctx.update()` 是同步回调，生成器不能从回调内部
   // yield，因此先缓冲、`executeToolCall` resolve 后按到达顺序重放——效果是
-  // "进度确实以 chunk 到达"，但不与执行过程严格实时交错（P13-1 既有取舍，
+  // "进度确实以 chunk 到达"，但不与执行过程严格实时交错（既有取舍，
   // 迁移前的 `executeStepToolCalls` 就是这个姿态，原样保留）。`text` 字段是
-  // 累积文本（docs/tech/single-ledger.md §2.2b"text（累积）"）。
+  // 累积文本（docs/logic/orchestration/tech/single-ledger.md §2.2b"text（累积）"）。
   let accumulated = "";
   for (const chunk of progressChunks) {
     accumulated += chunk;
@@ -784,8 +745,7 @@ interface RunOneStepOptions {
 }
 
 /**
- * `model/step.ts` 的 `runStep` 不复用（工单允许的"手工发块"路线，见 docs/tech/single-ledger.md §5
- * 单-2 工单原文"两条路线你按实现干净程度定"）：`runStep` 只转发四类增量块
+ * **不复用 `model/step.ts` 的 `runStep`**，改为手工发块：`runStep` 只转发四类增量块
  * （text-delta/reasoning-delta/tool-input-delta/tool-call），丢弃
  * text-start/text-end/reasoning-start/reasoning-end 等边界块——UIMessage 的
  * `TextUIPart`/`ReasoningUIPart` 需要这些边界来维护 `state:'streaming'|'done'`
@@ -927,7 +887,7 @@ async function* runOneStep(opts: RunOneStepOptions): AsyncGenerator<RunkoChunk, 
   return { finishReason: finalStep.finishReason, usage: finalStep.usage, assistantMessage };
 }
 
-// ---- runTurn：一个 turn 的完整 step 循环（终止条件同 docs/tech/core-sdk.md §4.8，未变） ----
+// ---- runTurn：一个 turn 的完整 step 循环（终止条件同 docs/logic/engine/tech/core-sdk.md §4.8，未变） ----
 
 export interface RunTurnOptions {
   model: LanguageModel;
@@ -963,7 +923,7 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<RunkoChunk,
   let lastAssistantMessage: RunkoUIMessage | undefined;
 
   for (let stepIndex = 1; stepIndex <= opts.maxTurnsPerRun; stepIndex++) {
-    // Checkpoint 0（宿主中止，docs/tech/turn-abort.md §2）：**绝不开始新的一步**。
+    // Checkpoint 0（宿主中止，docs/logic/orchestration/tech/turn-abort.md §2）：**绝不开始新的一步**。
     // 一步*之内*的中止不靠这里——`abortSignal` 已经透传给 `streamText`（模型流被
     // 掐断、其 promise reject）与 `ToolContext.abortSignal`（工具自己收尾），两者
     // 都落进下面那个 catch，`abortSignal.aborted` 为真时同样归成
@@ -1035,7 +995,7 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<RunkoChunk,
           // aborted"）——宿主给了理由就优先用它，回落才是那句第三方措辞。
           { code: "aborted", message: abortMessage(abortSignal, describeError(error)) }
         : { code: "provider_error", message: describeError(error) };
-      // Bug fix (P13-5-2 返工): don't rely on `lastAssistantMessage` alone — it's
+      // 不能只靠 `lastAssistantMessage`——它
       // only ever assigned *after* `runOneStep` returns successfully (see below),
       // so on this failure path it's still whatever the *previous* step (or turn)
       // left it as, possibly `undefined`, even though the *current*, half-built
@@ -1111,7 +1071,7 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<RunkoChunk,
     // finishReason === "tool-calls"：本步全部工具调用已经在 runOneStep 内部
     // 结算完毕（settleToolCall 在 runOneStep 返回前跑完，账本里不会留下任何
     // "in_progress" 占位——即便下面判定预算耗尽，工具调用本身也已正常完成，
-    // 不是"到达上限就拒绝执行最后一步的工具调用"，docs/tech/core-sdk.md §4.8 的既有语义
+    // 不是"到达上限就拒绝执行最后一步的工具调用"，docs/logic/engine/tech/core-sdk.md §4.8 的既有语义
     // 保持不变，只是不再需要在这里另起一段"先执行完再判定"的特殊分支）。
     if (stepIndex === opts.maxTurnsPerRun) {
       // STEER-1F：预算耗尽、即将失败之前也要 drain 一次——工具执行期间

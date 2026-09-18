@@ -1,121 +1,67 @@
 /**
- * Incrementally materializes the wire's `ChatReplayFrame` sequence (message
- * frames from replay + chunk envelopes from replay/live alike, docs/tech/single-ledger.md §5 单-3) into a single, render-ready
- * `RunkoUIMessage[]` — the client-side mirror of `@runko/core`'s own
- * server-side "UIMessage 单账本".
+ * 把 wire 上的 `ChatReplayFrame` 序列增量物化成一份可直接渲染的 `RunkoUIMessage[]`
+ * ——服务端那本[账本](../../../../../docs/terms.md)在客户端的镜像。
  *
- * ---- materialization mechanism (P13-5-4 report §①) ----
+ * `MessageFrame` 已经是成品消息，原样 upsert，不用再处理。`ChunkEnvelope` 则要喂给 ai 官方的
+ * 增量构建器 `readUIMessageStream()`。下面四件事是这个类真正在解决的问题。
  *
- * A `MessageFrame` is already a finished message — upserted verbatim, no
- * further processing.
+ * ## 一、`readUIMessageStream()` 要**一条消息一次调用**，不是一轮一次
  *
- * A `ChunkEnvelope`'s `chunk` is routed through ai's own official
- * chunk-to-UIMessage incremental builder, `readUIMessageStream()` — but
- * *one call per message*, not one call for a whole turn: `@runko/core`'s
- * `loop.ts` opens a fresh `start`/…/`finish` boundary for *every* assistant
- * step and for every steer-injected user message (its own file header: "一个
- * runko step = 一条 assistant RunkoUIMessage"), so a turn's chunk stream is
- * really a *concatenation* of several independent per-message chunk streams,
- * not one continuous one. `readUIMessageStream()` mutates a single
- * accumulating `state.message` in place and only patches `.id` on a `start`
- * chunk — it never resets `.parts` — so feeding an entire multi-message turn
- * through *one* call would silently merge every step's parts into one
- * message. `MessageLedger` re-opens a fresh `ReadableStream` +
- * `readUIMessageStream()` pair at every `start` chunk and closes it at the
- * matching `finish`, bridging that gap.
+ * core 的 `loop.ts` 给**每一个** assistant step、以及每条插话注入的 user 消息，都开一对新的
+ * `start` / `finish`。所以一轮的 chunk 流其实是好几段独立消息流**首尾相接**，不是一条连续的流。
  *
- * A second, narrower gap: `readUIMessageStream()`'s internal state is
- * hard-coded to `role: "assistant"` (ai's own `createStreamingUIMessageState`
- * — there is no way to seed it with a different role even via its own
- * `message` seed parameter, the ternary that consumes it only keeps a seed
- * whose `role` is already `"assistant"`). That's correct for every
- * *model-streamed* message, but `drainSteerMessages`'s own
- * `start`/`text-*`/`finish` sequence for a steer-injected **user** message
- * (already fully known up front, never actually streamed token-by-token —
- * `loop.ts`'s own doc comment) would come out mislabeled `assistant` if
- * routed through it. Its `start` chunk's `messageMetadata.steered === true`
- * (the same flag docs/tech/single-ledger.md §2.2a's steer marker) is the one signal available
- * at that point to tell the two apart, so `MessageLedger` special-cases it: a
- * `steered` `start` chunk is built directly (`applySteerChunk`, a handful of
- * known chunk types — `text-*`/`file`, never tool calls/reasoning/data
- * parts, matching exactly what `drainSteerMessages` can ever produce)
- * instead of through `readUIMessageStream()`. This is the "official
- * consumption API doesn't fit the mixed model" case P13-5-4's work order
- * asked to flag if found.
+ * ⚠️ 而 `readUIMessageStream()` 是就地累积的：它只在 `start` 时改 `.id`，**从不重置
+ * `.parts`**。把一整轮喂进**一次**调用，各 step 的部件会被静默合并成一条消息。
  *
- * A third case has *no* open message at all: the turn-ending
- * `message-metadata` chunk (`@runko/core`'s `loop.ts`'s `finalizeTurn`) is
- * always yielded *after* the last step's own `finish` already closed that
- * message — mirroring the ledger write server-side, where the metadata lands
- * on `target.metadata` (the *previous*, already-fully-built message), not
- * inside a message's own chunk sequence. `MessageLedger` merges it onto the
- * most-recently-seen assistant message (`applyStandaloneMetadata`), or — the
- * rare case where a turn fails before any step ever ran — synthesizes an
- * empty placeholder assistant message to carry it, mirroring `loop.ts`'s own
- * `appendPlaceholderAssistantMessage`. `onTurnEnd` fires exactly once per
- * turn at this same point — the client's equivalent of the retired
- * `turn.result`/`turn.failed` sentinels, used by `use-chat-messages.ts` to
- * flip turn status.
+ * 所以 `MessageLedger` 在每个 `start` 重开一对 `ReadableStream` + `readUIMessageStream()`，
+ * 在配对的 `finish` 关掉。
  *
- * A fourth, structurally trivial case needs no special chunk handling at
- * all: `applyFrame`'s `MessageFrame` branch (a finished message, upserted
- * verbatim, see above) also fires `onUserMessage` whenever that message's
- * `role` is `'user'` — today that's exclusively the turn-start synthesized
- * user message (`apps/node-server`'s `turn-runner/drive.ts`, this ticket's fix for the
- * "连发两条消息乱序" bug). See `UserMessageListener`'s own doc comment for why
- * this — and not the steer-injected user message's `ChunkEnvelope`
- * sequence — is the one signal `use-chat-messages.ts` needs to retire its
- * short-lived optimistic echo.
+ * ## 二、插话注入的 **user** 消息不能走 `readUIMessageStream()`
  *
- * ---- P13-5-5 fix: "most-recently-seen assistant message" must not mean
- * "most-recently-*materialized*" ----
+ * 它内部的状态**写死了 `role: "assistant"`**（ai 自己的 `createStreamingUIMessageState`：连
+ * `message` 这个种子参数也只接受 role 已经是 assistant 的种子）。对模型流式产出的消息当然没
+ * 问题，但插话那条 user 消息走它会被**贴错 role**。
  *
- * `readUIMessageStream()`'s own delivery is asynchronous — queued
- * `enqueue()`s only actually reach this class's `consume()` `for await` loop
- * on a later microtask/macrotask, never synchronously within the same
- * `applyChunk()` call that enqueued them (confirmed empirically: not even
- * after two microtask ticks, only a real macrotask boundary flushes the
- * pipe — `__tests__/helpers/runko-chunks.ts`'s `flushLedger()`). A first cut
- * of this class tracked "the last assistant message" by recording the *id*
- * only once that message's *materialized object* had actually been `upsert`ed
- * from `consume()` — which meant a caller that applies a whole turn's frames
- * synchronously in a tight loop (`use-chat-messages.ts`'s mount effect, "回放")
- * would reach the trailing standalone `message-metadata` chunk *before* the
- * async pipeline had delivered anything at all for the turn's last message,
- * making it look like there was no prior assistant message yet — wrongly
- * synthesizing a placeholder (and permanently losing the metadata once the
- * real message *did* finally arrive, since a placeholder is never retargeted).
- * A caller that instead applies frames one at a time with a real tick between
- * each ("直播") happened to avoid this, since by the time the metadata chunk
- * arrived the pipeline had long since caught up — an inconsistency this
- * class must not have: replay and live delivery of the *same* frame sequence
- * have to materialize to the *same* `RunkoUIMessage[]`, independent of
- * timing.
+ * 分辨两者的唯一信号是 `start` chunk 上的 `messageMetadata.steered === true`。带这个标记的
+ * 直接手工构建（`applySteerChunk`，只认 `text-*` / `file` 这几种——正好是 `drainSteerMessages`
+ * 可能产出的全部，永远不会有工具调用、推理或 data 部件）。
  *
- * The fix has two parts, both keyed off information `applyChunk()` already
- * has *synchronously*, before ever touching the async pipeline:
+ * ## 三、轮尾的 `message-metadata` chunk 落地时**没有打开的消息**
  *
- * 1. `lastAssistantId` is now updated the instant a non-steer `start` chunk
- *    is seen (`chunk.messageId`, right there in `applyChunk()`), not when
- *    that message's materialized object eventually shows up in `consume()`'s
- *    `upsert()`. The *id* a message will have is already fully known at
- *    `start` time — only its *content* streams in asynchronously — so there
- *    is no timing dependency left in identifying *which* message is "last".
- * 2. Identifying the *right* id isn't enough on its own if that id's message
- *    object hasn't materialized into `byId` *yet* (still true for "回放" at
- *    the moment the metadata chunk lands) — merging onto whatever's in
- *    `byId` right now (or not-yet-there) would still race the pipeline, and
- *    worse, a *later* `upsert()` for that same id (the pipeline delivering a
- *    fuller snapshot as more of the message streams in) would silently
- *    clobber an eagerly-merged copy, since every `upsert()` replaces the
- *    stored object wholesale. So standalone metadata is never merged into a
- *    stored message at all — it's kept in `pendingMetadata` (id → metadata)
- *    and merged **lazily, in `snapshot()`**, onto whatever the current
- *    `byId` entry for that id happens to be, every time a snapshot is taken.
- *    This is timing-independent by construction: it doesn't matter whether
- *    the target message has materialized yet, or how many more times it's
- *    still going to be `upsert()`-ed after this — the projection always
- *    recombines the *latest* content with the metadata fresh.
+ * 它总是在最后一个 step 的 `finish` **之后**才来——与服务端落库的姿态一致：metadata 挂在
+ * 前一条**已经建完**的消息上，不在某条消息自己的 chunk 序列里。
+ *
+ * `MessageLedger` 把它并到最近见过的那条 assistant 消息上；那种「一轮还没跑完任何 step 就失败」
+ * 的少见情形下，造一条空的占位 assistant 消息来承接。`onTurnEnd` 也在这一刻触发，每轮恰好一次。
+ *
+ * ## 四、`MessageFrame` 里 role 是 user 时触发 `onUserMessage`
+ *
+ * 今天它只可能是起轮那条合成的用户消息（`@runko/agent` 的 `driveTurn` 广播的）。为什么用它、
+ * 而不是插话那条 user 消息的 chunk 序列，来撤掉乐观回显，见 `UserMessageListener` 的注释。
+ *
+ * ## ⚠️ 「最近见过的 assistant 消息」**不等于**「最近物化出来的」
+ *
+ * `readUIMessageStream()` 的投递是**异步**的：`enqueue()` 进去的东西要到后续的微任务 / 宏任务
+ * 才会到达 `consume()` 的 `for await`，**绝不会**在同一次 `applyChunk()` 里同步到达。实测连两个
+ * 微任务都不够，得有一个真正的宏任务边界才冲得出来（测试里的 `flushLedger()` 就是干这个的）。
+ *
+ * 这会让两种调用方式分叉：**回放**是在一个紧凑的同步循环里把整轮帧灌进来，走到轮尾那条
+ * metadata 时，异步管线可能还一条消息都没吐出来；**直播**则每帧之间隔着真实的 tick，管线早就
+ * 跟上了。而这个类必须保证：**同一串帧，回放与直播必须物化出同一份 `RunkoUIMessage[]`**，
+ * 与时序无关。
+ *
+ * 做法是两条，都只依赖 `applyChunk()` **同步就已经拿到**的信息：
+ *
+ * 1. **`lastAssistantId` 在看到非插话的 `start` 那一刻就更新**（`chunk.messageId`），不等它的
+ *    消息对象从 `consume()` 里冒出来。消息的 **id 在 `start` 时就完全确定**了，异步流进来的
+ *    只是内容——于是「哪条消息是最后一条」这件事不再有时序依赖。
+ * 2. **独立的 metadata 从不写进已存的消息**，而是先放进 `pendingMetadata`（id → metadata），
+ *    在 `snapshot()` 里**懒合并**到那一刻 `byId` 里的对象上。
+ *
+ *    第 2 条单靠第 1 条不够：认对了 id，那条消息也可能**还没**物化进 `byId`。更糟的是，就算
+ *    当场并进去了，之后管线再 `upsert()` 一次（消息流得更全了）会**整个替换**存的对象，把并
+ *    进去的 metadata 悄悄冲掉。懒合并则是构造上就与时序无关——目标消息物化没物化、之后还要
+ *    被 `upsert()` 多少次，都不影响：每次取快照都拿**当前最新**的内容重新与 metadata 组合。
  */
 import type {
   RunkoChunk,
@@ -128,9 +74,8 @@ import { readUIMessageStream } from 'ai';
 import type { LedgerFrame } from './schema';
 import { isMessageFrame } from './schema';
 
-// ---- steer-injected user message: built directly, not through
-// `readUIMessageStream()` (see file header) — the only chunk types
-// `drainSteerMessages` (loop.ts) can ever produce for one of these. ----
+// ---- 插话注入的 user 消息：手工构建，不走 `readUIMessageStream()`（理由见文件头）。
+// 下面认的这几种 chunk，正好是 `drainSteerMessages`（loop.ts）能为它产出的全部。 ----
 
 interface SteerMessageBuilder {
   message: RunkoUIMessage;
@@ -183,27 +128,23 @@ function applySteerChunk(
       break;
     }
     default:
-      break; // 'start'/'finish' are boundaries handled by the caller; drainSteerMessages never yields anything else for a steer message.
+      break; // `start` / `finish` 是边界，由调用方处理；插话消息不会有别的 chunk。
   }
 }
 
 export type MessageLedgerListener = (messages: RunkoUIMessage[]) => void;
 export type TurnEndListener = (metadata: RunkoMessageMetadata) => void;
 /**
- * Fires exactly when a `role === 'user'` `MessageFrame` is applied — today
- * that's *only* ever the turn-start synthesized user message
- * (`apps/node-server`'s `turn-runner/drive.ts`'s `driveTurn`, broadcast as this turn's
- * very first frame). A steer-injected user message never fires this: it
- * reaches this ledger as a `ChunkEnvelope` sequence instead (a real
- * `start`/`text-*`/`finish` boundary, materialized through `applySteerChunk`
- * + `upsert` above) and only *later* ever shows up as a `MessageFrame` too —
- * once its `kind = 'message'` row is replayed after the turn has finished —
- * by which point `upsert`'s id-keyed dedup makes that replay a no-op for
- * `byId`, but this listener would still fire for it. `use-chat-messages.ts`
- * relies on this to pop its short-lived optimistic echo (see that file's own
- * header) the instant the real message lands; that same dedup-driven refire
- * on later replay is harmless there too, since a pop past an already-empty
- * echo queue is a no-op.
+ * 在一条 `role === 'user'` 的 `MessageFrame` 落地时触发。今天它**只可能**是起轮那条合成的
+ * 用户消息（`@runko/agent` 的 `driveTurn` 把它作为本轮第一帧广播出来）。
+ *
+ * 插话注入的 user 消息**不会**走到这里：它是以 `ChunkEnvelope` 序列到达的（真正的
+ * `start` / `text-*` / `finish`，经 `applySteerChunk` + `upsert` 物化）。它**之后**也会以
+ * `MessageFrame` 形态出现一次——那一轮结束后它的 `kind = 'message'` 行被回放时——那时
+ * `upsert` 按 id 去重，对 `byId` 是空操作，但这个监听器仍会为它触发一次。
+ *
+ * `use-chat-messages.ts` 靠它在真实消息落地的一瞬撤掉乐观回显。上面那次重复触发在那边也无害：
+ * 对一个已经空了的回显队列再撤一次，什么也不会发生。
  */
 export type UserMessageListener = () => void;
 
@@ -215,9 +156,9 @@ export class MessageLedger {
   private openController:
     ReadableStreamDefaultController<RunkoChunk> | undefined;
   private steerBuilder: SteerMessageBuilder | undefined;
-  /** Set synchronously the instant a non-steer `start` chunk is seen — never derived from `consume()`'s (asynchronous) `upsert()` calls. See file header, "P13-5-5 fix". */
+  /** 看到非插话的 `start` 就**同步**记下，绝不从 `consume()`（异步）的 `upsert()` 反推。见文件头最后一节。 */
   private lastAssistantId: string | undefined;
-  /** Standalone `message-metadata` waiting to be merged onto `lastAssistantId`'s message — merged lazily in `snapshot()`, never written directly into `byId`. See file header, "P13-5-5 fix" part 2. */
+  /** 等着并给 `lastAssistantId` 那条消息的独立 metadata——在 `snapshot()` 里懒合并，绝不直接写进 `byId`。见文件头最后一节。 */
   private readonly pendingMetadata = new Map<string, RunkoMessageMetadata>();
   private placeholderCount = 0;
   private readonly onChange: MessageLedgerListener;
@@ -234,7 +175,7 @@ export class MessageLedger {
     this.onUserMessage = onUserMessage;
   }
 
-  /** Feed one frame, in wire order — replay and live frames alike (both are just `ChatReplayFrame`s, see file header). */
+  /** 按 wire 顺序喂一帧进来。回放帧与直播帧一视同仁——它们都只是 `ChatReplayFrame`。 */
   applyFrame(frame: LedgerFrame): void {
     if (isMessageFrame(frame)) {
       this.upsert(frame.message);
@@ -248,7 +189,7 @@ export class MessageLedger {
 
   private applyChunk(chunk: RunkoChunk): void {
     if (chunk.type === 'start') {
-      this.closeOpenMessage(); // defensive: a prior unfinished stream (shouldn't happen, loop.ts's boundaries are always paired) is closed rather than leaked.
+      this.closeOpenMessage(); // 防御：上一条流没关就关掉，不泄漏（loop.ts 的边界总是成对的，正常走不到）。
       if (
         chunk.messageMetadata?.steered === true &&
         chunk.messageId !== undefined
@@ -260,10 +201,9 @@ export class MessageLedger {
           chunk.messageMetadata,
         );
       } else {
-        // Recorded here, synchronously — not from `consume()`'s (async)
-        // `upsert()` calls — so a trailing standalone `message-metadata`
-        // chunk always knows the right target id, even if this message's
-        // content hasn't materialized yet (see file header, "P13-5-5 fix").
+        // 在这里**同步**记下，不等 `consume()` 那边（异步的）`upsert()`——这样轮尾那条
+        // 独立的 `message-metadata` 永远知道该并给谁，哪怕这条消息的内容还没物化出来。
+        // 理由见文件头最后一节。
         if (chunk.messageId !== undefined) {
           this.lastAssistantId = chunk.messageId;
           // 顺序在这里就定死（`ensureOrder` 的注释说明了为什么不能等异步物化）：
@@ -289,8 +229,8 @@ export class MessageLedger {
     }
 
     if (this.openController === undefined) {
-      // No message currently open — the only chunk `@runko/core`'s loop ever
-      // produces outside a start/finish window (see file header).
+      // 此刻没有打开的消息——这是 core 的 loop 唯一会在 start/finish 窗口之外产出的 chunk，
+      // 见文件头第三节。
       if (chunk.type === 'message-metadata') {
         this.applyStandaloneMetadata(chunk.messageMetadata);
       }
@@ -318,10 +258,9 @@ export class MessageLedger {
 
   private applyStandaloneMetadata(metadata: RunkoMessageMetadata): void {
     if (this.lastAssistantId === undefined) {
-      // No assistant message has ever started this session (a turn failing
-      // before its first step ever ran) — nothing to merge onto, ever;
-      // synthesize a placeholder the same way `loop.ts`'s
-      // `appendPlaceholderAssistantMessage` does server-side.
+      // 这个会话里还没有任何 assistant 消息开过头（一轮在第一个 step 之前就失败了）——
+      // 没有东西可并，造一条占位消息承接，与服务端 `loop.ts` 的
+      // `appendPlaceholderAssistantMessage` 同一姿态。
       this.placeholderCount += 1;
       this.upsert({
         id: `turn-signal-${String(this.placeholderCount)}`,
@@ -330,11 +269,9 @@ export class MessageLedger {
         metadata,
       });
     } else {
-      // Queued, not written directly onto `byId` — the target message may
-      // not have materialized yet (or may still receive further `upsert()`s
-      // that would clobber an eagerly-merged copy); `snapshot()` recombines
-      // the latest stored content with this on every read instead (see file
-      // header, "P13-5-5 fix" part 2).
+      // 先排队，**不直接写进 `byId`**：目标消息可能还没物化，也可能之后还会被 `upsert()`
+      // 整个替换掉、把急着并进去的那份冲没。改由 `snapshot()` 每次读取时，拿当前最新的
+      // 内容与它重新组合。理由见文件头最后一节第 2 条。
       const prior = this.pendingMetadata.get(this.lastAssistantId);
       this.pendingMetadata.set(
         this.lastAssistantId,
@@ -356,7 +293,7 @@ export class MessageLedger {
    * 的旧轮消息只能排到**末尾**——界面上就是旧轮跑到新轮下面去了（用户实测）。
    *
    * 崩溃的轮以前总是账本里的最后一轮（崩溃即终止），所以这个洞一直没机会暴露；现在
-   * 崩溃轮之后还能继续对话（docs/tech/graceful-shutdown.md），它就浮出来了。
+   * 崩溃轮之后还能继续对话（docs/logic/orchestration/tech/graceful-shutdown.md），它就浮出来了。
    */
   private ensureOrder(id: string): void {
     if (this.ordered.has(id)) {

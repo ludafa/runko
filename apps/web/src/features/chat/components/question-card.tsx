@@ -1,17 +1,14 @@
 /**
- * Renders a pending or answered `ask-user` question (docs/tech/single-ledger.md §6) — driven directly by the `tool-ask-user` part's own
- * `input-available` (pending)/`output-available` (answered) states, no
- * separate `question`/`callId` wire shape any more (`part.toolCallId` *is*
- * the callId). `timeline.ts`'s `buildRenderEntries`/`message-entry.tsx`
- * still suppress the generic `ToolCallCard` for this tool name in favor of
- * this card, same "avoid double-显示" rationale as before this migration.
+ * 渲染一次 `ask-user` 提问的「待回答」或「已回答」态（docs/logic/orchestration/tech/single-ledger.md §6）。
  *
- * Unlike the retired `QuestionTimelineEntry`, there is no distinct
- * `'timeout'` outcome any more — the `ask-user` tool's `execute()` just
- * returns a plain string either way (the real answer, or the fixed timeout
- * message, `apps/node-server`'s `chat-agent.ts`), so an `output-available` state
- * always renders as "answered" (this app deliberately does not string-sniff
- * the fixed timeout text to recover the old distinction).
+ * 它直接由 `tool-ask-user` 部件自己的两个状态驱动：`input-available` = 待回答，
+ * `output-available` = 已回答。没有另一套 `question`/`callId` 的 wire 形状——
+ * `part.toolCallId` **就是** callId。`message-entry.tsx` 对这个工具名压掉通用的
+ * `ToolCallCard`，改用这张卡片，理由是「别重复显示」。
+ *
+ * **没有单独的「超时」结果。** `ask-user` 的 `execute()` 两种情况都只返回一个普通字符串
+ * （真实回答，或那句固定的超时文案，见 `apps/node-server` 的 `chat-agent.ts`），所以
+ * `output-available` 一律渲染成「已回答」。这里刻意**不去**嗅探那句固定文案来区分两者。
  *
  * ai-elements 没有「向用户提问」这一档组件（`Confirmation` 是二值审批，不带
  * 自由文本回答），所以这里自己拼，但用的是同一批基元（`Alert` + `Button` +
@@ -28,7 +25,7 @@ import { Input } from '@/components/ui/input';
 import type { RunkoToolPart } from '../timeline';
 import { askUserAnswerFromOutput, askUserInputFrom } from '../timeline';
 
-/** The two states this card ever renders (see file header) — `message-entry.tsx` only ever dispatches an `ask-user` part here in one of these two. */
+/** 这张卡片只渲染这两个状态（见文件头）——`message-entry.tsx` 只会在这两态下把 `ask-user` 部件分发到这里。 */
 export type QuestionPart = Extract<
   RunkoToolPart,
   { state: 'input-available' | 'output-available' }
@@ -42,7 +39,7 @@ export function QuestionCard({
 }: {
   part: QuestionPart;
   submitting: boolean;
-  /** `useChatMessages`'s `locallyExpiredCallIds` — not part of the tool part's own state. */
+  /** 来自 `useChatMessages` 的 `locallyExpiredCallIds`——工具部件自己的状态里没有这一档。 */
   expired: boolean;
   onAnswer: (answer: string) => void;
 }) {

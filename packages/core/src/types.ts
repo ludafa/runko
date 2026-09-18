@@ -1,8 +1,10 @@
 /**
  * L0 原语层：Tool/ToolContext/Approval 系列、RunkoFS、RunkoExec（tech-spec
- * §4.1 / §4.4 / §4.5a）。纯接口与基础类型，不含任何运行时实现——
- * MemoryFS/OverlayFS 落在 @runko/virtual-fs（P2），RunkoExec 的默认实现落在
- * @runko/mini-bash（P6），defineAgent/defineTool/defineSkill 落在 P1-2。
+ * §4.1 / §4.4 / §4.5a）。
+ *
+ * 这里只有纯接口与基础类型，不含任何运行时实现：MemoryFS/OverlayFS 在
+ * `@runko/virtual-fs`，RunkoExec 的默认实现在 `@runko/mini-bash`，
+ * defineAgent/defineTool/defineSkill 在本包的 `agent.ts`/`tool.ts`/`skill.ts`。
  */
 import { z } from "zod";
 
@@ -82,7 +84,7 @@ export interface RunkoFS {
   stat(path: string): Promise<FileStat>;
   glob(pattern: string): Promise<string[]>;
   /**
-   * 原生搜索能力接缝（docs/tech/sandbox.md §4）：实现了 = 该底座能一次调用在
+   * 原生搜索能力接缝（docs/host/contract/tech/sandbox.md §4）：实现了 = 该底座能一次调用在
    * 内部完成整个文件名搜索（典型如远端沙盒在沙盒里跑一条脚本），`grep`/`glob`
    * 工具会优先调用；抛 `SearchUnsupportedError` 会被工具静默捕获、回退现有
    * `glob()` + JS 过滤逐文件扫描。**内存态/覆盖态实现故意不实现这两个方法**——
@@ -159,7 +161,7 @@ export interface RunkoExec {
   defaultApproval?: ApprovalPolicy;
 }
 
-// ---- 活动信号：让远端工作区知道「这一轮还在干活」（docs/tech/sandbox-keepalive.md §5.1） ----
+// ---- 活动信号：让远端工作区知道「这一轮还在干活」（docs/logic/orchestration/tech/sandbox-keepalive.md §5.1） ----
 
 /**
  * 一次[活动信号](../../../docs/terms.md)的载荷。
@@ -203,7 +205,7 @@ export interface RunkoKeepAliveCapable {
   keepAlive?(targetMs: number): Promise<void>;
 }
 
-// ---- 审批链（docs/tech/single-ledger.md §6，P13-5-2c 三值重构；术语见 docs/terms.md §4） ----
+// ---- 审批链（docs/logic/orchestration/tech/single-ledger.md §6，P13-5-2c 三值重构；术语见 docs/terms.md §4） ----
 
 export interface ApprovalContext {
   toolName: string;
@@ -212,23 +214,26 @@ export interface ApprovalContext {
 }
 
 /**
- * 一次工具调用的审批结果三选一（docs/tech/single-ledger.md §6.1）：`allow` 直接执行；`review`
- * 人工审批（loop 先 yield `tool-approval-request` chunk 再阻塞等真人，见
- * `loop.ts`）；`deny` 直接拒绝。旧 `ApprovalDecision`（allow+updatedInput /
- * deny+message 二值）已删除——`updatedInput`（允许时改模型填的参数）随之整体
- * 移除（2026-07-15 定案，见 docs/tech/single-ledger.md §6.3：chat 卡片从来只有允许/拒绝两个按钮，
- * 没有编辑框）。
+ * 一次工具调用的审批结果三选一（docs/logic/orchestration/tech/single-ledger.md §6.1）：
+ *
+ * - `allow`：直接执行。
+ * - `review`：走人工审批。loop 先 yield 一条 `tool-approval-request` chunk，再阻塞等真人
+ *   （见 `loop.ts`）。
+ * - `deny`：直接拒绝。
  */
 export type ApprovalOutcome = "allow" | "review" | "deny";
 
 /**
- * 策略 vs 结果分层（docs/tech/single-ledger.md §6.1）：策略是配在工具上（`Tool.approval`）/注入
- * 会话（原 `SessionOptions.onApproval`，现审批分类器）的规则，解析出每次调用
- * 的结果三值之一。旧字符串 `"never"`/`"always"`/`"once"` 全废——
- * `"never"` → `"allow"`、`"always"` → `"review"`、`"once"` → `"review-once"`。
- * `"review"`：每次调用都问。`"review-once"`：第一次问、批准后本会话记住、之后
- * `"allow"`（复用现有 once 记忆）。回调形态直接产出 `ApprovalOutcome`——这正是
- * §6.2 的「审批分类器」形态，per-tool 与 session 共用同一个类型。
+ * 策略 vs 结果分层（docs/logic/orchestration/tech/single-ledger.md §6.1）。
+ *
+ * **策略**是规则：配在工具上（`Tool.approval`），或注入会话（`SessionOptions.onApproval`，
+ * 即审批分类器）。它解析出每次调用的**结果**，也就是 `ApprovalOutcome` 三值之一。
+ *
+ * 四个字符串档：`"allow"` 直接放行；`"review"` 每次调用都问；`"review-once"` 第一次问、
+ * 批准后本会话记住、之后按 `"allow"` 走；`"deny"` 直接拒绝。
+ *
+ * 回调形态直接产出 `ApprovalOutcome`——这正是 §6.2 的「审批分类器」形态，per-tool 与
+ * session 共用同一个类型。
  */
 export type ApprovalPolicy =
   | "allow"
@@ -238,9 +243,9 @@ export type ApprovalPolicy =
   | ((input: JsonValue, ctx: ApprovalContext) => Promise<ApprovalOutcome> | ApprovalOutcome);
 
 /**
- * 人工裁决（docs/tech/single-ledger.md §6.3）：分类器返回 `review` 后弹给真人的卡片，真人只答
- * 两值——`updatedInput`（改参数）彻底删除，"让它换个做法"用「拒绝+理由」或
- * steer 更直白。`deny.message` = 拒绝理由，回填模型。
+ * 人工裁决（docs/logic/orchestration/tech/single-ledger.md §6.3）：分类器返回 `review` 之后弹给
+ * 真人的卡片，真人只答两值。想「让它换个做法」就用「拒绝 + 理由」或 steer，不提供改参数
+ * 的入口。`deny.message` 是拒绝理由，会回填给模型。
  */
 export type HumanDecision = { behavior: "allow" } | { behavior: "deny"; message?: string };
 
@@ -252,17 +257,20 @@ export interface ApprovalReviewRequest {
 }
 
 /**
- * session 级注入的「等真人」通道（docs/tech/single-ledger.md §6.4 施工回报新增接口，P13-5-2c）：
- * `evaluateApproval` 解析出 `review` 后，`loop.ts` 先 yield
- * `tool-approval-request` chunk（界面弹卡片），再 `await` 这个函数拿到人工裁决。
- * 未注入（`undefined`）时 `review` 视同无仲裁者——按 deny + 现有指导文案处理，
- * 语义与"session 未配置分类器"一致。与旧 `SessionOptions.onApproval`
- * （现在的审批分类器，仍是 `ApprovalPolicy`）是两个独立的注入点：分类器是同步
- * 的三值判断，这个是真正的异步"等人"步骤。
+ * session 级注入的「等真人」通道（docs/logic/orchestration/tech/single-ledger.md §6.4）。
+ *
+ * `evaluateApproval` 解析出 `review` 之后，`loop.ts` 先 yield 一条
+ * `tool-approval-request` chunk（界面据此弹卡片），再 `await` 这个函数拿到人工裁决。
+ *
+ * 没注入（`undefined`）时，`review` 视同没有仲裁者：按 deny + 现有指导文案处理，语义与
+ * 「session 未配置分类器」一致。
+ *
+ * 它与 `SessionOptions.onApproval`（审批分类器）是两个独立的注入点：分类器是同步的三值
+ * 判断，这个才是真正异步的「等人」步骤。
  */
 export type ApprovalReviewer = (request: ApprovalReviewRequest) => Promise<HumanDecision>;
 
-// ---- Skills：仅类型（§4.1；defineSkill 与加载实现见 P1-2 起） ----
+// ---- Skills：仅类型（§4.1；defineSkill 与加载实现在本包的 `skill.ts`） ----
 
 export interface SkillFileHandle {
   text(): Promise<string>;
@@ -286,11 +294,11 @@ export interface ToolContext {
 }
 
 /**
- * `defineTool(...)` 的返回类型（P1-2 实现）：`AgentDefinition.tools` 是
- * `Record<string, Tool>`，因此这里是类型擦除后的非泛型形态——具体工具的
- * 输入类型经 `defineTool` 的泛型 `In`（`z.infer<In>`）在定义处收敛，
- * 一旦放进 tools 记录里就统一走 JsonValue（工具调用的实参本来就是模型
- * 产生的 JSON）。
+ * `defineTool(...)` 的返回类型。
+ *
+ * `AgentDefinition.tools` 是 `Record<string, Tool>`，所以这里是类型擦除后的非泛型形态：
+ * 具体工具的输入类型经 `defineTool` 的泛型 `In`（`z.infer<In>`）在定义处收敛，一旦放进
+ * tools 记录里就统一走 `JsonValue`（工具调用的实参本来就是模型产生的 JSON）。
  */
 export interface Tool {
   description: string;

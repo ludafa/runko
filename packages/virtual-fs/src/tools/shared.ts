@@ -1,30 +1,28 @@
 /**
- * 文件工具八件套的横切类型与辅助函数（docs/tech/builtin-tools.md §0 横切规则，
+ * 文件工具八件套的横切类型与辅助函数（docs/logic/engine/tech/builtin-tools.md §0 横切规则，
  * 消费于 §1.1–§1.8 各工具）。
  *
- * ---- P4 接缝设计说明（工单要求写清理由） ----
- * readState 与 file_change 派生"真正应该"归属 session/ToolRuntime（tech-spec
- * §4.2/§4.5，P4 尚未实现）：readState 本该是整个 session 生命周期内、跨全部
- * 工具调用共享的一份状态；file_change 本该经 SessionEvent 广播给宿主。P2 阶段
- * core 的运行层还不存在，因此这里把两者收窄成本包自己定义的最小接口，经
- * `createFileTools(opts)` 从外部注入——工具内部只认这两个接口的形状，不关心
- * 背后是测试用的 Map、还是 P4 落地后真正的 session 状态对象：
+ * ---- 两个注入接缝 ----
  *
- *   - `ReadStateStore`：get/set(path, version) 两个方法，version 判据用
- *     `stat().mtime`（§0.4 原文）。P4 落地后大概率就是一个 `Map<string, number>`
- *     包一层 session 生命周期管理，这里先给接口而非具体类型，让 P4 能在不改
- *     本包一行代码的前提下换成真正的、可能带持久化/序列化的实现。
- *   - `onFileChange`：一个普通回调，不是事件总线——工具本身不发 SessionEvent
- *     （§0.6："写类工具成功后由 ToolRuntime 派生 file_change item...工具自身
- *     不负责发事件"）。P4 的 ToolRuntime 把这个回调接到真正的 file_change item
- *     派生 + `item.completed` 事件上；本包对"事件"完全无感知，回调只是搬运
- *     一份 `FileChange[]` 数据。
+ * `readState` 与 `file_change` 派生这两样东西的归属在 session/ToolRuntime 那一层
+ * （tech-spec §4.2/§4.5），不在本包。所以这里把它们收窄成本包自己定义的最小接口，经
+ * `createFileTools(opts)` 从外部注入——工具内部只认这两个接口的形状，不关心背后是测试
+ * 用的 Map 还是真正的 session 状态对象：
  *
- * `FileChange.kind` 用 `add|update|delete`，是刻意与 `diff.ts` 的
- * `FileDiff.kind`（`created|modified|deleted`）不同的一个表面——前者对应
- * docs/tech/core-sdk.md §4.2 `SessionItem` 的 `file_change` 事件面，后者是
- * `diff()/writeBack()` 的宿主导出面；两者语义相邻但服务不同消费者，P2-1 已在
- * docs/tech/core-sdk.md §4.4"语义澄清"里定过一次，这里是 P2-2 侧的落地（orchitector 补充 a）。
+ *   - `ReadStateStore`：只有 get/set(path, version) 两个方法，version 判据用
+ *     `stat().mtime`（§0.4 原文）。给的是接口而不是具体类型，宿主可以换成带持久化/
+ *     序列化的实现，本包一行都不用改。
+ *   - `onFileChange`：一个普通回调，**不是**事件总线。工具本身不负责往外发事件
+ *     （§0.6：「写类工具成功后由 ToolRuntime 派生 file_change item……工具自身不负责发
+ *     事件」）。ToolRuntime 把这个回调接到真正的派生与广播上；本包对「事件」完全无感知，
+ *     回调只是搬运一份 `FileChange[]` 数据。
+ *
+ * ---- 两套 kind 别混用 ----
+ *
+ * `FileChange.kind` 用 `add|update|delete`，刻意与 `diff.ts` 的 `FileDiff.kind`
+ * （`created|modified|deleted`）不同。前者对应 docs/logic/engine/tech/core-sdk.md §4.2 的
+ * `file_change` 派生数据面，后者是 `diff()`/`writeBack()` 的宿主导出面：两者语义相邻，
+ * 但服务的是不同消费者（docs/logic/engine/tech/core-sdk.md §4.4「语义澄清」）。
  */
 import type { JsonValue, RunkoFS } from "@runko/core";
 import { DEFAULT_MIME_TYPE } from "../mime.js";
@@ -37,10 +35,11 @@ export interface ReadStateStore {
 }
 
 /**
- * file_change 派生数据的单条记录（docs/tech/core-sdk.md §4.2 `SessionItem` 的
- * `file_change.changes[]`）。kind 集合是 add/update/delete——不要跟本包
- * `diff.ts` 的 `FileDiff.kind`（created/modified/deleted）混用，两者是刻意
- * 不同的表面（见本文件顶部注释）。
+ * file_change 派生数据的单条记录（docs/logic/engine/tech/core-sdk.md §4.2 的
+ * `file_change.changes[]`）。
+ *
+ * kind 集合是 add/update/delete——不要跟本包 `diff.ts` 的 `FileDiff.kind`
+ * （created/modified/deleted）混用，两者是刻意不同的表面（见本文件顶部注释）。
  */
 export interface FileChange {
   path: string;
@@ -49,7 +48,7 @@ export interface FileChange {
 
 export interface CreateFileToolsOptions {
   readState: ReadStateStore;
-  /** 写类工具成功后上报派生的 file_change 记录；工具自身不发 SessionEvent（§0.6）。 */
+  /** 写类工具成功后上报派生的 file_change 记录；工具自身不负责往外发事件（§0.6）。 */
   onFileChange?: (changes: FileChange[]) => void;
 }
 
@@ -121,7 +120,7 @@ export function isTextMimeType(mimeType: string | undefined): boolean {
 
 /**
  * write-file/edit-file/move-file 写成功后调用：把写入后的新 mtime 登记进
- * readState，使"连续编辑无需重读"成立（docs/tech/builtin-tools.md §4："read→edit→
+ * readState，使"连续编辑无需重读"成立（docs/logic/engine/tech/builtin-tools.md §4："read→edit→
  * 再 edit，第二次无需重读"）。
  */
 export async function registerWrite(fs: RunkoFS, path: string, readState: ReadStateStore): Promise<void> {
@@ -160,7 +159,7 @@ export function truncationNotice(reason: string, hint: string): string {
   return `[truncated: ${reason}] ${hint}`;
 }
 
-// ---- 输出预算常量（docs/tech/builtin-tools.md §1.1–§1.8 逐条给出的数字） ----
+// ---- 输出预算常量（docs/logic/engine/tech/builtin-tools.md §1.1–§1.8 逐条给出的数字） ----
 export const READ_FILE_MAX_LINES = 2000;
 export const READ_FILE_MAX_BYTES = 256 * 1024;
 export const LIST_DIR_MAX_ENTRIES = 500;
@@ -169,7 +168,7 @@ export const GREP_MAX_FILES = 100;
 export const GREP_MAX_LINES = 500;
 
 /**
- * grep/glob 的默认忽略集合（docs/tech/sandbox.md §4 原生搜索接缝）：`.git` 元数据
+ * grep/glob 的默认忽略集合（docs/host/contract/tech/sandbox.md §4 原生搜索接缝）：`.git` 元数据
  * 与 `node_modules` 依赖树体积大、几乎从不是模型想搜的目标，两条路径
  * （native 适配器 / JS 回退）都要应用同一份默认值，保证行为一致。
  */
