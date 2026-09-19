@@ -660,10 +660,11 @@ flowchart TB
 | 3 | **两个网络**：`app` 放副本与 nginx，`db` 放副本与 Postgres | 这样才能**只切断「某个副本 ↔ 库」**，同时副本之间照样能互相转发——这正是[自我围栏](../../../terms.md)要应对的形状 |
 | 4 | **时间轴压扁**：心跳 1 秒、接管阈值 5 秒、每轮 10 秒、转发超时 2 秒 | 默认值下一个场景要等一分钟。5 秒 = 5 倍心跳，满足「≥ 3 倍」的构造期校验。一轮 10 秒是为了让「围栏约 4～5 秒停手」与「模型睡完自然结束」之间留足区分度 |
 | 5 | **端口与项目名都能用环境变量覆盖** | `test:lab` 用另一套项目名和端口，**不会碰到你手动起着的那套** |
-| 6 | 镜像里 `pnpm install --filter persist-demo...` + 构建依赖包的 `dist` | `@runko/*` 的 `exports` 指向 `dist`；只装这一个应用的依赖链，不装 web / docs / workerd |
+| 6 | **镜像分两个阶段，两段都用 `node:24-alpine`**。构建阶段只装 persist-demo 的依赖链，编译它和它依赖的 `@runko/*`，再用 `pnpm deploy --prod` 挑出运行要的文件；最终镜像只有 Node 加这些文件，跑 `node dist/index.js`，约 224MB | `@runko/*` 的 `exports` 指向 `dist`，得先编译。开发依赖、编译器、源码都不该进运行镜像。两个阶段必须用同一种 C 库。唯一的原生模块 better-sqlite3 加载时优先用包里自带的二进制（含 musl 版），所以装包和 deploy 都加 `--ignore-scripts`，不让 pnpm 替它跑 `node-gyp rebuild`（那一步没有编译工具就失败，编出来的也用不上）。deploy 要求打开 `injectWorkspacePackages`，只在那一条命令上用 `--config` 打开，仓库配置不动 |
 | 7 | nginx 配 `proxy_buffering off` | 与 `forward.ts` 的「背压」同一个坑：缓冲会让 SSE 变成「一轮跑完才一次性出现」 |
 | 8 | 库用 `postgres:18-alpine`，不用共享 SQLite 卷 | SQLite 那一档第一批的 e2e 已经覆盖；而且 macOS 上 bind mount 的文件锁不可靠。不挂数据卷，每次从空库开始 |
 | 9 | 回声模型的等待**能被中断**（`timers/promises` 的 `setTimeout` + `abortSignal`） | 跟真 provider 一样。否则被停掉的轮也要睡满整段才结束，「自己停的」和「睡完自然结束的」分不出来（S8 就靠这个区分） |
+| 10 | **`build:` 只写在 replica-a 上**，b、c 只写同名的 `image` | compose 会给每个带 `build:` 的服务各构建一次，产出的镜像只差一个服务名标签。名字只能贴在其中一个上，另外两个当场变成悬空镜像 |
 
 ### 11.3 用 docker 命令模拟真实故障
 

@@ -54,7 +54,8 @@ const sqliteEnv = (dbPath: string): DbEnv => ({ DEMO_DB: "sqlite", DEMO_DB_PATH:
 
 async function start(name: string, port: number, dbEnv: DbEnv): Promise<Replica> {
   const url = `http://127.0.0.1:${String(port)}`;
-  // 跟 `pnpm start` 同一条命令：`src/index.ts` 是 TypeScript，得带上 tsx。
+  // 用 tsx 直接跑 persist-demo 的源码，所以不用先编译 persist-demo 自己。
+  // 它 import 的 @runko/* 仍然走各包的 dist，那些包得先 build。
   const child = spawn(process.execPath, ["--import", "tsx", ENTRY], {
     env: {
       ...process.env,

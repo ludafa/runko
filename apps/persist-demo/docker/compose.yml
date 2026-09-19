@@ -7,11 +7,17 @@
 # 端口与时间参数都能用环境变量覆盖（LAB_*）。test:lab 就是靠这个另起一套、不碰你手动起的这套。
 name: runko-lab
 
+# 三个副本共用一个镜像，但 `build:` 只写在 replica-a 上。
+# 每个带 `build:` 的服务 compose 都会各构建一次，产出的镜像只差一个服务名标签；
+# 名字只能贴在其中一个上，其余的立刻变成悬空镜像。
+# b、c 不带 `build:`，一起起的时候 compose 认得出它们的 `image` 由 a 构建。
+# 它们另外写了 `pull_policy: never`：单独起 b 或 c 又没有本地镜像时，直接报「找不到镜像」，
+# 不去 Docker Hub 拉一个同名的别人的镜像。先 `lab:up` 一次就有了。
+x-replica-build: &replica-build
+  context: ../../..
+  dockerfile: apps/persist-demo/docker/Dockerfile
+
 x-replica: &replica
-  build:
-    context: ../../..
-    dockerfile: apps/persist-demo/docker/Dockerfile
-  # 三个副本共用一个镜像；给了名字，compose 只构建一次。
   image: runko-lab/persist-demo:dev
   init: true
   # 两个网络：app 给副本之间互相转发，db 给副本连库。分开才能「只切断某个副本和库」。
@@ -62,6 +68,7 @@ services:
   # 会撞 pg_type 的唯一索引报重复键（见 packages/persist-kysely/src/migrate.ts 末尾的注释）。
   replica-a:
     <<: *replica
+    build: *replica-build
     environment:
       <<: *replica-env
       RUNKO_NODE_URL: http://replica-a:3910
@@ -71,6 +78,7 @@ services:
 
   replica-b:
     <<: *replica
+    pull_policy: never
     environment:
       <<: *replica-env
       RUNKO_NODE_URL: http://replica-b:3910
@@ -80,6 +88,7 @@ services:
 
   replica-c:
     <<: *replica
+    pull_policy: never
     environment:
       <<: *replica-env
       RUNKO_NODE_URL: http://replica-c:3910

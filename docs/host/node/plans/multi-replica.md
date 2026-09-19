@@ -415,7 +415,7 @@ flowchart LR
 
 | 文件 | 内容 |
 |---|---|
-| `Dockerfile` | `node:24-bookworm` → 装 pnpm 11 → `pnpm install --frozen-lockfile --filter "@runko-demo/persist-demo..."` → 构建依赖包 `dist` → `node --import tsx src/index.ts` |
+| `Dockerfile` | `node:24-bookworm` → 装 pnpm 11 → `pnpm install --frozen-lockfile --filter "@runko-demo/persist-demo..."` → 构建依赖包 `dist` → `node --import tsx src/index.ts`（2026-09-18 改成两阶段 alpine，见 [§8.4](#_8-4-镜像瘦身的验证)） |
 | `Dockerfile.dockerignore` | 排除 `node_modules`、`dist`、`.git`、文档站缓存、`*.db`。**放在 Dockerfile 旁边**，不往仓库根目录加东西 |
 | `compose.yml` | Postgres + replica-a/b/c + nginx；两个网络；a→b→c 串行启动；时间参数与端口都可用环境变量覆盖 |
 | `nginx.conf` | 三个副本轮询；`proxy_buffering off` |
@@ -580,6 +580,38 @@ pnpm docs:check && pnpm docs:build
 | M19：跑一次 `test:lab` 看日志 | 目录与各服务日志、`test.log`、`timeline.log` 齐全；时间线有序，能读出 S1 与 S7 的完整路径；轮询不刷屏 | ✅ 8/8，时间线里读请求 0 行 |
 | M19：日志不进 git | `git status` 看不到 `logs/` | ✅ |
 
+### 8.4 镜像瘦身的验证
+
+2026-09-18 把副本镜像从 1.86GB 压到 224MB，做法见[技术方案 §11.2](../tech/multi-replica.md) 第 6、10 条。
+
+**原来 1.86GB 花在哪**：完整版 `node:24-bookworm` 底座 1.13GB（里面有编译工具链、imagemagick、git/svn/hg）；
+装依赖那一层 593MB，其中约 300MB 是 pnpm 的注册表元数据缓存，另外 290MB 里有不少开发工具；
+`COPY . .` 那一层 98MB，其中 65MB 是 `.transcripts/` 下的一个本地 SQLite。
+
+**运行步骤**：
+
+```sh
+pnpm --filter "@runko-demo/persist-demo..." build
+pnpm --filter @runko-demo/persist-demo typecheck && pnpm --filter @runko-demo/persist-demo lint
+pnpm --filter @runko-demo/persist-demo test
+docker compose -p runko-lab-check -f apps/persist-demo/docker/compose.yml build   # 看构建出几个镜像
+pnpm --filter @runko-demo/persist-demo test:lab
+docker images runko-lab/persist-demo
+```
+
+| 用例 | 预期 | 实际 |
+|---|---|---|
+| 镜像大小 | 明显小于 1.86GB | ✅ 224MB：底座 `node:24-alpine` 166MB + 应用 57.5MB（`dist` 与运行时依赖） |
+| 不带开发工具 | 镜像里没有 tsx / esbuild / typescript / vitest / eslint | ✅ 一个都没有 |
+| 原生模块 | alpine（musl）上 better-sqlite3 能加载 | ✅ 用的是包里自带的 `linuxmusl-arm64` 二进制，冒烟 `select 41+1` 得 42 |
+| 干净机器能构建 | 换全新的空缓存、`--no-cache` 也能构建成功，且不触发任何编译 | ✅ 29 秒，469 个包全部现下载，日志里 `gyp` 0 次（第一版没加 `--ignore-scripts`，这一条是红的，见 §9） |
+| 服务能起 | `/health` 返回 200 | ✅ |
+| compose 只构建一次 | 一次构建只出 1 个镜像 | ✅ 1 个；原来每次 3 个，其中 2 个当场悬空 |
+| 构建耗时 | 不比原来慢 | ✅ 构建缓存热的时候 20～35 秒 |
+| 八个故障场景 | `test:lab` 全过 | ✅ 8/8（150 秒；修掉构建缺陷后重跑 8/8，135 秒） |
+| 原有用例 | `persist-demo` 的 `pnpm test` 全过 | ✅ 24 条通过，10 条按门禁跳过 |
+| 本地编译 | `build` / `typecheck` / `lint` | ✅ |
+
 ## 9. 变更记录
 
 | 日期 | 变更 |
@@ -601,3 +633,6 @@ pnpm docs:check && pnpm docs:build
 | 2026-09-13 | **追加 M17–M19 立项**：用户要能看到核心成功路径的执行顺序与耗时。查明仓库没有 OTel（只有 chat 应用接的 AI SDK 遥测回调，不覆盖多副本阶段），这批先用「带时间戳的日志 + 按时间合并」，OTel 另议（技术方案附录 D） |
 | 2026-09-13 | **M18 / M19 交付，M17 撤销**：demo 侧日志与验证环境日志收集交付；框架层日志改由已对齐的可观测性事件方案提供（技术方案附录 D），不随本批提交 |
 | 2026-09-18 | **M2 交付，本计划九单收口**：Mongo 版租约仲裁（`mongoArbitration`）。压了九天的原因是本机没有可用的 MongoDB，这次有了就补上。四组一致性用例 21 条在真 MongoDB 8 上全绿。两处偏差：字段名用驼峰（不跟 SQL 表的下划线，理由见 M2）；变异测试发现套件守不住「心跳必须看 `matchedCount` 不是 `modifiedCount`」这条 Mongo 特有的坑，本包自己补了一条用例。顺手把 `persist-demo` 的 `mongo` 档接上仲裁出口，并给它补了「两个真进程共用一个真 MongoDB」的 e2e 两条（转发 + 接管）|
+| 2026-09-18 | **验证环境镜像瘦身：1.86GB → 224MB**（验证见 §8.4）。改成两阶段构建，两段都用 `node:24-alpine`；persist-demo 加 `build`（tsc），`start` 改跑 `dist/index.js`，tsx 只留给 `dev`；用 `pnpm deploy --legacy --prod` 只带运行时依赖；先拷依赖清单再装依赖；pnpm 元数据缓存挂成构建缓存；`.dockerignore` 补齐本地数据与密钥（`.dev.vars` 之前会被拷进镜像）；compose 只让 replica-a 带 `build:`。**两处判断被推翻**：① compose 里「给了同名 `image`，compose 只构建一次」不成立，每个带 `build:` 的服务各构建一次；② 选完整版 bookworm 的理由（better-sqlite3 要能现场编译）已经不成立，13 版包里自带全平台二进制 |
+| 2026-09-18 | **修掉瘦身版的一处构建缺陷，去掉 `--legacy`**。① 上一行的镜像在干净机器上构建不出来：better-sqlite3 包里有 `binding.gyp`，pnpm 会替它跑 `node-gyp rebuild`，alpine 构建阶段没有编译工具就失败。之前能过，是因为第一次试 alpine 时装过编译工具，编译结果留在了 pnpm 的缓存里。上一行说「13 版包里自带全平台二进制，装包时不编译」只对了一半：它加载时确实优先用自带的二进制，但 pnpm 照样会去编译。装包与 deploy 改为加 `--ignore-scripts`。② `--legacy` 不需要：deploy 要求的 `injectWorkspacePackages` 可以只在那一条命令上用 `--config` 打开，仓库配置不动；产物与 legacy 版逐包一致，还多一份锁死版本的专属 lockfile。空缓存构建与 `test:lab` 重跑结果见 §8.4 |
+| 2026-09-18 | **code review 后的镜像修补**：代码只按白名单拷（`tsconfig.base.json`、`packages`、`apps/persist-demo`），改 docs 或别的 app 不再让编译重做，构建上下文从几十 MB 降到约 100KB；依赖清单改用 `**/package.json` 一把捞，不再照抄工作区成员列表；`.dockerignore` 改成任意层级匹配并补齐 `.DS_Store`、`*.log`、`.claude`、`.agents`；最终阶段改用 `node` 用户、设 `NODE_ENV=production`，并加一步 better-sqlite3 冒烟，把「跳过安装脚本导致原生模块加载不了」提前到构建期；b、c 加 `pull_policy: never`，单独起它们又没有本地镜像时不会去 Docker Hub 拉同名镜像；persist-demo 的 `build` 先清空 `dist`；README 与入口注释写明 `start` 要先 build。空缓存构建 30 秒、`test:lab` 8/8（135 秒） |

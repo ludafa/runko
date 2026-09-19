@@ -8,9 +8,13 @@ agent 服务。不是玩具脚本，是一个对外提供 HTTP 端点的真服�
 ## 跑起来
 
 ```sh
+pnpm --filter "@runko-demo/persist-demo..." build   # 连同它依赖的 @runko/* 一起编译
 pnpm --filter @runko-demo/persist-demo start
 # → persist-demo 起来了：http://localhost:3910（sqlite）
 ```
+
+`start` 跑的是编译好的 `dist/index.js`，跟验证环境的镜像里是同一种跑法。
+改代码时用 `dev`：它用 tsx 直接跑源码并监听改动，不用每次先 build。
 
 **不需要 API key**。没配 `DEEPSEEK_API_KEY` 时用一个"回声模型"——不联网，回一句固定话。
 这个 demo 要展示的是持久化，一上来先要人配 key 是没必要的门槛。
@@ -60,6 +64,8 @@ src/
 多副本只靠一个环境变量开：`RUNKO_NODE_URL` 是本副本的**可达地址**，原样进 `holder`。
 给了它就换成租约版[归属仲裁机制](../../docs/terms.md)并打开转发；不给就是单副本跑法，
 行为与以前一字不差。
+
+`start` 跑的是编译产物：改过代码要先重新 build（见上面「跑起来」），否则跑的还是上次编译的版本。
 
 ```sh
 # 两个进程，共用一个 SQLite 文件（就是部署形态里的「① 同机 cluster」）

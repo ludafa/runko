@@ -1,5 +1,6 @@
 /**
- * 进程入口。`pnpm --filter @runko-demo/persist-demo start`。
+ * 进程入口。`start` 跑的是编译产物，先 `pnpm --filter "@runko-demo/persist-demo..." build`；
+ * 改代码时用 `dev`，它直接跑这份源码。
  *
  * 环境变量：
  *
