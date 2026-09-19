@@ -34,3 +34,7 @@ docs/.vitepress/dist/
 
 # npm pack 产物
 *.tgz
+
+*.db
+*.db-shm
+*.db-wal
