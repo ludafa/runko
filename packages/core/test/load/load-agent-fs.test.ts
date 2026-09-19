@@ -19,6 +19,9 @@ function stubToolContext(): ToolContext {
     session: { id: "sess_1", turn: 0 },
     getSkill: () => ({ file: () => ({ text: async () => "" }) }),
     update: () => {},
+    suspend: () => {
+      throw new Error("ctx.suspend() is not stubbed in this test");
+    },
   };
 }
 

@@ -36,6 +36,9 @@ function toolContext(abortSignal?: AbortSignal): ToolContext {
       throw new Error('getSkill is not used by web-search');
     },
     update: () => {},
+    suspend: () => {
+      throw new Error('ctx.suspend() is not stubbed in this test');
+    },
   };
 }
 

@@ -246,8 +246,20 @@ export type ApprovalPolicy =
  * 人工裁决（docs/logic/orchestration/tech/single-ledger.md §6.3）：分类器返回 `review` 之后弹给
  * 真人的卡片，真人只答两值。想「让它换个做法」就用「拒绝 + 理由」或 steer，不提供改参数
  * 的入口。`deny.message` 是拒绝理由，会回填给模型。
+ *
+ * **第三个值 `suspend` 不是人答的**，是[人在回路桥](../../agent/src/runtime/human.ts)在等不到人时
+ * 替它答的：这一轮[挂起](../../../docs/terms.md)，那次调用**原样留在账本里等人**。
+ *
+ * 它与 `deny` 的差别是全方位的：`deny` 要改写工具部件、要产出审批响应 chunk、要把理由回填给
+ * 模型继续跑；`suspend` **什么都不做**——部件停在 `approval-requested`，不发 chunk，本轮就此收尾。
+ * 于是人几小时后回来点「允许」时，账本里那次调用还是原封不动的样子。详见
+ * [挂起与恢复 · 技术方案](../../../docs/logic/orchestration/tech/suspend-resume.md) §3.1。
  */
-export type HumanDecision = { behavior: "allow" } | { behavior: "deny"; message?: string };
+export type HumanDecision =
+  | { behavior: "allow" }
+  | { behavior: "deny"; message?: string }
+  /** `reason` 是宿主的词（`"timeout"` / `"handover"` 这类），core 只透传进收尾 metadata。 */
+  | { behavior: "suspend"; reason?: string };
 
 /** `ApprovalReviewer`（session 的人审通道，见 `loop.ts`）收到的一次待裁决请求。 */
 export interface ApprovalReviewRequest {
@@ -291,6 +303,16 @@ export interface ToolContext {
   getSkill(name: string): SkillHandle;
   /** 流式进度 → item.updated。 */
   update(partial: string): void;
+  /**
+   * [挂起](../../../docs/terms.md)本轮：这次调用停在一个干净边界上等外部输入，本轮到此为止。
+   *
+   * 它**抛出**（返回类型是 `never`），所以后面的代码不会执行。那次调用的工具部件保持
+   * `input-available`——带着完整入参留在账本里，人回来之后由新的一轮接上。
+   *
+   * 典型调用者是 `ask-user`。机制、以及「为什么 `try/catch` 吃掉它也不影响正确性」见
+   * `suspend.ts`。
+   */
+  suspend(reason?: string): never;
 }
 
 /**

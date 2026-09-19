@@ -65,7 +65,7 @@ import type { z } from "zod";
 import type { AgentDefinition, BuiltinToolName } from "./agent.js";
 import { createOnceApprovalMemory } from "./approval.js";
 import { runTurn } from "./loop.js";
-import type { SessionTelemetry } from "./loop.js";
+import type { RunTurnOptions, SessionTelemetry } from "./loop.js";
 import { createDerivedDataCollector } from "./runtime.js";
 import type { DerivedDataCollector } from "./runtime.js";
 import type { Skill } from "./skill.js";
@@ -73,6 +73,8 @@ import { buildAvailableSkillsBlock, createGetSkill, mountSkillFiles } from "./sk
 import { sessionStateSchema, validateSessionMessages } from "./state.js";
 import type { RunkoChunk, RunkoMessageMetadata, RunkoUIMessage, SessionState } from "./state.js";
 import { generateStructuredOutput } from "./structured.js";
+import { assertNoPendingCalls, resolveResumeTarget, RunkoResumeError } from "./suspend.js";
+import type { Settlement } from "./suspend.js";
 import { createBashTool } from "./tools/builtin/bash.js";
 import { createLoadSkillTool } from "./tools/builtin/load-skill.js";
 import { createPlanStore, createUpdatePlanTool } from "./tools/builtin/update-plan.js";
@@ -116,6 +118,11 @@ export interface TurnOptions {
 export interface TurnResult {
   finalResponse: string;
   usage: Usage;
+  /**
+   * 这一轮以[挂起](../../../docs/terms.md)收尾时才有：哪几次调用还悬着、为什么挂起。它们要用
+   * `settleAndRun` 结清，之后这个会话才能开普通轮。
+   */
+  suspended?: { callIds: string[]; reason?: string };
 }
 
 /**
@@ -217,6 +224,17 @@ export interface Session {
   send<T>(input: Input, opts: TurnOptions & { outputSchema: z.ZodType<T> }): Promise<TurnResult & { structuredOutput: T }>;
   /** ai 的 UIMessageChunk 词汇表（对 `RunkoUIMessage` 实例化，`state.ts` 的 `RunkoChunk`）——任何 AI SDK 兼容客户端可直接消费（docs/logic/orchestration/tech/single-ledger.md §5 单-2 目标架构 2）。 */
   stream(input: Input, opts?: TurnOptions): AsyncGenerator<RunkoChunk, TurnResult>;
+  /**
+   * 恢复轮：结清一次[挂起](../../../docs/terms.md)留下的悬空调用，然后接着跑——不追加 user 消息，
+   * 第一步也不调模型（先执行 / 拒绝 / 填输出，模型看到结果才上场）。
+   *
+   * 那次调用**必须在最后一条消息里**（悬空调用只可能在那里），`settlement` 的种类要与它的
+   * 部件状态对得上；否则抛 `RunkoResumeError`，不算一轮。
+   *
+   * **它原地改写那条消息**（id 不变）。所以要落盘的是「开轮时的最后一条 + 本轮新增的」，
+   * 前者以新 seq、同 id 追加，读账本时按 id 折叠——见挂起与恢复 · 技术方案 §5.4。
+   */
+  settleAndRun(callId: string, settlement: Settlement, opts?: TurnOptions): AsyncGenerator<RunkoChunk, TurnResult>;
   /**
    * 软 steer（STEER-1，docs/logic/engine/tech/core-sdk.md §4.2）：turn 进行中调用则把 `input` 排队、在
    * 下一个 step checkpoint 注入为一条 user 消息（不打断进行中的模型流式输出
@@ -550,13 +568,26 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
     return true;
   }
 
-  async function* stream(input: Input, turnOpts: TurnOptions = {}): AsyncGenerator<RunkoChunk, TurnResult> {
+  /**
+   * `stream` 与 `settleAndRun` 共用的那一轮：装配、深层校验、steer 队列、活动信号、手工委派、
+   * 收尾复位全在这里。两个入口的差别只在 `open`——**这一轮怎么开场**：
+   *
+   * - `stream`：确认没有悬空调用，追加一条 user 消息；
+   * - `settleAndRun`：确认那次调用能被结清，把它交给 `runTurn` 的恢复开场。
+   *
+   * `open` 在深层校验之后、`turn += 1` 之前调用：**它抛了就不算一轮**——轮号不动、一个 chunk
+   * 都不出（`finally` 照样复位 `turnActive`）。
+   */
+  async function* runSessionTurn(
+    open: () => RunTurnOptions["resume"],
+    turnOpts: TurnOptions,
+  ): AsyncGenerator<RunkoChunk, TurnResult> {
     turnActive = true;
     try {
       await Promise.all([skillFilesMounted, messagesReady]);
 
+      const resume = open();
       turn += 1;
-      messages.push(toUserUIMessage(input));
 
       /**
        * [活动信号](../../../docs/terms.md)的 turn 作用域节流状态（docs/logic/orchestration/tech/sandbox-keepalive.md §5.2）。
@@ -604,6 +635,7 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
         getSkill,
         drainSteers: () => pendingSteers.splice(0, pendingSteers.length),
         telemetry: opts.telemetry,
+        resume,
       });
 
       /**
@@ -638,6 +670,25 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
     }
   }
 
+  function stream(input: Input, turnOpts: TurnOptions = {}): AsyncGenerator<RunkoChunk, TurnResult> {
+    return runSessionTurn(() => {
+      // 悬空调用后面再接一条 user 消息，provider 会 400。与其让它回一个看不懂的错误，
+      // 不如在这里说清楚（挂起与恢复 · 技术方案 §5.3）。
+      assertNoPendingCalls(messages);
+      messages.push(toUserUIMessage(input));
+      return undefined;
+    }, turnOpts);
+  }
+
+  function settleAndRun(callId: string, settlement: Settlement, turnOpts: TurnOptions = {}): AsyncGenerator<RunkoChunk, TurnResult> {
+    return runSessionTurn(() => {
+      // 只校验、不动账本：真正的改写在 `runTurn` 的恢复开场里。这里先查一遍，是为了用错时
+      // 在 `turn += 1` 之前就抛。
+      resolveResumeTarget(messages, callId, settlement);
+      return { callId, settlement };
+    }, turnOpts);
+  }
+
   async function send(input: Input, turnOpts?: TurnOptions): Promise<TurnResult>;
   async function send<T>(
     input: Input,
@@ -665,6 +716,13 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
 
     const turnResult = step.value;
     if (turnOpts.outputSchema === undefined) {return turnResult;}
+    // 挂起的一轮没有「最终答复」可以结构化，而且历史末尾是悬空调用，拿去调模型会 400。
+    if (turnResult.suspended !== undefined) {
+      throw new RunkoResumeError(
+        "pending_calls",
+        `This turn suspended waiting for a person (calls: ${turnResult.suspended.callIds.join(", ")}), so there is no finished answer to structure. Settle them with settleAndRun first.`,
+      );
+    }
 
     const requestMessages = await convertToModelMessages(messages);
     const structuredOutput = await generateStructuredOutput({
@@ -687,5 +745,5 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
     return state;
   }
 
-  return { id, fs, readState, derivedData, send, stream, steer, toJSON };
+  return { id, fs, readState, derivedData, send, stream, settleAndRun, steer, toJSON };
 }

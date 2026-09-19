@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createOnceApprovalMemory } from "../src/approval.js";
 import { createDerivedDataCollector, executeToolCall, resolveToolCallApproval } from "../src/runtime.js";
-import type { ExecuteToolCallOptions, ResolveToolCallApprovalOptions } from "../src/runtime.js";
+import type { ExecuteToolCallOptions, ResolveToolCallApprovalOptions, ToolCallResult } from "../src/runtime.js";
 import { createPlanStore, createUpdatePlanTool } from "../src/tools/builtin/update-plan.js";
 import type { ApprovalOutcome, JsonValue, RunkoFS, Tool, ToolContext, ToolReturn } from "../src/types.js";
 
@@ -15,6 +15,18 @@ import type { ApprovalOutcome, JsonValue, RunkoFS, Tool, ToolContext, ToolReturn
 function expectStringOutput(output: ToolReturn): string {
   expect(typeof output).toBe("string");
   return typeof output === "string" ? output : "";
+}
+
+/**
+ * `ToolCallResult` 是按 `status` 判别的联合，`"suspended"` 那一支没有 `output`（挂起不产生
+ * 结果）。本文件除挂起那一组之外的用例都不该挂起，所以统一经这里收窄——挂起了就当场炸，
+ * 而不是让断言去比一个不存在的字段。
+ */
+function outputOf(result: ToolCallResult): ToolReturn {
+  if (result.status === "suspended") {
+    throw new Error(`expected the call to settle, but it suspended (reason: ${String(result.reason)})`);
+  }
+  return result.output;
 }
 
 function fakeFs(): RunkoFS {
@@ -171,7 +183,7 @@ describe("executeToolCall", () => {
       const result = await executeToolCall({ ...baseOptions(), tool, input: {} });
 
       expect(result.status).toBe("failed");
-      expect(expectStringOutput(result.output)).toContain("disk on fire");
+      expect(expectStringOutput(outputOf(result))).toContain("disk on fire");
     });
 
     it("stringifies a non-Error throw value", async () => {
@@ -185,7 +197,7 @@ describe("executeToolCall", () => {
 
       const result = await executeToolCall({ ...baseOptions(), tool, input: {} });
       expect(result.status).toBe("failed");
-      expect(expectStringOutput(result.output)).toContain("boom");
+      expect(expectStringOutput(outputOf(result))).toContain("boom");
     });
   });
 
@@ -199,7 +211,7 @@ describe("executeToolCall", () => {
       };
       const result = await executeToolCall({ ...baseOptions(), tool, input: {} });
       expect(result.status).toBe("completed");
-      expect(result.output).toBe("a valid string");
+      expect(outputOf(result)).toBe("a valid string");
     });
 
     it("returns failed with a guidance message when the return value violates outputSchema", async () => {
@@ -213,14 +225,14 @@ describe("executeToolCall", () => {
       };
       const result = await executeToolCall({ ...baseOptions(), tool, input: {} });
       expect(result.status).toBe("failed");
-      expect(expectStringOutput(result.output)).toContain("test_tool");
+      expect(expectStringOutput(outputOf(result))).toContain("test_tool");
     });
 
     it("skips validation entirely when outputSchema is not declared", async () => {
       const tool: Tool = { description: "d", inputSchema: z.object({}), execute: () => ({ arbitrary: "shape" }) };
       const result = await executeToolCall({ ...baseOptions(), tool, input: {} });
       expect(result.status).toBe("completed");
-      expect(result.output).toEqual({ arbitrary: "shape" });
+      expect(outputOf(result)).toEqual({ arbitrary: "shape" });
     });
   });
 

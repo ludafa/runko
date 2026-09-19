@@ -41,15 +41,13 @@ const runkoErrorMetadataSchema = z.object({
  * provider_error）都归 `'failed'`——四态错误码折叠进三态 status 的映射见
  * `loop.ts` 的 `statusForError()`。
  *
- * `'suspended'` 是**挂起**（docs/architecture/tech/agent-kernel.md §4）的收尾态：
+ * `'suspended'` 是**挂起**（docs/logic/orchestration/tech/suspend-resume.md）的收尾态：
  * 一轮停在「正在等人」这个干净边界上、主动落盘并释放归属，人回来之后由
  * **新的一轮**接着跑。它与 `'interrupted'` 的区别是**主动且可恢复**——界面
  * 不该把它渲染成「已中断」（那会让用户以为出错了）。
  *
- * **本层只定义、暂不产出**：`loop.ts` 的 `finalizeTurn` 至今只产出前三态
- * （它的 `status` 参数就是三值联合，不是笔误）。产出方要等 K3 挂起与恢复落地
- * 时才补上；先加进这里是为了让宿主/界面提前把渲染分支占好，避免 K3 落地那天
- * 前后端不同步。
+ * 挂起那一轮的收尾 metadata 里同时带 `suspended`（哪几次调用还悬着），恢复
+ * 就是拿着其中一个 callId 走 `settleAndRun`。
  */
 export interface RunkoMessageMetadata {
   turn?: number;
@@ -67,6 +65,16 @@ export interface RunkoMessageMetadata {
   error?: RunkoError;
   /** turn 进行中经 `Session.steer()` 注入的 user 消息标记（docs/logic/orchestration/tech/single-ledger.md §2.2a）。 */
   steered?: boolean;
+  /**
+   * `status === 'suspended'` 时才有：这一轮留下了哪几次悬着的调用，以及为什么挂起。
+   *
+   * `callIds` 通常只有一个；一步里多个调用同时在等人时会有多个——那时恢复要走
+   * 多轮，每轮结清一个（docs/logic/orchestration/tech/suspend-resume.md §3.3）。
+   *
+   * `reason` 是**宿主给的词**（`'timeout'` / `'handover'` 这类），core 只透传不解释，
+   * 同 `RunkoError.message` 对待中止理由的姿态。
+   */
+  suspended?: { callIds: string[]; reason?: string };
 }
 
 export const runkoMessageMetadataSchema: z.ZodType<RunkoMessageMetadata> = z.object({
@@ -77,6 +85,7 @@ export const runkoMessageMetadataSchema: z.ZodType<RunkoMessageMetadata> = z.obj
   toolDurationMs: z.number().optional(),
   error: runkoErrorMetadataSchema.optional(),
   steered: z.boolean().optional(),
+  suspended: z.object({ callIds: z.array(z.string()), reason: z.string().optional() }).optional(),
 });
 
 // ============================================================================

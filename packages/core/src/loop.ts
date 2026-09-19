@@ -42,7 +42,7 @@
  * `approval-responded` / `output-denied`，`ToolUIPart` 的判别联合）。
  */
 import { randomUUID } from "node:crypto";
-import { convertToModelMessages, streamText } from "ai";
+import { convertToModelMessages, getToolName, isToolUIPart, streamText } from "ai";
 import type { Telemetry, ToolExecutionEndEvent, ToolExecutionStartEvent } from "ai";
 import type {
   DataUIPart,
@@ -67,10 +67,12 @@ import { jsonValueSchema } from "./types.js";
 import type { ApprovalPolicy, ApprovalReviewer, JsonValue, RunkoFS, SkillHandle, Tool, ToolReturn } from "./types.js";
 import { convertTools } from "./model/convert.js";
 import { executeToolCall, resolveToolCallApproval } from "./runtime.js";
-import type { DerivedDataCollector, ToolCallResult } from "./runtime.js";
+import type { DerivedDataCollector, ToolCallDerivedData, ToolCallResult } from "./runtime.js";
 import { DEFAULT_DENY_MESSAGE, noArbiterDenyReason } from "./approval.js";
 import type { OnceApprovalMemory } from "./approval.js";
 import type { TurnResult } from "./session.js";
+import { pendingCallIds, resolveResumeTarget } from "./suspend.js";
+import type { ResumeTarget, Settlement } from "./suspend.js";
 
 /**
  * `catch` 子句里从 `unknown` 安全窄化出可读消息——同款受控例外见
@@ -168,14 +170,21 @@ function appendPlaceholderAssistantMessage(messages: RunkoUIMessage[]): RunkoUIM
  * `[executionStartedAt, completedAt]` 区间，按起点排序后合并重叠再求和——
  * 全只读批并行结算时多个调用同时在跑，简单相加会把重叠时段重复计入、
  * 甚至超过整轮墙钟；区间并集才是"这段时间里有工具在执行"的真实时长。
+ *
+ * **只数 `since` 之后才开始执行的区间**。这是为恢复轮加的：恢复改写的是上一轮的消息，
+ * 里面既有上一轮已执行完的调用（不该算进本轮），也有这次被结清、在本轮才执行的那个（该算）。
+ * 按「开始执行的时刻」切一刀，三种情形都对——包括 `ctx.suspend()` 挂起的调用：它在上一轮
+ * 就「开始执行」了（执行的内容就是等人），所以等人的时间哪一轮都不算。
+ * 普通轮不受影响：它的区间本来全在本轮开始之后。见挂起与恢复 · 技术方案 §5.6。
  */
-function toolExecutionWallMs(messages: RunkoUIMessage[]): number {
+function toolExecutionWallMs(messages: RunkoUIMessage[], since: number): number {
   const intervals: { start: number; end: number }[] = [];
   for (const message of messages) {
     for (const part of message.parts) {
       if (part.type !== "data-tool-timing") {continue;}
       const { executionStartedAt, completedAt } = part.data;
       if (executionStartedAt === undefined || completedAt === undefined) {continue;}
+      if (executionStartedAt < since) {continue;}
       intervals.push({ start: executionStartedAt, end: completedAt });
     }
   }
@@ -205,21 +214,35 @@ function finalizeTurn(opts: {
   lastAssistantMessage: RunkoUIMessage | undefined;
   turn: number;
   turnStartedAt: number;
-  /** `runTurn` 入口时 `opts.messages` 的长度——本轮新增的消息从这里开始切片，`toolDurationMs` 只统计本轮的 timing 部件。 */
+  /** 本轮涉及的消息从这里开始切片（`toolDurationMs` 只统计它们的 timing 部件）。普通轮是入口时的长度；恢复轮往前多一条——被改写的那条上一轮的消息。 */
   turnMessagesStart: number;
   usage: Usage;
-  status: "completed" | "failed" | "interrupted";
+  status: "completed" | "failed" | "interrupted" | "suspended";
   error?: RunkoError;
+  /** `status: "suspended"` 时带上：哪几次调用还悬着、为什么挂起（见 state.ts 的 `RunkoMessageMetadata.suspended`）。 */
+  suspended?: { callIds: string[]; reason?: string };
 }): RunkoChunk {
   const durationMs = Date.now() - opts.turnStartedAt;
-  const toolDurationMs = toolExecutionWallMs(opts.messages.slice(opts.turnMessagesStart));
-  const metadata: RunkoMessageMetadata =
-    opts.error === undefined
-      ? { turn: opts.turn, usage: opts.usage, status: opts.status, durationMs, toolDurationMs }
-      : { turn: opts.turn, usage: opts.usage, status: opts.status, durationMs, toolDurationMs, error: opts.error };
+  const toolDurationMs = toolExecutionWallMs(opts.messages.slice(opts.turnMessagesStart), opts.turnStartedAt);
+  const base: RunkoMessageMetadata = { turn: opts.turn, usage: opts.usage, status: opts.status, durationMs, toolDurationMs };
+  const metadata: RunkoMessageMetadata = {
+    ...base,
+    ...(opts.error === undefined ? {} : { error: opts.error }),
+    ...(opts.suspended === undefined ? {} : { suspended: opts.suspended }),
+  };
   const target = opts.lastAssistantMessage ?? appendPlaceholderAssistantMessage(opts.messages);
-  target.metadata = target.metadata === undefined ? metadata : { ...target.metadata, ...metadata };
+  target.metadata = target.metadata === undefined ? metadata : { ...withoutSuspended(target.metadata), ...metadata };
   return { type: "message-metadata", messageMetadata: metadata };
+}
+
+/**
+ * 恢复轮在第一次调模型之前就收尾时，收尾 metadata 并在上一轮那条消息上（悬空调用只能在最后一条，
+ * 不能另起一条）。上一轮挂起时写的 `suspended` 这时得去掉：新状态不是挂起的话，留着就自相矛盾；
+ * 是挂起的话，新的那份会覆盖它。
+ */
+function withoutSuspended(metadata: RunkoMessageMetadata): RunkoMessageMetadata {
+  const { suspended: _previous, ...rest } = metadata;
+  return rest;
 }
 
 // ---- steer（STEER-1）：turn 进行中经 `Session.steer()` 排队的 user 消息 ----
@@ -425,8 +448,13 @@ function completeToolTiming(message: RunkoUIMessage, toolCallId: string): RunkoC
  *   抛出意味着 bug）：先把已产出的 chunk 放完、等全部分支停机，再重抛第一
  *   个错误——与串行路径"错误冒泡中断 turn"同语义，不留未观察的 rejection。
  */
-async function* mergeSettleStreams(streams: AsyncGenerator<RunkoChunk, void>[]): AsyncGenerator<RunkoChunk, void> {
+async function* mergeSettleStreams(
+  streams: AsyncGenerator<RunkoChunk, SuspendedCall | undefined>[],
+): AsyncGenerator<RunkoChunk, (SuspendedCall | undefined)[]> {
   const queue: RunkoChunk[] = [];
+  // 按**入参下标**写回，不用 push——并行结算的完成顺序是不确定的，而挂起 callId 的顺序
+  // 要跟模型发出调用的顺序一致（它会进账本 metadata，顺序飘会让同一份历史产出不同的记录）。
+  const outcomes: (SuspendedCall | undefined)[] = Array.from({ length: streams.length });
   let running = streams.length;
   let failure: { error: unknown } | undefined;
   let wake: (() => void) | undefined;
@@ -434,13 +462,17 @@ async function* mergeSettleStreams(streams: AsyncGenerator<RunkoChunk, void>[]):
     wake?.();
     wake = undefined;
   };
-  for (const stream of streams) {
+  for (const [index, stream] of streams.entries()) {
     void (async () => {
       try {
-        for await (const chunk of stream) {
-          queue.push(chunk);
+        // 手工迭代而不是 `for await`——后者拿不到生成器的 return 值，而这里正需要它。
+        let step = await stream.next();
+        while (!step.done) {
+          queue.push(step.value);
           notify();
+          step = await stream.next();
         }
+        outcomes[index] = step.value;
       } catch (error) {
         failure ??= { error };
       } finally {
@@ -460,9 +492,26 @@ async function* mergeSettleStreams(streams: AsyncGenerator<RunkoChunk, void>[]):
     });
   }
   if (failure !== undefined) {throw failure.error;}
+  return outcomes;
 }
 
 // ---- 单个工具调用的结算（审批→执行→部件/chunk 编码，见文件头"审批：三值 + 阻塞前显式产出"） ----
+
+/**
+ * 一次调用要求[挂起](../../../docs/terms.md)本轮——`settleToolCall` 的返回值，`undefined` 表示
+ * 正常结算完了。
+ *
+ * 它**走返回值而不是异常**：挂起在 loop 这一层是一个需要逐级汇总的正常结局（一步里可能有
+ * 好几个调用同时挂起），异常通道表达不了「汇总」，而且会让正常路径被当故障——同
+ * `Grant.nextSeq` 不抛 `OwnershipLostError` 的理由。
+ *
+ * （工具那一侧相反，`ctx.suspend()` 确实是抛的：那里要穿透工具自己的包装层，见 `suspend.ts`。
+ * 两层的选择不同，因为要解决的问题不同。）
+ */
+interface SuspendedCall {
+  callId: string;
+  reason: string | undefined;
+}
 
 interface PendingToolCall {
   toolCallId: string;
@@ -539,17 +588,39 @@ function notifyToolExecutionEnd(opts: SettleToolCallOptions, input: JsonValue, o
 }
 
 /**
+ * 派生数据（file-change / plan-update）落部件 + 出 chunk。
+ *
+ * 三条路共用：执行成功、执行失败、[挂起](../../../docs/terms.md)。**挂起也要走**——工具在
+ * 停下来等人之前可能已经真的改了文件，那些是已发生的事实，跟这次调用有没有结果无关。
+ */
+async function* emitDerivedData(opts: SettleToolCallOptions, derived: ToolCallDerivedData): AsyncGenerator<RunkoChunk, void> {
+  const { call, assistantMessage } = opts;
+  if (derived.changes.length > 0) {
+    const data: FileChangeData = { changes: derived.changes };
+    const id = `file-change-${call.toolCallId}`;
+    const part = pushFileChangePart(assistantMessage, id, data);
+    yield { type: "data-file-change", id: part.id, data: part.data };
+  }
+  if (derived.items !== undefined) {
+    const part = upsertPlanUpdatePart(assistantMessage, { items: derived.items });
+    yield { type: "data-plan-update", id: part.id, data: part.data };
+  }
+}
+
+/**
  * 第 2 步（`runtime.ts` 的 `executeToolCall`）+ 落 output 部件/chunk + 派生数据
  * chunk——`allow` 快速路径与 `review` 人工批准之后共用这一段尾巴，`approval`
  * 非空时（后者）把 `{id, approved:true}` 带进 output 部件（见
  * `outputAvailablePart`/`outputErrorPart` 注释），前者不带（`undefined`）。
+ *
+ * 返回非 `undefined` = 这次调用要求挂起本轮（工具调了 `ctx.suspend()`）。
  */
 async function* settleExecution(
   opts: SettleToolCallOptions,
   tool: Tool,
   input: JsonValue,
   approval: { id: string; approved: true } | undefined,
-): AsyncGenerator<RunkoChunk, void> {
+): AsyncGenerator<RunkoChunk, SuspendedCall | undefined> {
   const { call, assistantMessage } = opts;
   yield markToolExecutionStart(assistantMessage, call.toolCallId);
   const executionStartedAt = Date.now();
@@ -585,6 +656,17 @@ async function* settleExecution(
     };
   }
 
+  // 挂起：**什么都不写**。工具部件停在 `input-available`（带着完整入参），不发 output chunk、
+  // 不 complete timing（那条 timing 因此只有 executionStartedAt——「开始过、没结束」，与工具
+  // 执行中崩溃同形，`toolExecutionWallMs` 会跳过它）。这次调用原样留在账本里等人。
+  //
+  // 派生数据（file-change / plan-update）照常产出：挂起之前工具可能已经真的改了文件，那些是
+  // **已发生的事实**，跟这次调用有没有结果无关。
+  if (result.status === "suspended") {
+    yield* emitDerivedData(opts, result.derived);
+    return { callId: call.toolCallId, reason: result.reason };
+  }
+
   if (result.status === "completed") {
     assistantMessage.parts[call.partIndex] = outputAvailablePart(call.toolName, call.toolCallId, input, result.output, approval);
     yield { type: "tool-output-available", toolCallId: call.toolCallId, output: result.output };
@@ -598,23 +680,18 @@ async function* settleExecution(
     notifyToolExecutionEnd(opts, input, { status: "failed", errorText }, Date.now() - executionStartedAt);
   }
 
-  if (result.derived.changes.length > 0) {
-    const data: FileChangeData = { changes: result.derived.changes };
-    const id = `file-change-${call.toolCallId}`;
-    const part = pushFileChangePart(assistantMessage, id, data);
-    yield { type: "data-file-change", id: part.id, data: part.data };
-  }
-  if (result.derived.items !== undefined) {
-    const part = upsertPlanUpdatePart(assistantMessage, { items: result.derived.items });
-    yield { type: "data-plan-update", id: part.id, data: part.data };
-  }
+  yield* emitDerivedData(opts, result.derived);
+  return undefined;
 }
 
 /**
  * 单个工具调用的结算——第 1 步（审批解析）+（`review` 时）先产出后阻塞的人工
  * 裁决 + 第 2 步（执行），逐段说明见文件头"审批：三值 + 阻塞前显式产出"一节。
+ *
+ * 返回非 `undefined` = 这次调用要求[挂起](../../../docs/terms.md)本轮。两个来源：人审通道答了
+ * `suspend`，或者工具自己调了 `ctx.suspend()`。
  */
-async function* settleToolCall(opts: SettleToolCallOptions): AsyncGenerator<RunkoChunk, void> {
+async function* settleToolCall(opts: SettleToolCallOptions): AsyncGenerator<RunkoChunk, SuspendedCall | undefined> {
   const { call, assistantMessage } = opts;
   const tool = opts.tools[call.toolName];
 
@@ -623,7 +700,7 @@ async function* settleToolCall(opts: SettleToolCallOptions): AsyncGenerator<Runk
     assistantMessage.parts[call.partIndex] = outputErrorPart(call.toolName, call.toolCallId, call.input, errorText);
     yield { type: "tool-output-error", toolCallId: call.toolCallId, errorText };
     yield completeToolTiming(assistantMessage, call.toolCallId);
-    return;
+    return undefined;
   }
 
   const approval = await resolveToolCallApproval({
@@ -640,19 +717,18 @@ async function* settleToolCall(opts: SettleToolCallOptions): AsyncGenerator<Runk
     assistantMessage.parts[call.partIndex] = outputErrorPart(call.toolName, call.toolCallId, call.input, approval.message);
     yield { type: "tool-output-error", toolCallId: call.toolCallId, errorText: approval.message };
     yield completeToolTiming(assistantMessage, call.toolCallId);
-    return;
+    return undefined;
   }
 
   if (approval.status === "deny") {
     assistantMessage.parts[call.partIndex] = outputDeniedPart(call.toolName, call.toolCallId, call.input, call.toolCallId, approval.reason);
     yield { type: "tool-output-denied", toolCallId: call.toolCallId };
     yield completeToolTiming(assistantMessage, call.toolCallId);
-    return;
+    return undefined;
   }
 
   if (approval.status === "allow") {
-    yield* settleExecution(opts, tool, approval.input, undefined);
-    return;
+    return yield* settleExecution(opts, tool, approval.input, undefined);
   }
 
   // approval.status === "review"：先产出请求 chunk，再 await 人审通道——
@@ -663,7 +739,7 @@ async function* settleToolCall(opts: SettleToolCallOptions): AsyncGenerator<Runk
     assistantMessage.parts[call.partIndex] = outputDeniedPart(call.toolName, call.toolCallId, approval.input, call.toolCallId, reason);
     yield { type: "tool-output-denied", toolCallId: call.toolCallId };
     yield completeToolTiming(assistantMessage, call.toolCallId);
-    return;
+    return undefined;
   }
 
   assistantMessage.parts[call.partIndex] = approvalRequestedPart(call.toolName, call.toolCallId, approval.input, call.toolCallId);
@@ -675,30 +751,168 @@ async function* settleToolCall(opts: SettleToolCallOptions): AsyncGenerator<Runk
     ctx: { toolName: call.toolName, callId: call.toolCallId, session: opts.session },
   });
 
-  if (decision.behavior === "deny") {
-    const reason = decision.message ?? DEFAULT_DENY_MESSAGE;
-    assistantMessage.parts[call.partIndex] = approvalRespondedPart(
-      call.toolName,
-      call.toolCallId,
-      approval.input,
-      call.toolCallId,
-      false,
-      reason,
-    );
-    yield { type: "tool-approval-response", approvalId: call.toolCallId, approved: false, reason };
+  // 挂起：**一个字都不改**。上面那行已经把部件写成了 `approval-requested`——那正是我们要留在
+  // 账本里的东西：一次带着完整入参、等着人答的调用。不发响应 chunk（没有响应）、不 complete
+  // timing（没执行过）、不动 once 记忆（没人批准过）。本轮就此收尾。
+  //
+  // ⚠️ **这里不能走「resolve 成 deny 再靠 abort 收尾」那条近路。** 上面 `await` 醒来之后是
+  // 立刻按 behavior 分支的，不检查 abort 信号——deny 分支会把部件改写成 `output-denied`。
+  // 于是人几小时后回来点「允许」时，账本里那次调用早就是拒绝态了，审批闸门形同虚设。
+  // 完整推演见 docs/logic/orchestration/tech/suspend-resume.md §2。
+  if (decision.behavior === "suspend") {
+    return { callId: call.toolCallId, reason: decision.reason };
+  }
 
-    assistantMessage.parts[call.partIndex] = outputDeniedPart(call.toolName, call.toolCallId, approval.input, call.toolCallId, reason);
-    yield { type: "tool-output-denied", toolCallId: call.toolCallId };
-    yield completeToolTiming(assistantMessage, call.toolCallId);
-    return;
+  if (decision.behavior === "deny") {
+    yield* settleHumanDenial(opts, approval.input, decision.message ?? DEFAULT_DENY_MESSAGE);
+    return undefined;
   }
 
   if (approval.markOnceOnApprove) {opts.onceMemory.markApproved(call.toolName);}
 
-  assistantMessage.parts[call.partIndex] = approvalRespondedPart(call.toolName, call.toolCallId, approval.input, call.toolCallId, true);
-  yield { type: "tool-approval-response", approvalId: call.toolCallId, approved: true };
+  return yield* settleHumanApproval(opts, tool, approval.input);
+}
 
-  yield* settleExecution(opts, tool, approval.input, { id: call.toolCallId, approved: true });
+/**
+ * 人审**拒绝**之后的写入：部件先改成 `approval-responded`（approved: false）并发响应 chunk，
+ * 再改成 `output-denied`，理由回填给模型。当场裁决与恢复轮的 `approval / deny` 共用。
+ */
+async function* settleHumanDenial(opts: SettleToolCallOptions, input: JsonValue, reason: string): AsyncGenerator<RunkoChunk, void> {
+  const { call, assistantMessage } = opts;
+  assistantMessage.parts[call.partIndex] = approvalRespondedPart(call.toolName, call.toolCallId, input, call.toolCallId, false, reason);
+  yield { type: "tool-approval-response", approvalId: call.toolCallId, approved: false, reason };
+
+  assistantMessage.parts[call.partIndex] = outputDeniedPart(call.toolName, call.toolCallId, input, call.toolCallId, reason);
+  yield { type: "tool-output-denied", toolCallId: call.toolCallId };
+  yield completeToolTiming(assistantMessage, call.toolCallId);
+}
+
+/**
+ * 人审**批准**之后：部件改成 `approval-responded`（approved: true）、发响应 chunk、执行。
+ * 当场裁决与恢复轮的 `approval / allow` 共用。返回值同 `settleExecution`（执行时工具可能又挂起）。
+ */
+async function* settleHumanApproval(opts: SettleToolCallOptions, tool: Tool, input: JsonValue): AsyncGenerator<RunkoChunk, SuspendedCall | undefined> {
+  const { call, assistantMessage } = opts;
+  assistantMessage.parts[call.partIndex] = approvalRespondedPart(call.toolName, call.toolCallId, input, call.toolCallId, true);
+  yield { type: "tool-approval-response", approvalId: call.toolCallId, approved: true };
+  return yield* settleExecution(opts, tool, input, { id: call.toolCallId, approved: true });
+}
+
+/**
+ * 一步半路失败（停止、模型服务出错）时，半成品消息里可能已经有模型发出、还没轮到结算的调用。
+ * 它们没执行，也不会再执行——这一轮就此收尾。给每个一个「没有执行」的错误结果。
+ *
+ * 不收的话账本末尾留着悬空调用：下一轮会被当成[挂起](../../../docs/terms.md)（等一个根本没人
+ * 能答的答复），交给模型也会 400。
+ */
+function* closeNeverRunCalls(message: RunkoUIMessage, cause: string): Generator<RunkoChunk, void> {
+  const dangling = new Set(pendingCallIds([message]));
+  for (const [index, part] of message.parts.entries()) {
+    if (!isToolUIPart(part) || !dangling.has(part.toolCallId)) {continue;}
+    const errorText = `Not run: this step ended early (${cause}) before the call was carried out.`;
+    message.parts[index] = outputErrorPart(getToolName(part), part.toolCallId, toJsonValue(part.input), errorText);
+    yield { type: "tool-output-error", toolCallId: part.toolCallId, errorText };
+  }
+}
+
+/**
+ * 串行批里排在一个挂起调用后面的调用：**不执行**，直接给一个错误结果，告诉模型为什么没跑。
+ * 不留成悬空调用——那样恢复时既没有裁决表的行可读，也分不清它是在等人还是被跳过了。
+ */
+async function* skipBehindSuspended(opts: SettleToolCallOptions, blockedBy: PendingToolCall): AsyncGenerator<RunkoChunk, void> {
+  const { call, assistantMessage } = opts;
+  const errorText =
+    `Not run: the earlier call "${blockedBy.toolName}" (${blockedBy.toolCallId}) in this step is waiting for a person, ` +
+    "and calls in one step run in the order you wrote them. If you still need this call once that one has a result, make it again.";
+  assistantMessage.parts[call.partIndex] = outputErrorPart(call.toolName, call.toolCallId, call.input, errorText);
+  yield { type: "tool-output-error", toolCallId: call.toolCallId, errorText };
+  yield completeToolTiming(assistantMessage, call.toolCallId);
+}
+
+// ---- 恢复轮的开场：结清一次悬空调用（挂起与恢复 · 技术方案 §5.2） ----
+
+/**
+ * 恢复轮第一件事：把那条悬空部件**原地**结清——它在上一轮的消息里（恒为最后一条，§5.3），
+ * 改写后 id 不变，调用方以新 seq 追加它，读账本时按 id 折叠（§5.4）。
+ *
+ * 三种结清方式：
+ *
+ * - `approval / allow`：**不再走审批链**（人已经批准；重跑分类器可能又判 review、再挂起一次），
+ *   但**重新过 `inputSchema`**——「原封不动」是说不让模型重新生成参数，不是绕过校验；恢复前工具
+ *   可能换了版本。然后执行，执行时工具还可能再挂起一次。
+ * - `approval / deny`：与当场拒绝同一套写入，理由回填给模型。
+ * - `output`：外部给的值就是这次调用的输出。声明了 `outputSchema` 就校验，不过就是 `output-error`。
+ *
+ * 部件与 `Settlement` 对不对得上，`resolveResumeTarget` 已经在开轮前查过了。
+ */
+async function* settleResumedCall(
+  base: Omit<SettleToolCallOptions, "call" | "assistantMessage">,
+  target: ResumeTarget,
+  settlement: Settlement,
+): AsyncGenerator<RunkoChunk, SuspendedCall | undefined> {
+  const { message, partIndex, part } = target;
+  const toolName = getToolName(part);
+  const toolCallId = part.toolCallId;
+
+  // 账本里的 input 在 ai 的类型里是 `unknown`。它来自模型产出、又经过一次 JSON 落盘，按理总是
+  // 合法 JSON；真不合法说明账本坏了，这时记一次 output-error 让本轮继续，比抛错把会话卡死好。
+  const parsedInput = jsonValueSchema.safeParse(part.input);
+  if (!parsedInput.success) {
+    const errorText = `Cannot resume tool call "${toolName}": its stored input is not valid JSON.`;
+    message.parts[partIndex] = outputErrorPart(toolName, toolCallId, undefined, errorText);
+    yield { type: "tool-output-error", toolCallId, errorText };
+    yield completeToolTiming(message, toolCallId);
+    return undefined;
+  }
+  const input = parsedInput.data;
+  const opts: SettleToolCallOptions = { ...base, call: { toolCallId, toolName, input, partIndex }, assistantMessage: message };
+  const tool = opts.tools[toolName];
+
+  if (settlement.kind === "approval") {
+    if (settlement.behavior === "deny") {
+      yield* settleHumanDenial(opts, input, settlement.message ?? DEFAULT_DENY_MESSAGE);
+      return undefined;
+    }
+    if (tool === undefined) {
+      const errorText = `Unknown tool "${toolName}" — it is no longer registered in this session's tool set, so the approved call cannot run.`;
+      message.parts[partIndex] = outputErrorPart(toolName, toolCallId, input, errorText);
+      yield { type: "tool-output-error", toolCallId, errorText };
+      yield completeToolTiming(message, toolCallId);
+      return undefined;
+    }
+    const reparsed = tool.inputSchema.safeParse(input);
+    if (!reparsed.success) {
+      const errorText =
+        `The approved call to "${toolName}" can no longer run: its stored input does not match the tool's current ` +
+        `input schema (${reparsed.error.message}). The tool may have changed since the call was approved.`;
+      message.parts[partIndex] = outputErrorPart(toolName, toolCallId, input, errorText, { id: toolCallId, approved: true });
+      yield { type: "tool-approval-response", approvalId: toolCallId, approved: true };
+      yield { type: "tool-output-error", toolCallId, errorText };
+      yield completeToolTiming(message, toolCallId);
+      return undefined;
+    }
+    return yield* settleHumanApproval(opts, tool, reparsed.data);
+  }
+
+  // settlement.kind === "output"。审批过后才挂起的那种，保留审批痕迹。
+  const approval: { id: string; approved: true } | undefined =
+    part.state === "approval-responded" && part.approval.approved === true ? { id: part.approval.id, approved: true } : undefined;
+  let output = settlement.output;
+  if (tool?.outputSchema !== undefined) {
+    const parsedOutput = tool.outputSchema.safeParse(output);
+    if (!parsedOutput.success) {
+      const errorText = `The value supplied to resume tool call "${toolName}" does not match its outputSchema: ${parsedOutput.error.message}`;
+      message.parts[partIndex] = outputErrorPart(toolName, toolCallId, input, errorText, approval);
+      yield { type: "tool-output-error", toolCallId, errorText };
+      yield completeToolTiming(message, toolCallId);
+      return undefined;
+    }
+    output = parsedOutput.data;
+  }
+  message.parts[partIndex] = outputAvailablePart(toolName, toolCallId, input, output, approval);
+  yield { type: "tool-output-available", toolCallId, output };
+  yield completeToolTiming(message, toolCallId);
+  return undefined;
 }
 
 // ---- 单步：一次 `streamText` = 账本里新增一条 assistant 消息（见文件头） ----
@@ -707,6 +921,11 @@ export interface StepOutcome {
   finishReason: FinishReason;
   usage: LanguageModelUsage;
   assistantMessage: RunkoUIMessage;
+  /**
+   * 本步有调用要求[挂起](../../../docs/terms.md)本轮时才有。`runTurn` 见到它就以
+   * `suspended` 收尾，**不进下一步**——那些调用还没有结果，拿这份历史去调模型是错的。
+   */
+  suspended?: { callIds: string[]; reason?: string };
 }
 
 /**
@@ -875,16 +1094,45 @@ async function* runOneStep(opts: RunOneStepOptions): AsyncGenerator<RunkoChunk, 
   // → 并行。混入任何非只读调用则**整批**退回串行：模型偶发的"同批隐含顺序
   // 依赖"坏批次（如先 write-file 再 bash cat 同一文件）只可能涉及写操作，
   // 串行按书写顺序执行把它兜住。
+  const settled: (SuspendedCall | undefined)[] = [];
   if (pending.length > 1 && pending.every((call) => opts.tools[call.toolName]?.readOnly === true)) {
-    yield* mergeSettleStreams(pending.map((call) => settleToolCall(settleOptsFor(call))));
+    settled.push(...(yield* mergeSettleStreams(pending.map((call) => settleToolCall(settleOptsFor(call))))));
   } else {
+    // 串行路径保的是「按模型书写的顺序执行」。所以前一个调用挂起之后，**后面的一个都不执行**：
+    // 否则它们会先于被挂起的那个跑完，人几小时后批准时，被批准的那个反而最后才执行
+    // （docs/logic/orchestration/tech/suspend-resume.md §3.3）。它们各得一个「没有执行」的结果，
+    // 账本里不留悬空调用；模型恢复之后看得到，需要的话会再发一次。
+    let blockedBy: PendingToolCall | undefined;
     for (const call of pending) {
-      yield* settleToolCall(settleOptsFor(call));
+      if (blockedBy !== undefined) {
+        yield* skipBehindSuspended(settleOptsFor(call), blockedBy);
+        settled.push(undefined);
+        continue;
+      }
+      const outcome = yield* settleToolCall(settleOptsFor(call));
+      settled.push(outcome);
+      if (outcome !== undefined) {blockedBy = call;}
     }
   }
 
   yield { type: "finish", finishReason: finalStep.finishReason };
-  return { finishReason: finalStep.finishReason, usage: finalStep.usage, assistantMessage };
+
+  // 汇总挂起：只要有**任何一个**调用要求挂起，本轮就挂起。callIds 按模型发出调用的顺序，
+  // reason 取第一个给了理由的（多个同时挂起时它们通常同源，都是同一个内存窗口到点）。
+  const suspendedCalls = settled.filter((outcome): outcome is SuspendedCall => outcome !== undefined);
+  if (suspendedCalls.length === 0) {
+    return { finishReason: finalStep.finishReason, usage: finalStep.usage, assistantMessage };
+  }
+  const reason = suspendedCalls.find((entry) => entry.reason !== undefined)?.reason;
+  return {
+    finishReason: finalStep.finishReason,
+    usage: finalStep.usage,
+    assistantMessage,
+    suspended: {
+      callIds: suspendedCalls.map((entry) => entry.callId),
+      ...(reason === undefined ? {} : { reason }),
+    },
+  };
 }
 
 // ---- runTurn：一个 turn 的完整 step 循环（终止条件同 docs/logic/engine/tech/core-sdk.md §4.8，未变） ----
@@ -911,16 +1159,64 @@ export interface RunTurnOptions {
   drainSteers?: () => RunkoUIMessage[];
   /** telemetry 透传（`SessionTelemetry`，见 `runOneStep` 区块注释）——未注入时只剩 functionId 元数据，零行为差异。 */
   telemetry?: SessionTelemetry;
+  /**
+   * 恢复轮（`Session.settleAndRun`）：开场先结清这次悬空调用，再进入正常的 step 循环。
+   * 不传就是普通轮。设计见挂起与恢复 · 技术方案 §5。
+   */
+  resume?: { callId: string; settlement: Settlement };
 }
 
 export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<RunkoChunk, TurnResult> {
+  // 恢复轮在开轮前就校验完：用错了直接抛，一个 chunk 都不出（`Session` 那层同样先查一遍，
+  // 这里是给直接调 `runTurn` 的人兜底）。
+  const resumeTarget = opts.resume === undefined ? undefined : resolveResumeTarget(opts.messages, opts.resume.callId, opts.resume.settlement);
   const turnStartedAt = Date.now();
-  const turnMessagesStart = opts.messages.length;
+  // 恢复轮往前多算一条：被改写的那条上一轮的消息，恢复时执行的工具 timing 在它里面。
+  const turnMessagesStart = resumeTarget === undefined ? opts.messages.length : opts.messages.length - 1;
   const abortSignal = opts.signal ?? new AbortController().signal;
   let finalResponse = "";
   let usage: Usage = {};
   let contextCalibration = 1;
   let lastAssistantMessage: RunkoUIMessage | undefined;
+
+  // Step 0（恢复轮）：先结清那次悬空调用。**不调模型**——恢复的第一步是执行（或拒绝、或填输出），
+  // 模型要等看到结果才上场。所以模型在这一步里想改参数也无从改起：执行的就是账本里那条。
+  if (resumeTarget !== undefined && opts.resume !== undefined) {
+    lastAssistantMessage = resumeTarget.message;
+    const resuspended = yield* settleResumedCall(
+      {
+        tools: opts.tools,
+        session: opts.session,
+        fs: opts.fs,
+        abortSignal,
+        onApproval: opts.onApproval,
+        onReview: opts.onReview,
+        onceMemory: opts.onceMemory,
+        derivedData: opts.derivedData,
+        getSkill: opts.getSkill,
+        telemetry: opts.telemetry,
+      },
+      resumeTarget,
+      opts.resume.settlement,
+    );
+    // 结清之后这条消息里还有悬空调用（一步里有多个同时挂起，或者刚结清的这个执行时又挂起了）：
+    // **不能调模型**——还有不配对的 tool_use，provider 会 400。直接以 suspended 收尾，人答下一个
+    // 再开一轮（技术方案 §5.2）。理由沿用：这次又挂起了就用这次的，否则沿用上一轮挂起时记下的。
+    const remaining = pendingCallIds([resumeTarget.message]);
+    if (remaining.length > 0) {
+      const reason = resuspended?.reason ?? resumeTarget.message.metadata?.suspended?.reason;
+      const suspended = { callIds: remaining, ...(reason === undefined ? {} : { reason }) };
+      yield finalizeTurn({
+        messages: opts.messages,
+        lastAssistantMessage,
+        turn: opts.session.turn, turnStartedAt, turnMessagesStart,
+        usage,
+        status: "suspended",
+        suspended,
+      });
+      return { finalResponse, usage, suspended };
+    }
+  }
 
   for (let stepIndex = 1; stepIndex <= opts.maxTurnsPerRun; stepIndex++) {
     // Checkpoint 0（宿主中止，docs/logic/orchestration/tech/turn-abort.md §2）：**绝不开始新的一步**。
@@ -1017,6 +1313,9 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<RunkoChunk,
       // the case the pinned regression tests exercise).
       const partiallyBuiltAssistantMessage =
         opts.messages.length > ledgerLengthBeforeStep ? opts.messages[opts.messages.length - 1] : undefined;
+      if (partiallyBuiltAssistantMessage !== undefined) {
+        yield* closeNeverRunCalls(partiallyBuiltAssistantMessage, runkoError.message);
+      }
       yield finalizeTurn({
         messages: opts.messages,
         lastAssistantMessage: partiallyBuiltAssistantMessage ?? lastAssistantMessage,
@@ -1032,6 +1331,25 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<RunkoChunk,
     usage = mergeUsage(usage, stepOutcome.usage);
     const stepText = collectMessageText(stepOutcome.assistantMessage);
     if (stepText !== "") {finalResponse = stepText;}
+
+    // Checkpoint S（挂起，docs/logic/orchestration/tech/suspend-resume.md）：本步有调用停在
+    // 「等人」上，本轮就此收尾——**必须拦在这里**。挂起时 finishReason 恒为 "tool-calls"，
+    // 不拦就会往下走进 `continue`，拿着一份「有 tool_use、没有对应 tool_result」的历史去调
+    // 模型，两家 provider 都会 400。
+    //
+    // **不 drain steer 队列**：那是「取出来就没了」的动作，而挂起不清空待发队列——排队的消息
+    // 留给下一轮（恢复轮或新轮）自然消费。这与 `turn-abort` 的停止语义刻意不同，停止会清空。
+    if (stepOutcome.suspended !== undefined) {
+      yield finalizeTurn({
+        messages: opts.messages,
+        lastAssistantMessage,
+        turn: opts.session.turn, turnStartedAt, turnMessagesStart,
+        usage,
+        status: "suspended",
+        suspended: stepOutcome.suspended,
+      });
+      return { finalResponse, usage, suspended: stepOutcome.suspended };
+    }
 
     if (opts.maxContextTokens !== undefined) {
       const rawEstimate = estimateMessagesTokens(opts.messages, opts.system);

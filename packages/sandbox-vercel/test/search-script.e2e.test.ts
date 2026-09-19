@@ -94,6 +94,9 @@ function makeToolCtx(fs: RunkoFS): ToolContext {
     session: { id: "s", turn: 0 },
     getSkill: () => ({ file: () => ({ text: async () => "" }) }),
     update: () => {},
+    suspend: () => {
+      throw new Error("ctx.suspend() is not stubbed in this test");
+    },
   };
 }
 

@@ -20,10 +20,13 @@
  * 「先产出、后阻塞」是一个 `await` 边界，塞不进一个返回 `Promise` 的普通函数里让调用方中途
  * 取值。所以中间那一段由 `loop.ts`（async generator）插入，见它的文件头。
  *
- * 由此，`ToolCallStatus` 只剩 "completed" / "failed"——**"denied" 不在这一层**。拒绝的编码
- * （`tool-output-denied` chunk + 理由回填）整个是 `loop.ts` 的事，`executeToolCall` 根本不
- * 认识「拒绝」这个概念。同理，`ToolReturn` 的模型可读序列化也不在这里做，"completed" 的
+ * 由此，`ToolCallStatus` 是 "completed" / "failed" / "suspended"——**"denied" 不在这一层**。
+ * 拒绝的编码（`tool-output-denied` chunk + 理由回填）整个是 `loop.ts` 的事，`executeToolCall`
+ * 根本不认识「拒绝」这个概念。同理，`ToolReturn` 的模型可读序列化也不在这里做，"completed" 的
  * `output` 字段原样就是 `tool.execute()` 的返回值。
+ *
+ * "suspended" 是工具自己调 `ctx.suspend()` 声明的[挂起](../../../docs/terms.md)——它有
+ * **两条**识别路径，见下面 `executeToolCall` 里那段注释。
  *
  * ## 派生数据为什么走「构造期回调」而不是 `ToolContext`
  *
@@ -46,6 +49,7 @@
  */
 import type { ApprovalContext, ApprovalPolicy, JsonValue, RunkoFS, SkillHandle, Tool, ToolContext, ToolReturn } from "./types.js";
 import { evaluateApproval, type OnceApprovalMemory } from "./approval.js";
+import { createSuspendRequest, requestSuspend } from "./suspend.js";
 
 // ---- 派生数据：工具上报、loop 消费（形状与理由见文件头） ----
 
@@ -152,18 +156,31 @@ export async function resolveToolCallApproval(opts: ResolveToolCallApprovalOptio
 
 // ---- 第 2 步：executeToolCall（只执行，输入已校验/已获批） ----
 
-export type ToolCallStatus = "completed" | "failed";
+export type ToolCallStatus = "completed" | "failed" | "suspended";
 
-export interface ToolCallResult {
-  status: ToolCallStatus;
-  /**
-   * "completed"：`tool.execute()`（或其 `outputSchema.safeParse` 校验后）的
-   * 原始返回值，尚未字符串化。"failed"：给模型看的指导性错误文本（`string`）。
-   * 序列化到工具部件/`tool-result` 是回填层（`loop.ts`）的职责。
-   */
-  output: ToolReturn;
-  derived: ToolCallDerivedData;
-}
+/**
+ * **判别联合**，按 `status` 收窄：`"suspended"` 没有 `output`，因为那次调用**没有产生结果**
+ * ——挂起不是一种结果，是「这一轮到此为止」。写成联合是让编译器替我们拦住「拿挂起当结果用」。
+ */
+export type ToolCallResult =
+  | {
+      status: "completed";
+      /** `tool.execute()`（或其 `outputSchema.safeParse` 校验后）的原始返回值，尚未字符串化。序列化到工具部件/`tool-result` 是回填层（`loop.ts`）的职责。 */
+      output: ToolReturn;
+      derived: ToolCallDerivedData;
+    }
+  | {
+      status: "failed";
+      /** 给模型看的指导性错误文本。 */
+      output: ToolReturn;
+      derived: ToolCallDerivedData;
+    }
+  | {
+      status: "suspended";
+      /** 工具传给 `ctx.suspend()` 的理由，原样透传（core 不认识它的含义）。 */
+      reason: string | undefined;
+      derived: ToolCallDerivedData;
+    };
 
 export interface ExecuteToolCallOptions {
   tool: Tool;
@@ -226,6 +243,8 @@ function createPlaceholderGetSkill(): (name: string) => SkillHandle {
 
 /** 单次工具调用的执行体：只执行 + 输出校验，输入已经过 `resolveToolCallApproval`，逐段说明见本文件头"拆分为两步"一节。 */
 export async function executeToolCall(opts: ExecuteToolCallOptions): Promise<ToolCallResult> {
+  // 这一次调用专属的挂起标记——`ctx.suspend()` 写它（见 `suspend.ts`）。
+  const suspendRequest = createSuspendRequest();
   const ctx: ToolContext = {
     fs: opts.fs,
     abortSignal: opts.abortSignal,
@@ -233,6 +252,7 @@ export async function executeToolCall(opts: ExecuteToolCallOptions): Promise<Too
     session: opts.session,
     getSkill: opts.getSkill ?? createPlaceholderGetSkill(),
     update: (partial) => opts.onProgress?.(partial),
+    suspend: (reason) => requestSuspend(suspendRequest, reason),
   };
 
   // 防御性清空：确保这次调用只归集这次调用期间产生的记录，不带上任何此前
@@ -243,11 +263,22 @@ export async function executeToolCall(opts: ExecuteToolCallOptions): Promise<Too
   try {
     rawOutput = await opts.tool.execute(opts.input, ctx);
   } catch (error) {
+    // 挂起的第一条识别路径：`SuspendSignal` 一路抛到这里（正常情形）。
+    if (suspendRequest.requested) {
+      return { status: "suspended", reason: suspendRequest.reason, derived: opts.derivedData?.drain() ?? emptyDerived() };
+    }
     return {
       status: "failed",
       output: `Tool "${opts.toolName}" threw during execution: ${describeError(error)}.`,
       derived: opts.derivedData?.drain() ?? emptyDerived(),
     };
+  }
+
+  // 第二条识别路径：工具内部一句 `try { ... } catch { return "先跳过" }` 把信号吃掉了，
+  // `execute` 正常返回。**标记才是判据**，所以这里照样算挂起，`rawOutput` 连
+  // `outputSchema` 都不过——那个垫场返回值不该进账本。
+  if (suspendRequest.requested) {
+    return { status: "suspended", reason: suspendRequest.reason, derived: opts.derivedData?.drain() ?? emptyDerived() };
   }
 
   const derived = opts.derivedData?.drain() ?? emptyDerived();
