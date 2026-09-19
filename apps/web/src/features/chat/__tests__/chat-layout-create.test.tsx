@@ -50,6 +50,7 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
     queuedMessages: [],
     availableSkills: [],
     turnInProgress: false,
+    pendingDecisions: 0,
     createdAt: new Date(0).toISOString(),
     ...overrides,
   };
@@ -280,5 +281,25 @@ describe('ChatLayout — 建会话', () => {
     await user.click(screen.getByRole('button', { name: '返回' }));
 
     expect(screen.getByText('之前的会话内容')).toBeInTheDocument();
+  });
+});
+
+describe('ChatLayout — 会话列表里的「在等你」', () => {
+  it('有卡片在等人答的会话标出「等你」，没有的不标', async () => {
+    listConversationsMock.mockResolvedValue([
+      conversation({ id: 'conv-wait', title: '等审批的', pendingDecisions: 2 }),
+      conversation({ id: 'conv-idle', title: '没事的', pendingDecisions: 0 }),
+    ]);
+    render(
+      <ChatLayout activeSessionId={undefined}>
+        <p>会话区</p>
+      </ChatLayout>,
+    );
+
+    const badge = await screen.findByTestId('waiting-for-you-badge');
+    expect(badge).toHaveTextContent('等你');
+    expect(badge).toHaveAttribute('title', '有 2 处在等你答复');
+    expect(screen.getAllByTestId('waiting-for-you-badge')).toHaveLength(1);
+    expect(badge.closest('a')).toHaveTextContent('等审批的');
   });
 });

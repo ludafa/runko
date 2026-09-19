@@ -151,7 +151,7 @@ describe('TimelineView — message part rendering', () => {
     expect(screen.getByTestId('approval-card')).toBeInTheDocument();
   });
 
-  // 轮结束后，还挂着的审批卡片就已经失效了——服务端那边的挂起项在轮收尾时就被结掉了，
+  // 轮结束后，还挂着的审批卡片就已经失效了——服务端那边的等人项在轮收尾时就被结掉了，
   // 再点任何按钮都只会拿到 404。此前界面要等用户点下去吃了 404 才翻，在那之前一直画着
   // 三个可点的按钮（用户实测报告：一张「待审批」卡片下面就是「服务重启，这一轮已中断」）。
   it('轮已结束时，还停在 approval-requested 的卡片直接显示「已失效」且不给按钮', () => {

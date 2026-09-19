@@ -69,7 +69,7 @@ import type {
   RunkoUIMessage,
 } from '@runko/core';
 import type { FileUIPart, TextUIPart } from 'ai';
-import { readUIMessageStream } from 'ai';
+import { isToolUIPart, readUIMessageStream } from 'ai';
 
 import type { LedgerFrame } from './schema';
 import { isMessageFrame } from './schema';
@@ -132,6 +132,27 @@ function applySteerChunk(
   }
 }
 
+// ---- 恢复那一轮开头的 chunk（`openResumedMessage` 的注释） ----
+
+/**
+ * 能认出「恢复改写的是哪次调用」的 chunk 只有这几种，而恢复那一轮总是以其中一种开头（`loop.ts` 的
+ * `settleResumedCall`）。数据部件不带 `toolCallId`，只能跟在它们后面进同一条流。
+ *
+ * `approvalId` 在 runko 里恒等于 `toolCallId`（`loop.ts` 发审批 chunk 时就是这么填的）。
+ */
+function resumedToolCallId(chunk: RunkoChunk): string | undefined {
+  switch (chunk.type) {
+    case 'tool-approval-response':
+      return chunk.approvalId;
+    case 'tool-output-available':
+    case 'tool-output-error':
+    case 'tool-output-denied':
+      return chunk.toolCallId;
+    default:
+      return undefined;
+  }
+}
+
 export type MessageLedgerListener = (messages: RunkoUIMessage[]) => void;
 export type TurnEndListener = (metadata: RunkoMessageMetadata) => void;
 /**
@@ -155,6 +176,8 @@ export class MessageLedger {
   private readonly byId = new Map<string, RunkoUIMessage>();
   private openController:
     ReadableStreamDefaultController<RunkoChunk> | undefined;
+  /** 打开的那条流是恢复那一轮的种子流（`openResumedMessage` 的注释）。它没有自己的 `finish`，要靠收尾 metadata 关。 */
+  private resumedMessageOpen = false;
   private steerBuilder: SteerMessageBuilder | undefined;
   /** 看到非插话的 `start` 就**同步**记下，绝不从 `consume()`（异步）的 `upsert()` 反推。见文件头最后一节。 */
   private lastAssistantId: string | undefined;
@@ -229,15 +252,25 @@ export class MessageLedger {
     }
 
     if (this.openController === undefined) {
-      // 此刻没有打开的消息——这是 core 的 loop 唯一会在 start/finish 窗口之外产出的 chunk，
-      // 见文件头第三节。
+      // 此刻没有打开的消息。core 的 loop 在 start/finish 窗口之外只会产出两种 chunk：
+      // 轮尾的 metadata（文件头第三节），以及恢复那一轮开头的那几个（`openResumedMessage` 的注释）。
       if (chunk.type === 'message-metadata') {
         this.applyStandaloneMetadata(chunk.messageMetadata);
+        return;
       }
+      if (!this.openResumedMessage(chunk)) {
+        return;
+      }
+    } else if (this.resumedMessageOpen && chunk.type === 'message-metadata') {
+      // 种子流没有自己的 `finish`，收尾 metadata 一到就关掉它，再走独立 metadata 那条路：
+      // 并到这条消息上、触发一次 `onTurnEnd`。
+      this.closeOpenMessage();
+      this.applyStandaloneMetadata(chunk.messageMetadata);
       return;
     }
 
-    this.openController.enqueue(chunk);
+    // 可选链不是多余的：上面那一支刚开的种子流是在回调里赋给 `openController` 的，编译器看不见。
+    this.openController?.enqueue(chunk);
     if (chunk.type === 'finish') {
       this.closeOpenMessage();
     }
@@ -246,6 +279,63 @@ export class MessageLedger {
   private closeOpenMessage(): void {
     this.openController?.close();
     this.openController = undefined;
+    this.resumedMessageOpen = false;
+  }
+
+  /**
+   * [恢复](../../../../../docs/terms.md)那一轮开头的 chunk **前面没有 `start`**：它的第一步不调模型，
+   * 而是原地改写上一轮最后那条消息（结清那次悬空调用），先发 `tool-approval-response` / `tool-output-*`
+   * 和计时数据部件。所以这里按 `toolCallId` 找到那条已经物化的消息，拿它的副本当种子开一条流；
+   * 下一个 `start` 或收尾 `message-metadata` 到来时关掉。设计见 docs/ingress/tech/chat-webapp.md §6.2 ④。
+   *
+   * 找不到就返回 `false`，这个 chunk 照旧丢掉——整轮结束时成品消息会补上。
+   *
+   * **必须传副本**：ai 会就地修改种子消息，直接传 `byId` 里那个对象等于绕过 React 改状态。
+   */
+  private openResumedMessage(chunk: RunkoChunk): boolean {
+    const toolCallId = resumedToolCallId(chunk);
+    if (toolCallId === undefined) {
+      return false;
+    }
+    const target = this.findMessageWithToolCall(toolCallId);
+    if (target === undefined) {
+      return false;
+    }
+    // 收尾 metadata 要并给这条消息：恢复那一轮如果只结清了一个、还有别的在等，
+    // core 会把新的 `suspended` 写回它。
+    this.lastAssistantId = target.id;
+    this.resumedMessageOpen = true;
+    const stream = new ReadableStream<RunkoChunk>({
+      start: (controller) => {
+        this.openController = controller;
+      },
+    });
+    void this.consume(
+      readUIMessageStream<RunkoUIMessage>({
+        message: structuredClone(target),
+        stream,
+      }),
+    );
+    return true;
+  }
+
+  /** 从后往前找：恢复改写的恒是上一轮的最后一条 assistant 消息，一般一步就找到。 */
+  private findMessageWithToolCall(
+    toolCallId: string,
+  ): RunkoUIMessage | undefined {
+    for (let index = this.order.length - 1; index >= 0; index -= 1) {
+      const id = this.order[index];
+      const message = id === undefined ? undefined : this.byId.get(id);
+      if (
+        message?.role === 'assistant' &&
+        message.parts.some(
+          (part) => isToolUIPart(part) && part.toolCallId === toolCallId,
+        )
+      ) {
+        return message;
+      }
+    }
+    return undefined;
   }
 
   private async consume(

@@ -67,6 +67,7 @@ import { MessageLedger } from './materialize';
 import type { ChatReplayFrame, QueuedMessage } from './schema';
 import { frameSeq, isQueueFrame, isTurnStateFrame } from './schema';
 import type { PendingUserEcho } from './timeline';
+import { findWaitingCallIds } from './timeline';
 
 export type ChatTurnStatus = 'idle' | 'streaming' | 'error';
 
@@ -114,8 +115,16 @@ export interface UseChatMessagesResult {
   /**
    * 正有一个 `POST .../approvals/:callId` 或 `.../questions/:callId` 在飞的那些
    * `callId`。卡片据此禁用自己的按钮、显示转圈，并挡住同一个 `callId` 的第二次提交。
+   *
+   * 还包括**答过的[挂起](../../../../../docs/terms.md)调用**：答完到恢复那一轮真的改写它，
+   * 中间可能隔几十秒（唤醒沙盒），这段时间按钮不能重新亮起来（docs/ingress/tech/chat-webapp.md §6.2 ③）。
    */
   submittingCallIds: ReadonlySet<string>;
+  /**
+   * [挂起](../../../../../docs/terms.md)之后还在等人答的调用，从账本推出来（`timeline.ts` 的
+   * `findWaitingCallIds`）。这些卡片虽然属于已收尾的轮，却仍然可以答。
+   */
+  waitingCallIds: ReadonlySet<string>;
   /**
    * `submitApproval`/`submitAnswer` 对这些 `callId` 拿回了 `404`——服务端已经不再挂着
    * 它们了（超时了，或者那一轮已经结束）。这份集合经 `TimelineView`/页面传给工具部件
@@ -198,6 +207,14 @@ export function useChatMessages(
   const [locallyExpiredCallIds, setLocallyExpiredCallIds] = useState<
     ReadonlySet<string>
   >(new Set());
+  /** 答过的挂起调用。只增不减：它只在与 `waitingCallIds` 的交集里起作用，部件一变就自然失效。 */
+  const [answeredWaitingCallIds, setAnsweredWaitingCallIds] = useState<
+    ReadonlySet<string>
+  >(new Set());
+  const waitingCallIds = useMemo(
+    () => findWaitingCallIds(messages),
+    [messages],
+  );
 
   const turnInProgressRef = useRef(initialTurnInProgress);
   /** `queuedMessages` 的 ref 镜像——`MessageLedger` 的 `onTurnEnd` 回调（构造时闭包捕获，见下）要在轮收尾的那一刻读到**当下**的队列长度，不能读被闭包冻住的那一份。 */
@@ -297,7 +314,13 @@ export function useChatMessages(
         // `turnInProgressRef`，让 tail 的既有退避重连去接住那一轮——否则用户会看到
         // 「转完 → 静止 → 又开始转」的闪烁，甚至以为排队的消息没发出去。
         // 起轮真失败时消息留在队列里，重连退避耗尽后安静停下，刷新即恢复。
-        if (queuedMessagesRef.current.length > 0) {
+        //
+        // [挂起](../../../../../docs/terms.md)的那一轮除外：服务端这时不出队，要等人把卡片答完
+        // （docs/ingress/tech/chat-webapp.md §6.2 ⑤）。
+        if (
+          metadata.status !== 'suspended' &&
+          queuedMessagesRef.current.length > 0
+        ) {
           turnInProgressRef.current = true;
           setStatus('streaming');
           // 下一轮同样要走一整段[起轮装配](../../../../../docs/terms.md)才会出第一帧
@@ -449,6 +472,21 @@ export function useChatMessages(
         return;
       }
 
+      if (!turnInProgressRef.current && waitingCallIds.size > 0) {
+        // [挂起](../../../../../docs/terms.md)中：服务端不会起轮，只会把它放进待发队列
+        // （docs/ingress/tech/chat-webapp.md §6.2 ⑤）。所以没有「起新一轮」的乐观回显，也谈不上
+        // 插话。发完重开一次 tail 取回队列快照：直播流此刻关着，服务端广播的那帧收不到。
+        postChatMessage(conversationId, trimmed, 'queue').then(
+          () => {
+            openTail();
+          },
+          (postError: unknown) => {
+            setError(describeError(postError));
+          },
+        );
+        return;
+      }
+
       if (turnInProgressRef.current) {
         // 有进行中的一轮：`intent` 决定这条消息是排队还是插话
         // （docs/logic/orchestration/tech/steer-and-queue.md §4.1，服务端才是判定方，这里只是把意图传过去）。
@@ -544,7 +582,7 @@ export function useChatMessages(
           );
         });
     },
-    [conversationId, openTail, messages.length],
+    [conversationId, openTail, messages.length, waitingCallIds],
   );
 
   const removeQueuedMessage = useCallback(
@@ -678,29 +716,83 @@ export function useChatMessages(
    * `tool-approval-response` chunk（或 `ask-user` 部件自己的 `output-available`）到达才
    * 落地（「不做乐观翻转——多 tab 一致性靠事件」）。
    */
+  /** 对外的「提交中」：在飞的请求，加上答过、但恢复那一轮还没改写到的挂起调用（见接口注释）。 */
+  const effectiveSubmittingCallIds = useMemo(() => {
+    const stillWaiting = [...answeredWaitingCallIds].filter((callId) =>
+      waitingCallIds.has(callId),
+    );
+    if (stillWaiting.length === 0) {
+      return submittingCallIds;
+    }
+    const union = new Set(submittingCallIds);
+    for (const callId of stillWaiting) {
+      union.add(callId);
+    }
+    return union;
+  }, [submittingCallIds, answeredWaitingCallIds, waitingCallIds]);
+
+  /**
+   * 答了一张挂起的卡片之后去接恢复那一轮（docs/ingress/tech/chat-webapp.md §6.2 ③）。
+   *
+   * 服务端要等恢复那一轮登记好才回 200，所以此刻重开的 tail 一定看得到它。其余照
+   * `sendMessage` 起新一轮那条路走，只是没有乐观回显——人没说话，只是答了一张卡片。
+   * 恢复那一轮也要走起轮装配（沙盒可能要唤醒），「正在准备…」占位是真的在等。
+   */
+  const followResumedTurn = useCallback(() => {
+    turnInProgressRef.current = true;
+    reconnectAttemptRef.current = 0;
+    setStatus('streaming');
+    setError(undefined);
+    setAwaitingFirstEvent(true);
+    openTail();
+  }, [openTail]);
+
   const submitDecision = useCallback(
     (callId: string, request: () => Promise<void>) => {
       // 同一个 callId 同时只允许一个在飞。卡片自己也会禁用按钮，这里是第二道防线。
-      if (submittingCallIds.has(callId)) {
+      if (effectiveSubmittingCallIds.has(callId)) {
         return;
       }
+      // 在点下去这一刻判：答的是不是一张挂起的卡片。
+      const resumes = waitingCallIds.has(callId);
       markSubmitting(callId);
       request()
-        .catch((requestError: unknown) => {
-          if (
-            requestError instanceof ChatApiError &&
-            requestError.status === 404
-          ) {
-            setLocallyExpiredCallIds((prev) => new Set(prev).add(callId));
-            return;
-          }
-          setError(describeError(requestError));
-        })
+        .then(
+          () => {
+            if (resumes) {
+              setAnsweredWaitingCallIds((prev) => new Set(prev).add(callId));
+              followResumedTurn();
+            }
+          },
+          (requestError: unknown) => {
+            if (
+              requestError instanceof ChatApiError &&
+              requestError.status === 404
+            ) {
+              setLocallyExpiredCallIds((prev) => new Set(prev).add(callId));
+              // 挂起的卡片拿到 404，多半是已经答过、恢复没做成：服务端这时会顺手再推一把
+              // （docs/ingress/tech/chat-webapp.md §6.2 ③）。重开一次直播流去看——真起了恢复，
+              // 轮状态快照会说「有轮在跑」，否则回放完就关，不多做什么。
+              if (resumes) {
+                openTail();
+              }
+              return;
+            }
+            setError(describeError(requestError));
+          },
+        )
         .finally(() => {
           clearSubmitting(callId);
         });
     },
-    [submittingCallIds, markSubmitting, clearSubmitting],
+    [
+      effectiveSubmittingCallIds,
+      waitingCallIds,
+      markSubmitting,
+      clearSubmitting,
+      followResumedTurn,
+      openTail,
+    ],
   );
 
   const submitApproval = useCallback(
@@ -739,7 +831,8 @@ export function useChatMessages(
       clearQueue,
       stopTurn,
       stopping,
-      submittingCallIds,
+      submittingCallIds: effectiveSubmittingCallIds,
+      waitingCallIds,
       locallyExpiredCallIds,
       submitApproval,
       submitAnswer,
@@ -757,7 +850,8 @@ export function useChatMessages(
       clearQueue,
       stopTurn,
       stopping,
-      submittingCallIds,
+      effectiveSubmittingCallIds,
+      waitingCallIds,
       locallyExpiredCallIds,
       submitApproval,
       submitAnswer,

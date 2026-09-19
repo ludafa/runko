@@ -75,6 +75,7 @@ export function TimelineView({
   submittingCallIds = EMPTY_CALL_ID_SET,
   locallyExpiredCallIds = EMPTY_CALL_ID_SET,
   turnInProgress = true,
+  waitingCallIds = EMPTY_CALL_ID_SET,
   awaitingFirstEvent = false,
   onSubmitApproval = noopDecision,
   onSubmitAnswer = noopDecision,
@@ -88,6 +89,8 @@ export function TimelineView({
   locallyExpiredCallIds?: ReadonlySet<string>;
   /** 这个会话此刻有没有[轮](../../../../../../docs/terms.md)在跑——轮结束后还没落定的审批/提问卡片一律显示成「已失效」（见 `MessageEntry` 的同名 prop）。缺省 `true`。 */
   turnInProgress?: boolean;
+  /** [挂起](../../../../../../docs/terms.md)之后还在等人答的调用（`useChatMessages` 的同名字段）——这些卡片不按「所属轮已收尾」判失效。缺省为空。 */
+  waitingCallIds?: ReadonlySet<string>;
   /** 消息已发出、这一轮的第一帧还没到（`useChatMessages` 的同名字段）——为真时在时间线末尾摆一个 AI 侧的等待占位，见 `AwaitingFirstEventMessage`。缺省 `false`。 */
   awaitingFirstEvent?: boolean;
   onSubmitApproval?: (
@@ -169,6 +172,7 @@ export function TimelineView({
               turnLive={
                 turnInProgress && !settledMessageIds.has(entry.message.id)
               }
+              waitingCallIds={waitingCallIds}
               onSubmitApproval={onSubmitApproval}
               onSubmitAnswer={onSubmitAnswer}
               conversationId={conversationId}

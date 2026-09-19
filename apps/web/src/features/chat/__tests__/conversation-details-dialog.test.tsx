@@ -30,6 +30,7 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
     queuedMessages: [],
     availableSkills: [],
     turnInProgress: false,
+    pendingDecisions: 0,
     createdAt: '2026-07-19T20:23:00.000Z',
     ...overrides,
   };

@@ -127,6 +127,17 @@ function ConversationTimeline({
         </p>
       )}
 
+      {/* [挂起](../../../../docs/terms.md)：卡片在时间线里，可能已经滚出视野——顶部说一声
+          （docs/ingress/tech/chat-webapp.md §6.2）。 */}
+      {chat.waitingCallIds.size > 0 && (
+        <p
+          className="text-foreground border-border border-l-2 py-0.5 pl-3 text-xs leading-snug"
+          data-testid="waiting-for-you"
+        >
+          有 {chat.waitingCallIds.size} 处在等你答复，答完会从停下的地方接着跑。
+        </p>
+      )}
+
       {chat.status === 'error' && chat.error !== undefined && (
         <p className="border-destructive/70 text-destructive border-l-2 py-0.5 pl-3 text-xs leading-snug">
           直播中断：{chat.error} · 已补齐断线期间产生的事件
@@ -144,9 +155,10 @@ function ConversationTimeline({
           pendingUserEchoes={chat.pendingUserEchoes}
           submittingCallIds={chat.submittingCallIds}
           locallyExpiredCallIds={chat.locallyExpiredCallIds}
-          // 轮一结束，还挂着的审批/提问卡片就已经失效了（服务端的挂起项被结掉了）
+          // 轮一结束，还挂着的审批/提问卡片就已经失效了（服务端的等人项被结掉了；挂起在等的除外，见 `waitingCallIds`）
           // ——界面立刻如实画成「已失效」，而不是等用户点下去吃 404 才翻。
           turnInProgress={chat.status === 'streaming'}
+          waitingCallIds={chat.waitingCallIds}
           // 消息发出到这一轮第一帧到达之间（起轮装配，冷启动可达数十秒），AI 侧摆一个
           // 「正在准备…」占位——否则用户只看到自己那条消息孤零零地挂着。
           awaitingFirstEvent={chat.awaitingFirstEvent}

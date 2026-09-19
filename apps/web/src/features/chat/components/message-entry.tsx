@@ -48,6 +48,8 @@ import { TurnStatsButton } from './turn-stats-dialog';
 
 const ASK_USER_TOOL_NAME = 'ask-user';
 
+const NO_WAITING_CALLS: ReadonlySet<string> = new Set();
+
 export interface MessageEntryProps {
   message: RunkoUIMessage;
   submittingCallIds: ReadonlySet<string>;
@@ -58,7 +60,7 @@ export interface MessageEntryProps {
    *
    * 为什么需要它：一张卡片处于「待审批」态，只有**它自己那一轮还在跑**时才可能真的还
    * 在等人。轮一结束（正常收尾、被[停止](../../../../../../docs/terms.md)、服务重启中断），
-   * 服务端的挂起项就已经被结掉了，再点任何按钮都只会拿到 404。光靠
+   * 服务端的等人项就已经被结掉了，再点任何按钮都只会拿到 404。光靠
    * `locallyExpiredCallIds` 不够——那条路要等用户**点下去**、吃了 404 才翻成「已失效」，
    * 在那之前一直画着三个可点的按钮，等于骗人。
    *
@@ -70,6 +72,12 @@ export interface MessageEntryProps {
    * 卡片长相的测试不传它时，卡片照常显示 pending 态。
    */
   turnLive?: boolean;
+  /**
+   * [挂起](../../../../../../docs/terms.md)之后还在等人答的调用（`useChatMessages` 的同名字段）。
+   * 它们所属的轮已经收尾，`turnLive` 为假，但卡片**仍然可以答**——`turnLive` 那条失效规则对
+   * 它们不适用（docs/ingress/tech/chat-webapp.md §6.2 ②）。缺省为空。
+   */
+  waitingCallIds?: ReadonlySet<string>;
   onSubmitApproval: (
     callId: string,
     behavior: 'allow' | 'allow-session' | 'deny',
@@ -84,12 +92,14 @@ export function MessageEntry({
   submittingCallIds,
   locallyExpiredCallIds,
   turnLive = true,
+  waitingCallIds = NO_WAITING_CALLS,
   onSubmitApproval,
   onSubmitAnswer,
   conversationId,
 }: MessageEntryProps) {
-  /** 这条消息所属的轮已结束 = 它里面还没落定的卡片都已失效（见 `turnLive` 的注释）。 */
-  const staleByTurnEnd = !turnLive;
+  /** 这条消息所属的轮已结束 = 它里面还没落定的卡片都已失效（见 `turnLive` 的注释）——挂起在等的那几张除外。 */
+  const staleByTurnEnd = (callId: string) =>
+    !turnLive && !waitingCallIds.has(callId);
   // 防御性判断——runko 从不往账本里塞 system 消息（系统提示词是单独传给 streamText() 的，见 loop.ts 的 runOneStep）
   if (message.role === 'system') {
     return null;
@@ -168,7 +178,8 @@ export function MessageEntry({
                       // `answered`，叠上去会把一条已经答完的问题画成「已失效」。
                       expired={
                         locallyExpiredCallIds.has(part.toolCallId) ||
-                        (part.state === 'input-available' && staleByTurnEnd)
+                        (part.state === 'input-available' &&
+                          staleByTurnEnd(part.toolCallId))
                       }
                       onAnswer={(answer) => {
                         onSubmitAnswer(part.toolCallId, answer);
@@ -187,10 +198,10 @@ export function MessageEntry({
                     part={approvalPart}
                     submitting={submittingCallIds.has(part.toolCallId)}
                     // `approval-requested` 本身就是「还在等人」，所以直接叠加：轮结束了
-                    // 就没人会来处理它了（服务端的挂起项早已被结掉）。
+                    // 就没人会来处理它了（服务端的等人项早已被结掉）。挂起在等的除外，见 `staleByTurnEnd`。
                     expired={
                       locallyExpiredCallIds.has(part.toolCallId) ||
-                      staleByTurnEnd
+                      staleByTurnEnd(part.toolCallId)
                     }
                     onDecide={(behavior) => {
                       onSubmitApproval(part.toolCallId, behavior);
@@ -214,8 +225,14 @@ export function MessageEntry({
             />
           : message.metadata.status === 'suspended' ?
             // [挂起](../../../../../../docs/terms.md)不是失败，也没有 error——不单独判一下的话
-            // 这一轮的尾部会是一片空白。
-            <TurnSuspendedBar />
+            // 这一轮的尾部会是一片空白。恢复那一轮改写了这条消息之后，它就不再在等了。
+            <TurnSuspendedBar
+              waiting={
+                message.metadata.suspended?.callIds.some((callId) =>
+                  waitingCallIds.has(callId),
+                ) ?? false
+              }
+            />
           : message.metadata.error !== undefined && (
               <TurnFailedBar error={message.metadata.error} />
             ))}

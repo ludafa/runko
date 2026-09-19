@@ -36,8 +36,21 @@ const SHUTDOWN_ABORT_MESSAGE =
  *
  * **不是失败**——跟 `aborted` 一样走中性呈现。它没有 `RunkoError`（没有出错），所以
  * 单独一个组件，不挂在 `TurnFailedBar` 上。
+ *
+ * `waiting` 为假 = 挂起的调用都答完了、恢复那一轮已经接着跑了。这时只留一行灰字，否则历史里
+ * 会一直挂着一句「在等你」（docs/ingress/tech/chat-webapp.md §6.2 ②）。
  */
-export function TurnSuspendedBar() {
+export function TurnSuspendedBar({ waiting }: { waiting: boolean }) {
+  if (!waiting) {
+    return (
+      <p
+        className="text-muted-foreground mb-2 text-xs"
+        data-testid="turn-resumed-note"
+      >
+        在这里挂起过，答复之后已接着跑。
+      </p>
+    );
+  }
   return (
     <Alert className="mb-2" data-testid="turn-suspended-bar">
       <CircleStopIcon />

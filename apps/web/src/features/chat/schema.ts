@@ -285,6 +285,14 @@ export const conversationSchema = z.object({
    * 就是这个字段要解决的那个 bug（有轮在跑却显示空闲）。
    */
   turnInProgress: z.boolean(),
+  /**
+   * 还有几张卡片在等人答（审批或提问）——内存窗口里等着的与已[挂起](../../../../../docs/terms.md)的
+   * 都算。会话列表据此标出「在等你」（docs/ingress/tech/chat-webapp.md §6.3）。
+   *
+   * 必填、不加 default，理由同 `turnInProgress`：它是每次请求现算的，字段改名时该报错，
+   * 而不是静默退回 0、让等着人答的会话在列表里看起来无事发生。
+   */
+  pendingDecisions: z.number().int(),
   createdAt: z.string(),
 });
 

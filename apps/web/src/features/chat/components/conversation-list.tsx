@@ -213,6 +213,16 @@ export function SessionList({
                   <span className="truncate text-[0.8125rem] leading-snug">
                     {conversation.title ?? '未命名会话'}
                   </span>
+                  {/* 有卡片在等人答（含已[挂起](../../../../../../docs/terms.md)的）——不点进去也看得到。 */}
+                  {conversation.pendingDecisions > 0 && (
+                    <span
+                      className="bg-foreground text-background ml-auto shrink-0 rounded-sm px-1 text-[0.625rem] leading-4"
+                      data-testid="waiting-for-you-badge"
+                      title={`有 ${String(conversation.pendingDecisions)} 处在等你答复`}
+                    >
+                      等你
+                    </span>
+                  )}
                 </div>
                 <span className="text-muted-foreground truncate pl-3 font-mono text-[0.6875rem]">
                   {conversation.branchName} · {conversation.provider}

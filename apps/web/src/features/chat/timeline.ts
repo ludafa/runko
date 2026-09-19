@@ -139,6 +139,63 @@ export function summarizeJson(value: unknown): string {
   return json.length > 120 ? `${json.slice(0, 120)}…` : json;
 }
 
+// ---- [挂起](../../../../../docs/terms.md)之后还在等人的调用（docs/ingress/tech/chat-webapp.md §6.2） ----
+
+const NO_WAITING_CALLS: ReadonlySet<string> = new Set();
+
+/**
+ * 部件还停在等人的状态，与 `@runko/core` 的 `pendingCallIds` 认的一致：`approval-responded`
+ * 只有批准了才算（被拒的不会再执行）。
+ *
+ * 不直接 import 那个函数：web 只从 core 拿类型，引一个运行时函数会把整个 core 打进前端包。
+ */
+function isAwaitingHuman(part: RunkoToolPart): boolean {
+  if (part.state === 'approval-responded') {
+    return part.approval.approved;
+  }
+  return (
+    part.state === 'approval-requested' || part.state === 'input-available'
+  );
+}
+
+/**
+ * 挂起之后还在等人答的调用，全从账本读出来：
+ *
+ * - 只看**最后一条**收尾消息，它的 `status` 必须是 `suspended`；
+ * - 调用要列在它的 `metadata.suspended.callIds` 里；
+ * - 部件还停在等人的状态。
+ *
+ * 第三条不能省：恢复那一轮会原地改写这条消息（同一个 id），但 `callIds` 是挂起那一刻记下的，
+ * 改写之后还留着。只看 metadata，答过的调用也会被算成「在等」。
+ */
+export function findWaitingCallIds(
+  messages: readonly RunkoUIMessage[],
+): ReadonlySet<string> {
+  let turnEnd: RunkoUIMessage | undefined;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.metadata?.status !== undefined) {
+      turnEnd = messages[index];
+      break;
+    }
+  }
+  const metadata = turnEnd?.metadata;
+  if (turnEnd === undefined || metadata?.status !== 'suspended') {
+    return NO_WAITING_CALLS;
+  }
+  const listed = new Set(metadata.suspended?.callIds);
+  const waiting = new Set<string>();
+  for (const part of turnEnd.parts) {
+    if (
+      isRunkoToolPart(part) &&
+      listed.has(part.toolCallId) &&
+      isAwaitingHuman(part)
+    ) {
+      waiting.add(part.toolCallId);
+    }
+  }
+  return waiting;
+}
+
 // ---- 工具耗时（`data-tool-timing`，见 `@runko/core` 的 `state.ts`——它会落盘，
 // 与 `data-tool-progress` 不同） ----
 

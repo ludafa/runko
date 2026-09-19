@@ -50,6 +50,7 @@ export const previewConversations: Conversation[] = [
     queuedMessages: [],
     availableSkills: [],
     turnInProgress: false,
+    pendingDecisions: 0,
     createdAt: new Date(T0 - 3_600_000).toISOString(),
   },
   {
@@ -64,6 +65,7 @@ export const previewConversations: Conversation[] = [
     queuedMessages: [],
     availableSkills: [],
     turnInProgress: false,
+    pendingDecisions: 0,
     createdAt: new Date(T0 - 90_000_000).toISOString(),
   },
   {
@@ -78,6 +80,7 @@ export const previewConversations: Conversation[] = [
     queuedMessages: [],
     availableSkills: [],
     turnInProgress: false,
+    pendingDecisions: 0,
     createdAt: new Date(T0 - 7 * 86_400_000).toISOString(),
   },
 ];
