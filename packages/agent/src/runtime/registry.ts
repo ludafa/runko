@@ -11,18 +11,36 @@
  * 模块级的 Map 会让它们互相踩。
  */
 import type { RunkoChunk } from "@runko/core";
-import type { HumanDecision, JsonValue } from "@runko/core";
+import type { HumanDecision, JsonValue, Settlement } from "@runko/core";
 
 import type { Grant, Takeover } from "../arbitration.js";
 import type { TurnInput, TurnPhase } from "../types.js";
+import type { SuspendReason } from "./reasons.js";
 
-/** 一次 `ask-user` 的结局——`timeout` 永不带 `answer`，同 `HumanDecision` 的 deny 分支不要求 `message`。 */
-export type AskUserOutcome = { outcome: "answered"; answer: string } | { outcome: "timeout" };
+/**
+ * 一次 `ask-user` 的结局。
+ *
+ * - `answered`：人答了。
+ * - `suspended`：等不到人，这一轮要[挂起](../../../../docs/terms.md)——`ask-user` 据此调 `ctx.suspend()`。
+ * - `timeout`：不会再有人答了——这一轮已经被停止、根本没有在跑的轮，或者裁决表那一行没登记上
+ *   （不能挂起）。等人等太久**不走**这一支，那走 `suspended`。
+ */
+export type AskUserOutcome =
+  | { outcome: "answered"; answer: string }
+  | { outcome: "suspended"; reason: SuspendReason }
+  | { outcome: "timeout" };
 
-/** 一个挂起中的人审/提问：一个 resolve + 一个超时定时器。 */
+/** 一个[等人项](../../../../docs/terms.md)：一个 resolve + 内存窗口的定时器 + 它那一行裁决表的登记。 */
 export interface PendingEntry<T> {
   resolve: (value: T) => void;
+  /** 内存窗口的定时器，到点整轮挂起。[在场](../../../../docs/terms.md)上报会把它换成一个新的。 */
   timer: ReturnType<typeof setTimeout>;
+  /**
+   * 登记那一行的写入（从不 reject——失败在里面记日志）。**结清之前必须先等它**：连接池下登记的
+   * INSERT 与结清的 UPDATE 可能走不同连接、到达顺序不保证，UPDATE 先到就匹配 0 行，INSERT 随后
+   * 落地，留下一条永远待定的行（技术方案 §11.2）。
+   */
+  recorded: Promise<boolean>;
 }
 
 /** 人审多带一次调用的 `toolName`/`input`——结清时要连同它们一起落进裁决表留底。 */
@@ -63,8 +81,32 @@ export interface ActiveTurn {
   draft: RunkoChunk[];
   /** 绑到这一轮自己的 `session.steer`；`preparing` 阶段是 `undefined`（还没有 session 可绑）。 */
   steer: ((input: string) => boolean) | undefined;
+  /**
+   * 这一轮接下的全部插话，按到达顺序。core 按先进先出注入，所以前 `steersDelivered` 条已经进了
+   * 账本，其余的只活在这一轮的内存里——这一轮以[挂起](../../../../docs/terms.md)收尾时要把它们转进
+   * 待发队列，否则用户被告知「插进去了」的话就这么没了。
+   */
+  steered: TurnInput[];
+  /** 已经注入账本的插话条数，落盘时（`finalize`）数出来。 */
+  steersDelivered: number;
   pendingReviews: Map<string, ReviewPendingEntry>;
   pendingQuestions: Map<string, QuestionPendingEntry>;
+  /**
+   * 这一轮已决定[挂起](../../../../docs/terms.md)（及理由）。一旦设上就不再撤：
+   *
+   * - 设它的那一刻，所有还挂着的等人项被一起解成「挂起」（`HumanBridge.suspendTurn`）；
+   * - 之后**同一轮里再来的**等人请求也立刻解成挂起，不再等一个新窗口——串行的下一个审批不该
+   *   让已经决定收尾的这一轮再多等五分钟。
+   *
+   * 与 `aborted` 是两道不同的闸：停止把等人项解成**拒绝**并写进裁决表；挂起解成**挂起**、
+   * 裁决表那一行**留着不结**——人回来还要答。
+   */
+  suspending: SuspendReason | undefined;
+  /**
+   * 这一轮发出去的全部裁决表登记（从不 reject）。收尾时**释放归属之前**等齐：挂起之后别的副本
+   * 随时可能来恢复，它要读的那几行必须已经在库里。
+   */
+  decisionWrites: Promise<void>[];
   /** 这一轮的输入（收尾通知要用）。 */
   input: TurnInput;
   /**
@@ -72,6 +114,12 @@ export interface ActiveTurn {
    * 「已停止」——上一个持有者崩了或卡住了，自己写不了收尾。可选：测试夹具与不报它的仲裁都不用改。
    */
   takeover?: Takeover;
+  /**
+   * 这是一轮[恢复](../../../../docs/terms.md)：结清哪次悬空调用、用什么结清（答案从裁决表读来）。
+   * 没有它就是普通轮。恢复轮不追加用户消息、调的是 `session.settleAndRun`、收尾从被改写的那条
+   * 开始落盘——见[挂起与恢复 · 技术方案](../../../../docs/logic/orchestration/tech/suspend-resume.md) §5.8。
+   */
+  resume?: { callId: string; settlement: Settlement };
   turnNumber: number;
   done: boolean;
   /** 收尾完成——[优雅关闭](../../../../docs/terms.md)等的就是它。 */
@@ -143,8 +191,12 @@ export function createActiveTurn(opts: {
     abortReason: undefined,
     draft: [],
     steer: undefined,
+    steered: [],
+    steersDelivered: 0,
     pendingReviews: new Map(),
     pendingQuestions: new Map(),
+    suspending: undefined,
+    decisionWrites: [],
     input: opts.input,
     ...(opts.takeover !== undefined ? { takeover: opts.takeover } : {}),
     turnNumber: opts.turnNumber,

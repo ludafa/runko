@@ -146,7 +146,14 @@ function isOutcome(value: string | null): value is NonNullable<DecisionRecord["o
   return value === "allow" || value === "deny" || value === "answered" || value === "timeout";
 }
 
-/** 可选字段一律「有才放进去」——`exactOptionalPropertyTypes` 下不能给 `undefined`。 */
+/**
+ * 可选字段一律「有才放进去」。
+ *
+ * 这个函数是在**两种「没有」之间翻译**：库里用 `null` 表示没有，`DecisionRecord` 用
+ * 「键不存在」表示没有。写成 `toolName: doc.toolName ?? undefined` 会造出第三种形状
+ * ——键在、值是 `undefined`——它既不是库那边的表示、也不是接口这边的表示，而且
+ * `"toolName" in record` 会答 `true`，把「没有」说成「有」。
+ */
 function toRecord(doc: DecisionDoc): DecisionRecord {
   return {
     conversationId: doc.conversationId,
@@ -218,6 +225,11 @@ export function createDecisionStore(db: Db): DecisionStore {
         .sort({ requestedAt: 1 })
         .toArray();
       return docs.map(toRecord);
+    },
+
+    async get(conversationId, toolCallId): Promise<DecisionRecord | undefined> {
+      const doc = await col.findOne({ conversationId, toolCallId }, { projection: { _id: 0 } });
+      return doc === null ? undefined : toRecord(doc);
     },
   };
 }

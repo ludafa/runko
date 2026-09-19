@@ -28,8 +28,15 @@ import type { TurnInput } from "./types.js";
 
 export interface PrepareTurnContext {
   conversationId: string;
-  /** 这一轮的输入（含 `userId`/`meta`——宿主拿它匹配自己的授权）。 */
+  /**
+   * 这一轮的输入（含 `userId`/`meta`——宿主拿它匹配自己的授权）。
+   *
+   * [恢复](../../../docs/terms.md)轮没有用户说话：`text` 是空串，`userId` 取答复人（`decidedBy`），
+   * 并带上下面的 `resume`。
+   */
   input: TurnInput;
+  /** 有它 = 这是一轮恢复，要结清的是 `callId` 那次调用。宿主一般不需要区别对待，照常装配即可。 */
+  resume?: { callId: string };
   /** 这一轮的轮号（1-based，从账本推的）。 */
   turnNumber: number;
   /**

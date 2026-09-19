@@ -1,18 +1,18 @@
 /**
- * 两条**人在回路**的通道——[人审](../../../../docs/terms.md)（审批链）与 `ask-user`
- * （反问用户）。结构上是一对孪生兄弟：都在这一轮的 `ActiveTurn` 上挂一个 pending 项，
- * 让 core 的 loop `await` 住，等一个人（或超时）来结掉它。
+ * 两条**人在回路**的通道——[人审](../../../../docs/terms.md)（审批链）与 `ask-user`（反问用户）。
+ * 结构上是一对孪生兄弟：都在这一轮的 `ActiveTurn` 上挂一个[等人项](../../../../docs/terms.md)，
+ * 让 core 的 loop `await` 住，等人来答，或等满[内存窗口](../../../../docs/terms.md)后
+ * [挂起](../../../../docs/terms.md)。
  *
- * **一个直播帧都不发**：挂起中这件事的可见性是 core 自己的 `tool-approval-request`
+ * **一个直播帧都不发**：等人这件事的可见性是 core 自己的 `tool-approval-request`
  * chunk（loop 是**先 yield 它、再 `await onReview`**，所以人一被需要那一刻它已经在线上
  * 了），结果的可见性是随后的 `tool-approval-response`。两者都随 `session.stream()` 正常
  * 流转，本文件不需要（也绝不该）再宣告一遍——多发一遍就是两份互相打架的状态。
- * `ask-user` 同理：它挂起/已答的状态就是 `tool-ask-user` 部件自己的
+ * `ask-user` 同理：它等人/已答的状态就是 `tool-ask-user` 部件自己的
  * `input-available`/`output-available`，在 loop 眼里就是一次普通工具调用。
  *
- * 它比 chat 应用原先那版多做一件事：**裁决落[裁决表](../../../../docs/terms.md)留底**
- * （请求时记一条待定、结清时补上结局）。当前是纯审计表——人的答复走的是下面这条内存
- * promise 路由，不是读库；落库是为了留底与将来的[挂起](../../../../docs/terms.md)恢复。
+ * 每一项都登记进[裁决表](../../../../docs/terms.md)：请求时记一条待定、结清时补上结局。内存窗口里，
+ * 人的答复走下面这条内存 promise 路由，不读库；挂起之后，答案写进那一行，由恢复轮读回。
  */
 import type { HumanDecision, JsonValue } from "@runko/core";
 
@@ -20,15 +20,18 @@ import type { Logger } from "../logger.js";
 import { describeError } from "../logger.js";
 import type { DecisionStore } from "../persistence.js";
 import type { AskUserOutcome, ActiveTurn, PendingEntry, TurnRegistry } from "./registry.js";
-import { ABORT_DENY_MESSAGE } from "./reasons.js";
+import { ABORT_DENY_MESSAGE, UNRECORDED_DENY_MESSAGE } from "./reasons.js";
+import type { SuspendReason } from "./reasons.js";
 
 const LOG_SCOPE = "agent:human";
 
 export interface HumanBridgeOptions {
   registry: TurnRegistry;
   decisions: DecisionStore;
-  approvalTimeoutMs: number;
-  askUserTimeoutMs: number;
+  /** 审批这一路的[内存窗口](../../../../docs/terms.md)（毫秒）。`0` = 一等人就挂起，不起定时器。 */
+  approvalWindowMs: number;
+  /** `ask-user` 这一路的内存窗口。两路分开，只是为了让旧的两个超时参数能各自等价映射过来。 */
+  questionWindowMs: number;
   logger: Logger;
   onApprovalPending?: (event: ApprovalPendingEvent) => void;
   onQuestionPending?: (event: QuestionPendingEvent) => void;
@@ -40,6 +43,7 @@ export interface ApprovalPendingEvent {
   toolName: string;
   input: JsonValue;
   userId?: string;
+  /** 这次在内存里会等多久才[挂起](../../../../docs/terms.md)（毫秒）；`0` = 已经立刻挂起了。 */
   timeoutMs: number;
 }
 
@@ -49,6 +53,7 @@ export interface QuestionPendingEvent {
   question: string;
   options?: string[];
   userId?: string;
+  /** 同 `ApprovalPendingEvent.timeoutMs`。 */
   timeoutMs: number;
 }
 
@@ -67,7 +72,7 @@ export interface SubmittedDecision {
   message?: string;
 }
 
-/** 结清一条挂起项：取消超时、从 Map 移除，把它交回给调用方去 settle。 */
+/** 结清一条等人项：取消超时、从 Map 移除，把它交回给调用方去 settle。 */
 function takePending<T>(pending: Map<string, PendingEntry<T>>, callId: string): PendingEntry<T> | undefined {
   const entry = pending.get(callId);
   if (entry === undefined) {return undefined;}
@@ -76,6 +81,21 @@ function takePending<T>(pending: Map<string, PendingEntry<T>>, callId: string): 
   return entry;
 }
 
+/**
+ * ## 等人项有四种解法
+ *
+ * | 谁解开 | 解成什么 | 写不写裁决表 |
+ * |---|---|---|
+ * | 人答了 | allow / deny / 答案 | 写——结清那一行 |
+ * | 这一轮被停止 | deny / timeout | 写 |
+ * | [内存窗口](../../../../docs/terms.md)到点 | **挂起** | **不写**——那一行留着，人回来还要答 |
+ * | [交权](../../../../docs/terms.md) | **挂起** | **不写** |
+ *
+ * 后两种走 `suspendTurn`：它**整轮**挂起，而不是只挂一个——这一轮已经决定收尾了，别的
+ * 等人项再各自等一个窗口没有意义。见[挂起与恢复 · 技术方案](../../../../docs/logic/orchestration/tech/suspend-resume.md) §4.2。
+ *
+ * 例外：那一行**没登记上**时不挂起（`suspendIfRecorded`），退回拒绝 / 「没人回应」。
+ */
 export class HumanBridge {
   private readonly opts: HumanBridgeOptions;
 
@@ -85,11 +105,14 @@ export class HumanBridge {
 
   /**
    * core 的 loop 解析出 `review` 后调它——返回的 promise 正是 loop 在 `await` 的那个，
-   * 所以这一轮的执行是真的挂起了（不是轮询）。
+   * 所以这一轮的执行是真的停在这里等人（不是轮询）。
    *
-   * 两条**立即拒绝、不注册挂起项**的路：没有活跃轮（防御性，正常走不到），以及这一轮
-   * 已被停止——后者要紧：不拦的话这个请求会挂到自己的超时（默认 240 秒）才动，把
-   * 「停止」拖成「四分钟后停止」。
+   * 两条**立即拒绝、不注册等人项**的路：没有活跃轮（防御性，正常走不到），以及这一轮
+   * 已被停止——后者要紧：不拦的话这个请求会挂满一整个内存窗口才动，把「停止」拖成
+   * 「五分钟后停止」。
+   *
+   * 一条**立即挂起**的路：这一轮已经决定挂起了（`turn.suspending`）。裁决表那一行**照记**
+   * ——这次调用会留在账本里等人，人回来答的就是它。
    */
   requestReview(conversationId: string, req: { callId: string; toolName: string; input: JsonValue }): Promise<HumanDecision> {
     const turn = this.opts.registry.get(conversationId);
@@ -100,36 +123,31 @@ export class HumanBridge {
       return Promise.resolve({ behavior: "deny", message: ABORT_DENY_MESSAGE });
     }
 
-    const timeoutMs = this.opts.approvalTimeoutMs;
-    const requestedAt = Date.now();
-    // 留底先行、但**不 await**：落库慢或失败都不该拖住（更不该阻断）人审这条主路。
-    void this.opts.decisions
-      .record({
-        conversationId,
-        toolCallId: req.callId,
-        kind: "approval",
-        toolName: req.toolName,
-        payload: req.input,
-        requestedAt,
-      })
-      .catch((error: unknown) => {
-        this.opts.logger.warn(LOG_SCOPE, "failed to record pending decision", {
-          conversationId,
-          callId: req.callId,
-          error: describeError(error),
-        });
-      });
-
-    const promise = new Promise<HumanDecision>((resolve) => {
-      const timer = setTimeout(() => {
-        void this.settleReview(conversationId, req.callId, {
-          outcome: "deny",
-          message: `Approval request timed out after ${String(timeoutMs)}ms with no response.`,
-        });
-      }, timeoutMs);
-      turn.pendingReviews.set(req.callId, { resolve, timer, toolName: req.toolName, input: req.input });
+    const windowMs = this.opts.approvalWindowMs;
+    // 留底先行、但**不在这里 await**：落库慢或失败都不该拖住弹卡片。结清之前与释放归属之前
+    // 才等它（见 `PendingEntry.recorded`）——人要答几秒到几分钟，正常路径上它早就落地了。
+    const recorded = this.recordPending(turn, {
+      conversationId,
+      toolCallId: req.callId,
+      kind: "approval",
+      toolName: req.toolName,
+      payload: req.input,
+      requestedAt: Date.now(),
     });
 
+    // 窗口是 0：一等人就挂，不起定时器。走整轮挂起那条路，同一步里后到的等人请求也跟着挂。
+    if (windowMs === 0) {this.suspendTurn(turn, "immediate");}
+    // 这一轮已经决定挂起：不开新窗口，立刻挂。
+    const suspending = turn.suspending;
+    const promise =
+      suspending !== undefined
+        ? this.suspendIfRecorded(recorded, { behavior: "suspend", reason: suspending }, req.callId)
+        : new Promise<HumanDecision>((resolve) => {
+            const timer = this.startWindow(turn, windowMs);
+            turn.pendingReviews.set(req.callId, { resolve, timer, recorded, toolName: req.toolName, input: req.input });
+          });
+
+    // 立刻挂起的也要通知：人得知道有一张卡片等着他答（推送就靠这个）。
     this.notify(() => {
       this.opts.onApprovalPending?.({
         conversationId,
@@ -137,7 +155,7 @@ export class HumanBridge {
         toolName: req.toolName,
         input: req.input,
         ...(turn.input.userId !== undefined ? { userId: turn.input.userId } : {}),
-        timeoutMs,
+        timeoutMs: suspending !== undefined ? 0 : windowMs,
       });
     });
 
@@ -149,30 +167,24 @@ export class HumanBridge {
     const turn = this.opts.registry.get(conversationId);
     if (turn === undefined || turn.aborted) {return Promise.resolve({ outcome: "timeout" });}
 
-    const timeoutMs = this.opts.askUserTimeoutMs;
-    const requestedAt = Date.now();
-    void this.opts.decisions
-      .record({
-        conversationId,
-        toolCallId: req.callId,
-        kind: "question",
-        payload: req.question,
-        requestedAt,
-      })
-      .catch((error: unknown) => {
-        this.opts.logger.warn(LOG_SCOPE, "failed to record pending question", {
-          conversationId,
-          callId: req.callId,
-          error: describeError(error),
-        });
-      });
-
-    const promise = new Promise<AskUserOutcome>((resolve) => {
-      const timer = setTimeout(() => {
-        void this.settleQuestion(conversationId, req.callId, { outcome: "timeout" });
-      }, timeoutMs);
-      turn.pendingQuestions.set(req.callId, { resolve, timer, question: req.question });
+    const windowMs = this.opts.questionWindowMs;
+    const recorded = this.recordPending(turn, {
+      conversationId,
+      toolCallId: req.callId,
+      kind: "question",
+      payload: req.question,
+      requestedAt: Date.now(),
     });
+
+    if (windowMs === 0) {this.suspendTurn(turn, "immediate");}
+    const suspending = turn.suspending;
+    const promise =
+      suspending !== undefined
+        ? this.suspendIfRecorded(recorded, { outcome: "suspended", reason: suspending }, req.callId)
+        : new Promise<AskUserOutcome>((resolve) => {
+            const timer = this.startWindow(turn, windowMs);
+            turn.pendingQuestions.set(req.callId, { resolve, timer, recorded, question: req.question });
+          });
 
     this.notify(() => {
       this.opts.onQuestionPending?.({
@@ -181,7 +193,7 @@ export class HumanBridge {
         question: req.question,
         ...(req.options !== undefined ? { options: req.options } : {}),
         ...(turn.input.userId !== undefined ? { userId: turn.input.userId } : {}),
-        timeoutMs,
+        timeoutMs: suspending !== undefined ? 0 : windowMs,
       });
     });
 
@@ -189,10 +201,36 @@ export class HumanBridge {
   }
 
   /**
-   * 人（或超时）那一侧：`false` = 没有这条挂起项可结（已结、已超时、从未存在）——
+   * [在场](../../../../docs/terms.md)续期：把这一轮每个等人项的定时器重置成「从现在起一个完整窗口」。
+   *
+   * 同步、不落库——调用频率是每个在场用户每 20 秒一次，走一次 IO 是白花钱。没有轮在跑、或这一轮
+   * 不在等人（包括已经决定挂起、已被停止）时什么都不做：调用方是个定时心跳，没法判断这些。
+   */
+  reportPresence(conversationId: string): void {
+    const turn = this.opts.registry.get(conversationId);
+    if (turn === undefined || turn.aborted || turn.suspending !== undefined) {return;}
+    for (const entry of turn.pendingReviews.values()) {
+      clearTimeout(entry.timer);
+      entry.timer = this.startWindow(turn, this.opts.approvalWindowMs);
+    }
+    for (const entry of turn.pendingQuestions.values()) {
+      clearTimeout(entry.timer);
+      entry.timer = this.startWindow(turn, this.opts.questionWindowMs);
+    }
+  }
+
+  /** 开一个内存窗口。到点**整轮挂起**，不是只结这一条——见文件头那张表。 */
+  private startWindow(turn: ActiveTurn, windowMs: number): ReturnType<typeof setTimeout> {
+    return setTimeout(() => {
+      this.suspendTurn(turn, "timeout");
+    }, windowMs);
+  }
+
+  /**
+   * 人那一侧：`false` = 本进程内存里没有这条等人项可结（已结、已挂起、从未存在）——
    * [接入层](../../../../docs/terms.md)据此转 404。
    *
-   * **超时与人工裁决走的是同一个方法**，所以重连的客户端分辨不出两者——这是刻意的。
+   * 窗口到点**不走这里**（那条路是挂起，不结裁决表），所以这个方法只由人的答复和停止触发。
    */
   async settleReview(conversationId: string, callId: string, decision: SubmittedDecision): Promise<boolean> {
     const turn = this.opts.registry.get(conversationId);
@@ -206,6 +244,7 @@ export class HumanBridge {
     const pending = takePending(turn.pendingReviews, callId);
     if (pending === undefined) {return false;}
 
+    await pending.recorded;
     await this.recordSettlement(conversationId, callId, {
       outcome: decision.outcome,
       ...(decision.scope !== undefined ? { scope: decision.scope } : {}),
@@ -222,26 +261,67 @@ export class HumanBridge {
     return true;
   }
 
-  async settleQuestion(conversationId: string, callId: string, outcome: AskUserOutcome): Promise<boolean> {
+  async settleQuestion(conversationId: string, callId: string, outcome: AskUserOutcome, decidedBy?: string): Promise<boolean> {
     const turn = this.opts.registry.get(conversationId);
     if (turn === undefined) {return false;}
-    return await this.settleQuestionOn(turn, callId, outcome);
+    return await this.settleQuestionOn(turn, callId, outcome, decidedBy);
   }
 
   /** 同上，但直接对着给定的那一轮结清。 */
-  private async settleQuestionOn(turn: ActiveTurn, callId: string, outcome: AskUserOutcome): Promise<boolean> {
+  private async settleQuestionOn(turn: ActiveTurn, callId: string, outcome: AskUserOutcome, decidedBy?: string): Promise<boolean> {
     const conversationId = turn.conversationId;
     const pending = takePending(turn.pendingQuestions, callId);
     if (pending === undefined) {return false;}
 
+    await pending.recorded;
     await this.recordSettlement(conversationId, callId, {
       outcome: outcome.outcome === "answered" ? "answered" : "timeout",
       ...(outcome.outcome === "answered" ? { message: outcome.answer } : {}),
+      ...(decidedBy !== undefined ? { decidedBy } : {}),
       decidedAt: Date.now(),
     });
 
     pending.resolve(outcome);
     return true;
+  }
+
+  /**
+   * 这一轮[挂起](../../../../docs/terms.md)：把还挂着的等人项**全部**解成「挂起」，并关上闸门——
+   * 此后同一轮里再来的等人请求立刻挂起（`turn.suspending`）。
+   *
+   * **一个字都不写裁决表。** 那几行保持未结清（`decidedAt` 为空），这正是人回来时「这条还
+   * 悬着」的判据。写了就等于替人答了——这是本方法与 `settleAllPending` 唯一、也是全部的区别。
+   *
+   * 同步、幂等：理由以第一次为准（窗口到点之后又碰上交权，这一轮仍记 `timeout`）。
+   */
+  suspendTurn(turn: ActiveTurn, reason: SuspendReason): void {
+    turn.suspending ??= reason;
+    const settled = turn.suspending;
+    for (const callId of [...turn.pendingReviews.keys()]) {
+      const entry = takePending(turn.pendingReviews, callId);
+      if (entry !== undefined) {void this.suspendIfRecorded(entry.recorded, { behavior: "suspend", reason: settled }, callId).then(entry.resolve);}
+    }
+    for (const callId of [...turn.pendingQuestions.keys()]) {
+      const entry = takePending(turn.pendingQuestions, callId);
+      if (entry !== undefined) {void this.suspendIfRecorded(entry.recorded, { outcome: "suspended", reason: settled }, callId).then(entry.resolve);}
+    }
+  }
+
+  /**
+   * 挂起的前提是**裁决表那一行已经登记上**：人回来答的就是那一行，没有它就永远没人能答，这个会话
+   * 也再开不了普通轮。登记失败时退回窗口到点的老结局——审批按拒绝、提问按「没人回应」——让这一轮
+   * 照常往下走。
+   */
+  private async suspendIfRecorded(recorded: Promise<boolean>, suspend: HumanDecision, callId: string): Promise<HumanDecision>;
+  private async suspendIfRecorded(recorded: Promise<boolean>, suspend: AskUserOutcome, callId: string): Promise<AskUserOutcome>;
+  private async suspendIfRecorded(
+    recorded: Promise<boolean>,
+    suspend: HumanDecision | AskUserOutcome,
+    callId: string,
+  ): Promise<HumanDecision | AskUserOutcome> {
+    if (await recorded) {return suspend;}
+    this.opts.logger.warn(LOG_SCOPE, "pending decision was not recorded, so this call cannot be suspended; ending the wait instead", { callId });
+    return "behavior" in suspend ? { behavior: "deny", message: UNRECORDED_DENY_MESSAGE } : { outcome: "timeout" };
   }
 
   /**
@@ -252,7 +332,7 @@ export class HumanBridge {
    * 不能边删边迭代。
    *
    * **对着形参那一轮结清，不按 conversationId 回查登记表**：两者可能已经不是同一个对象
-   * （这一轮刚收尾、位子被下一轮顶替），那样会去拒掉**另一轮**的挂起项，而传进来这一轮
+   * （这一轮刚收尾、位子被下一轮顶替），那样会去拒掉**另一轮**的等人项，而传进来这一轮
    * 的反倒留着——正是这个方法要防的那件事。
    */
   async settleAllPending(turn: ActiveTurn, reason: string): Promise<void> {
@@ -264,6 +344,27 @@ export class HumanBridge {
     for (const callId of questionIds) {
       await this.settleQuestionOn(turn, callId, { outcome: "timeout" });
     }
+  }
+
+  /**
+   * 登记一条待定裁决，返回写没写成（从不 reject），并挂到这一轮的 `decisionWrites` 上。
+   * 失败只记一行：落库失败不该阻断人审这条主路——但这次调用从此不能挂起（`suspendIfRecorded`）。
+   */
+  private recordPending(turn: ActiveTurn, entry: Parameters<DecisionStore["record"]>[0]): Promise<boolean> {
+    const write = this.opts.decisions.record(entry).then(
+      () => true,
+      (error: unknown) => {
+        this.opts.logger.warn(LOG_SCOPE, "failed to record pending decision", {
+          conversationId: entry.conversationId,
+          callId: entry.toolCallId,
+          kind: entry.kind,
+          error: describeError(error),
+        });
+        return false;
+      },
+    );
+    turn.decisionWrites.push(write.then(() => undefined));
+    return write;
   }
 
   private async recordSettlement(

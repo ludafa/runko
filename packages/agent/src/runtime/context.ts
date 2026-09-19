@@ -29,7 +29,7 @@ export interface RuntimeHooks {
   /** 第一个**用户看得见**的 chunk 抵达——它减去上一个就是模型首 token 的等待。 */
   onFirstOutput?: (event: { conversationId: string; sessionId: string; turn: number; sinceStartMs: number }) => void;
   /**
-   * agent 需要一个人来批（推送通知的触发点之一）。**发生在挂起项登记好之后**——
+   * agent 需要一个人来批（推送通知的触发点之一）。**发生在等人项登记好之后**——
    * 审批卡片走直播那条路，通知是可选支路，绝不能排在它前面拖慢或拖挂它。
    */
   onApprovalPending?: (event: ApprovalPendingEvent) => void;

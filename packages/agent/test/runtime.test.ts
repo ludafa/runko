@@ -587,7 +587,7 @@ describe("人在回路", () => {
     await session.started;
 
     // 真正的调用点在 `buildSessionOptions` 注入的 `onReview` 上；测试从 runtime 这一侧
-    // 验证：先没有挂起项 → submit 返回 false。
+    // 验证：先没有等人项 → submit 返回 false。
     expect(await runtime.submitDecision("conv-15", "call-1", { outcome: "allow" })).toBe(false);
 
     await runOneTurn(session, "ok", 1);
@@ -699,7 +699,7 @@ describe("交权（优雅关闭）", () => {
 
   it("空闲时关闭秒退", async () => {
     const { runtime } = setup();
-    await expect(runtime.shutdown({ graceMs: 1000 })).resolves.toEqual({ aborted: 0, settled: true, pending: 0 });
+    await expect(runtime.shutdown({ graceMs: 1000 })).resolves.toEqual({ aborted: 0, suspended: 0, settled: true, pending: 0 });
   });
 });
 

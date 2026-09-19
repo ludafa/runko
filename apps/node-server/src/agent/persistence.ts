@@ -251,6 +251,45 @@ function createDecisionStore(db: Db): DecisionStore {
           })),
       );
     },
+    get(
+      conversationId: string,
+      toolCallId: string,
+    ): Promise<DecisionRecord | undefined> {
+      const row = db
+        .select()
+        .from(conversationDecisions)
+        .where(
+          and(
+            eq(conversationDecisions.conversationId, conversationId),
+            eq(conversationDecisions.toolCallId, toolCallId),
+          ),
+        )
+        .get();
+      return Promise.resolve(
+        row === undefined ? undefined : toDecisionRecord(row),
+      );
+    },
+  };
+}
+
+/** 一行裁决表 → 框架的 `DecisionRecord`。列为 null 的字段**不出现**，不写成 `undefined`。 */
+function toDecisionRecord(
+  row: typeof conversationDecisions.$inferSelect,
+): DecisionRecord {
+  return {
+    conversationId: row.conversationId,
+    toolCallId: row.toolCallId,
+    kind: row.kind,
+    ...(row.toolName !== null ? { toolName: row.toolName } : {}),
+    ...(row.payloadJson !== null ?
+      { payload: parseJsonValue(row.payloadJson) }
+    : {}),
+    ...(row.outcome !== null ? { outcome: row.outcome } : {}),
+    ...(row.scope !== null ? { scope: row.scope } : {}),
+    ...(row.decidedBy !== null ? { decidedBy: row.decidedBy } : {}),
+    ...(row.message !== null ? { message: row.message } : {}),
+    requestedAt: row.requestedAt.getTime(),
+    ...(row.decidedAt !== null ? { decidedAt: row.decidedAt.getTime() } : {}),
   };
 }
 

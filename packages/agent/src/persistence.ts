@@ -90,8 +90,16 @@ export interface DecisionStore {
     toolCallId: string,
     settlement: Pick<DecisionRecord, "outcome" | "scope" | "decidedBy" | "message"> & { decidedAt: number },
   ): Promise<boolean>;
-  /** 这个会话还没结清的裁决。当前只服务于观测与将来的[挂起](../../../docs/terms.md)恢复。 */
+  /** 这个会话还没结清的裁决。用于观测，以及收拾崩溃留下的孤儿行。 */
   listPending(conversationId: string): Promise<DecisionRecord[]>;
+  /**
+   * 取一行，结没结清都返回；没有这一行返回 `undefined`。
+   *
+   * [恢复](../../../docs/terms.md)靠它：人答的时候不一定能马上开恢复轮，答案先写进这一行，
+   * 恢复轮开起来时再从这里读回去——`listPending` 只列没答的，读不到答案。见
+   * [挂起与恢复 · 技术方案](../../../docs/logic/orchestration/tech/suspend-resume.md) §5.7。
+   */
+  get(conversationId: string, toolCallId: string): Promise<DecisionRecord | undefined>;
 }
 
 export type EnqueueOutcome =

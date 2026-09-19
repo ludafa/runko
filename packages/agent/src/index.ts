@@ -44,3 +44,6 @@ export {
   ABORT_REASON_USER,
   OWNERSHIP_LOST_MESSAGE,
 } from "./runtime/reasons.js";
+export type { SuspendReason } from "./runtime/reasons.js";
+export type { Duration } from "./runtime/duration.js";
+export { foldById } from "./runtime/turn.js";

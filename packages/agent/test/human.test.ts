@@ -2,16 +2,22 @@
  * [人在回路桥](../src/runtime/human.ts)与内置 `ask-user` 工具的用例——两条通道的
  * 挂起、结清、超时、以及「一轮结束时把还挂着的就地结掉」。
  */
+import { SuspendSignal } from "@runko/core";
 import type { AgentDefinition, Tool, ToolContext } from "@runko/core";
 import { MemoryFS } from "@runko/virtual-fs";
 import { describe, expect, it, vi } from "vitest";
 
 import { ASK_USER_TIMEOUT_MESSAGE, createAgentRuntime, defaultSessionFactory, memoryPersistence } from "../src/index.js";
+import { UNRECORDED_DENY_MESSAGE } from "../src/runtime/reasons.js";
+import { settleOrphanedDecisionsSafely } from "../src/runtime/orphaned-decisions.js";
 import { assistantMessage, createFakeSessionFactory, endTurnChunk } from "./helpers/fake-session.js";
 
 const agent: AgentDefinition = { model: "test/model" };
 
-/** 一个只够 `ask-user` 用的假 `ToolContext`。 */
+/**
+ * 一个只够 `ask-user` 用的假 `ToolContext`。`suspend` 按真实语义**抛出**（返回类型是 `never`），
+ * 抛的是 core 的 `SuspendSignal`，测试据此断言「到点挂起了、理由是什么」。
+ */
 function toolContext(callId: string): ToolContext {
   return {
     fs: new MemoryFS(),
@@ -22,6 +28,9 @@ function toolContext(callId: string): ToolContext {
       throw new Error("not used");
     },
     update: () => undefined,
+    suspend: (reason) => {
+      throw new SuspendSignal(reason);
+    },
   };
 }
 
@@ -74,14 +83,23 @@ describe("内置 ask-user 工具", () => {
     session.finish();
   });
 
-  it("超时不是错误——交回一段提示文案，模型自己决定接下来怎么办", async () => {
-    const { runtime, sessions, askUser } = setupWithAskUser({ human: { askUserTimeoutMs: 20 } });
+  it("窗口到点不是返回提示文案，而是挂起——调 ctx.suspend(\"timeout\")", async () => {
+    const { runtime, sessions, askUser } = setupWithAskUser({ suspend: { memoryWindow: 20 } });
     await runtime.enqueue("c4", { text: "hi" });
     const session = await sessions.next();
     await session.started;
 
-    await expect(askUser()?.execute({ question: "在吗" }, toolContext("call-2"))).resolves.toBe(ASK_USER_TIMEOUT_MESSAGE);
-    // 超时与人工回答走同一条结清路径——重连的客户端分辨不出两者。
+    let thrown: unknown;
+    try {
+      await askUser()?.execute({ question: "在吗" }, toolContext("call-2"));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(SuspendSignal);
+    expect(thrown instanceof SuspendSignal ? thrown.reason : undefined).toBe("timeout");
+    // 挂起之后内存里没有这一项了，迟到的回答走恢复路径。但恢复只认**账本末尾还悬着**的调用，
+    // 这里的假 session 一个字都不写账本——这一行在账本里没有对应的悬空调用，按孤儿对待，报 false。
+    // 真账本下的恢复见 resume.test.ts。
     expect(await runtime.submitAnswer("c4", "call-2", "迟到的回答")).toBe(false);
 
     session.emit(endTurnChunk(1));
@@ -102,12 +120,12 @@ describe("内置 ask-user 工具", () => {
 });
 
 describe("人审通道", () => {
-  it("审批超时按拒绝结掉，并带上超时说明", async () => {
+  it("审批窗口到点不再当拒绝，而是答「挂起」", async () => {
     const sessions = createFakeSessionFactory();
     let reviewer: ((callId: string) => Promise<{ behavior: string; message?: string }>) | undefined;
     const runtime = createAgentRuntime({
       agent,
-      human: { approvalTimeoutMs: 20 },
+      suspend: { memoryWindow: 20 },
       prepareTurn: () => ({}),
       sessionFactory: (agentDef, options) => {
         const onReview = options.onReview;
@@ -124,8 +142,7 @@ describe("人审通道", () => {
     await session.started;
 
     const decision = await reviewer?.("call-4");
-    expect(decision?.behavior).toBe("deny");
-    expect(decision?.message).toContain("timed out");
+    expect(decision).toEqual({ behavior: "suspend", reason: "timeout" });
 
     session.emit(endTurnChunk(1));
     session.finish();
@@ -176,6 +193,7 @@ describe("人审通道", () => {
       record: () => Promise.reject(new Error("db down")),
       settle: () => Promise.reject(new Error("db down")),
       listPending: () => Promise.resolve([]),
+      get: () => Promise.reject(new Error("db down")),
     };
     const sessions = createFakeSessionFactory();
     let reviewer: ((callId: string) => Promise<{ behavior: string }>) | undefined;
@@ -233,5 +251,62 @@ describe("默认 session 工厂", () => {
     expect(state.id).toBe("conv");
     expect(state.turn).toBe(3);
     expect(state.messages).toHaveLength(1);
+  });
+});
+
+describe("裁决表那一行没登记上：不能挂起", () => {
+  // 挂起之后人回来答的就是那一行。没有它，这次调用永远没人能答，会话也再开不了普通轮——
+  // 所以退回窗口到点的老结局，让这一轮照常往下走。
+  function setupFailingRecord(memoryWindow: number) {
+    const persistence = memoryPersistence();
+    persistence.decisions.record = () => Promise.reject(new Error("db down"));
+    const sessions = createFakeSessionFactory();
+    let reviewer: ((callId: string) => Promise<{ behavior: string; message?: string }>) | undefined;
+    const runtime = createAgentRuntime({
+      agent,
+      persistence,
+      suspend: { memoryWindow },
+      prepareTurn: () => ({}),
+      sessionFactory: (agentDef, options) => {
+        const onReview = options.onReview;
+        if (onReview !== undefined) {
+          reviewer = (callId) =>
+            onReview({ toolName: "bash", input: "ls", ctx: { callId, toolName: "bash", session: { id: "s", turn: 1 } } });
+        }
+        return sessions.factory(agentDef, options);
+      },
+    });
+    return { runtime, sessions, review: (callId: string) => reviewer?.(callId) };
+  }
+
+  it("窗口到点：按拒绝结掉，理由说清楚", async () => {
+    const { runtime, sessions, review } = setupFailingRecord(20);
+    await runtime.enqueue("c9", { text: "hi" });
+    const session = await sessions.next();
+    await session.started;
+    await expect(review("call-9")).resolves.toMatchObject({ behavior: "deny", message: UNRECORDED_DENY_MESSAGE });
+    session.emit(endTurnChunk(1));
+    session.finish();
+  });
+
+  it("窗口是 0：同样不挂起", async () => {
+    const { runtime, sessions, review } = setupFailingRecord(0);
+    await runtime.enqueue("c10", { text: "hi" });
+    const session = await sessions.next();
+    await session.started;
+    await expect(review("call-10")).resolves.toMatchObject({ behavior: "deny" });
+    session.emit(endTurnChunk(1));
+    session.finish();
+  });
+});
+
+describe("收拾孤儿行失败不连累调用方", () => {
+  it("settleOrphanedDecisionsSafely：裁决表抛错时返回 0、记一行，不往外抛", async () => {
+    const persistence = memoryPersistence();
+    persistence.decisions.listPending = () => Promise.reject(new Error("db down"));
+    const errors: string[] = [];
+    const logger = { debug: () => undefined, info: () => undefined, warn: () => undefined, error: (_s: string, message: string) => errors.push(message) };
+    await expect(settleOrphanedDecisionsSafely(persistence, logger, "c1")).resolves.toBe(0);
+    expect(errors).toHaveLength(1);
   });
 });

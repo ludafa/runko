@@ -20,10 +20,13 @@ import { describeError, noopLogger } from "./logger.js";
 import type { Persistence } from "./persistence.js";
 import type { TurnPreparer } from "./prepare.js";
 import type { RuntimeContext, RuntimeHooks, SteerPolicy } from "./runtime/context.js";
+import { durationToMs } from "./runtime/duration.js";
+import type { Duration } from "./runtime/duration.js";
 import { HumanBridge } from "./runtime/human.js";
 import { appendInterruptedMarker } from "./runtime/interrupted-marker.js";
+import { settleOrphanedDecisionsSafely } from "./runtime/orphaned-decisions.js";
 import type { SubmittedDecision } from "./runtime/human.js";
-import { enqueue as enqueueInput, publishQueue, startNextQueued, startTurn } from "./runtime/queue.js";
+import { advance, answerSuspended, enqueue as enqueueInput, publishQueue, startNextQueued, startTurn } from "./runtime/queue.js";
 import type { EnqueueOptions } from "./runtime/queue.js";
 import { TurnRegistry } from "./runtime/registry.js";
 import type { ActiveTurn } from "./runtime/registry.js";
@@ -41,9 +44,11 @@ import type {
 
 const LOG_SCOPE = "agent:runtime";
 
-/** 默认值：人多久不理算放弃。纯产品决策，宿主可改。 */
-const DEFAULT_APPROVAL_TIMEOUT_MS = 240_000;
-const DEFAULT_ASK_USER_TIMEOUT_MS = 240_000;
+/**
+ * [内存窗口](../../../docs/terms.md)默认 5 分钟：与审批保活预算对齐，免得沙盒已经休眠了、
+ * 框架还在内存里等（挂起与恢复 · 技术方案 §8.2）。
+ */
+const DEFAULT_MEMORY_WINDOW: Duration = "5m";
 /** [交权](../../../docs/terms.md)宽限期：正在干活的轮，等多久还没收尾就不等了。 */
 const DEFAULT_SHUTDOWN_GRACE_MS = 15_000;
 const DEFAULT_QUEUE_MAX = 10;
@@ -77,10 +82,22 @@ export interface AgentRuntimeOptions {
     steer?: SteerPolicy;
   };
   human?: {
+    /** @deprecated 改用 `suspend.memoryWindow`。配了仍然生效（只管审批这一路），并记一行 warn。 */
     approvalTimeoutMs?: number;
+    /** @deprecated 改用 `suspend.memoryWindow`。配了仍然生效（只管 `ask-user` 这一路），并记一行 warn。 */
     askUserTimeoutMs?: number;
     /** 注册内置 `ask-user` 工具（缺省开）。 */
     askUser?: boolean;
+  };
+  /** [挂起](../../../docs/terms.md)：等人等多久就落盘退出、释放机器，人回来在任意节点接着干。 */
+  suspend?: {
+    /**
+     * [内存窗口](../../../docs/terms.md)：先在内存里等多久，等不到就挂起。缺省 `"5m"`。
+     * `0` = 一等人就挂起、不起定时器——不可寻址的宿主（Vercel Functions、Durable Object）用这一档。
+     */
+    memoryWindow?: Duration;
+    /** 收到 `reportPresence` 时：`"extend"`（缺省）把窗口往后推一整个窗口；`"ignore"` 不理。 */
+    onPresence?: "extend" | "ignore";
   };
   shutdown?: { graceMs?: number };
 }
@@ -96,6 +113,8 @@ export interface SubscribeOptions {
 export interface ShutdownResult {
   /** 这次关闭中止了几个轮（含还在[起轮装配](../../../docs/terms.md)里的）。 */
   aborted: number;
+  /** 这次关闭[挂起](../../../docs/terms.md)了几个轮——关闭那一刻它们正在等人，挂起是无损的，人回来在任意节点接着干。 */
+  suspended: number;
   /** 是否全部收尾完毕。`false` = 撞了宽限期上限，还有轮没等到。 */
   settled: boolean;
   /** 撞超时时还剩几个没收尾。 */
@@ -114,10 +133,15 @@ export interface AgentRuntime {
   enqueue(conversationId: string, input: TurnInput, opts?: EnqueueOptions): Promise<EnqueueResult>;
   /** 实时流：先回放，再直播。中立的 `AsyncIterable`，序列化归接入层。 */
   subscribe(conversationId: string, opts?: SubscribeOptions): AsyncGenerator<Frame, void>;
-  /** 人做出裁决。`false` = 没有这条挂起项（已结、已超时、从未存在）→ 接入层转 404。 */
+  /** 人做出裁决。`false` = 没有这条等人项（已结、已超时、从未存在）→ 接入层转 404。 */
   submitDecision(conversationId: string, callId: string, decision: SubmittedDecision): Promise<boolean>;
-  /** 人回答了 `ask-user`。语义同上。 */
-  submitAnswer(conversationId: string, callId: string, answer: string): Promise<boolean>;
+  /**
+   * 人回答了 `ask-user`。语义同上。
+   *
+   * `decidedBy` 是答复人。[挂起](../../../docs/terms.md)之后答的，恢复那一轮以他的身份跑（`TurnInput.userId`）
+   * ——推送、钩子都靠它找人；不给就没有身份。
+   */
+  submitAnswer(conversationId: string, callId: string, answer: string, opts?: { decidedBy?: string }): Promise<boolean>;
   /** [停止](../../../docs/terms.md)进行中的那一轮 + 清空[待发队列](../../../docs/terms.md)。`false` = 没有轮可停。 */
   abort(conversationId: string, reason?: string): Promise<boolean>;
   /** 这个会话此刻在不在跑、谁在跑（多节点时接入层据 `holder` 转发）。 */
@@ -133,6 +157,40 @@ export interface AgentRuntime {
   shutdown(opts?: { graceMs?: number }): Promise<ShutdownResult>;
   /** 进程是否正在[优雅关闭](../../../docs/terms.md)（接入层据此转 503）。 */
   isShuttingDown(): boolean;
+  /**
+   * [在场](../../../docs/terms.md)上报：此刻有人正盯着这条会话。`suspend.onPresence` 为 `"extend"` 时，
+   * 正在等人的那一轮的内存窗口从现在起重新计时。同步、不落库；没轮在等人时什么都不做。
+   *
+   * **宿主要保证它基于真实交互**（页面可见 + 窗口聚焦 + 路由停在这条会话），不能拿「连接还在」
+   * 当在场——半夜挂着页面的浏览器会让会话永远不挂起。
+   */
+  reportPresence(conversationId: string): void;
+}
+
+/**
+ * 两路等人的窗口（毫秒）。新参数 `suspend.memoryWindow` 两路共用；旧的两个超时参数按通道各自
+ * 映射，这样只配了旧参数的宿主行为完全不变（挂起与恢复 · 技术方案 §8.1）。
+ */
+function resolveMemoryWindows(options: AgentRuntimeOptions, logger: Logger): { approvalWindowMs: number; questionWindowMs: number } {
+  const configured = options.suspend?.memoryWindow;
+  const windowMs = durationToMs(configured ?? DEFAULT_MEMORY_WINDOW, "suspend.memoryWindow");
+  const legacy = {
+    approvalTimeoutMs: options.human?.approvalTimeoutMs,
+    askUserTimeoutMs: options.human?.askUserTimeoutMs,
+  };
+  for (const [name, value] of Object.entries(legacy)) {
+    if (value === undefined) {continue;}
+    if (configured !== undefined) {
+      logger.warn(LOG_SCOPE, `human.${name} is deprecated and ignored because suspend.memoryWindow is set`, { [name]: value });
+    } else {
+      logger.warn(LOG_SCOPE, `human.${name} is deprecated; use suspend.memoryWindow`, { [name]: value });
+    }
+  }
+  if (configured !== undefined) {return { approvalWindowMs: windowMs, questionWindowMs: windowMs };}
+  return {
+    approvalWindowMs: legacy.approvalTimeoutMs === undefined ? windowMs : durationToMs(legacy.approvalTimeoutMs, "human.approvalTimeoutMs"),
+    questionWindowMs: legacy.askUserTimeoutMs === undefined ? windowMs : durationToMs(legacy.askUserTimeoutMs, "human.askUserTimeoutMs"),
+  };
 }
 
 export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
@@ -144,11 +202,11 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
   const hooks = options.hooks ?? {};
   let shuttingDown = false;
 
+  const extendOnPresence = (options.suspend?.onPresence ?? "extend") === "extend";
   const human = new HumanBridge({
     registry,
     decisions: persistence.decisions,
-    approvalTimeoutMs: options.human?.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS,
-    askUserTimeoutMs: options.human?.askUserTimeoutMs ?? DEFAULT_ASK_USER_TIMEOUT_MS,
+    ...resolveMemoryWindows(options, logger),
     logger,
     ...(hooks.onApprovalPending !== undefined ? { onApprovalPending: hooks.onApprovalPending } : {}),
     ...(hooks.onQuestionPending !== undefined ? { onQuestionPending: hooks.onQuestionPending } : {}),
@@ -336,12 +394,27 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
 
     subscribe,
 
-    submitDecision(conversationId, callId, decision) {
-      return human.settleReview(conversationId, callId, decision);
+    // 两条路（技术方案 §5.7）：等人项还在本进程内存里（内存窗口内）→ 直接交给正在等的那一轮；
+    // 不在了（挂起了，或者在别的副本上等着）→ 写进裁决表那一行，推一把，由恢复轮接上。
+    async submitDecision(conversationId, callId, decision) {
+      if (await human.settleReview(conversationId, callId, decision)) {return true;}
+      return await answerSuspended(ctx, conversationId, callId, "approval", {
+        outcome: decision.outcome,
+        ...(decision.scope !== undefined ? { scope: decision.scope } : {}),
+        ...(decision.decidedBy !== undefined ? { decidedBy: decision.decidedBy } : {}),
+        ...(decision.message !== undefined ? { message: decision.message } : {}),
+        decidedAt: Date.now(),
+      });
     },
 
-    submitAnswer(conversationId, callId, answer) {
-      return human.settleQuestion(conversationId, callId, { outcome: "answered", answer });
+    async submitAnswer(conversationId, callId, answer, opts = {}) {
+      if (await human.settleQuestion(conversationId, callId, { outcome: "answered", answer }, opts.decidedBy)) {return true;}
+      return await answerSuspended(ctx, conversationId, callId, "question", {
+        outcome: "answered",
+        message: answer,
+        ...(opts.decidedBy !== undefined ? { decidedBy: opts.decidedBy } : {}),
+        decidedAt: Date.now(),
+      });
     },
 
     async abort(conversationId, reason = ABORT_REASON_USER) {
@@ -421,6 +494,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     async recover() {
       const stale = await arbitration.listStale();
       let recovered = 0;
+      const interruptedResumes: string[] = [];
       for (const entry of stale) {
         const { conversationId } = entry;
         try {
@@ -430,11 +504,17 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
           });
           if (!acquired.ok) {continue;}
           try {
+            // 裁决表那一半：崩掉的那一轮要是正在内存里等人，那一行再也不会有人结清了。
+            // 挂起中（账本末尾有悬空调用）的行不动——那是在等人回来，不是孤儿。失败不能挡住下面补标记。
+            const orphans = await settleOrphanedDecisionsSafely(persistence, logger, conversationId);
             // 与「接管时补收尾」共用同一个写法（`runtime/interrupted-marker.ts`），只是理由不同。
             const marker = await appendInterruptedMarker(persistence, acquired.grant, ABORT_REASON_SHUTDOWN);
             if (marker.written) {
               recovered += 1;
-              logger.info(LOG_SCOPE, "recovered orphaned turn", { conversationId, seq: marker.seq });
+              logger.info(LOG_SCOPE, "recovered orphaned turn", { conversationId, seq: marker.seq, orphanedDecisions: orphans });
+            } else if (marker.reason === "awaiting_human") {
+              // 崩掉的是一次没做完的恢复：账本没动过，答案还在裁决表里。
+              interruptedResumes.push(conversationId);
             }
           } finally {
             // 放在 finally 里：`nextSeq`/`append` 抛错时也要还回去，否则这个会话的
@@ -445,6 +525,15 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
           // 一个会话恢复失败不该让整轮扫描停下——记一行，继续下一个。
           logger.error(LOG_SCOPE, "failed to recover orphaned turn", { conversationId, error: describeError(error) });
         }
+      }
+      // 崩掉的恢复轮：人已经答过了，他在等那个操作执行。推一把让它重来——**那条命令可能会被执行
+      // 第二次**（崩溃不是干净边界，不知道它执行完没有），这是有意的取舍：宁可至少执行一次，也不要
+      // 让人批准过的操作静默丢失（技术方案 §5.9）。不 await：一轮的寿命与启动扫描无关。
+      for (const conversationId of interruptedResumes) {
+        logger.warn(LOG_SCOPE, "crashed turn was a resume attempt; retrying it", { conversationId });
+        void advance(ctx, conversationId).catch((error: unknown) => {
+          logger.error(LOG_SCOPE, "failed to retry an interrupted resume", { conversationId, error: describeError(error) });
+        });
       }
       if (recovered > 0) {logger.warn(LOG_SCOPE, "startup sweep finished", { scanned: stale.length, recovered });}
       else {logger.debug(LOG_SCOPE, "startup sweep finished, nothing to recover", { scanned: stale.length });}
@@ -457,9 +546,12 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
      * 1. **先置关闭闸门**，否则收尾期间[自动出队](../../../docs/terms.md)会源源不断起新轮，
      *    这个函数永远等不完。
      * 2. 快照当前全部活跃轮 + 各自的「收尾了」promise。
-     * 3. 逐个中止，理由是 `ABORT_REASON_SHUTDOWN`——经 core 透传进收尾 metadata，界面据此
-     *    显示「服务重启，这一轮已中断」而不是「已停止」。**不清队列**：服务重启不该吞掉
-     *    用户排的消息，重启后自然重试。
+     * 3. **正在等人的挂起，其余的中止。**
+     *    - 等人的：[挂起](../../../docs/terms.md)是无损的——那次调用原样留在账本里，人回来在
+     *      任意节点接着干。中止它反而会把人的待答项结成「拒绝」，白等一场。
+     *    - 其余的：中止，理由是 `ABORT_REASON_SHUTDOWN`——经 core 透传进收尾 metadata，界面
+     *      据此显示「服务重启，这一轮已中断」而不是「已停止」。
+     *    **两种都不清队列**：服务重启不该吞掉用户排的消息。
      * 4. 等齐或撞宽限期。撞了不抛错也不强制清理登记：那些轮成了[孤儿轮](../../../docs/terms.md)，
      *    交给下次启动的 `recover()`——两道防线在这里接上。
      */
@@ -470,12 +562,22 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       const snapshot = registry.snapshot();
       if (snapshot.length === 0) {
         logger.debug(LOG_SCOPE, "shutdown: no active turns", {});
-        return { aborted: 0, settled: true, pending: 0 };
+        return { aborted: 0, suspended: 0, settled: true, pending: 0 };
       }
-      logger.info(LOG_SCOPE, "shutdown: aborting active turns", { count: snapshot.length, graceMs });
+      logger.info(LOG_SCOPE, "shutdown: settling active turns", { count: snapshot.length, graceMs });
 
       const settledPromises = snapshot.map((turn) => turn.settled);
-      for (const turn of snapshot) {await abortTurn(turn, ABORT_REASON_SHUTDOWN);}
+      let aborted = 0;
+      let suspended = 0;
+      for (const turn of snapshot) {
+        if (turn.pendingReviews.size + turn.pendingQuestions.size > 0) {
+          human.suspendTurn(turn, "handover");
+          suspended += 1;
+        } else {
+          await abortTurn(turn, ABORT_REASON_SHUTDOWN);
+          aborted += 1;
+        }
+      }
 
       let timer: ReturnType<typeof setTimeout> | undefined;
       const timedOut = await Promise.race([
@@ -490,18 +592,19 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
 
       const pending = registry.size;
       if (timedOut) {
-        logger.error(LOG_SCOPE, "shutdown: timed out waiting for turns to settle", {
-          aborted: snapshot.length,
-          pending,
-        });
-        return { aborted: snapshot.length, settled: false, pending };
+        logger.error(LOG_SCOPE, "shutdown: timed out waiting for turns to settle", { aborted, suspended, pending });
+        return { aborted, suspended, settled: false, pending };
       }
-      logger.info(LOG_SCOPE, "shutdown: all turns settled", { aborted: snapshot.length });
-      return { aborted: snapshot.length, settled: true, pending: 0 };
+      logger.info(LOG_SCOPE, "shutdown: all turns settled", { aborted, suspended });
+      return { aborted, suspended, settled: true, pending: 0 };
     },
 
     isShuttingDown() {
       return shuttingDown;
+    },
+
+    reportPresence(conversationId) {
+      if (extendOnPresence) {human.reportPresence(conversationId);}
     },
   };
 }

@@ -19,6 +19,7 @@ import type {
   SessionOptions,
   SessionReadState,
   SessionState,
+  Settlement,
   Tool,
   TurnResult,
 } from "@runko/core";
@@ -35,6 +36,12 @@ export interface DrivenSession {
   stream(input: string, opts?: { signal?: AbortSignal }): AsyncGenerator<RunkoChunk, TurnResult>;
   toJSON(): SessionState;
   steer?(input: string): boolean;
+  /**
+   * [恢复](../../../../docs/terms.md)轮用：结清一次挂起留下的悬空调用，然后接着跑（core 的
+   * `Session.settleAndRun`）。**可选**，同 `steer?`——自定义的 session 工厂不必跟着改；没有它的
+   * session 遇到恢复轮会以一个明确的错误收尾，而不是静默跑错。
+   */
+  settleAndRun?(callId: string, settlement: Settlement, opts?: { signal?: AbortSignal }): AsyncGenerator<RunkoChunk, TurnResult>;
 }
 
 export type SessionFactory = (

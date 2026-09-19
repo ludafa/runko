@@ -16,7 +16,9 @@ import type {
   RunkoUIMessage,
   SessionOptions,
   SessionState,
+  Settlement,
   Tool,
+  TurnResult,
 } from "@runko/core";
 import { sessionStateSchema } from "@runko/core";
 
@@ -27,7 +29,8 @@ import type { Frame, TurnStatus } from "../types.js";
 import type { RuntimeContext } from "./context.js";
 import { createAskUserTool } from "./ask-user.js";
 import type { ActiveTurn } from "./registry.js";
-import { ABORT_REASON_USER, OWNERSHIP_LOST_MESSAGE } from "./reasons.js";
+import { ledgerEndsWithPendingCalls } from "./interrupted-marker.js";
+import { ABORT_DENY_MESSAGE, ABORT_REASON_USER, OWNERSHIP_LOST_MESSAGE } from "./reasons.js";
 import type { DrivenSession } from "./session-factory.js";
 
 const LOG_SCOPE = "agent:turn";
@@ -73,14 +76,37 @@ export function buildResumeState(conversationId: string, entries: readonly Ledge
   // 本包不再产出这种行（收尾标记改成了 `[{ type: "step-start" }]`），但 0.0.x 早期版本
   // 写下的存量行还在别人库里躺着，滤掉它们才能让那些会话自愈。丢掉也不损失什么：
   // 空 parts 的那条只承载 metadata，模型上下文里本来就看不到它。
-  const messages = entries
-    .map((entry) => entry.message)
-    .filter((message) => message.parts.length > 0);
+  const messages = foldById(entries).filter((message) => message.parts.length > 0);
   const turn = entries.reduce((max, entry) => Math.max(max, entry.message.metadata?.turn ?? 0), 0);
   const createdAt = entries[0]?.ts ?? Date.now();
   // 复用 core 自己导出的 schema——这是反序列化边界（行可能来自 DB 的 JSON 列），
   // 与 core 内部 `createSession({resume})` 那次校验是纵深防御，不是冗余。
   return sessionStateSchema.parse({ id: conversationId, turn, messages, createdAt });
+}
+
+/**
+ * 按 `message.id` 折叠账本：**位置取首次出现，内容取最新一条**（seq 最大的那条）。
+ *
+ * 同一个 id 出现两次只有一个来源：[恢复](../../../../docs/terms.md)轮原地改写了挂起那一轮的最后一条
+ * 消息（结清了悬空调用），以新 seq 追加了一遍。不折叠的话同一个 `toolCallId` 会出现两次，模型服务商
+ * 直接 400。见[挂起与恢复 · 技术方案](../../../../docs/logic/orchestration/tech/suspend-resume.md) §5.4。
+ *
+ * 这与直播流的规则一致——前端本来就按消息 id 覆盖、不追加。**宿主自己读账本**（`readLedger`、
+ * `subscribe` 的回放）时拿到的是原始行，同一个 id 可能出现两次，要么用它折叠，要么按 id 覆盖。
+ */
+export function foldById(entries: readonly { message: RunkoUIMessage }[]): RunkoUIMessage[] {
+  const positions = new Map<string, number>();
+  const folded: RunkoUIMessage[] = [];
+  for (const entry of entries) {
+    const at = positions.get(entry.message.id);
+    if (at === undefined) {
+      positions.set(entry.message.id, folded.length);
+      folded.push(entry.message);
+    } else {
+      folded[at] = entry.message;
+    }
+  }
+  return folded;
 }
 
 /** 下一轮的轮号（1-based）——起轮占位时就要知道它，好交给 `prepareTurn`。 */
@@ -126,19 +152,24 @@ export async function driveTurn(ctx: RuntimeContext, turn: ActiveTurn): Promise<
     const entries = await ctx.persistence.ledger.read(conversationId);
     const resume = buildResumeState(conversationId, entries);
     const priorMessageCount = resume.messages.length;
+    // 三个停止检查点**只对普通轮生效**。恢复轮不走「停止就补一条用户消息 + 已停止」的捷径——
+    // 那会把收尾标记追加在悬空调用后面，永久弄坏这个会话（技术方案 §5.9）。它必须走到 core，
+    // 在那里把停止当成「拒绝」来结清那次调用（`openTurnStream`）。
+    const stopBeforeCore = (): boolean => turn.aborted && turn.resume === undefined;
 
-    if (turn.aborted) {return await finishAborted(ctx, turn, publish);}
+    if (stopBeforeCore()) {return await finishAborted(ctx, turn, publish);}
 
     const preparation = await ctx.prepareTurn({
       conversationId,
       input: turn.input,
       turnNumber: turn.turnNumber,
       signal: turn.abortController.signal,
+      ...(turn.resume !== undefined ? { resume: { callId: turn.resume.callId } } : {}),
     });
 
     // 停止检查点：装配那几个远程调用（取沙盒、扫 skill）掐不断，但既然已经知道用户
     // 要停，就别再往下白跑建 session。
-    if (turn.aborted) {
+    if (stopBeforeCore()) {
       await runDispose(ctx, preparation, conversationId);
       return await finishAborted(ctx, turn, publish);
     }
@@ -148,7 +179,7 @@ export async function driveTurn(ctx: RuntimeContext, turn: ActiveTurn): Promise<
       buildSessionOptions(ctx, turn, preparation, resume),
     );
 
-    if (turn.aborted) {
+    if (stopBeforeCore()) {
       await runDispose(ctx, preparation, conversationId);
       return await finishAborted(ctx, turn, publish);
     }
@@ -164,6 +195,7 @@ export async function driveTurn(ctx: RuntimeContext, turn: ActiveTurn): Promise<
       return await consumeStream(ctx, turn, session, {
         publish,
         priorMessageCount,
+        baselineLast: resume.messages[priorMessageCount - 1],
         modelText: preparation.modelText ?? turn.input.text,
         startedAt,
       });
@@ -171,6 +203,17 @@ export async function driveTurn(ctx: RuntimeContext, turn: ActiveTurn): Promise<
       await runDispose(ctx, preparation, conversationId);
     }
   } catch (error) {
+    // 恢复轮装配失败：**账本一个字不写**——不写用户消息（人没说话），也不写收尾标记（会补在
+    // 悬空调用后面）。答案还在裁决表里，下一次推一把时重来；收尾第⑤步也不会立刻重试，免得
+    // 沙盒持续不可用时变成热循环（技术方案 §5.8）。
+    if (turn.resume !== undefined) {
+      ctx.logger.error(LOG_SCOPE, "resume turn assembly failed; conversation stays suspended", {
+        conversationId,
+        callId: turn.resume.callId,
+        error: describeError(error),
+      });
+      return { status: "crashed" };
+    }
     // 走到这里意味着装配自己抛了（凭据、沙盒、建 session）——这一轮从没启动，core 不会
     // 为它产出任何东西，所以补一条形状与 core 优雅失败同源的收尾帧。
     ctx.logger.error(LOG_SCOPE, "turn assembly failed", { conversationId, error: describeError(error) });
@@ -244,6 +287,14 @@ async function appendSettleMessage(
   publish: (frame: Frame) => void,
   metadata: RunkoMessageMetadata,
 ): Promise<void> {
+  // 账本末尾有悬空调用时**不写**：标记会把它埋进历史中间，此后每次调模型都 400（技术方案 §5.9）。
+  // 走到这里通常是一次没做完的恢复轮——这个会话本来就还在挂起。
+  if (await ledgerEndsWithPendingCalls(ctx.persistence, turn.conversationId)) {
+    ctx.logger.info(LOG_SCOPE, "conversation is suspended; not appending a settle marker after a pending call", {
+      conversationId: turn.conversationId,
+    });
+    return;
+  }
   const allocated = await turn.grant.nextSeq();
   if (!allocated.ok) {
     ctx.logger.warn(LOG_SCOPE, "lost ownership before persisting the settle marker", { conversationId: turn.conversationId });
@@ -304,8 +355,31 @@ async function appendUserMessage(ctx: RuntimeContext, turn: ActiveTurn, publish:
 interface ConsumeOptions {
   publish: (frame: Frame) => void;
   priorMessageCount: number;
+  /** 开轮时账本的最后一条。恢复轮会原地改写它；收尾时拿它比对，没变就不再写一遍。 */
+  baselineLast: RunkoUIMessage | undefined;
   modelText: string;
   startedAt: number;
+}
+
+/**
+ * 开这一轮的流：普通轮 `stream(text)`，恢复轮 `settleAndRun(callId, settlement)`。
+ *
+ * **停止键在恢复轮里等于「拒绝」**（技术方案 §5.8）：人点了允许、恢复轮还在装配时他又点了停止，
+ * 那就不执行，改用拒绝结清。这跟内存窗口内点停止的结果一致。开轮之后再点停止，由 core 用中止
+ * 信号处理（跟普通轮一样）。
+ */
+function openTurnStream(turn: ActiveTurn, session: DrivenSession, modelText: string): AsyncGenerator<RunkoChunk, TurnResult> {
+  const signal = turn.abortController.signal;
+  if (turn.resume === undefined) {return session.stream(modelText, { signal });}
+  if (session.settleAndRun === undefined) {
+    throw new Error("This session factory's sessions cannot resume a suspended turn (DrivenSession.settleAndRun is missing).");
+  }
+  const { callId, settlement } = turn.resume;
+  const effective: Settlement =
+    turn.aborted && settlement.kind === "approval" && settlement.behavior === "allow"
+      ? { kind: "approval", behavior: "deny", message: ABORT_DENY_MESSAGE }
+      : settlement;
+  return session.settleAndRun(callId, effective, { signal });
 }
 
 /** 一轮的主循环：把 `session.stream()` 吐出的每个 chunk「攒进草稿 → 推给订阅者」，跑完落盘。 */
@@ -321,7 +395,8 @@ async function consumeStream(
   // 起轮那条用户消息在**开始消费流之前**就上线，所以它必定排在这一轮任何产出之前。
   // core 自己也会往内部账本 push 一条结构相同（id 不同、文本可能是 modelText）的
   // 副本——收尾时 `slice(priorMessageCount + 1)` 正是为了跳过那一条，不重复落盘。
-  await appendUserMessage(ctx, turn, publish);
+  // 恢复轮没有这一条：人没说话，他只是答了一张卡片。
+  if (turn.resume === undefined) {await appendUserMessage(ctx, turn, publish);}
 
   let lastMetadata: RunkoMessageMetadata | undefined;
   let firstChunkReported = false;
@@ -333,11 +408,11 @@ async function consumeStream(
   const finalizeOnce = async (): Promise<void> => {
     if (finalized) {return;}
     finalized = true;
-    await finalize(ctx, turn, session, opts.priorMessageCount, publish);
+    await finalize(ctx, turn, session, opts, publish);
   };
 
   try {
-    const generator = session.stream(opts.modelText, { signal: turn.abortController.signal });
+    const generator = openTurnStream(turn, session, opts.modelText);
     let step = await generator.next();
     while (!step.done) {
       const chunk = step.value;
@@ -404,7 +479,7 @@ async function finalize(
   ctx: RuntimeContext,
   turn: ActiveTurn,
   session: DrivenSession,
-  priorMessageCount: number,
+  opts: Pick<ConsumeOptions, "priorMessageCount" | "baselineLast">,
   publish: (frame: Frame) => void,
 ): Promise<void> {
   turn.draft.length = 0;
@@ -420,7 +495,9 @@ async function finalize(
     return;
   }
 
-  const newMessages = state.messages.slice(priorMessageCount + 1);
+  const newMessages = messagesToPersist(turn, state.messages, opts);
+  // core 按先进先出注入插话，数一下进了账本的有几条，剩下的由收尾时转进待发队列（挂起时）。
+  turn.steersDelivered = newMessages.filter((message) => message.role === "user" && message.metadata?.steered === true).length;
   const written: Frame[] = [];
   for (const message of newMessages) {
     const allocated = await turn.grant.nextSeq();
@@ -449,6 +526,45 @@ async function finalize(
     conversationId: turn.conversationId,
     messageCount: written.length,
   });
+}
+
+/**
+ * 这一轮要落盘哪几条。
+ *
+ * - 普通轮：跳过开轮时 core 自己 push 的那条用户消息（`appendUserMessage` 已经写过了）。
+ * - 恢复轮：**从开轮时的最后一条开始**——core 原地改写了它（结清那次悬空调用），它以新 seq、
+ *   同 id 追加，读账本时按 id 折叠（技术方案 §5.4）。它要是一个字没变（恢复在结清之前就失败了），
+ *   就别再写一遍。
+ */
+function messagesToPersist(
+  turn: ActiveTurn,
+  messages: RunkoUIMessage[],
+  opts: Pick<ConsumeOptions, "priorMessageCount" | "baselineLast">,
+): RunkoUIMessage[] {
+  if (turn.resume === undefined) {return messages.slice(opts.priorMessageCount + 1);}
+  const revised = messages[opts.priorMessageCount - 1];
+  const unchanged = revised === undefined || opts.baselineLast === undefined || sameJson(revised, opts.baselineLast);
+  return messages.slice(unchanged ? opts.priorMessageCount : opts.priorMessageCount - 1);
+}
+
+/**
+ * 两条消息内容是否一样，**不看键的顺序**：账本读出来的那份与 session 里的那份各自过了一遍 zod，
+ * 键序可能不同，直接比 `JSON.stringify` 会把没变的误判成变了（那只会多写一行，读时会被折叠掉，
+ * 但没必要）。
+ */
+function sameJson(a: unknown, b: unknown): boolean {
+  return canonicalJson(a) === canonicalJson(b);
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) {return `[${value.map(canonicalJson).join(",")}]`;}
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
 }
 
 /** `agent` 定义 + 这一轮的覆盖项（模型/指令/skills/工具）。 */

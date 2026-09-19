@@ -1,10 +1,13 @@
 /**
- * **[持久化](../../../docs/terms.md)的一致性套件**——31 条，把接口注释里写死却没验过的
+ * **[持久化](../../../docs/terms.md)的一致性套件**——40 条，把接口注释里写死却没验过的
  * 承诺变成可执行断言。五个官方实现跑的是同一份；第三方实现装上这个包也能跑。
+ *
+ * 最后 5 条是[挂起](../../../docs/terms.md)与恢复的要求，写在 `./suspend-resume.ts`。
  */
 import type { RunkoUIMessage } from "@runko/core";
 
 import * as assert from "./assert.js";
+import { suspendResumeCases } from "./suspend-resume.js";
 import type { ConformanceCase, PersistenceConformanceSetup } from "./types.js";
 
 function message(id: string, text: string): RunkoUIMessage {
@@ -170,6 +173,52 @@ export const persistenceCases: readonly ConformanceCase<PersistenceConformanceSe
     async run(setup) {
       await setup.persistence.decisions.record(pending);
       assert.equal(await setup.persistence.decisions.listPending("c2"), []);
+    },
+  },
+  {
+    name: "get 读回已结清的一行：答案、范围、决策人、理由、结清时刻都在（恢复轮靠它读答案）",
+    async run(setup) {
+      await setup.persistence.decisions.record(pending);
+      await setup.persistence.decisions.settle("c1", "call-1", {
+        outcome: "deny",
+        scope: "once",
+        decidedBy: "u1",
+        message: "别动 build",
+        decidedAt: 2000,
+      });
+      const record = await setup.persistence.decisions.get("c1", "call-1");
+      assert.same(record?.outcome, "deny");
+      assert.same(record?.scope, "once");
+      assert.same(record?.decidedBy, "u1");
+      assert.same(record?.message, "别动 build");
+      assert.same(record?.decidedAt, 2000);
+      assert.same(record?.toolName, "bash");
+      assert.equal(record?.payload, { command: "rm -rf build" });
+    },
+  },
+  {
+    name: "get 读回还没结清的一行：没结清的字段**不出现**，而不是出现一个 undefined 值",
+    async run(setup) {
+      await setup.persistence.decisions.record(pending);
+      const record = await setup.persistence.decisions.get("c1", "call-1");
+      assert.defined(record, "刚登记的那一行读不回来");
+      // `decidedAt` 缺席 = 还悬着——恢复与 `listPending` 都按这条判。用 `in` 查，因为本套件的
+      // deepEquals 把「缺这个键」与「键在、值是 undefined」当成相等，查不出第二种形状。
+      assert.same("decidedAt" in record, false, "没结清的行不该带 decidedAt 键");
+      assert.same("outcome" in record, false, "没结清的行不该带 outcome 键");
+    },
+  },
+  {
+    name: "get 对从未存在的返回 undefined（不抛）",
+    async run(setup) {
+      assert.same(await setup.persistence.decisions.get("c1", "根本没有这个"), undefined);
+    },
+  },
+  {
+    name: "get · 会话之间互不串",
+    async run(setup) {
+      await setup.persistence.decisions.record(pending);
+      assert.same(await setup.persistence.decisions.get("c2", "call-1"), undefined);
     },
   },
   {
@@ -425,4 +474,5 @@ export const persistenceCases: readonly ConformanceCase<PersistenceConformanceSe
       assert.same(new Set(queue.map((q) => q.id)).size, queue.length);
     },
   },
+  ...suspendResumeCases,
 ];
