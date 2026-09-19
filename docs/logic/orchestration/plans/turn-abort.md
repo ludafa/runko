@@ -140,8 +140,8 @@ pnpm --filter @runko-chat/web test                # 249 全绿
 
 - `ActiveTurn` 加 `abortController: AbortController` + `aborted: boolean`。
 - `TurnDrivenSession.stream` 签名放宽到 `(input, opts?: { signal?: AbortSignal })`；`driveTurn` 透传 signal。
-- 新增 `export function abortTurn(conversationId: string): boolean`——五步顺序见 [tech §3.1](../tech/turn-abort.md)（含「先置 `aborted` 再结挂起项」的理由）。
-- `requestReview` / `requestUserAnswer`：`activeTurn.aborted` 为真时立即 deny / timeout，不再注册新的挂起项。
+- 新增 `export function abortTurn(conversationId: string): boolean`——五步顺序见 [tech §3.1](../tech/turn-abort.md)（含「先置 `aborted` 再结等人项」的理由）。
+- `requestReview` / `requestUserAnswer`：`activeTurn.aborted` 为真时立即 deny / timeout，不再注册新的等人项。
 - 日志：`turn abort requested`（含 `pendingReviews`/`pendingQuestions` 数量）。
 
 ### A3 server：端点与契约

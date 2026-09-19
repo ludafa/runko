@@ -207,4 +207,4 @@ pnpm --filter @runko-demo/persist-demo lab:logs                       # 存一�
   那一轮只会剩下用户消息。见[技术方案 §9.6](../tech/multi-replica.md)。
 - **验证环境只起了 Postgres。** 四档库（SQLite / Postgres / MySQL / MongoDB）都有租约版实现、都能跑多副本，但 `apps/persist-demo` 的 compose 只编排了 Postgres 那一档；换库要自己加一组服务。
 - **验证环境测不了时钟不同步。** 所有容器共用宿主机的时钟。
-- **验证环境测不了审批与提问的转发。** demo 用的回声模型不调工具，触发不了待裁决项；这两条由[技术方案 §5.3](../tech/multi-replica.md) 的转发矩阵和代码审查保证。
+- **验证环境测不了审批与提问的转发。** 验证环境的副本跑回声模型，不调工具，触发不了待裁决项。这两条改由 persist-demo 的两进程 e2e 覆盖（四档库都跑）：内存窗口里打到非持有者照旧转发；[挂起](../../../terms.md)之后打到任一副本都能恢复。

@@ -18,7 +18,7 @@ related: ["architecture/features/agent-kernel.md", "architecture/tech/agent-kern
 **K1 + K2 + K4 + K7 已交付**（2026-08-16）——`@runko/agent` 落地，chat 应用完成迁移。
 **K5 已交付**（2026-08-23）——持久化实现落地，但产出物与原计划不同（单包 `persist-sql` 被推翻，改成 Kysely 核心 + 一种库一个薄壳），见[持久化 · 施工](../../host/contract/plans/persistence.md)。
 **K6 已交付**（2026-09-01 租约版归属仲裁；2026-09-09 / 09-13 多副本两批把它推到「可部署、可验收」，见[多副本部署 · 施工](../../host/node/plans/multi-replica.md)）。
-**K3 前置已解**（2026-08-22，core 入口定为 `settleAndRun`），主体未开工；**K8 / K9 未开工**。
+**K3 已交付**（2026-09-19）——等人等满内存窗口就挂起、人回来在任意节点恢复；四档库两进程 e2e 全绿，chat 应用也已接入，见[挂起与恢复 · 施工进展](../../logic/orchestration/plans/suspend-resume.md)。**K8 / K9 未开工**。
 **K10 可观测性第一期方案已对齐、文档已落**（2026-09-13），未开工。**之后做什么、按什么顺序**，见下面的[路线图](#路线图)。
 
 **起因**：`apps/node-server` 只绑 SQLite、只跑单进程。作为 demo 够用，作为框架不够——别人拿 runko 建产品，得把「会话怎么接下去 / 等人怎么办 / 崩了怎么办 / 多进程怎么办」四件事重写一遍，而其中第四件很难写对，写错是静默的数据损坏。
@@ -30,7 +30,7 @@ related: ["architecture/features/agent-kernel.md", "architecture/tech/agent-kern
 | **K0** | 三份文档 + 术语登记 | `docs/*` | 本三件套 + `terms.md` 新词条 | ✅ 已交付（术语 2026-08-15 全部登记，见下文「待登记的术语」） |
 | **K1** | 进行中草稿放内存 + 起轮标记 | node-server | 库里只剩成品消息；孤儿轮判据换成起轮标记 | ✅ 已交付 |
 | **K2** | 接口定型：四种宿主能力 + 全套内置实现 | 新包 `@runko/agent` | 零配置能跑通一个会话 | ✅ 已交付 |
-| **K3** | 挂起与恢复 | `@runko/agent` + core | 等人超时挂起、人回来在任意节点恢复 | ⬜ **可开工**——2026-08-22 前置解开：core 入口定为 `settleAndRun(callId, decision)`（下面第 3 条）。`suspended` 收尾态与 `TurnStatus` 已先行落地 |
+| **K3** | 挂起与恢复 | `@runko/agent` + core | 等人超时挂起、人回来在任意节点恢复 | ✅ **已交付**（2026-09-19，见[挂起与恢复 · 施工进展](../../logic/orchestration/plans/suspend-resume.md) S0–S8）。与 K10 的顺序按 P2 定为**先做 K3**，K10 落地时回来补挂起相关事件。两处对实现者的破坏性改动（`ToolCallResult` 判别联合、`DecisionStore.get` 必填）按 minor 写，版本号待定 |
 | **K4** | 队列与插话回到框架 | `@runko/agent` | `enqueue` + `conversation-drained`，竞态框架内处理一次 | ✅ 已交付 |
 | **K5** | 持久化实现 | `persist-kysely` + `-sqlite` / `-postgres` / `-mysql` | 三个方言跑绿 | ✅ **已交付**（2026-08-23，见[持久化 · 施工](../../host/contract/plans/persistence.md)）。**产出物与原计划不同**：单包 `persist-sql` 被推翻，改成「Kysely 核心 + 一种库一个薄壳」 |
 | **K6** | 租约版归属仲裁 | `persist-kysely` + 三个薄壳 | 多进程 cluster 端到端 | ✅ **已交付**（2026-09-01，见[归属仲裁机制 · 施工](../../logic/arbitration/plans/arbitration-impl.md) L0–L6）。**产出物与原计划不同**：`persist-sql` 不存在，落在 `persist-kysely` 的 `leaseArbitration`，三个薄壳各导出 `*Arbitration()`。端到端跑了两档——两个进程共用 SQLite 文件、三个容器共用真 Postgres（[多副本部署 · 施工](../../host/node/plans/multi-replica.md)）。**Mongo 版已于 2026-09-18 补齐**（M2，`mongoArbitration`）——四档库现在都能跑多副本 |
@@ -57,7 +57,7 @@ related: ["architecture/features/agent-kernel.md", "architecture/tech/agent-kern
 | 顺序 | 做什么 | 为什么排在这 | 出处 | 文档 |
 |---|---|---|---|---|
 | **1** | **K10 可观测性第一期** | 方案已对齐、文档已落；它是 K3 的前置（见排序依据） | 本表 K10 | ✅ 三份已落 |
-| **2** | **K3 挂起与恢复** | 框架主线里唯一还没做的核心能力。多副本让它更值钱：今天一轮等人时一直占着租约与沙盒，挂起后才能释放 | 本表 K3 · [已定案第 3、4 条](#已定案2026-08-22) | 🟡 需补施工计划（设计散在 issue #2 与轮编排文档） |
+| **2** | **K3 挂起与恢复** | 框架主线里唯一还没做的核心能力。多副本让它更值钱：等人时不再占着租约与沙盒 | 本表 K3 · [已定案第 3、4 条](#已定案2026-08-22) | ✅ **已交付**（2026-09-19）。按 P2 与第 1 项对调、先做了 K3，理由见[技术方案 · 附录 B](../../logic/orchestration/tech/suspend-resume.md) |
 | **3** | **幂等键**（转发超时后重试会多一条消息）+ **冻住之后无人接管补不上「已停止」** | 正确性问题，重复消息用户看得见。前者要改持久化契约（队列表与账本表各一个唯一约束）与 wire 协议 | [多副本 · 技术方案](../../host/node/tech/multi-replica.md) 附录 C · §9.6 | ⬜ 需另立三份文档 |
 | **4** | **K9 + K11**：`durable-object`、`stream-redis`，与两档上的调用链 | 宿主与调用链同期落地，免得调用链先做出来却没有宿主可验 | 本表 K9 · K11 | ⬜ 需另立 |
 | **5** | **K8 `@runko/cli`** | 按需排。同批原有的「Mongo 版租约」已于 2026-09-18 提前做掉（本机有了可用的 MongoDB） | 本表 K8 | ⬜ 需另立 |
@@ -110,6 +110,7 @@ related: ["architecture/features/agent-kernel.md", "architecture/tech/agent-kern
 | 2026-08-09 | 三份文档落地；issue 正文重排为「架构 → 机制 → 契约与落地」三部分 |
 | 2026-08-16 | **K1+K2+K4+K7 落地**：新包 `@runko/agent`（轮编排运行时 + 四种宿主能力接口 + 三样内置实现，61 个单测）；`apps/node-server` 迁移完成——删掉 `turn-runner/`（9 文件）、`turn-launcher.ts`、`crash-recovery.ts`，换成 `agent/runtime.ts`（起轮装配）+ `agent/persistence.ts`（drizzle 实现四个宿主接口）；账本从此只写成品消息，孤儿轮判据换成起轮标记（`conversations.turn_holder`）。**K5 就此取消而非顺延**：chat 应用已有 drizzle schema，让它自己实现领域接口反而是对接口更真实的检验，硬塞一个 `persist-sql` 只会造出第二套数据访问方式 |
 | 2026-09-13 | **K6 状态回填为已交付**（此前表格仍写「未开工」，实际 2026-09-01 交付）；**K9 范围收窄**（`persist-drizzle` / `persist-prisma` 随 K5 改道取消）；新增 **K10 / K11 可观测性两期**；新增「路线图」一节，把散在各份施工计划与技术方案里的遗留项按先后排好 |
+| 2026-09-19 | **K3 交付**：挂起与恢复 S0–S8 全部完成（含原本单列的 chat 应用接入 S8），四档库两进程 e2e 全绿。与 K10 的顺序按 P2 对调，先做 K3 |
 | 2026-08-15 | **整个 docs 按本方案的分层分包重划**：路径形状改成 `docs/<层或包>/<视角>/<feature>.md`——顶层按架构分层分包切成 `architecture` / `engine` / `orchestration` / `host` / `ingress` / `misc` 六个目录，每个目录内部再分 `features` / `tech` / `plans` 三视角（术语表与 README 留 `docs/` 根）。72 份文档归位、全量相对链接重算并校验（0 断链、0 失效锚点）；每份文档加 front matter（`view`/`layer`/`module`/`packages`/`tags`/`related`）。同批补齐宿主层三块空位文档（持久化 · 流分发 · 归属仲裁机制，features/tech 各 3 份，接口未定稿处标 TODO）、补建 `orchestration/plans/in-flight-draft.md`（此前技术方案链的施工文档一直不存在）、把上表五处既有文档按 issue #2 修订、术语表补 6 个词条并把小节标题里的文档路径挪出（锚点从此稳定） |
 
 ### 期间被推翻的判断

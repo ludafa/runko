@@ -15,7 +15,7 @@ related: ["architecture/plans/agent-kernel.md", "architecture/tech/agent-kernel.
 > 依赖/延续：[core SDK](../../logic/engine/features/core-sdk.md)（本包建在它的 loop 之上）· [优雅关闭与崩溃恢复](../../logic/orchestration/features/graceful-shutdown.md)（[交权](../../terms.md)是它的推广）· [排队与插话](../../logic/orchestration/features/steer-and-queue.md)（那套机制从 chat 应用上移到本包）· [沙盒保活](../../logic/orchestration/features/sandbox-keepalive.md)（[等人状态](../../terms.md)的信号从这里发）。
 > 宿主层四样可替换能力各自展开：[沙盒](../../host/contract/features/sandbox.md) · [持久化](../../host/contract/features/persistence.md) · [流分发](../../host/contract/features/stream-fanout.md) · [归属仲裁机制](../../logic/arbitration/features/arbitration-impl.md)。
 
-> ⚠️ **包尚未实现**，下面的 API 形状是方案，会随实现调整。**分层与职责边界是定的**，签名细节不是。
+> ⚠️ **这份手册里混着已交付的和还没做的。** `@runko/agent` 本身早已交付（四档持久化、多副本都能跑），但**[挂起](../../terms.md)与恢复还没做**——[路线图](../plans/agent-kernel.md) K3。凡是讲挂起的段落（[§5 的 `suspend` 配置](#_5-策略-产品决策由你配)、[§7.1](#_7-1-等人时这一轮会「消失」再「回来」)）都各自标了状态，别按它们去配。
 
 这一份是**使用手册**：怎么接进来、每一档部署配什么、换档要改什么。设计推导看[技术方案](../tech/agent-kernel.md)。
 
@@ -109,7 +109,7 @@ app.post("/conversations/:id/approvals/:callId", async (c) => {
 
 // ④ 上报「人还在」—— 框架靠它决定要不要提前挂起
 app.post("/conversations/:id/presence", async (c) => {
-  await runtime.reportPresence(c.req.param("id"));
+  runtime.reportPresence(c.req.param("id"));   // 同步、不落库
   return c.body(null, 204);
 });
 ```
@@ -284,13 +284,15 @@ const runtime = createAgentRuntime(agent, {
     steer: "onRequest",         // 插进当前这一轮还是排队，见下
   },
 
-  // 等人
+  // 等人：等不到就挂起，人回来在任意节点接着干
   suspend: {
     memoryWindow: "5m",         // 内存里先等多久，等不到就挂起。0 = 立刻挂起
     onPresence: "extend",       // 上报「人还在」时延长这个窗口
   },
 });
 ```
+
+> `suspend` 的完整说明见[挂起与恢复](../../logic/orchestration/features/suspend-resume.md)（路线图 K3）。旧参数 `human.approvalTimeoutMs` / `human.askUserTimeoutMs` 保留为废弃别名：配了照样生效（各管一路），会多一行 warn。
 
 `steer` 有四种写法，前三种是枚举、第四种是回调：
 
@@ -328,6 +330,8 @@ const runtime = createAgentRuntime(agent, {
 ## 7. 有几个行为要知道
 
 ### 7.1 等人时这一轮会「消失」再「回来」
+
+> ✅ 已实现（[路线图](../plans/agent-kernel.md) K3，2026-09-19）。完整说明见[挂起与恢复](../../logic/orchestration/features/suspend-resume.md)。
 
 agent 弹出审批卡片后：
 

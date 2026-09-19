@@ -143,9 +143,9 @@ createAgentRuntime({
     steer: "onRequest",        // 'never' | 'always' | 'onRequest' | (input) => boolean
   },
 
-  human: {
-    approvalTimeoutMs: 240_000,   // 人多久不理算放弃
-    askUserTimeoutMs: 240_000,
+  suspend: {
+    memoryWindow: "5m",           // 等人先在内存里等多久，等不到就挂起（见「挂起与恢复」）
+    onPresence: "extend",         // reportPresence 上报时把窗口往后推
   },
 
   shutdown: { graceMs: 15_000 },

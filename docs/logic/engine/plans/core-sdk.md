@@ -14,7 +14,7 @@ related: ["logic/engine/features/core-sdk.md", "logic/engine/tech/core-sdk.md", 
 > 依赖：[builtin-tools](../tech/builtin-tools.md)（内置工具面）· [sandbox](../../../host/contract/plans/sandbox.md)（执行环境接入包）
 > 延续/演进：本页只覆盖 core-sdk 本体的施工（**P0–P8 v1 / P9 v1.1**）。后续阶段 P10（三沙盒接入包）归 [sandbox](../../../host/contract/plans/sandbox.md)、P11（真实项目 e2e 示例）与 P12（chat webapp）归 [chat-webapp](../../../ingress/plans/chat-webapp.md)、P13-5（UIMessage 单账本 + 三值审批 + 工具改名，深改 core）归 [single-ledger](../../orchestration/plans/single-ledger.md)——它们的详细拆单/验收在各自功能的施工文档，本页只保留跨功能共享的**完整变更记录**（末尾表）并在相应处交叉链接。
 
-> 状态：**v1（P0–P8）与 v1.1（P9 全语法档 bash）全部完成**（2026-07-10 创建并改版为 pnpm monorepo 方案；2026-07-11 全阶段验收通过，[产品/使用手册](../features/core-sdk.md) §6 成功标准全部达成；唯一挂起项：npm 裸名 `runko` 发布决策）
+> 状态：**v1（P0–P8）与 v1.1（P9 全语法档 bash）全部完成**（2026-07-10 创建并改版为 pnpm monorepo 方案；2026-07-11 全阶段验收通过，[产品/使用手册](../features/core-sdk.md) §6 成功标准全部达成；唯一等人项：npm 裸名 `runko` 发布决策）
 >
 > 规则：每完成一个阶段，回到本文档更新状态（✅/⏳/❌）、记录实际改动与偏差。
 > 施工方式：由 `orchitector` sub agent 拆解工单与验收，`coder` sub agent 实现（见 `.claude/agents/`）。
@@ -108,7 +108,7 @@ P0 monorepo 脚手架 ──▶ P1 core 接口+定义层 ──▶ P2 virtual-fs
 - **P7-3 六项裁量（②③ 已回填 tech-spec §4.5a/§4.7；⑥ 返工）**：① fs 经构造参数注入、缺失构造期同步抛错；② cwd 语义分叉（模式 C 真实路径/模式 B 虚拟路径）；③ agent.ts/json 只读 5 标量字段、目录扫描是 tools/skills/instructions 唯一事实来源；④ loadAgentFromFS 连 agent.json 都不读；⑤ `./load` 子路径与主入口并存；⑥ **返工项 P7-3R**：load-agent.ts 4 处字段级 `as` 须改为类型守卫。
 - **P7-3R 返工完成（P7 整体 ✅）**：4 处 `as` 全消除——`isZodSchemaLike`（safeParse 探针）、`ToolLikeRecord` 字段直接声明为 `Tool["execute"]`/`Tool["inputSchema"]`、`isLanguageModelInstance`（specificationVersion/provider/modelId 三探针）；`grep " as "` 仅剩 `import * as` 三行；+4 负例，load-agent.ts lines 100%。**披露的越界改动（验收接受）**：`test/fixtures/agent-dir/tools/*.js` 改 fixture 是返工的必然连带（safeParse 探针使旧纯对象 inputSchema 必然被拒）。
 
-## P8 · 文档、示例与端到端验证 — 状态：✅ 完成（P8-1/1b/1c + P8-2，2026-07-11；唯一挂起项：npm 裸名 `runko` 决策）
+## P8 · 文档、示例与端到端验证 — 状态：✅ 完成（P8-1/1b/1c + P8-2，2026-07-11；唯一等人项：npm 裸名 `runko` 决策）
 
 - **目标**：各包 README + 根 README；`examples/`（内存 diff、目录挂载、skills、mini-bash、自定义 exec 注入、结构化输出、streaming）；编写 `docs/misc/plans/verification.md` 验证方案并执行（真实 API 端到端，产品文档 §6 成功标准逐条核验）。
 - **P8-1 实际改动**：根 + 四包 README 共 5 个；`examples/` 六脚本 + `shared/` + `setup-node-modules.mjs`（符号链接模拟发布后消费姿态）+ `typecheck.mjs` + examples/README；`docs/misc/plans/verification.md` 方案部分（§1 运行步骤 / §2 十三用例逐条映射 §6 四条成功标准 / §3 examples 运行矩阵 / §4 回归命令清单 / §5 回填区）。README 代码块与实际 API 面逐条对照**零发明能力**。

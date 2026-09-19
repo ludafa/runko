@@ -208,9 +208,9 @@ P13-5 后的现行机制（三值审批 + 原生 chunk，取代旧的四对 wire
 
 - **触发面（bash 审批）**：`buildSession` 用 `gateWorkspace` 包装沙盒 workspace（**逐方法显式委托** + `defaultApproval: "review"`，不用对象展开——沙盒 workspace 是类实例，方法在原型链上，浅展开会丢方法只剩 `undefined`）。这把内置 bash 的 per-tool approval 升到 `"review"`，每次调用都升级到会话级的[审批分类器](../../terms.md)。
 - **[审批分类器](../../terms.md)（`onApproval`，`ApprovalPolicy`，三值）**：`approval-policy.ts` 的 `classifyApproval(mode, toolName, input)` 当场判「`allow` 直接跑 / `review` 需要人」。`CHAT_APPROVAL_MODE` 三档——`dangerous`（默认：`git push`、GitHub API curl（引 api.github.com 或 `$GH_TOKEN`）、`rm -r/-f`、`git reset --hard`、`git clean -f` 判 `review`，其余 `allow`；input 形状不符一律升级 `review`，宁严勿松）/ `all`（全量 `review`）/ `off`（不包装 workspace，零行为变化）。
-- **[人审通道](../../terms.md)（`onReview`，`ApprovalReviewer`）**：分类器返 `review` 后，core 的 loop **先 yield 一个 `tool-approval-request` chunk**（审批可见性=这条 chunk，人一需要就已在线上）、再 `await onReview`。`onReview` → `turn-runner/human-bridge.ts` 的 `requestReview(id, {callId, toolName, input})`：注册一条 pending review、挂起直到 `POST .../approvals/:callId` 的[人工裁决](../../terms.md)（或超时自动 deny）经 `resolveReview` settle。settle 后 loop 自己 yield `tool-approval-response` chunk——**turn-runner 不再 emit 任何桥事件**（纯内存 Promise 路由）。超时默认 `CHAT_APPROVAL_TIMEOUT_MS=240s`（沙盒 idle 300s 的 80%），走同一条 resolve 通路保证多 tab/回放一致。
+- **[人审通道](../../terms.md)（`onReview`，`ApprovalReviewer`）**：分类器返 `review` 后，core 的 loop **先 yield 一个 `tool-approval-request` chunk**（审批可见性=这条 chunk，人一需要就已在线上）、再 `await onReview`。`onReview` → `turn-runner/human-bridge.ts` 的 `requestReview(id, {callId, toolName, input})`：注册一条 pending review、等到 `POST .../approvals/:callId` 的[人工裁决](../../terms.md)经 `resolveReview` settle（等满内存窗口还没人答，这一轮就[挂起](../../terms.md)，见 §6.2）。settle 后 loop 自己 yield `tool-approval-response` chunk——**turn-runner 不再 emit 任何桥事件**（纯内存 Promise 路由）。内存窗口用框架缺省的 5 分钟，可用 `CHAT_SUSPEND_MEMORY_WINDOW` 改（§6.3）。
 - **人工裁决纯两值**：允许 / 拒绝（可带拒绝理由回填模型），映射 `@runko/core` 的 `HumanDecision`。「改参数」口子已于 2026-07-15 定案删除。
-- **ask-user 工具**：`BuildSessionOptions.onAskUser` 存在时注册进 `agent.tools`（kebab-case `ask-user`）；`execute` 经 `requestUserAnswer`/`resolveUserAnswer` 同款桥挂起（`pendingQuestions`，独立于 `pendingReviews`）。可见性=`tool-ask-user` 部件自身的 `input-available`/`output-available` 状态（普通工具调用）。超时（`CHAT_ASK_USER_TIMEOUT_MS` 默认 240s）返回固定提示文案（`status:"completed"`，不抛错，模型自行继续）。**与 approvalMode 无关恒注册**（产品能力，不是安全闸）。
+- **ask-user 工具**：`BuildSessionOptions.onAskUser` 存在时注册进 `agent.tools`（kebab-case `ask-user`）；`execute` 经 `requestUserAnswer`/`resolveUserAnswer` 同款桥挂起（`pendingQuestions`，独立于 `pendingReviews`）。可见性=`tool-ask-user` 部件自身的 `input-available`/`output-available` 状态（普通工具调用）。等满同一个内存窗口同样挂起（§6.2），不再返回「用户没回应」的提示文案。**与 approvalMode 无关恒注册**（产品能力，不是安全闸）。
 - **裁决路由**：`POST .../approvals/:callId` `{behavior:"allow"|"deny", message?}`、`POST .../questions/:callId` `{answer}`——属主校验同其余路由；404 覆盖「session 不存在/非属主」与「callId 无 pending」；allow/answer 先 `touch` 续沙盒且**失败不阻断裁决**（挂到超时比 exec 失败更糟）。
 - **[会话级授权](../../terms.md)（`allow-session`）**：卡片第三个按钮「会话内都允许」。wire 上是 `POST .../approvals/:callId` 的 `behavior:'allow-session'`——`resolveReview` 除了按 `allow` 放行本次，还调 `conversation-grants.ts` 的 `grantConversationApproval(id, userId, toolName, input)` 记放行（`pendingReviews` 项带着 `toolName`/`input`，路由只知 `callId` 也够用）。此后 `onApproval` 分类前先查 `hasConversationGrant(db, id, userId, tool, input)`：命中即短路 `allow`、不弹卡片；没记过的仍照常分类。刻意按**具体命令**而非按工具名——授权 `rm -rf build` 不等于放行之后任意 bash（`git push -f` 仍拦）。纯 chat 层、core 不感知（`HumanDecision` 仍只 allow/deny）。
 - **记账粒度：bash 走[分段授权](../../terms.md)**（详见 [approval-grant-split](../../logic/engine/tech/approval-grant-split.md)）：一条复合命令按 `&&`/`||`/`;`/`|` 拆成若干[命令段](../../terms.md)、每段记一行，后续调用**每段都记过**才放行。这样 `cd X && rm -rf y && npm i a` 授权后，`cd X && npm i a` 直接放行，只有新出现的段才再弹卡片——整串指纹时代「命令稍变即重新审批」的组合爆炸消掉了。段的键是**去引号后的 argv 数组 + cwd + 重定向**（不是命令名，否则 `rm -rf node_modules` 的授权会放行 `rm -rf /`；也不是段的字符串原文，否则 `rm -rf "my dir"` 与 `rm -rf my dir` 撞键）。拆分器（`split-command.ts`）**只认平坦形状**，命令替换/heredoc/控制结构/注释等一律拒拆并**退回整串匹配**（= 本功能上线前的行为，零回退）。非 bash 工具、以及上线前落下的历史授权行，同样走整串键——两种键形态并存都参与查询，**无 DB 迁移**。
@@ -222,7 +222,7 @@ P13-5 后的现行机制（三值审批 + 原生 chunk，取代旧的四对 wire
 
 ### 6.1 卡片什么时候算「已失效」（2026-07-27 修）
 
-一张[审批卡片](../../terms.md)/提问卡片处于「待审批」「待回答」态，**只有当前正在跑的那一轮**才可能还真在等人。轮一结束——正常收尾、被[停止](../../terms.md)、[优雅关闭](../../terms.md)中断、进程被强杀——服务端那边的挂起项就已经被结掉了（`startTurn` 的 `finally` 会把 `pendingReviews`/`pendingQuestions` 全部 resolve 并清空），此后再点任何按钮都只会拿到 404。
+一张[审批卡片](../../terms.md)/提问卡片处于「待审批」「待回答」态，**只有当前正在跑的那一轮**才可能还真在等人。轮一结束——正常收尾、被[停止](../../terms.md)、[优雅关闭](../../terms.md)中断、进程被强杀——服务端那边的等人项就已经被结掉了（`startTurn` 的 `finally` 会把 `pendingReviews`/`pendingQuestions` 全部 resolve 并清空），此后再点任何按钮都只会拿到 404。
 
 此前界面要等用户**点下去**、吃了 404 才把卡片翻成「已失效」（`locallyExpiredCallIds`），在那之前一直画着三个可点的按钮。用户实测撞到的样子是：一张「待审批」卡片，紧接着下面就是「服务重启，这一轮已中断」——两条信息互相矛盾，而且按钮点了也没用。
 
@@ -241,10 +241,134 @@ turnLive = 会话里有轮在跑（status === 'streaming'）
 
 - **审批卡片**（`approval-requested`）：`expired = 本地404 || !turnLive`。
 - **提问卡片**：只有 `input-available`（还在等）那一档才叠加，**`output-available`（已回答）不能叠**——卡片内部 `expired` 的优先级高于 `answered`，叠上去会把一条答完的问题画成「已失效」。
+- **例外：[挂起](../../terms.md)**。挂起的那一轮已经收尾了，但它的卡片还在等人——`!turnLive` 对它不成立。规则见 §6.2。
 
-为什么放在 web 而不是让服务端补一条 wire 帧：这是**从已有状态推导得出**的结论（轮不在跑 ⇒ 挂起项必然已结），不需要新的事实来源；而且它天然覆盖「服务端来不及发那条 `tool-approval-response` 就退出了」的情形——那正是进程被强杀时的样子。与「不做乐观翻转」不冲突：这里推导的不是某个决策的结果，而是「这张卡片还有没有人在等」。
+为什么放在 web 而不是让服务端补一条 wire 帧：这是**从已有状态推导得出**的结论（轮不在跑 ⇒ 等人项必然已结），不需要新的事实来源；而且它天然覆盖「服务端来不及发那条 `tool-approval-response` 就退出了」的情形——那正是进程被强杀时的样子。与「不做乐观翻转」不冲突：这里推导的不是某个决策的结果，而是「这张卡片还有没有人在等」。
 
-**审批超时不中止这一轮**（常被误解，故在此写明）：`CHAT_APPROVAL_TIMEOUT_MS`（默认 240s）到点后走的是 `resolveReview(..., { behavior: 'deny', message: '…timed out…' })`——与人点「拒绝」**完全同一条路**。所以那次工具调用被拒、卡片落定成「已拒绝」，agent 继续跑下一步。「超时」与「人工拒绝」在 wire 上不可区分，是刻意的（多标签页/回放一致）。
+**等满内存窗口：不再当拒绝，而是挂起**（2026-09-19 起）。以前 240 秒到点按「拒绝」处理，agent 接着往下跑。[挂起与恢复](../../logic/orchestration/features/suspend-resume.md)上线之后改成**挂起**：这一轮落盘收尾、服务端放手，卡片继续等人，人什么时候回来答都行。见下面 §6.2。
+
+### 6.2 挂起之后：卡片跨轮还在等人（2026-09-19）
+
+> 背景：[挂起与恢复](../../logic/orchestration/features/suspend-resume.md)（路线图 K3）。chat 服务端吃的就是 `@runko/agent`，所以等人超过内存窗口的那一轮会**挂起**：以 `status: 'suspended'` 收尾、服务端放手，但[裁决表](../../terms.md)里那一行还等着人。人一答，服务端就开一轮[恢复](../../terms.md)接着跑。框架那一侧的设计见[技术方案](../../logic/orchestration/tech/suspend-resume.md)。
+
+§6.1 的判据「轮不在跑 ⇒ 等人项必然已结」对挂起**不成立**。不补的话会出两个问题：
+
+| 用户做的事 | 实际发生 |
+|---|---|
+| 回来想答那张卡片 | 卡片已经显示「已失效」，按钮收起了，**答不了**——其实服务端正等着这个答案 |
+| 发一条新消息 | 界面按「起新一轮」处理，一直转「正在准备…」——其实服务端把它放进了待发队列，要等卡片答完才发 |
+
+下面五件事都在 web 侧补，**服务端和 wire 一个字没改**。
+
+**① 哪些调用还在等人：从账本推出来，不加新帧。**
+
+core 挂起时，会在收尾那条消息的 metadata 上写 `suspended.callIds`（哪几次调用还悬着）。前端据此判断：
+
+```
+waitingCallIds = 账本里最后一条收尾消息，且它的 status === 'suspended'；
+                 取其中 callId ∈ suspended.callIds、
+                 且部件还停在等人状态（approval-requested / input-available / approval-responded）的那些调用
+```
+
+「部件还停在等人状态」这一条不能省。恢复那一轮会**原地改写**这条消息（同一个 id），但 metadata 里的 `callIds` 是挂起那一刻记下的，改写之后还留着。只看 metadata，就会把已经答过的调用也算成「在等」。
+
+这个判据只读账本镜像（`messages`），所以刷新页面、换标签页都对。实现是 `timeline.ts` 的 `findWaitingCallIds`，`useChatMessages` 把结果作为 `waitingCallIds` 交出去。
+
+**② 卡片：还在等的不算失效。**
+
+```
+expired = 本地拿过 404 || (!turnLive && !waitingCallIds.has(callId))
+```
+
+按调用判，不按消息判：同一条消息里可能还有别的调用，早就结清了。
+
+时间线里那条挂起提示（`TurnSuspendedBar`）也分两档。还有调用在等，就显示「等待你的答复」；都答完了（恢复那一轮已经改写了这条消息），就只留一行灰字「在这里挂起过，答复之后已接着跑」。不分两档的话，历史里会一直挂着一句「在等你」。
+
+**③ 答了之后，重开直播流。**
+
+挂起时直播流已经关了：没有轮在跑，服务端回放完就关。所以人答了一张在等的卡片之后，前端要自己重开。
+
+时机没有竞态。服务端的 `submitDecision` 要等恢复那一轮**登记好**才返回（`advance` → `startResume` 先登记、再在后台跑）。所以 POST 一返回 200，重开的 tail 连上时，轮状态快照一定说「有轮在跑」。
+
+前端照 `sendMessage` 起新一轮那条路走：`status` 置 `streaming`，摆上「正在准备…」占位，重开 tail。恢复那一轮也要走一遍[起轮装配](../../terms.md)，沙盒可能已经[休眠](../../terms.md)、要先唤醒，所以这个占位是真的在等。
+
+还有一个窗口要堵。从 POST 返回，到恢复那一轮产出第一个 chunk，中间可能隔几十秒（唤醒沙盒）。这段时间部件还是「待审批」，按钮会重新亮起来。再点一次，服务端那一行已经答过了，回 404，卡片就被画成「已失效」——其实它马上就要执行。
+
+所以**答过的在等调用一直算「提交中」**（按钮禁用、转圈），直到部件离开等人状态。实现上它等于「答过的」与 `waitingCallIds` 的交集：部件一变，它就从 `waitingCallIds` 里消失，自然也不再算提交中，不用单独清理。
+
+**答一张在等的卡片拿到 404**：多半是已经答过、恢复没做成（比如沙盒没唤醒）。服务端这时会顺手再推一把，所以前端除了把卡片标成「已失效」，还会重开一次直播流看看——真起了恢复，轮状态快照会说「有轮在跑」，界面就跟上去。
+
+**④ 恢复那一轮开头的几个 chunk，前面没有 `start`。**
+
+恢复那一轮的第一步不调模型，而是结清那次悬空调用、原地改写上一轮最后那条消息。它依次发 `tool-approval-response`、`tool-output-*`、计时数据部件，**前面没有 `start`**，因为消息不是新开的。
+
+`MessageLedger` 原来的规则是「没有打开的消息时，只认 `message-metadata`」。这几个 chunk 会被丢掉，卡片要等整轮结束、成品消息到了才会变。
+
+修法：没有打开的消息时，来了一个带 `toolCallId` 的 `tool-*` chunk，就按 `toolCallId` 找到已经物化的那条消息，拿它的**副本**当种子，开一条 `readUIMessageStream`（ai 的 `message` 参数），后续 chunk 照常喂进去。碰到下一个 `start`（模型开始新的一步）或收尾 `message-metadata` 时关掉。
+
+- **收尾 metadata 仍走原来的独立路径**：并到这条消息上，触发一次 `onTurnEnd`。恢复那一轮只结清了一个、还有别的在等时，core 就是把新的 `suspended` 写回这条消息。
+- **必须传副本**：ai 会**就地修改**种子消息。直接把 `byId` 里那个对象传进去，等于绕过 React 改了状态。
+- 找不到对应消息（比如账本镜像还没回放到那里）就照旧丢掉，等成品消息到了自然补上。
+
+**⑤ 在等人时发消息：走排队。**
+
+服务端这时不会起轮，而是把消息放进[待发队列](../../terms.md)（`mode: 'queued'`）。前端于是不做「起新一轮」的乐观回显，发完之后重开一次 tail，把队列快照取回来。要重开，是因为此刻直播流关着，服务端广播的那帧队列快照收不到。
+
+顺带改了一处：挂起那一轮收尾时，`onTurnEnd` 原来会因为「队列非空」就保持 `streaming`，等服务端自动[出队](../../terms.md)。挂起时服务端不会出队，所以 `status === 'suspended'` 跳过这条规则。不跳过的话，会先转一秒圈、再被轮状态快照纠正回来。
+
+**页面顶部**：`waitingCallIds` 非空时，时间线上方出一行「有 N 处在等你答复，答完会从停下的地方接着跑」。
+
+```mermaid
+sequenceDiagram
+  participant U as 用户
+  participant W as web（useChatMessages）
+  participant S as node-server
+  participant R as @runko/agent
+  Note over R: 等满内存窗口，这一轮以 suspended 收尾、放手
+  R-->>W: 收尾 metadata（status: suspended，suspended.callIds = [X]）
+  Note over W: waitingCallIds = {X}：卡片 X 可点、顶部出提示
+  Note over W: 直播流关闭（没有轮在跑）
+  U->>W: 在卡片 X 上点「允许」
+  W->>S: POST .../approvals/X
+  S->>R: submitDecision
+  R->>R: 写裁决表 → 推一把 → 登记恢复那一轮
+  R-->>S: true
+  S-->>W: 200
+  Note over W: X 算「提交中」；status = streaming；摆「正在准备…」
+  W->>S: GET .../stream?after=lastSeq（重开）
+  S-->>W: 轮状态快照：有轮在跑
+  R-->>W: tool-approval-response(X)、tool-output-available(X)（前面没有 start）
+  Note over W: 按 X 找到原消息，拿副本当种子接着物化
+  Note over W: X 离开等人状态 → 不再在 waitingCallIds 里
+  R-->>W: start(新消息) … 收尾 metadata
+```
+
+会话列表里标出「在等你」要服务端加字段，见下面 §6.3。
+
+**已知限制**：答完之后恢复那一轮没起来（服务端崩了、沙盒没唤醒）。这时卡片会一直转圈，直到刷新页面；刷新后再点会拿到 404（那一行已经答过），卡片显示「已失效」——但这一点会让服务端再推一把、前端也会重开直播流，所以恢复通常就此接上。界面上「已失效」这个说法在这一档不准确，是已知的小瑕疵。
+
+### 6.3 服务端接入挂起（2026-09-19）
+
+§6.2 是前端那一半。服务端这一半只有三件事，都很小——框架已经把挂起与恢复做完了，chat 服务端吃的就是它。
+
+**① 内存窗口可配：`CHAT_SUSPEND_MEMORY_WINDOW`（毫秒）。** 不配就用框架缺省 5 分钟；`0` = 一等人就挂起。写错了（负数、不是数）当没配——宁可按默认等，也不要因为一个环境变量把服务起不来（`agent/runtime.ts` 的 `resolveMemoryWindowMs`）。
+
+`.env.template` 里原来的 `CHAT_APPROVAL_TIMEOUT_MS` / `CHAT_ASK_USER_TIMEOUT_MS` 早就没有代码在读（迁到 `@runko/agent` 之后就断了），这次删掉，换成这一个。
+
+**② 在场心跳不喂给框架的 `reportPresence`。** 框架支持「人还盯着就把内存窗口往后推」，但 chat 应用**刻意不接**：
+
+| 等人时 | 沙盒 | 内存窗口被在场推着的话 |
+|---|---|---|
+| 前 5 分钟 | 为等人续命（审批保活预算，缺省 5 分钟） | 没问题 |
+| 5 分钟之后 | **不再续命，空闲到点就休眠** | 这一轮还在内存里等；人点「允许」，命令跑在一个睡着的沙盒上 |
+
+挂起再恢复则不同：恢复那一轮走起轮装配，`prepareTurn` 会先把沙盒叫醒。所以在 chat 应用里，等满 5 分钟就挂起，反而是对的。在场心跳仍然只管推送的[前台抑制](../../terms.md)。
+
+**③ 会话列表带上「还有几张卡片在等人答」：`pendingDecisions`。** 数的是裁决表里 `decided_at` 为空的行，内存窗口里等着的与已挂起的都算——对用户来说都是「这里有事要你拍板」。一次分组查询拿全（`countPendingDecisions`），列表不做 N+1。前端在会话标题右边标一个「等你」。
+
+崩溃残留的孤儿行会被启动扫描（`recover()`）结清，不会一直算在里面。
+
+**不用改的**：审批路由里「会话内都允许」要先读裁决表拿这次调用的入参（`listPending`），挂起之后那一行照样还悬着，读得到；推送文案里早就有 `suspended`（「这一轮先挂起了 / 在等你」）；恢复那一轮交给 `prepareTurn` 的是空文本、`userId` 是答复人，skill 提及扫空文本什么也扫不到，无害。
 
 ## 7. 关键接口 / 数据结构
 

@@ -249,8 +249,9 @@ export function sqliteArbitration(database: SqliteDatabase, opts: SqliteArbitrat
 | `GET …/stream` | ✅ | 同上，**流式**转发 |
 | `GET …/messages` · 队列四个端点 | ❌ | 状态在数据库，任何副本都能答 |
 
-> **审批与提问最容易漏**：人在回路桥把待裁决项挂在那一轮的 `ActiveTurn` 对象上，不是数据库里。
-> 裁决打到别的副本会拿到「没有这条待定裁决」，而用户看到的是提交成功。
+> **审批与提问最容易漏**：内存窗口里，人在回路桥把待裁决项挂在那一轮的 `ActiveTurn` 对象上，不是数据库里。
+> 裁决打到别的副本会拿到「没有这条待定裁决」，而用户看到的是提交成功。（[挂起](../../../terms.md)之后没有持有者，
+> 任一副本都能答——判据「`active && !local` 才转」本身就覆盖了这一档，见[挂起与恢复 · 技术方案 §9.1](../../../logic/orchestration/tech/suspend-resume.md)。）
 
 **③ 三道防护**（缺一条都会在真机上咬人）：
 
@@ -382,7 +383,7 @@ A 滞留在网络里的旧写入会被放行。**粒度必须是一次租期**�
 - **`@runko/stream-redis`**（外挂广播）：这一档转发够用，理由见[技术方案 §6](../tech/multi-replica.md)。它归 Vercel 那条线。
 - **`@runko/durable-object`**：另一档宿主，另一条线。
 - **改造 chat 应用跑多副本**：它是单进程 + SQLite，`held_by_other` 走不到。示范放在 persist-demo。
-- **[挂起](../../../terms.md)与恢复**：等人时仍占着归属与沙盒。多副本只让「等着的是哪个副本」变确定，不改这件事本身。
+- **[挂起](../../../terms.md)与恢复**：另一条线（路线图 K3），已交付，见[挂起与恢复 · 施工进展](../../../logic/orchestration/plans/suspend-resume.md)。它的两进程 e2e 放在 persist-demo（`test/suspend-resume.e2e.test.ts`），顺带补上了本批测不了的审批与提问转发。
 - **依赖基础设施的 sticky routing**：亲和的单位是「一次排空」，不是一轮、也不是会话永久绑定。
 
 ## 7. 第二批拆单：跨容器验证与两处修复
@@ -636,3 +637,4 @@ docker images runko-lab/persist-demo
 | 2026-09-18 | **验证环境镜像瘦身：1.86GB → 224MB**（验证见 §8.4）。改成两阶段构建，两段都用 `node:24-alpine`；persist-demo 加 `build`（tsc），`start` 改跑 `dist/index.js`，tsx 只留给 `dev`；用 `pnpm deploy --legacy --prod` 只带运行时依赖；先拷依赖清单再装依赖；pnpm 元数据缓存挂成构建缓存；`.dockerignore` 补齐本地数据与密钥（`.dev.vars` 之前会被拷进镜像）；compose 只让 replica-a 带 `build:`。**两处判断被推翻**：① compose 里「给了同名 `image`，compose 只构建一次」不成立，每个带 `build:` 的服务各构建一次；② 选完整版 bookworm 的理由（better-sqlite3 要能现场编译）已经不成立，13 版包里自带全平台二进制 |
 | 2026-09-18 | **修掉瘦身版的一处构建缺陷，去掉 `--legacy`**。① 上一行的镜像在干净机器上构建不出来：better-sqlite3 包里有 `binding.gyp`，pnpm 会替它跑 `node-gyp rebuild`，alpine 构建阶段没有编译工具就失败。之前能过，是因为第一次试 alpine 时装过编译工具，编译结果留在了 pnpm 的缓存里。上一行说「13 版包里自带全平台二进制，装包时不编译」只对了一半：它加载时确实优先用自带的二进制，但 pnpm 照样会去编译。装包与 deploy 改为加 `--ignore-scripts`。② `--legacy` 不需要：deploy 要求的 `injectWorkspacePackages` 可以只在那一条命令上用 `--config` 打开，仓库配置不动；产物与 legacy 版逐包一致，还多一份锁死版本的专属 lockfile。空缓存构建与 `test:lab` 重跑结果见 §8.4 |
 | 2026-09-18 | **code review 后的镜像修补**：代码只按白名单拷（`tsconfig.base.json`、`packages`、`apps/persist-demo`），改 docs 或别的 app 不再让编译重做，构建上下文从几十 MB 降到约 100KB；依赖清单改用 `**/package.json` 一把捞，不再照抄工作区成员列表；`.dockerignore` 改成任意层级匹配并补齐 `.DS_Store`、`*.log`、`.claude`、`.agents`；最终阶段改用 `node` 用户、设 `NODE_ENV=production`，并加一步 better-sqlite3 冒烟，把「跳过安装脚本导致原生模块加载不了」提前到构建期；b、c 加 `pull_policy: never`，单独起它们又没有本地镜像时不会去 Docker Hub 拉同名镜像；persist-demo 的 `build` 先清空 `dist`；README 与入口注释写明 `start` 要先 build。空缓存构建 30 秒、`test:lab` 8/8（135 秒） |
+| 2026-09-19 | **随挂起与恢复（K3）同步三处说法**：转发矩阵里审批与提问改成「有持有者才转，已挂起就本副本自己答」（代码判据 `active && !local` 本来就覆盖，只是注释与文档还写着「必须转」）；「挂起还没做」那条限制删掉；「验证环境测不了审批与提问的转发」改指 persist-demo 新增的两进程 e2e（`test/suspend-resume.e2e.test.ts`，四档库）。见[挂起与恢复 · 施工进展 S7](../../../logic/orchestration/plans/suspend-resume.md) |
