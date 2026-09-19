@@ -5,6 +5,7 @@
  * 要展示的是持久化，一上来先要人配 API key 是没必要的门槛。真要接 provider 的写法
  * 看 `apps/node-server/src/agent/model.ts`。
  */
+import { randomUUID } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { simulateReadableStream } from "ai";
@@ -70,6 +71,50 @@ export function slowModel(text: string, delayMs: number): LanguageModel {
           chunkDelayInMs: null,
         }),
       };
+    },
+  });
+}
+
+/**
+ * **会调工具的脚本模型**——给[挂起](../../../docs/terms.md)与恢复的 e2e 用：第一步调一次工具，
+ * 看到工具结果之后回一句话收尾。
+ *
+ * 按**提示词里最后一条是不是工具结果**来决定这一步做什么，而不是按调用次数：每一轮都会新拿一个
+ * 模型实例，恢复那一轮开场先结清那次调用、再调模型——那时模型看到的最后一条正是工具结果，
+ * 它该收尾，而不是再调一次工具。
+ */
+export function toolScriptModel(call: "bash" | "ask-user"): LanguageModel {
+  return new MockLanguageModelV4({
+    doStream: ({ prompt }) => {
+      const last = prompt.at(-1);
+      if (last?.role === "tool") {
+        return Promise.resolve({
+          stream: simulateReadableStream({
+            chunks: [
+              { type: "stream-start" as const, warnings: [] },
+              { type: "text-start" as const, id: "t1" },
+              { type: "text-delta" as const, id: "t1", delta: "拿到结果了，这一轮做完。" },
+              { type: "text-end" as const, id: "t1" },
+              { type: "finish" as const, finishReason: { unified: "stop" as const, raw: undefined }, usage: USAGE },
+            ],
+            initialDelayInMs: null,
+            chunkDelayInMs: null,
+          }),
+        });
+      }
+      const input =
+        call === "bash" ? { command: "echo resumed-from-ledger" } : { question: "要不要继续？", options: ["要", "不要"] };
+      return Promise.resolve({
+        stream: simulateReadableStream({
+          chunks: [
+            { type: "stream-start" as const, warnings: [] },
+            { type: "tool-call" as const, toolCallId: `call-${randomUUID()}`, toolName: call, input: JSON.stringify(input) },
+            { type: "finish" as const, finishReason: { unified: "tool-calls" as const, raw: undefined }, usage: USAGE },
+          ],
+          initialDelayInMs: null,
+          chunkDelayInMs: null,
+        }),
+      });
     },
   });
 }

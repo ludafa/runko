@@ -5,7 +5,7 @@
  * 抽成一个函数（而不是写在 `index.ts` 里）是为了让 e2e 能不起真端口就把它装起来，
  * 直接对 `app.request()` 打——这是 Hono 的原生能力，比起真监听端口快且没有端口冲突。
  */
-import type { AgentRuntime, Logger } from "@runko/agent";
+import type { AgentRuntime, Duration, Logger } from "@runko/agent";
 import { createAgentRuntime } from "@runko/agent";
 import type { LanguageModel } from "ai";
 import type { Hono } from "hono";
@@ -30,6 +30,13 @@ export interface CreateDemoAppOptions extends OpenDriverOptions {
   createModel: () => LanguageModel;
   /** 队列上限，缺省 10。e2e 调小它来测「满了怎么办」。 */
   queueMax?: number;
+  /**
+   * `bash` 要不要先经人审批。缺省不要——这个 demo 的工作区是内存文件系统，跑什么都伤不到人。
+   * [挂起](../../../docs/terms.md)与恢复的 e2e 打开它：要有人在等，才谈得上挂起。
+   */
+  approval?: "review";
+  /** [内存窗口](../../../docs/terms.md)：等人先在内存里等多久，等不到就挂起。缺省用框架的（5 分钟）。 */
+  memoryWindow?: Duration;
   /**
    * 多副本：本副本的可达地址与副本间令牌。**给了才换租约版[归属仲裁机制](../../../docs/terms.md)**，
    * 不给就用框架内置的内存版（单副本跑法，一行代码不用改）。
@@ -94,12 +101,28 @@ async function assemble(
     // skill、instructions、审批分类器等等。
     prepareTurn: ({ conversationId }) => {
       const { fs, exec } = workspaceFor(conversationId);
-      return { fs, exec, model: opts.createModel() };
+      if (opts.approval !== "review") {
+        return { fs, exec, model: opts.createModel() };
+      }
+      // 要审批得两层都说「要人」：mini-bash 自己声明 `defaultApproval: "allow"`（它只碰内存文件系统），
+      // 这一层是快速放行，根本不会去问会话级分类器。所以先把它抬成 `review`，再让分类器也答 `review`。
+      // 逐方法委托、不用对象展开：展开会丢掉类实例原型上的方法。
+      return {
+        fs,
+        exec: {
+          exec: (req, execOpts) => exec.exec(req, execOpts),
+          describe: () => exec.describe?.() ?? "",
+          defaultApproval: "review",
+        },
+        model: opts.createModel(),
+        onApproval: () => "review",
+      };
     },
     // **本 demo 的全部意义所在**：持久化换成官方包，其余一个字不改。
     persistence: opened.persistence,
     ...(arbitration !== undefined ? { arbitration } : {}),
     queue: { max: opts.queueMax ?? 10 },
+    ...(opts.memoryWindow !== undefined ? { suspend: { memoryWindow: opts.memoryWindow } } : {}),
     ...(opts.logger !== undefined ? { logger: opts.logger } : {}),
   });
 

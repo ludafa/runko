@@ -281,7 +281,7 @@ describe.each(DIALECTS)("persist-demo e2e · $name", ({ kind, url }) => {
     await settle(demo, id);
   });
 
-  it("裁决端点：没有这条挂起项时回 404（不是 500）", async () => {
+  it("裁决端点：没有这条等人项时回 404（不是 500）", async () => {
     const demo = await openTracked();
     const id = await createConversation(demo);
 

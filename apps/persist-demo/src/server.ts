@@ -251,8 +251,9 @@ export function createServer(deps: ServerDeps): Hono {
   );
 
   app.post("/api/chat/conversations/:id/approvals/:callId", async (c) => {
-    // **最容易漏的一条**：待裁决项挂在持有者内存里那一轮上，不在数据库里。打错副本会
-    // 拿到「没有这条待定裁决」，而用户看到的是提交成功——答案就这么静默丢了。
+    // **最容易漏的一条**：内存窗口里，待裁决项挂在持有者内存里那一轮上，不在数据库里。
+    // 打错副本会拿到「没有这条待定裁决」，答案就这么静默丢了。已经[挂起](../../../docs/terms.md)
+    // 的没有持有者，`holderElsewhere` 返回空，本副本直接答：框架写进裁决表，再开一轮恢复。
     const holder = await holderElsewhere(c, c.req.param("id"));
     if (holder !== undefined) {return await forwarder.forward(c, holder);}
     const body = await c.req.json<{ behavior?: "allow" | "allow-session" | "deny"; message?: string }>();

@@ -86,6 +86,9 @@ PORT=3922 DEMO_DB_PATH=/tmp/runko-demo.db RUNKO_NODE_URL=http://127.0.0.1:3922 \
 | `RUNKO_HEARTBEAT_MS` / `RUNKO_TAKEOVER_MS` | 租约的两个时间参数，缺省 5000 / 60000 |
 | `RUNKO_FORWARD_TIMEOUT_MS` | 转发给持有者时等它开口（响应头）的上限，缺省 10000；等不到回 503 |
 | `DEMO_MODEL_DELAY_MS` | 回声模型答话前先睡多久，用来手工制造「一轮还在跑」 |
+| `DEMO_SCRIPT` | `bash` / `ask-user`：模型第一步先调这个工具，看到结果再收尾；缺省 `echo`（回声） |
+| `DEMO_APPROVAL` | 配 `review` 时每次 `bash` 都要人审批 |
+| `RUNKO_MEMORY_WINDOW` | [内存窗口](../../docs/terms.md)：等人先在内存里等多久，等不到就[挂起](../../docs/terms.md)。`0`、毫秒数，或 `500ms` / `30s` / `5m` |
 
 **转发哪些端点**，判据只有一条：这件事的状态在数据库里，还是在持有者的**进程内存**里。
 
@@ -93,7 +96,7 @@ PORT=3922 DEMO_DB_PATH=/tmp/runko-demo.db RUNKO_NODE_URL=http://127.0.0.1:3922 \
 | --- | --- | --- |
 | `POST …/messages` | 转 | 起轮要在持有者那儿发生（拿 `held_by_other` 带回的 `holder`） |
 | `POST …/abort` | **必须转** | 停止作用在持有者的 `AbortController` 上 |
-| `POST …/approvals/:callId` · `…/questions/:callId` | **必须转** | 待裁决项挂在持有者内存里那一轮上 |
+| `POST …/approvals/:callId` · `…/questions/:callId` | 有持有者就**必须转**；已挂起就不转 | 内存窗口里，待裁决项挂在持有者内存里那一轮上；挂起之后没有持有者，答案写进裁决表、本副本自己恢复 |
 | `GET …/stream` | 转 | 进行中草稿在持有者内存里 |
 | `DELETE …/queue[/:id]` | 转 | 改完库要广播一帧新快照，而订阅者都在持有者那一侧 |
 | `GET …/messages` · `GET …/queue` | 不转 | 读，状态在库里，谁都能答 |
@@ -115,6 +118,12 @@ PORT=3922 DEMO_DB_PATH=/tmp/runko-demo.db RUNKO_NODE_URL=http://127.0.0.1:3922 \
 RUNKO_TEST_MONGO_URL=mongodb://127.0.0.1:27018 \
   pnpm --filter @runko-demo/persist-demo test
 ```
+
+**[挂起](../../docs/terms.md)与恢复**的验收在 `test/suspend-resume.e2e.test.ts`：副本 A 起一轮、等人审批、
+等满半秒挂起、**被 `kill -9`**，人把答复发给副本 B，B 执行的正是 A 那一轮请求批准的那条命令。
+另有 `ask-user`、挂起期间排队、窗口内答复照旧转发三条。SQLite 文件永远跑；Postgres / MySQL / Mongo
+给了 `RUNKO_TEST_POSTGRES_URL` / `RUNKO_TEST_MYSQL_URL` / `RUNKO_TEST_MONGO_URL` 才跑。设计见
+[挂起与恢复](../../docs/logic/orchestration/tech/suspend-resume.md)。
 
 ## 多副本验证环境（docker-compose）
 

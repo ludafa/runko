@@ -17,15 +17,18 @@
  * | `RUNKO_LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` / `silent`；框架的起轮收尾、转发与每个 HTTP 请求都会记 |
  * | `RUNKO_LOG_NAME` | `RUNKO_NODE_URL` 的主机名，再缺省 `demo` | 日志里「谁打的」那一列 |
  * | `DEMO_MODEL_DELAY_MS` | `0` | 回声模型答话前先睡多久；e2e 用它让「这一轮还在跑」成为确定事实 |
+ * | `DEMO_SCRIPT` | `echo` | `echo` 回声；`bash` / `ask-user` 第一步先调这个工具、看到结果再收尾（[挂起](../../../docs/terms.md)与恢复的 e2e 用） |
+ * | `DEMO_APPROVAL` | — | 配 `review` 时每次 `bash` 都要人审批 |
+ * | `RUNKO_MEMORY_WINDOW` | 框架缺省（`5m`） | [内存窗口](../../../docs/terms.md)：`0`、毫秒数，或 `300ms` / `30s` / `5m` / `1h` |
  *
- * **模型固定是回声模型**（不联网，说什么答什么）——这个 demo 展示的是持久化，
- * 不该拿 API key 当门槛。真要接 provider 看 `apps/node-server/src/agent/model.ts`。
+ * **模型全是不联网的假模型**（展示的是持久化，不该拿 API key 当门槛）；接 provider 看 node-server 的 `agent/model.ts`。
  */
 import { serve } from "@hono/node-server";
+import type { Duration } from "@runko/agent";
 
 import { createDemoApp } from "./app.js";
 import { createTextLogger, parseLogLevel } from "./logger.js";
-import { echoModel, slowModel } from "./model.js";
+import { echoModel, slowModel, toolScriptModel } from "./model.js";
 
 const port = Number(process.env["PORT"] ?? 3910);
 
@@ -51,6 +54,18 @@ const heartbeatMs = num("RUNKO_HEARTBEAT_MS");
 const takeoverMs = num("RUNKO_TAKEOVER_MS");
 const forwardTimeoutMs = num("RUNKO_FORWARD_TIMEOUT_MS");
 
+/** 带单位的时长（`"30s"`）。类型守卫而不是断言：认不出来的写法就当没配，交给框架用缺省。 */
+const isDurationString = (value: string): value is `${number}ms` | `${number}s` | `${number}m` | `${number}h` =>
+  /^\d+(?:\.\d+)?(?:ms|s|m|h)$/.test(value);
+const memoryWindow = ((): Duration | undefined => {
+  const raw = process.env["RUNKO_MEMORY_WINDOW"]?.trim();
+  if (raw === undefined || raw === "") {return undefined;}
+  if (/^\d+$/.test(raw)) {return Number(raw);}
+  return isDurationString(raw) ? raw : undefined;
+})();
+const script = process.env["DEMO_SCRIPT"]?.trim();
+const approval = process.env["DEMO_APPROVAL"]?.trim() === "review" ? "review" : undefined;
+
 /** 日志里「谁打的」：多副本时取可达地址的主机名（`replica-a`），单副本就叫 `demo`。 */
 const nodeName = ((): string => {
   const explicit = process.env["RUNKO_LOG_NAME"]?.trim();
@@ -66,9 +81,13 @@ const logLevel = parseLogLevel(process.env["RUNKO_LOG_LEVEL"]) ?? "info";
 const logger = createTextLogger({ node: nodeName, level: logLevel });
 
 const demo = await createDemoApp({
-  createModel: () =>
-    modelDelayMs > 0 ? slowModel("（慢回声：这一轮故意跑久一点。）", modelDelayMs) : echoModel(),
+  createModel: () => {
+    if (script === "bash" || script === "ask-user") {return toolScriptModel(script);}
+    return modelDelayMs > 0 ? slowModel("（慢回声：这一轮故意跑久一点。）", modelDelayMs) : echoModel();
+  },
   logger,
+  ...(approval !== undefined ? { approval } : {}),
+  ...(memoryWindow !== undefined ? { memoryWindow } : {}),
   ...(nodeUrl !== undefined && nodeUrl !== ""
     ? {
         node: {
