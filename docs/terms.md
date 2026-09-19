@@ -104,6 +104,7 @@
 | **网关形态（gateway form）** | — | 沙盒 SDK 无法在普通 Node 进程直连时（如 Cloudflare）的接入方式：自部署一个 HTTP 网关把七个文件方法与 exec 映射成端点，runko 侧用纯 fetch 客户端连它。 |
 | **双角色 Worker（dual-role worker）** | — | `apps/cloudflare-worker-server` 的形态：同一个 Cloudflare Worker 既在进程内自驱 runko 会话（`/agent`），又对外提供[网关形态](#五沙盒与生命周期)端点（`/gateway/*`）供任意 Node 机器的客户端连入；两者共用同一套 `getSandbox` 接线与 Durable Object binding。 |
 | **沙盒 provider（sandbox provider）** | 沙盒厂商 | 一次会话选用哪家云沙盒（`vercel` / `e2b`）的选择项。决定 server 端 `sandbox-manager` 接哪个沙盒适配器、走哪套生命周期实现（建盒拉码方式、重连方式、休眠机制）。与会话 1:1 绑定，创建时选定即固定、运行中不切换。 |
+| **本地沙盒（local sandbox，provider 取值 `local`）** | — | chat 应用自带、不需要任何云账号的那一档[沙盒 provider](#五沙盒与生命周期)：文件放在进程内存里（`MemoryFS`），命令交给纯 TS 实现的 bash（`@runko/just-bash`），每轮收尾把整个文件树存一份进数据库，重启或换副本后照样接着用。没有 git、没有网络，所以建会话时不拉仓库、不建分支。见 docs/ingress/tech/unified-demo.md。 |
 | **沙盒模板（sandbox template）** | — | 建盒时指定的镜像 + 资源规格（CPU 核数、内存），沙盒按它开出来。E2B 的 CPU/内存**只能在构建模板时定死**，`Sandbox.create` 没有内存参数；其自带 `base` 模板是 2 vCPU / 512 MiB。chat 应用因此自建模板 `runko-chat-base`（同一 base 镜像，内存抬到 1024 MiB），见 `apps/node-server/src/agent/e2b-template.ts`。 |
 | **重连令牌（resume token）** | — | server 为一次会话持久化、下次唤醒沙盒时用来指名恢复的字符串。因 provider 而异：Vercel 是创建时用户自选的确定性[沙盒名](#五沙盒与生命周期)（由 conversationId 派生，无需额外落库），E2B 是**建盒后**服务端分配的 `sandboxId`（必须落 `conversations.sandbox_id` 才能跨进程 `Sandbox.connect` 恢复）。 |
 | **心跳（keepalive heartbeat）** | — | 一轮进行期间持续触发[保活](#五沙盒与生命周期)的整套机制。不是单个定时器，而是**两个信号源合流**：core 按 [活动信号](#五沙盒与生命周期)往下推、[沙盒适配器](#五沙盒与生命周期)在自己的 exec 调用期间自己打点，两者都汇进[续期闸门](#五沙盒与生命周期)。见 [沙盒保活 · 技术方案](./logic/orchestration/tech/sandbox-keepalive.md)。 |
@@ -173,6 +174,7 @@
 | **模型驱动段** | — | 示例脚本中需真实模型（可能还需云凭证）才运行、用来验证 agent 端到端行为的那一段；与「确定性段」相对。 |
 | **多副本验证环境（lab）** | — | `apps/persist-demo/docker/` 下的一套 docker-compose：一个 Postgres + 三个 persist-demo 副本 + 一个 nginx。用 `docker kill`（崩溃）、`docker pause`（冻住）、`docker network disconnect`（断网）故意制造故障，验证租约版[归属仲裁机制](#十三架构分层)与[应用层转发](#十三架构分层)在真跨容器下的行为。见 [多副本部署 · 功能](./host/node/features/multi-replica.md)。 |
 | **gate（配置闸门）** | — | 示例脚本在发起任何模型调用/网络请求之前，按序检查所需环境变量/凭证；任一未配置就打印指引并干净退出或 return（exit 0），全程不创建沙盒、不发起模型调用、不产生副作用。 |
+| **演示模型（demo model）** | 回声模型 | chat 应用没配模型 key 时用的替身模型，不联网、不花钱。用户消息里写 `run: <命令>` 它就调 bash，写 `ask: <问题>` 它就调 ask-user，别的话原样复述一遍。目的是零配置也能把审批、提问、挂起、排队这些交互走一遍，不是冒充真 AI。见 docs/ingress/features/unified-demo.md。 |
 
 ## 十一、界面语言（chat 页面）
 
