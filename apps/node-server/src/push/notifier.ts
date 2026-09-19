@@ -147,8 +147,8 @@ const TURN_END_TEXT: Record<TurnEndStatus, { title: string; suffix?: string }> =
     failed: { title: '这一轮没跑完', suffix: '出错了' },
     interrupted: { title: '这一轮没跑完', suffix: '已停止' },
     // 挂起是**主动且可恢复**的，不是「没跑完」——文案刻意不跟上面三条同形。
-    // 目前没有产出方（等 K3 挂起与恢复落地）。届时要顺带定一个产品问题：
-    // 挂起前必然已经发过一条「等你审批」的推送，这条会不会变成重复打扰。
+    // 挂起之前已经发过一条「等你审批 / 回答」的推送；这一条是等满内存窗口之后的提醒，刻意保留：
+    // 人可能错过了第一条，而会话此后会一直等下去。
     suspended: { title: '这一轮先挂起了', suffix: '在等你' },
     crashed: { title: '这一轮没跑完', suffix: '中断了' },
   };
@@ -283,12 +283,15 @@ export function createChatNotifier(deps: ChatNotifierDeps): ChatNotifier {
         // 队列抑制（技术方案 §5.3）：[待发队列](../../../../docs/terms.md)非空意味着
         // 下一轮马上就开始——这不是"活干完了"，只是一轮的分界。不抑制的话用户会被
         // 连着叫醒五次，每次回来都发现它又开始跑下一条了。
+        //
+        // [挂起](../../../../docs/terms.md)除外：这时队列**不会**出队，要等人答完——这条推送正是
+        // 叫人回来的那一条，吞掉它会话就一直干等。
         const row = getConversationById(deps.db, input.conversationId);
         const queued =
           row === undefined ?
             []
           : parseQueuedInputs(row.queuedMessagesJson, row.id, log);
-        if (queued.length > 0) {
+        if (input.status !== 'suspended' && queued.length > 0) {
           return;
         }
 

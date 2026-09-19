@@ -23,5 +23,6 @@ export const conversationSchema = z.object({
     return z.array(skillSummarySchema);
   },
   turnInProgress: z.boolean(),
+  pendingDecisions: z.int().min(0),
   createdAt: z.string(),
 });

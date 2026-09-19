@@ -17,6 +17,7 @@ import type { GitHubRepoRef } from '../agent/github-repo.js';
 import { resolveGithubPat, resolveRepo } from '../agent/github-repo.js';
 import { resolveModel } from '../agent/model.js';
 import {
+  countPendingDecisions,
   createChatPersistence,
   parseQueuedInputs,
 } from '../agent/persistence.js';
@@ -128,7 +129,10 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function toConversationDto(row: ConversationRow): ConversationDto {
+function toConversationDto(
+  row: ConversationRow,
+  pendingDecisions = 0,
+): ConversationDto {
   // `sleeping` is derived at read time, never stored: hibernation happens on
   // Vercel's side when the idle timeout elapses (no server-side timer to flip
   // the row — docs/ingress/tech/chat-webapp.md §2.2), so a stored `active` whose idle window has passed
@@ -158,6 +162,7 @@ function toConversationDto(row: ConversationRow): ConversationDto {
     ),
     // [起轮标记](../../../../docs/terms.md)就是答案，手上这一行已经带着它了。
     turnInProgress: row.turnHolder !== null,
+    pendingDecisions,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -342,7 +347,14 @@ export function createChatApp(deps: ChatRouteDeps) {
   app.openapi(listSessionsRoute, (c) => {
     const userId = c.get('userId');
     const rows = listConversations(deps.db, userId);
-    return c.json(rows.map(toConversationDto), 200);
+    const pending = countPendingDecisions(
+      deps.db,
+      rows.map((row) => row.id),
+    );
+    return c.json(
+      rows.map((row) => toConversationDto(row, pending.get(row.id) ?? 0)),
+      200,
+    );
   });
 
   // ---- GET /api/chat/conversations/{id} ----
@@ -376,7 +388,8 @@ export function createChatApp(deps: ChatRouteDeps) {
     if (row === undefined) {
       return c.json({ error: 'Not found' }, 404);
     }
-    return c.json(toConversationDto(row), 200);
+    const pending = countPendingDecisions(deps.db, [row.id]);
+    return c.json(toConversationDto(row, pending.get(row.id) ?? 0), 200);
   });
 
   // ---- GET /api/chat/conversations/{id}/messages?after=<seq> ----
@@ -791,7 +804,7 @@ export function createChatApp(deps: ChatRouteDeps) {
     path: '/api/chat/conversations/{id}/presence',
     tags: ['Chat'],
     summary:
-      '上报[在场](../../../../docs/terms.md)：这条会话此刻是否正在调用者眼前（docs/ingress/tech/push-notification.md §5.2）。在场期间不向这个人推送本会话的通知',
+      '上报在场（见 docs/terms.md「在场」）：这条会话此刻是否正在调用者眼前（docs/ingress/tech/push-notification.md §5.2）。在场期间不向这个人推送本会话的通知',
     request: {
       params: ConversationParamsSchema,
       body: {
@@ -828,6 +841,10 @@ export function createChatApp(deps: ChatRouteDeps) {
       return c.json({ error: 'Not found' }, 404);
     }
 
+    // 在场**只用于推送的前台抑制**，不喂给框架的 `reportPresence`（那会把等人的内存窗口往后推）。
+    // 沙盒为等人续命只续到审批保活预算（5 分钟）为止；窗口要是被在场一直推着，沙盒会先睡着，
+    // 这时点「允许」是在一个睡着的沙盒上跑命令。挂起再恢复则会走起轮装配、先把沙盒叫醒
+    // （docs/ingress/tech/chat-webapp.md §6.3）。
     if (focused) {
       markPresent(userId, id);
     } else {
@@ -982,7 +999,9 @@ export function createChatApp(deps: ChatRouteDeps) {
       // intentionally swallowed — see comment above
     }
 
-    const resolved = await deps.runtime.submitAnswer(id, callId, answer);
+    const resolved = await deps.runtime.submitAnswer(id, callId, answer, {
+      decidedBy: userId,
+    });
     if (!resolved) {
       return c.json({ error: 'Not found' }, 404);
     }

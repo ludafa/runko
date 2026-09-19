@@ -107,6 +107,29 @@ export interface ChatRuntimeDeps {
   sessionFactory?: SessionFactory;
 }
 
+/** `setTimeout` 能等的上限——框架对更长的窗口直接报错，而这个函数在模块顶层被求值，报错会让进程起不来。 */
+const MAX_MEMORY_WINDOW_MS = 2_147_483_647;
+
+/**
+ * [内存窗口](../../../../docs/terms.md)：等人先在内存里等多久（毫秒），等不到这一轮就
+ * [挂起](../../../../docs/terms.md)。读 `CHAT_SUSPEND_MEMORY_WINDOW`；不配或写错（含超过定时器上限）
+ * 就返回 `undefined`，交给框架缺省（5 分钟，与沙盒的审批保活预算对齐）。`0` = 一等人就挂起。
+ */
+export function resolveMemoryWindowMs(
+  env: NodeJS.ProcessEnv = process.env,
+): number | undefined {
+  const raw = env.CHAT_SUSPEND_MEMORY_WINDOW?.trim();
+  if (raw === undefined || raw.length === 0) {
+    return undefined;
+  }
+  const parsed = Number(raw);
+  return (
+      Number.isFinite(parsed) && parsed >= 0 && parsed <= MAX_MEMORY_WINDOW_MS
+    ) ?
+      parsed
+    : undefined;
+}
+
 /**
  * chat 应用的 runtime。**进程内单例**（见文件底部），测试可以自己造一个隔离的。
  */
@@ -216,6 +239,7 @@ export function createChatRuntime(deps: ChatRuntimeDeps): AgentRuntime {
     },
   };
 
+  const memoryWindowMs = resolveMemoryWindowMs();
   return createAgentRuntime({
     // instructions/skills/tools/model 全是**逐轮**决定的（仓库、分支、沙盒里现有的
     // skill、按会话选的模型），所以这里只放一个占位——每一轮的 `prepareTurn` 都会把
@@ -228,6 +252,9 @@ export function createChatRuntime(deps: ChatRuntimeDeps): AgentRuntime {
     persistence: createChatPersistence(deps.db, log),
     arbitration: createChatArbitration(deps.db),
     logger: log,
+    ...(memoryWindowMs !== undefined ?
+      { suspend: { memoryWindow: memoryWindowMs } }
+    : {}),
     hooks,
     ...(deps.sessionFactory !== undefined ?
       { sessionFactory: deps.sessionFactory }

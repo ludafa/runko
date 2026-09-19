@@ -69,6 +69,11 @@ export type Conversation = {
    */
   turnInProgress: boolean;
   /**
+   * @minLength 0
+   * @type integer
+   */
+  pendingDecisions: number;
+  /**
    * @type string
    */
   createdAt: string;

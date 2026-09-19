@@ -203,6 +203,12 @@ export const ConversationSchema = z
      * 空闲，用户这时发的消息会去起新轮，而不是[排队](../../../../docs/terms.md)。
      */
     turnInProgress: z.boolean(),
+    /**
+     * 还有几张卡片在等人答（审批或 `ask-user` 提问）。内存窗口里等着的与已
+     * [挂起](../../../../docs/terms.md)的都算——会话列表据此标出「在等你」。每次请求现算
+     * （裁决表里 `decided_at` 为空的行），一次分组查询，列表不做 N+1。
+     */
+    pendingDecisions: z.number().int().nonnegative(),
     createdAt: z.string(),
   })
   .openapi('Conversation');

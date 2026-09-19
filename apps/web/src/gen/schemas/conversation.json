@@ -36,6 +36,7 @@
       }
     },
     "turnInProgress": { "type": "boolean" },
+    "pendingDecisions": { "type": "integer", "minimum": 0 },
     "createdAt": { "type": "string" }
   },
   "required": [
@@ -50,6 +51,7 @@
     "queuedMessages",
     "availableSkills",
     "turnInProgress",
+    "pendingDecisions",
     "createdAt"
   ],
   "x-readme-ref-name": "Conversation"

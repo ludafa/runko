@@ -36,7 +36,16 @@ import type {
 } from '@runko/agent';
 import type { JsonValue, RunkoUIMessage } from '@runko/core';
 import { jsonValueSchema } from '@runko/core';
-import { and, asc, eq, isNotNull, max } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  max,
+} from 'drizzle-orm';
 import { z } from 'zod';
 
 import {
@@ -469,6 +478,42 @@ function createQueueStore(db: Db, log: Logger): QueueStore {
       );
     },
   };
+}
+
+/**
+ * 每个会话还有几张卡片在等人答（审批或提问）——会话列表据此标出「在等你」。
+ *
+ * 内存窗口里等着的与已[挂起](../../../../docs/terms.md)的都算：对用户来说都是「这里有事要你拍板」。
+ * 崩溃残留的孤儿行会被启动扫描结清（`recover()`），不会一直算在里面。
+ *
+ * 一次分组查询拿全，列表不做 N+1。
+ */
+export function countPendingDecisions(
+  db: Db,
+  conversationIds: readonly string[],
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  if (conversationIds.length === 0) {
+    return counts;
+  }
+  const rows = db
+    .select({
+      conversationId: conversationDecisions.conversationId,
+      pending: count(),
+    })
+    .from(conversationDecisions)
+    .where(
+      and(
+        inArray(conversationDecisions.conversationId, [...conversationIds]),
+        isNull(conversationDecisions.decidedAt),
+      ),
+    )
+    .groupBy(conversationDecisions.conversationId)
+    .all();
+  for (const row of rows) {
+    counts.set(row.conversationId, row.pending);
+  }
+  return counts;
 }
 
 export function createChatPersistence(

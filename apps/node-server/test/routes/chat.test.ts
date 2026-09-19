@@ -300,6 +300,47 @@ describe('routes/chat', () => {
       expect(stolen.status).toBe(404);
     });
 
+    it('列表与详情带上还在等人答的卡片数（会话列表据此标「在等你」）；答完就归零', async () => {
+      const { app } = build();
+      const waiting = await createConversationVia(app);
+      const idle = await createConversationVia(app);
+      const decisions = createChatPersistence(db, silentLogger).decisions;
+      const requestedAt = 1_700_000_000_000;
+      await decisions.record({
+        conversationId: waiting.id,
+        toolCallId: 'call-1',
+        kind: 'approval',
+        toolName: 'bash',
+        payload: { command: 'git push' },
+        requestedAt,
+      });
+      await decisions.record({
+        conversationId: waiting.id,
+        toolCallId: 'call-2',
+        kind: 'question',
+        payload: '要不要继续？',
+        requestedAt,
+      });
+
+      const listed = (await (
+        await app.request('/api/chat/conversations')
+      ).json()) as ConversationDto[];
+      const byId = new Map(listed.map((row) => [row.id, row.pendingDecisions]));
+      expect(byId.get(waiting.id)).toBe(2);
+      expect(byId.get(idle.id)).toBe(0);
+
+      await decisions.settle(waiting.id, 'call-1', {
+        outcome: 'allow',
+        decidedAt: requestedAt + 1,
+      });
+      const detail = ConversationSchema.parse(
+        await (
+          await app.request(`/api/chat/conversations/${waiting.id}`)
+        ).json(),
+      );
+      expect(detail.pendingDecisions).toBe(1);
+    });
+
     it('未登录一律 401', async () => {
       const { app } = buildChatApp({
         db,
@@ -749,7 +790,7 @@ describe('routes/chat', () => {
       session.finish();
     });
 
-    it('没有这条挂起项 → 404（已结、已超时、或从未存在）', async () => {
+    it('没有这条等人项 → 404（已结、已超时、或从未存在）', async () => {
       const { app } = build();
       const created = await createConversationVia(app);
       const response = await app.request(

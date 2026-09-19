@@ -327,6 +327,19 @@ describe('push/notifier', () => {
     expect(sent).toHaveLength(0);
   });
 
+  it('队列抑制不管挂起：挂起时队列不会出队，这条「在等你」正是叫人回来的那一条', async () => {
+    seedQueuedInput(db, '接着做下一件事');
+    const { sent, transport } = collector();
+    notifier(transport).turnSettled({
+      conversationId: CONVERSATION_ID,
+      userId: 'user-1',
+      status: 'suspended',
+    });
+    await flush();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.title).toBe('这一轮先挂起了');
+  });
+
   it('队列抑制只管一轮结束，不影响审批（队列里有货照样要人批准）', async () => {
     seedQueuedInput(db, '接着做下一件事');
     const { sent, transport } = collector();
