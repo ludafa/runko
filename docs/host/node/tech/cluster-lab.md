@@ -143,7 +143,13 @@ const stream = redisUrl === undefined ? undefined : redisFanout({ url: redisUrl,
 createAgentRuntime({ ..., stream });
 ```
 
-配了 Redis 之后还有一处要跟着改：**直播流不再转发给持有者**。现有的转发中间件挂了六条路径，其中 `…/stream`（以及新的 WebSocket 端点）在有 Redis 时要摘掉——留着的话，一个本可以就地答的订阅会被白转一跳，持有者崩了还会跟着 503。
+配了 Redis 之后还有两处要跟着改。
+
+**其一：框架要知道这份流分发能跨进程**（`StreamFanout.crossInstance`，[契约 §3③](../../contract/tech/stream-fanout.md#_3-三条约束)）。框架的 `subscribe` 原本见「这一轮不在本副本」就收线——没有广播时这是对的（等也等不到）。有广播之后还收线，连到非持有者副本的人就只收到两帧快照、流随即关闭，正在跑的那一轮一个字也看不到。`@runko/stream-redis` 自报 `true`，框架据此留着等。
+
+这条是**实测出来的**：三副本集群里发一条消息，只有持有者那台能看到直播，另外两台各收到 3 帧就关了（2026-09-22）。
+
+**其二：直播流不再转发给持有者**。现有的转发中间件挂了六条路径，其中 `…/stream`（以及新的 WebSocket 端点）在有 Redis 时要摘掉——留着的话，一个本可以就地答的订阅会被白转一跳，持有者崩了还会跟着 503。
 
 | 请求 | 单副本 / 无 Redis | 有 Redis |
 |---|---|---|

@@ -46,21 +46,33 @@ pnpm --filter @runko-chat/node-server cluster:down
 
 起来之后：
 
-- **统一入口**是 nginx，缺省 `http://localhost:3960`。浏览器直接连它就行：`SERVER_URL=http://localhost:3960 pnpm chat:web`。
+- **统一入口**是 nginx，缺省 `http://localhost:3940`。浏览器直接连它就行：`SERVER_URL=http://localhost:3940 pnpm chat:web`。
 - **HTTP 与 WebSocket 都走同一个入口**，同一个端口。
+- **副本自己的端口是随机分配的**——五个容器不能都绑同一个固定端口。要直连某一个（测试里常用）：
+  ```sh
+  CLUSTER_INDEX=2 pnpm --filter @runko-chat/node-server cluster:port   # 第 2 个副本的宿主机端口
+  pnpm --filter @runko-chat/node-server cluster:ps                      # 都起着没有
+  ```
 - 每个副本自己是什么地址、谁在跑哪一轮，用 `GET /api/chat/conversations/:id/activity` 看。
 
 集群里跑的是零配置那一档：[演示模型](../../../terms.md) + [本地沙盒](../../../terms.md)，不需要任何云账号。
 
 ### 3.1 故障怎么造
 
+下面的命令都在 `apps/node-server` 目录下跑（`-f docker/cluster.compose.yml` 省略写法见
+`package.json` 里的 `cluster:*` 脚本）。副本的容器名是 `runko-cluster-node-<序号>`。
+
 | 想造的故障 | 命令 |
 |---|---|
-| 某个副本崩了 | `docker compose -p runko-cluster kill -s SIGKILL node-2` |
-| 某个副本冻住（活着但不响应） | `docker compose -p runko-cluster pause node-2` |
-| 某个副本连不上库 | `docker network disconnect runko-cluster_db runko-cluster-node-2` |
-| Redis 挂了 | `docker compose -p runko-cluster stop redis` |
-| 加一个副本 | `docker compose -p runko-cluster up -d --scale node=4` |
+| 某个副本崩了 | `docker kill -s SIGKILL runko-cluster-node-2` |
+| 某个副本冻住（活着但不响应） | `docker pause runko-cluster-node-2` / `docker unpause …` |
+| 某个副本连不上库与 Redis | `docker network disconnect runko-cluster_cluster runko-cluster-node-2` |
+| Redis 挂了 | `docker compose -f docker/cluster.compose.yml stop redis` |
+| 改副本数 | `CLUSTER_REPLICAS=4 pnpm --filter @runko-chat/node-server cluster:up` |
+
+**只有一个网络**（`runko-cluster_cluster`）：摘掉一个副本，它与库、Redis、别的副本同时断——
+这一档验的是[自我围栏](../../../terms.md)。要「只断库不断别的」那种更细的故障注入，用
+[多副本验证环境](../../../terms.md)那一套（它分了两个网络）。
 
 ## 4. 这套环境回答什么
 

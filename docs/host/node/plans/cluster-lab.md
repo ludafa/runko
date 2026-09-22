@@ -20,7 +20,7 @@ related: ["host/node/features/cluster-lab.md", "host/node/tech/cluster-lab.md", 
 | C1 | 新包 `@runko/stream-redis`：Redis 版[流分发](../../../terms.md) | ✅ |
 | C2 | node-server 接上：`REDIS_URL` 一配就广播；直播流不再转发 | ✅ |
 | C3 | WebSocket 直播流（见 [ws-stream · 施工](../../../ingress/plans/ws-stream.md)） | ✅ |
-| C4 | 集群 compose：nginx 统一入口 + 1–5 副本 + Postgres + Redis | ⬜ |
+| C4 | 集群 compose：nginx 统一入口 + 1–5 副本 + Postgres + Redis | ✅ |
 | C5 | 集群端到端测试：租约 5 条 + WebSocket 3 条 | ⬜ |
 | C6 | 验证方案、实测、代码审查 | ⬜ |
 
@@ -46,8 +46,10 @@ related: ["host/node/features/cluster-lab.md", "host/node/tech/cluster-lab.md", 
 ### C4 · 集群 compose
 
 - **目标**：`CLUSTER_REPLICAS=1|3|5` 都能起；nginx 同一个端口吃 HTTP 与 WebSocket。
-- **涉及**：`docker/cluster.compose.yml`、`docker/cluster.nginx.conf`、`cluster:up` / `cluster:down` 脚本、副本自报主机名的启动方式。
+- **涉及**：`docker/cluster.compose.yml`、`docker/cluster.nginx.conf`、`cluster:up` / `cluster:down` / `cluster:port` / `cluster:ps` 脚本、副本自报主机名的启动方式。
 - **验收**：三种副本数各起一次，nginx 入口能建会话、能看直播。
+- **结论**：1 / 3 / 5 三种副本数各起了一次，都通过——经 nginx 注册、建会话、发消息，然后**每个副本各连一条 WebSocket 都收到了同一轮的直播 chunk**，经 nginx 连也一样。起一次约 50 秒（含构建）。
+- **实测揪出一个框架缺陷**：第一次跑只有持有者那台能看到直播，另外两台各收到 3 帧就正常关闭了。原因是框架的 `subscribe` 见「这一轮不在本副本」就收线——没有广播时这是对的，有广播之后就错了。补了 `StreamFanout.crossInstance` 标志（`@runko/agent` + `@runko/stream-redis`，changeset 与契约文档同步更新），重跑三种副本数全绿。
 
 ### C5 · 集群端到端
 
