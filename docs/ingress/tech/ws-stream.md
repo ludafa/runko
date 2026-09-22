@@ -65,12 +65,27 @@ injectWebSocket(server);
 
 ## 4. 前端
 
-### 4.1 一个开关
+### 4.1 一个开关（用户的选择，不是构建期的）
+
+开关存在**这台设备**上（`localStorage`，键 `runko:chat-transport`），设置页读写它——
+`features/chat/transport.ts`：
 
 ```ts
-// VITE_CHAT_TRANSPORT=ws | sse（不配 = sse）
-export const chatTransport = import.meta.env.VITE_CHAT_TRANSPORT === 'ws' ? 'ws' : 'sse';
+export type ChatTransport = 'sse' | 'ws';
+
+getChatTransport(): ChatTransport          // 没选过、值认不出来、读不到 → 'sse'
+setChatTransport(t: ChatTransport): void   // 写进去，并通知所有订阅者
+subscribeChatTransport(fn): () => void     // 变化通知
+useChatTransport(): ChatTransport          // useSyncExternalStore 包一层
 ```
+
+三处刻意的选择：
+
+| 选择 | 为什么 |
+|---|---|
+| **存这台设备，不存服务端** | 它是「这个浏览器怎么连」的选择，不是账号偏好。存服务端要加一张用户设置表，这一批不值当 |
+| **坏值一律回落 SSE** | 存储里的东西不可信（手改过、旧版本写的）。回落到浏览器内建的那条，比把坏值传给连接代码安全 |
+| **`useSyncExternalStore` 而不是 `useState`** | 值在 React 之外，且设置页与聊天页同时在读——必须一起翻，否则设置页显示 WebSocket、聊天页还连着 SSE |
 
 调用点只有一个（`use-chat-messages.ts` 里那条「连直播尾巴」），两个实现签名相同：
 
@@ -94,6 +109,12 @@ SSE 由浏览器内建负责的几样，WebSocket 得自己来：
 | **主动取消** | 传进来的 `signal` 一 abort 就 `close()`，并且**不再 reject**（与 SSE 那条一致：主动取消不是错误） |
 
 重连的退避、以及「连上时带上看到的最后一个 seq」都在上层，两条通道共用。
+
+### 4.3 中途改设置
+
+`transport` 进了开直播流那个 effect 的依赖数组：值一变，effect 先清理（断掉旧连接）、
+再用新通道开一条。**不会丢内容**——新连接照常带 `after=<看到的最后一个 seq>`，走的就是
+掉线重连那条路，服务端先补齐落下的再接直播。
 
 ## 5. 与集群的关系
 
