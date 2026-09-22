@@ -10,10 +10,10 @@ import { z } from 'zod/v4';
 export const conversationSchema = z.object({
   id: z.string(),
   title: z.string(),
-  repo: z.string(),
-  branchName: z.string(),
+  repo: z.nullable(z.string()),
+  branchName: z.nullable(z.string()),
   sandboxName: z.string(),
-  provider: z.enum(['vercel', 'e2b']),
+  provider: z.enum(['vercel', 'e2b', 'local']),
   status: z.enum(['active', 'sleeping', 'expired']),
   lastActiveAt: z.string(),
   get queuedMessages() {

@@ -85,13 +85,38 @@ export function resolveIdleTimeoutMs(): number {
 
 // ---- SandboxProvider：对接云沙盒 SDK 的唯一接缝（可替换成假实现） ----
 
-export type SandboxProviderId = 'vercel' | 'e2b';
+export type SandboxProviderId = 'vercel' | 'e2b' | 'local';
 
-/** 建会话的请求没指定 provider 时用的默认[沙盒 provider](docs/terms.md)——读 `SANDBOX_PROVIDER` 环境变量，没有就回落到 `'vercel'`（docs/host/contract/tech/sandbox-provider.md §6）。 */
-export function resolveDefaultProvider(): SandboxProviderId {
-  return process.env.SANDBOX_PROVIDER?.trim().toLowerCase() === 'e2b' ?
-      'e2b'
-    : 'vercel';
+/** 这台服务端能用哪几档[沙盒 provider](docs/terms.md)：云沙盒要 key，[本地沙盒](docs/terms.md)永远能用。 */
+export function availableProviders(
+  env: NodeJS.ProcessEnv = process.env,
+): SandboxProviderId[] {
+  const ids: SandboxProviderId[] = [];
+  if ((env.VERCEL_TOKEN?.trim() ?? '').length > 0) {
+    ids.push('vercel');
+  }
+  if ((env.E2B_API_KEY?.trim() ?? '').length > 0) {
+    ids.push('e2b');
+  }
+  ids.push('local');
+  return ids;
+}
+
+/**
+ * 建会话的请求没指定 provider 时用哪一档。
+ *
+ * `SANDBOX_PROVIDER` 点名了就听它的；没点名就挑**这台服务端真配得起**的第一档——
+ * 什么 key 都没配时那就是[本地沙盒](docs/terms.md)，于是零配置也能建会话。
+ */
+export function resolveDefaultProvider(
+  env: NodeJS.ProcessEnv = process.env,
+): SandboxProviderId {
+  const named = env.SANDBOX_PROVIDER?.trim().toLowerCase();
+  const available = availableProviders(env);
+  if (named === 'e2b' || named === 'vercel' || named === 'local') {
+    return named;
+  }
+  return available[0] ?? 'local';
 }
 
 export interface CreateSandboxParams {
@@ -115,6 +140,11 @@ export type ManagedWorkspace = RunkoFS &
  */
 export interface ProvisionedSandbox {
   readonly workspace: ManagedWorkspace;
+  /**
+   * 把工作区存一份下来，下次还能恢复成这个样子。**只有[本地沙盒](../../../../docs/terms.md)
+   * 需要**——云沙盒的文件本来就在云上，重连就回来了。每轮收尾调一次（`SandboxManager.persist`）。
+   */
+  persist?(): Promise<void>;
   /** 落库保存，下次重连要用：Vercel 是沙盒名（= 传进来的那个令牌），E2B 是新分配的 sandboxId。 */
   readonly resumeToken: string;
   /**
@@ -130,6 +160,13 @@ export type ResumeResult =
 
 export interface SandboxProvider {
   readonly id: SandboxProviderId;
+  /**
+   * 这一档有没有 git 与网络。
+   *
+   * `false` 时建盒之后**不装 skill、不配 git、不开分支**——那三步都要联网，在
+   * [本地沙盒](../../../../docs/terms.md)里一定失败，而它本来也不需要：没有仓库可拉。
+   */
+  readonly usesGit: boolean;
   /** 新建一个沙盒，仓库 clone 在工作区根目录。 */
   create(params: CreateSandboxParams): Promise<ProvisionedSandbox>;
   /** 用之前落库的令牌重连；返回 `unavailable` 就由调用方重新创建。 */
@@ -214,6 +251,7 @@ function vercelProvisioned(
 export function createVercelProvider(): SandboxProvider {
   return {
     id: 'vercel',
+    usesGit: true,
     async create(params: CreateSandboxParams): Promise<ProvisionedSandbox> {
       const token = requireEnv('VERCEL_TOKEN');
       const teamId = requireEnv('VERCEL_TEAM_ID');
@@ -317,6 +355,7 @@ function withTokenAuth(cloneUrl: string): string {
 export function createE2bProvider(): SandboxProvider {
   return {
     id: 'e2b',
+    usesGit: true,
     async create(params: CreateSandboxParams): Promise<ProvisionedSandbox> {
       const apiKey = requireEnv('E2B_API_KEY');
       const sandbox = await E2bSandbox.create({
@@ -506,11 +545,12 @@ export interface AcquireInput {
   conversationId: string;
   provider: SandboxProviderId;
   sandboxName: string;
-  branchName: string;
-  repoCloneUrl: string;
-  repoOwner: string;
-  repoName: string;
-  githubPat: string;
+  /** 仓库那一组：只有会用 git 的档（云沙盒）才需要；[本地沙盒](../../../../docs/terms.md)一律不传。 */
+  branchName?: string;
+  repoCloneUrl?: string;
+  repoOwner?: string;
+  repoName?: string;
+  githubPat?: string;
   /** 之前落库的[重连令牌](docs/terms.md)：Vercel 是 sandboxName，E2B 是存下来的 sandboxId。全新会话是 `undefined`，直接走创建。 */
   resumeToken?: string;
 }
@@ -543,6 +583,11 @@ export interface SandboxManager {
    * 自己做，不需要也不该由这里驱动，见文件头。
    */
   ensureLifetime(conversationId: string): Promise<void>;
+  /**
+   * 把工作区存一份下来（只有[本地沙盒](../../../../docs/terms.md)有这回事，其余档是空操作）。
+   * 每轮收尾调一次；这个会话此刻没有活沙盒时什么都不做。
+   */
+  persist(conversationId: string): Promise<void>;
   /** 把进程内的缓存项踢掉（不发任何远程调用）——逼下一次 `acquire()` 重新走一遍 `SandboxProvider.resume()`。 */
   release(conversationId: string): void;
 }
@@ -786,9 +831,10 @@ export function createSandboxManager(
           });
           return await createAndRegister(input, provider);
         }
-        const defaultBranch = await detectDefaultBranch(
-          resumed.sandbox.workspace,
-        );
+        const defaultBranch =
+          provider.usesGit ?
+            await detectDefaultBranch(resumed.sandbox.workspace)
+          : '';
         const entry: ActiveSandbox = {
           provisioned: resumed.sandbox,
           defaultBranch,
@@ -811,18 +857,22 @@ export function createSandboxManager(
   ): Promise<AcquiredSandbox> {
     const provisioned = await provider.create({
       name: input.sandboxName,
-      cloneUrl: input.repoCloneUrl,
-      githubPat: input.githubPat,
+      cloneUrl: input.repoCloneUrl ?? '',
+      githubPat: input.githubPat ?? '',
       timeoutMs: idleTimeoutMs,
       keepAlive: keepAliveOptionsFor(input.conversationId),
     });
-    await installSkillAndConfigureGit(
-      provisioned.workspace,
-      input.repoOwner,
-      input.repoName,
-    );
-    const defaultBranch = await detectDefaultBranch(provisioned.workspace);
-    await recoverSessionBranch(provisioned.workspace, input.branchName);
+    // 没有 git 的档（本地沙盒）跳过这三步：它们都要联网，而那一档没有仓库可拉。
+    let defaultBranch = '';
+    if (provider.usesGit) {
+      await installSkillAndConfigureGit(
+        provisioned.workspace,
+        input.repoOwner ?? '',
+        input.repoName ?? '',
+      );
+      defaultBranch = await detectDefaultBranch(provisioned.workspace);
+      await recoverSessionBranch(provisioned.workspace, input.branchName ?? '');
+    }
 
     const entry: ActiveSandbox = {
       provisioned,
@@ -858,6 +908,9 @@ export function createSandboxManager(
      * （审批/提问那两条路由刻意吞掉它）。
      */
     ensureLifetime: extendDeadline,
+    async persist(conversationId: string): Promise<void> {
+      await active.get(conversationId)?.provisioned.persist?.();
+    },
     release(conversationId: string): void {
       evict(conversationId);
     },

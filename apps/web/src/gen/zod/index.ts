@@ -1,7 +1,9 @@
 export { abortTurnAckSchema } from './abortTurnAckSchema.ts';
+export { activitySchema } from './activitySchema.ts';
 export { apiErrorSchema } from './apiErrorSchema.ts';
 export { approvalAckSchema } from './approvalAckSchema.ts';
 export { chatChunkEnvelopeSchema } from './chatChunkEnvelopeSchema.ts';
+export { chatConfigSchema } from './chatConfigSchema.ts';
 export { chatMessageFrameSchema } from './chatMessageFrameSchema.ts';
 export { chatQueueFrameSchema } from './chatQueueFrameSchema.ts';
 export { chatTurnStateFrameSchema } from './chatTurnStateFrameSchema.ts';
@@ -23,6 +25,18 @@ export {
   deleteApiChatConversationsIdQueueMutationResponseSchema,
   deleteApiChatConversationsIdQueuePathParamsSchema,
 } from './deleteApiChatConversationsIdQueueSchema.ts';
+export {
+  getApiChatConfig200Schema,
+  getApiChatConfig401Schema,
+  getApiChatConfigQueryResponseSchema,
+} from './getApiChatConfigSchema.ts';
+export {
+  getApiChatConversationsIdActivity200Schema,
+  getApiChatConversationsIdActivity401Schema,
+  getApiChatConversationsIdActivity404Schema,
+  getApiChatConversationsIdActivityPathParamsSchema,
+  getApiChatConversationsIdActivityQueryResponseSchema,
+} from './getApiChatConversationsIdActivitySchema.ts';
 export {
   getApiChatConversationsIdMessages200Schema,
   getApiChatConversationsIdMessages401Schema,

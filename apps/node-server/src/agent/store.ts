@@ -36,8 +36,9 @@ export interface ConversationRow {
   id: string;
   userId: string;
   title: string;
-  repo: string;
-  branchName: string;
+  /** [本地沙盒](../../../../docs/terms.md)没有仓库与分支，这两个为 null。 */
+  repo: string | null;
+  branchName: string | null;
   sandboxName: string;
   provider: ConversationProvider;
   /** E2B 的[重连令牌](../../../../docs/terms.md) sandboxId；Vercel 恒为 null。 */
@@ -80,8 +81,9 @@ export interface CreateConversationInput {
   id: string;
   userId: string;
   title: string;
-  repo: string;
-  branchName: string;
+  /** [本地沙盒](../../../../docs/terms.md)没有仓库与分支，这两个传 null。 */
+  repo: string | null;
+  branchName: string | null;
   sandboxName: string;
   /** 沙盒 provider（docs/host/contract/tech/sandbox-provider.md）。省略时默认 `'vercel'`——路由侧始终显式传，省略仅便于测试夹具。 */
   provider?: ConversationProvider;

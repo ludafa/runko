@@ -1,8 +1,9 @@
 import { Icon } from '@iconify/react';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { fetchAuthConfig } from '@/features/chat/api';
 
 import { authClient } from '../lib/auth-client';
 
@@ -12,6 +13,19 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  // 拿不到就当没开——登录页不该因为这一个只读查询报错（`GET /api/auth-config`
+  // 不需要登录，docs/ingress/tech/unified-demo.md §4.3）。
+  const [githubEnabled, setGithubEnabled] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchAuthConfig(controller.signal)
+      .then((config) => setGithubEnabled(config.github))
+      .catch(() => {
+        /* 见上 */
+      });
+    return () => controller.abort();
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -94,22 +108,26 @@ export function LoginPage() {
         </Button>
       </form>
 
-      <div className="relative flex items-center gap-3">
-        <span className="bg-foreground/10 h-px flex-1" />
-        <span className="text-muted-foreground text-[0.7rem] tracking-[0.16em] uppercase">
-          or
-        </span>
-        <span className="bg-foreground/10 h-px flex-1" />
-      </div>
+      {githubEnabled && (
+        <>
+          <div className="relative flex items-center gap-3">
+            <span className="bg-foreground/10 h-px flex-1" />
+            <span className="text-muted-foreground text-[0.7rem] tracking-[0.16em] uppercase">
+              or
+            </span>
+            <span className="bg-foreground/10 h-px flex-1" />
+          </div>
 
-      <Button
-        variant="outline"
-        onClick={handleGitHub}
-        className="h-11 w-full gap-2"
-      >
-        <Icon icon="logos:github-icon" className="size-4" />
-        Continue with GitHub
-      </Button>
+          <Button
+            variant="outline"
+            onClick={handleGitHub}
+            className="h-11 w-full gap-2"
+          >
+            <Icon icon="logos:github-icon" className="size-4" />
+            Continue with GitHub
+          </Button>
+        </>
+      )}
 
       <p className="text-muted-foreground text-center text-xs">
         New here?{' '}

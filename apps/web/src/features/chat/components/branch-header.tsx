@@ -29,9 +29,13 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 
-import type { Conversation } from '../schema';
+import type { ChatConfig, Conversation } from '../schema';
 import { ConversationDetailsDialog } from './conversation-details-dialog';
 import { StatusDot } from './conversation-status-badge';
+
+/** 会话页顶部「演示模型」提示的正文——没配模型 key 时的替身模型怎么触发工具/提问卡片。 */
+const DEMO_MODEL_HINT =
+  '没配模型 key，用的是演示模型：发 "run: ls" 调工具，发 "ask: 问题" 弹提问卡片';
 
 const COPIED_RESET_MS = 1600;
 
@@ -57,10 +61,13 @@ export function abbreviateBranchName(name: string): string {
 export function BranchHeader({
   conversation,
   messages,
+  model,
 }: {
   conversation: Conversation;
   /** 透传给详情弹窗的「统计」tab——会话级用量从账本 metadata 现算，不额外请求。 */
   messages?: readonly RunkoUIMessage[];
+  /** 这台服务端用的是真模型还是[演示模型](../../../../../../docs/terms.md)（`GET /api/chat/config`）；缺省当作真模型，不标。 */
+  model?: ChatConfig['model'];
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -77,9 +84,15 @@ export function BranchHeader({
   }, [copied]);
 
   function handleCopy() {
+    const branchName = conversation.branchName;
+    // 按钮只在有分支名（非本地沙盒）时才会渲染，这里再判一次是为了不用类型断言
+    // 把 `string | null` 收窄成 `string`。
+    if (branchName === null) {
+      return;
+    }
     // 复制失败（无剪贴板权限/非安全上下文）就什么都不发生——分支名就在旁边，
     // 用户随时可以手选，为此弹一条错误提示是过度反应。
-    navigator.clipboard.writeText(conversation.branchName).then(
+    navigator.clipboard.writeText(branchName).then(
       () => {
         setCopied(true);
       },
@@ -91,46 +104,71 @@ export function BranchHeader({
 
   return (
     <header className="group border-border flex items-center gap-2 border-b pb-2">
-      <StatusDot status={conversation.status} />
+      <StatusDot
+        status={conversation.status}
+        provider={conversation.provider}
+      />
       <h1 className="font-label min-w-0 truncate text-[0.9375rem] tracking-normal">
         {conversation.title ?? '未命名会话'}
       </h1>
 
-      {/* 分支名退到行尾：它的用途是复制，不是阅读。 */}
-      <div className="text-muted-foreground ml-auto flex shrink-0 items-center gap-1">
-        {/* tooltip 而不是原生 `title`：缩写后的 `runko/chat-8430…5fb1` 看不出是
-            什么，光给全名还是看不出——得先说清「这是 git 分支」，再给全名。 */}
-        {/* Provider 就近包一层——项目里没有全局的，ai-elements/message.tsx 也是这么用的 */}
+      {model === 'demo' && (
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger
               render={
-                <span className="hidden cursor-default font-mono text-[0.6875rem] sm:inline" />
+                <span className="border-border text-muted-foreground shrink-0 cursor-default rounded-sm border px-1.5 py-0.5 text-[0.625rem] leading-4" />
               }
             >
-              {abbreviateBranchName(conversation.branchName)}
+              演示模型
             </TooltipTrigger>
-            <TooltipContent className="flex flex-col gap-0.5">
-              <span className="text-background/70 text-[0.6875rem]">
-                这个会话的 git 分支
-              </span>
-              <span className="font-mono">{conversation.branchName}</span>
+            <TooltipContent className="max-w-64">
+              {DEMO_MODEL_HINT}
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          onClick={handleCopy}
-          className="text-muted-foreground hover:text-foreground shrink-0"
-          aria-label={copied ? '分支名已复制' : '复制分支名'}
-          title={copied ? '已复制' : '复制分支名'}
-        >
-          {copied ?
-            <CheckIcon className="size-3" aria-hidden="true" />
-          : <CopyIcon className="size-3" aria-hidden="true" />}
-        </Button>
+      )}
+
+      {/* 分支名退到行尾：它的用途是复制，不是阅读。[本地沙盒](../../../../../../docs/terms.md)
+          没有仓库、没有分支，`branchName` 为 `null` 时这整块（含复制钮）都不渲染。 */}
+      <div className="text-muted-foreground ml-auto flex shrink-0 items-center gap-1">
+        {conversation.branchName !== null && (
+          <>
+            {/* tooltip 而不是原生 `title`：缩写后的 `runko/chat-8430…5fb1` 看不出是
+                什么，光给全名还是看不出——得先说清「这是 git 分支」，再给全名。 */}
+            {/* Provider 就近包一层——项目里没有全局的，ai-elements/message.tsx 也是这么用的 */}
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span className="hidden cursor-default font-mono text-[0.6875rem] sm:inline" />
+                  }
+                >
+                  {abbreviateBranchName(conversation.branchName)}
+                </TooltipTrigger>
+                <TooltipContent className="flex flex-col gap-0.5">
+                  <span className="text-background/70 text-[0.6875rem]">
+                    这个会话的 git 分支
+                  </span>
+                  <span className="font-mono">{conversation.branchName}</span>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              onClick={handleCopy}
+              className="text-muted-foreground hover:text-foreground shrink-0"
+              aria-label={copied ? '分支名已复制' : '复制分支名'}
+              title={copied ? '已复制' : '复制分支名'}
+            >
+              {copied ?
+                <CheckIcon className="size-3" aria-hidden="true" />
+              : <CopyIcon className="size-3" aria-hidden="true" />}
+            </Button>
+          </>
+        )}
         <ConversationDetailsDialog
           conversation={conversation}
           messages={messages}

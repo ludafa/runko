@@ -207,7 +207,7 @@ sequenceDiagram
 
 没配 `DEEPSEEK_API_BASE_URL` + `DEEPSEEK_API_TOKEN` 时，`resolveModel()` 返回[演示模型](../../terms.md)，启动时记一行日志说明用的是演示模型。它从 persist-demo 的 `toolScriptModel` 演化而来：
 
-| 最后一条用户消息里 | 它做什么 |
+| 最后一条用户消息里的某一行 | 它做什么 |
 |---|---|
 | 某一行以 `run:` 开头 | 调 `bash`，参数是冒号后面的命令 |
 | 某一行以 `ask:` 开头 | 调 `ask-user`，问冒号后面的问题 |
@@ -216,6 +216,7 @@ sequenceDiagram
 - **收尾靠看最后一条消息**：如果最后一条是工具结果，就说一句「做完了」加上结果摘要，然后收尾。审批后[恢复](../../terms.md)的轮、换了副本接着跑的轮都是这样续上的，不会重复调工具。
 - **复述是一小段一小段流出来的**，每段间隔由 `CHAT_DEMO_DELAY_MS` 控制（缺省 30 毫秒）。这样人有时间点「停止」、试「插话」。多副本测试会把它调大，让一轮跑得够久，好在中途杀进程。
 - **否决 persist-demo 的环境变量剧本**（`DEMO_SCRIPT=bash`）：它一次只能演一种剧本，而且界面上的人没法选。把指令写在消息里，人和测试用的是同一种方式。
+- 「这一步产出什么」抽成 `demoStreamFor(prompt)` 单独一个函数，测试直接喂提示词给它——否则测一次要绕过 AI SDK 的类型去拼一个假调用，只能靠类型断言。
 
 ### 4.2 本地沙盒
 
@@ -226,18 +227,18 @@ sequenceDiagram
 | 文件 | `@runko/virtual-fs` 的 `MemoryFS`，建会话时铺一个小示例项目（`README.md`、`src/`、一个演示用的 `SKILL.md`） |
 | 命令 | `@runko/just-bash`，可以写文件，`rm -rf` 真的会删 |
 | 保活 | 空操作，本地沙盒不会休眠 |
-| 重连 | 进程内按会话缓存。缓存里没有就从 `local_workspaces` 读快照恢复；两处都没有，就当新会话重新铺示例项目 |
+| 重连 | 进程内按沙盒名缓存。缓存里没有就从 `local_workspaces` 读快照恢复；两处都没有就回 `unavailable`，由管理器当新会话重建 |
 
 - **每轮收尾存一份快照**：挂在运行时的 `onTurnSettled` 钩子上，调 `MemoryFS.snapshot()`，写进 `local_workspaces`，`version` 加一。挂起也会触发收尾，所以挂起前的文件也存上了。进程崩溃时，这一轮里改的文件会丢，这跟「崩溃中断这一轮」的语义一致。
 - **取的时候比版本号**：缓存的版本比库里的旧，就重新读快照。多副本时 A 跑完第 1 轮，B 接手跑了第 2 轮，回到 A 跑第 3 轮时，不会用上 A 手里那份过期的文件。
-- **建会话不拉仓库、不装 skill**：现在 `acquire` 建盒后一定会跑 git 初始化和 `npx skills add`，这两步都要联网，失败就抛错。改成由 provider 决定要不要跑：给 `SandboxProvider` 加一个可选的初始化钩子，云沙盒把现有逻辑挪进去，本地沙盒不实现。
+- **建会话不拉仓库、不装 skill**：`SandboxProvider` 多一个 `usesGit` 字段。`false` 时建盒之后不跑 git 初始化、不装 skill、不开分支——这三步都要联网，本地沙盒一定失败，而它本来也不需要。顺带 `AcquireInput` 里仓库那一组字段改成可选：本地沙盒一律不传。
 - **否决 `@runko/mini-bash`**：它只读，批准了 `rm -rf` 之后会报「命令不存在」，审批演示就没有意义了。
 - **否决真目录（`DirFS` + overlay）**：会碰到本机文件；而且多副本之间共享不了。
 
 ### 4.3 GitHub 可选，加一个配置接口
 
 - `GITHUB_REPO` / `GITHUB_PAT` 只在用云沙盒时必需。建会话选 `local` 时不读它们，`repo`、`branch_name` 留空。
-- 缺省 provider 的规则：配了 Vercel 的 key 用 `vercel`；否则配了 E2B 的 key 用 `e2b`；都没配用 `local`。
+- 缺省 provider 的规则：`SANDBOX_PROVIDER` 点名了就听它的；没点名就挑这台服务端**真配得起**的第一档（Vercel → E2B → 本地），什么都没配时就是本地沙盒。
 - 新增 `GET /api/chat/config`（要登录），告诉前端这台服务端的能力：
 
 ```ts
@@ -248,7 +249,7 @@ sequenceDiagram
 }
 ```
 
-- 登录页要知道 GitHub 登录开没开，但那时还没登录。所以另开一个不用登录的 `GET /api/auth-config`，只返回 `{ github: boolean }`。
+- 登录页要知道 GitHub 登录开没开，但那时还没登录。所以另开一个不用登录的 `GET /api/auth-config`，只返回 `{ github: boolean }`。它挂在 better-auth 那个路由组上，不走 chat 的鉴权中间件。
 - `chat-agent.ts` 的系统提示词分两版：本地沙盒那一版不提仓库、分支、PR，并说明沙盒里没有 git 和网络。
 - 报错信息里提到的 `.env.example` 文件不存在，统一改成 `.env.template`。
 
@@ -270,7 +271,7 @@ sequenceDiagram
 
 - 配了 `DATABASE_URL` 就用 `pg.Pool` + Kysely 的 `PostgresDialect`，否则用 better-sqlite3 + `SqliteDialect`。flavor 跟着选，传给 persist-kysely 和本应用的迁移。
 - **大整数**：Postgres 的 `bigint` 经 pg 驱动回来是字符串。在我们自己的 Pool 上配 `types`，把 int8 解析成 number。毫秒时间戳离 2^53 还远，不会丢精度。persist-kysely 自己也有 `toNumber` 兜底。
-- **测试**：store 层的测试在 SQLite 内存库和 pglite（进程内的 Postgres）上各跑一遍。pglite 已经在 catalog 里，Kysely 方言的写法照抄 `packages/persist-kysely/test/helpers/pglite-dialect.ts`。
+- **测试**：同一批读写在 SQLite 内存库和 pglite（进程内的 Postgres）上各跑一遍（`test/db/dialects.test.ts`）。pglite 是 Postgres 编译成的 WASM，**拼出来的 SQL 与真 Postgres 一模一样**，只有送出去那一层不同，所以这一档有代表性。真 Postgres 留给 CI 与本地 docker。
 
 ## 6. 多副本
 

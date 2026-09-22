@@ -9,13 +9,14 @@ import type {
 } from '@runko/agent';
 import type { SessionTelemetry } from '@runko/core';
 import type { LanguageModel } from 'ai';
-import type { MiddlewareHandler } from 'hono';
+import type { Context, MiddlewareHandler } from 'hono';
 import { streamSSE } from 'hono/streaming';
 
 import { grantConversationApproval } from '../agent/conversation-grants.js';
 import type { GitHubRepoRef } from '../agent/github-repo.js';
 import { resolveGithubPat, resolveRepo } from '../agent/github-repo.js';
-import { resolveModel } from '../agent/model.js';
+import { createLocalProvider } from '../agent/local-sandbox.js';
+import { hasRealModel, resolveModel } from '../agent/model.js';
 import { createChatPersistence } from '../agent/persistence.js';
 import { countPendingDecisions } from '../agent/runko-tables.js';
 import { createChatRuntime } from '../agent/runtime.js';
@@ -24,6 +25,7 @@ import type {
   SandboxManager,
 } from '../agent/sandbox-manager.js';
 import {
+  availableProviders,
   createE2bProvider,
   createSandboxManager,
   createVercelProvider,
@@ -44,6 +46,13 @@ import {
   syncAvailableSkills,
 } from '../agent/store.js';
 import { db as defaultDb } from '../db/instance.js';
+import type { Forwarder } from './forward.js';
+import {
+  createForwarder,
+  RETRY_AFTER_SECONDS,
+  RETRY_LATER_STATUS,
+  resolveNodeIdentity,
+} from './forward.js';
 import { logger as defaultLogger } from '../logger.js';
 import { requireAuth } from '../middleware/auth.js';
 import { createChatNotifier } from '../push/notifier.js';
@@ -56,8 +65,10 @@ import type {
 } from '../schemas/chat.js';
 import {
   AbortTurnAckSchema,
+  ActivitySchema,
   ApprovalAckSchema,
   ChatApprovalParamsSchema,
+  ChatConfigSchema,
   ChatQueueParamsSchema,
   chatReplayFrameSchema,
   ConversationMessagesListSchema,
@@ -101,6 +112,11 @@ export interface ChatRouteDeps {
    * ——而路由手上只有 `callId`。裁决表是框架唯一知道这两样的地方。
    */
   decisions: DecisionStore;
+  /**
+   * 多副本时把请求转给[归属](../../../../docs/terms.md)持有者。不传 = 单进程跑法，
+   * 一律本地答。
+   */
+  forwarder?: Forwarder;
   sandboxManager: SandboxManager;
   resolveModel: () => LanguageModel;
   /**
@@ -174,6 +190,29 @@ function toConversationDto(
     pendingDecisions: live.pendingDecisions,
     createdAt: row.createdAt.toISOString(),
   };
+}
+
+/**
+ * 这一轮归别人跑吗？归的话把请求原样转过去，返回上游的响应；不归就返回 `undefined`，
+ * 由调用方照常在本副本答。
+ *
+ * **判据只有一条：这件事的状态在库里，还是在持有者的进程内存里。** 前者哪个副本都能答，
+ * 后者必须转。带着转发标记进来的一律自己答——那说明已经转过一次，再转就是环路。
+ */
+async function forwardToHolder(
+  c: Context<ChatEnv>,
+  deps: ChatRouteDeps,
+  conversationId: string,
+): Promise<Response | undefined> {
+  const forwarder = deps.forwarder;
+  if (forwarder === undefined || forwarder.isForwarded(c)) {
+    return undefined;
+  }
+  const activity = await deps.runtime.getActivity(conversationId);
+  if (!activity.active || activity.local || activity.holder === undefined) {
+    return undefined;
+  }
+  return await forwarder.forward(c, activity.holder);
 }
 
 /**
@@ -257,7 +296,60 @@ function generateBranchName(conversationId: string): string {
 
 export function createChatApp(deps: ChatRouteDeps) {
   const app = new OpenAPIHono<ChatEnv>();
+
+  // 副本间令牌闸门。**只拦转发进来的请求**——终端用户的请求不带这个头，也不该被要求带。
+  // 它防的是「伪造转发标记、逼这个副本在本地答」，越不过登录（用户身份仍走 cookie）。
+  app.use('/api/chat/*', async (c, next) => {
+    const rejected = deps.forwarder?.reject(c);
+    if (rejected !== undefined) {
+      return rejected;
+    }
+    await next();
+    return undefined;
+  });
+
   app.use('/api/chat/*', deps.authMiddleware);
+
+  /**
+   * **要在持有者那边办的事，先转过去。**
+   *
+   * 写成中间件而不是写在各个处理器里：处理器的返回类型由 OpenAPI 路由定义钉死，而转发
+   * 返回的是上游那条原样的响应（含 SSE 流）。
+   *
+   * 会话归属（这条会话是不是你的）由持有者再查一遍——它跑的是同一份代码，转过去的请求
+   * 和用户直连的请求在它眼里没有区别。
+   */
+  const forwardToHolderMiddleware: MiddlewareHandler<ChatEnv> = async (
+    c,
+    next,
+  ) => {
+    const id = c.req.param('id');
+    if (id !== undefined) {
+      const forwarded = await forwardToHolder(c, deps, id);
+      if (forwarded !== undefined) {
+        return forwarded;
+      }
+    }
+    await next();
+    return undefined;
+  };
+
+  // 这几条的状态在持有者的进程内存里：[进行中草稿](../../../../docs/terms.md)、
+  // 那一轮的 `AbortController`、正在等人的那个 promise、以及改完队列要广播的那帧快照。
+  //
+  // `…/messages` 在列表里只因为它的 **POST**（起轮/插话/排队要在持有者那边发生）；它的
+  // GET 是纯回放、哪个副本都能答，但转过去也只是多一跳，不值得为此再拆一条路由。
+  for (const path of [
+    '/api/chat/conversations/:id/messages',
+    '/api/chat/conversations/:id/stream',
+    '/api/chat/conversations/:id/abort',
+    '/api/chat/conversations/:id/queue',
+    '/api/chat/conversations/:id/queue/:messageId',
+    '/api/chat/conversations/:id/approvals/:callId',
+    '/api/chat/conversations/:id/questions/:callId',
+  ]) {
+    app.use(path, forwardToHolderMiddleware);
+  }
 
   // ---- POST /api/chat/conversations ----
 
@@ -295,19 +387,24 @@ export function createChatApp(deps: ChatRouteDeps) {
     const userId = c.get('userId');
     const input = c.req.valid('json');
 
-    let repoRef: GitHubRepoRef;
-    let githubPat: string;
-    try {
-      repoRef = resolveRepo();
-      githubPat = resolveGithubPat();
-    } catch (error) {
-      return c.json({ error: describeError(error) }, 500);
-    }
-
     const conversationId = randomUUID();
     const sandboxName = generateSandboxName(conversationId);
-    const branchName = generateBranchName(conversationId);
     const provider = input.provider ?? resolveDefaultProvider();
+    // [本地沙盒](../../../../docs/terms.md)没有 git，也就没有仓库与工作分支——GitHub 那两个
+    // 配置这一档根本不读，零配置才起得来。
+    const usesGit = provider !== 'local';
+    const branchName = usesGit ? generateBranchName(conversationId) : null;
+
+    let repoRef: GitHubRepoRef | undefined;
+    let githubPat: string | undefined;
+    if (usesGit) {
+      try {
+        repoRef = resolveRepo();
+        githubPat = resolveGithubPat();
+      } catch (error) {
+        return c.json({ error: describeError(error) }, 500);
+      }
+    }
 
     let acquired: AcquiredSandbox;
     try {
@@ -317,11 +414,15 @@ export function createChatApp(deps: ChatRouteDeps) {
         sandboxName,
         // Vercel resumes by its upfront-known name (keeps today's get()→404→create on the first acquire); E2B has no sandboxId yet → straight to create.
         resumeToken: provider === 'e2b' ? undefined : sandboxName,
-        branchName,
-        repoCloneUrl: repoRef.cloneUrl,
-        repoOwner: repoRef.owner,
-        repoName: repoRef.repo,
-        githubPat,
+        ...(branchName !== null ? { branchName } : {}),
+        ...(repoRef !== undefined ?
+          {
+            repoCloneUrl: repoRef.cloneUrl,
+            repoOwner: repoRef.owner,
+            repoName: repoRef.repo,
+          }
+        : {}),
+        ...(githubPat !== undefined ? { githubPat } : {}),
       });
     } catch (error) {
       return c.json({ error: describeError(error) }, 500);
@@ -331,7 +432,7 @@ export function createChatApp(deps: ChatRouteDeps) {
       id: conversationId,
       userId,
       title: input.title ?? 'New chat',
-      repo: `${repoRef.owner}/${repoRef.repo}`,
+      repo: repoRef === undefined ? null : `${repoRef.owner}/${repoRef.repo}`,
       branchName,
       sandboxName,
       provider,
@@ -646,8 +747,14 @@ export function createChatApp(deps: ChatRouteDeps) {
     if (outcome.reason === 'queue_full' || outcome.reason === 'busy') {
       return c.json({ error: outcome.message }, 409);
     }
-    // `held_by_other` 在单进程下走不到（框架只有在归属落在别的节点手上时才报它）；
-    // 上多节点后这里要改成「转发给 outcome 里那个 holder」，而不是报错。
+    // `held_by_other`：归属在别的副本手上。**框架把地址放在 `holder` 字段里**（不是那句
+    // 文案里），照着转就行；已经转过一次的不再转，回 503 让客户端稍后重试。
+    if (outcome.reason === 'held_by_other') {
+      // 走到这里说明归属**刚刚**易了主：前面那道转发中间件问的时候还在本地。窄竞态，
+      // 回「稍后再试」而不是报错——客户端重发时中间件就会把它转到新的持有者那边。
+      c.header('retry-after', RETRY_AFTER_SECONDS);
+      return c.json({ error: outcome.message }, RETRY_LATER_STATUS);
+    }
     return c.json({ error: outcome.message }, 500);
   });
 
@@ -844,6 +951,80 @@ export function createChatApp(deps: ChatRouteDeps) {
     });
   });
 
+  // ---- GET /api/chat/conversations/{id}/activity ----
+
+  const activityRoute = createRoute({
+    method: 'get',
+    path: '/api/chat/conversations/{id}/activity',
+    tags: ['Chat'],
+    summary:
+      '这条会话此刻有没有轮在跑、归哪个副本跑（多副本运维与验证用）',
+    request: { params: ConversationParamsSchema },
+    responses: {
+      200: {
+        content: { 'application/json': { schema: ActivitySchema } },
+        description: 'Activity',
+      },
+      401: {
+        content: { 'application/json': { schema: ErrorSchema } },
+        description: 'Unauthorized',
+      },
+      404: {
+        content: { 'application/json': { schema: ErrorSchema } },
+        description: 'Not found',
+      },
+    },
+  });
+
+  app.openapi(activityRoute, async (c) => {
+    const userId = c.get('userId');
+    const { id } = c.req.valid('param');
+    const row = await getConversation(deps.db, id, userId);
+    if (row === undefined) {
+      return c.json({ error: 'Not found' }, 404);
+    }
+    const activity = await deps.runtime.getActivity(id);
+    return c.json(
+      {
+        active: activity.active,
+        local: activity.local,
+        ...(activity.holder !== undefined ? { holder: activity.holder } : {}),
+      },
+      200,
+    );
+  });
+
+  // ---- GET /api/chat/config ----
+
+  const chatConfigRoute = createRoute({
+    method: 'get',
+    path: '/api/chat/config',
+    tags: ['Chat'],
+    summary:
+      '这台服务端能做什么：能选哪几档沙盒、用的是真模型还是演示模型（docs/ingress/tech/unified-demo.md §4.3）',
+    responses: {
+      200: {
+        content: { 'application/json': { schema: ChatConfigSchema } },
+        description: 'Capabilities',
+      },
+      401: {
+        content: { 'application/json': { schema: ErrorSchema } },
+        description: 'Unauthorized',
+      },
+    },
+  });
+
+  app.openapi(chatConfigRoute, (c) =>
+    c.json(
+      {
+        providers: availableProviders(),
+        defaultProvider: resolveDefaultProvider(),
+        model: hasRealModel() ? ('deepseek' as const) : ('demo' as const),
+      },
+      200,
+    ),
+  );
+
   // ---- POST /api/chat/conversations/{id}/presence (在场心跳, docs/ingress/tech/push-notification.md §5.2) ----
 
   const presenceRoute = createRoute({
@@ -893,9 +1074,9 @@ export function createChatApp(deps: ChatRouteDeps) {
     // 这时点「允许」是在一个睡着的沙盒上跑命令。挂起再恢复则会走起轮装配、先把沙盒叫醒
     // （docs/ingress/tech/chat-webapp.md §6.3）。
     if (focused) {
-      markPresent(userId, id);
+      await markPresent(deps.db, userId, id);
     } else {
-      clearPresent(userId, id);
+      await clearPresent(deps.db, userId, id);
     }
 
     return c.json({ ok: true as const }, 200);
@@ -1069,6 +1250,7 @@ export function createChatApp(deps: ChatRouteDeps) {
 const defaultSandboxManager = createSandboxManager({
   vercel: createVercelProvider(),
   e2b: createE2bProvider(), // lazy — reads E2B_API_KEY only when an E2B conversation actually acquires
+  local: createLocalProvider({ db: defaultDb }),
 });
 
 /** getChatTelemetry* 自带 vitest 守卫（模块顶层求值——任何 import 本文件的测试都会走到这里，没有守卫会在仓库里落 telemetry.db）。 */
@@ -1099,9 +1281,12 @@ export const chatRuntime = createChatRuntime({
   ...defaultTelemetry,
 });
 
+const defaultForwarder = createForwarder(resolveNodeIdentity(), defaultLogger);
+
 export const chatApp = createChatApp({
   db: defaultDb,
   runtime: chatRuntime,
+  forwarder: defaultForwarder,
   decisions: createChatPersistence(defaultDb).decisions,
   sandboxManager: defaultSandboxManager,
   resolveModel,

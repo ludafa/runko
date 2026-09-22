@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils';
 
-import type { ConversationStatus } from '../schema';
+import type { ConversationProvider, ConversationStatus } from '../schema';
 
 /**
  * 会话状态：一个点，不是徽标。
@@ -26,8 +26,30 @@ export const CONVERSATION_STATUS_LABEL: Record<ConversationStatus, string> = {
   expired: STATUS_META.expired.label,
 };
 
-export function StatusDot({ status }: { status: ConversationStatus }) {
-  const meta = STATUS_META[status];
+/**
+ * 展示层看到的状态——[本地沙盒](../../../../../../docs/terms.md)不会休眠，`sleeping`
+ * 在这里就地折回 `active`，不管服务端实际给的是什么。三处读状态的地方
+ * （这里、`branch-header.tsx`、`conversation-details-dialog.tsx`）都要过这一层，
+ * 不能只改点、漏了详情弹窗里的文字。
+ */
+export function displayConversationStatus(
+  status: ConversationStatus,
+  provider: ConversationProvider,
+): ConversationStatus {
+  if (provider === 'local' && status === 'sleeping') {
+    return 'active';
+  }
+  return status;
+}
+
+export function StatusDot({
+  status,
+  provider,
+}: {
+  status: ConversationStatus;
+  provider: ConversationProvider;
+}) {
+  const meta = STATUS_META[displayConversationStatus(status, provider)];
   return (
     <span
       className={cn('size-1.5 shrink-0 rounded-full border', meta.className)}

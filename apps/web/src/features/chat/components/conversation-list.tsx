@@ -29,36 +29,51 @@ import {
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
-import type { Conversation, ConversationProvider } from '../schema';
+import type { ChatConfig, Conversation, ConversationProvider } from '../schema';
 import { StatusDot } from './conversation-status-badge';
 
-const PROVIDER_OPTIONS: {
-  value: ConversationProvider;
-  label: string;
-  hint: string;
-}[] = [
-  { value: 'vercel', label: 'Vercel', hint: '按名字恢复，快照到期前一直在' },
-  { value: 'e2b', label: 'E2B', hint: '空闲自动暂停，下条消息唤醒' },
-];
+/** 每档 provider 在新建表单里的说法——选项本身（有哪几档、默认选哪个）来自 `/api/chat/config`，这里只管怎么讲。 */
+const PROVIDER_COPY: Record<
+  ConversationProvider,
+  { label: string; hint: string }
+> = {
+  vercel: { label: 'Vercel', hint: '按名字恢复，快照到期前一直在' },
+  e2b: { label: 'E2B', hint: '空闲自动暂停，下条消息唤醒' },
+  local: {
+    label: '本地',
+    hint: '跑在服务端进程内存里，没有 git、不联网，不需要任何云账号',
+  },
+};
+
+/** 拿不到 `/api/chat/config` 时的退路：`local` 不需要任何云账号，服务端也恒保证支持它（docs/ingress/tech/unified-demo.md §4.3）。 */
+const FALLBACK_CHAT_CONFIG: ChatConfig = {
+  providers: ['local'],
+  defaultProvider: 'local',
+  model: 'demo',
+};
 
 export function SessionList({
   conversations,
   activeSessionId,
   onCreate,
   pendingTitle,
+  chatConfig,
 }: {
   conversations: Conversation[];
   activeSessionId: string | undefined;
   onCreate: (title: string, provider: ConversationProvider) => void;
   /** 正在建的那个会话的标题；`undefined` 表示当前没有在建。 */
   pendingTitle: string | undefined;
+  /** `/api/chat/config` 的结果；`undefined` 表示还没拿到（含请求失败），此时退回 `FALLBACK_CHAT_CONFIG`。 */
+  chatConfig: ChatConfig | undefined;
 }) {
   const creating = pendingTitle !== undefined;
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
-  // Defaults to 'vercel' — matches the server's own `SANDBOX_PROVIDER` default
-  // (docs/host/contract/tech/sandbox-provider.md §6); the UI always sends the choice explicitly.
-  const [provider, setProvider] = useState<ConversationProvider>('vercel');
+  const config = chatConfig ?? FALLBACK_CHAT_CONFIG;
+  const [provider, setProvider] = useState<ConversationProvider>(
+    config.defaultProvider,
+  );
 
   function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -124,27 +139,30 @@ export function SessionList({
                 <div
                   role="group"
                   aria-label="沙盒 provider"
-                  className="grid grid-cols-2 gap-2"
+                  className="flex flex-col gap-2"
                 >
-                  {PROVIDER_OPTIONS.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setProvider(option.value)}
-                      aria-pressed={provider === option.value}
-                      className={cn(
-                        'flex flex-col items-start gap-0.5 rounded-md border px-3 py-2 text-left transition-colors',
-                        provider === option.value ?
-                          'border-foreground bg-muted'
-                        : 'border-border hover:bg-muted/50',
-                      )}
-                    >
-                      <span className="font-mono text-xs">{option.label}</span>
-                      <span className="text-muted-foreground text-[0.6875rem] leading-snug">
-                        {option.hint}
-                      </span>
-                    </button>
-                  ))}
+                  {config.providers.map((value) => {
+                    const copy = PROVIDER_COPY[value];
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setProvider(value)}
+                        aria-pressed={provider === value}
+                        className={cn(
+                          'flex flex-col items-start gap-0.5 rounded-md border px-3 py-2 text-left transition-colors',
+                          provider === value ?
+                            'border-foreground bg-muted'
+                          : 'border-border hover:bg-muted/50',
+                        )}
+                      >
+                        <span className="font-mono text-xs">{copy.label}</span>
+                        <span className="text-muted-foreground text-[0.6875rem] leading-snug">
+                          {copy.hint}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -209,7 +227,10 @@ export function SessionList({
                 )}
               >
                 <div className="flex items-center gap-1.5">
-                  <StatusDot status={conversation.status} />
+                  <StatusDot
+                    status={conversation.status}
+                    provider={conversation.provider}
+                  />
                   <span className="truncate text-[0.8125rem] leading-snug">
                     {conversation.title ?? '未命名会话'}
                   </span>
@@ -225,7 +246,10 @@ export function SessionList({
                   )}
                 </div>
                 <span className="text-muted-foreground truncate pl-3 font-mono text-[0.6875rem]">
-                  {conversation.branchName} · {conversation.provider}
+                  {/* 本地沙盒没有分支（docs/ingress/tech/unified-demo.md §4.3）——这一行退回只显示 provider。 */}
+                  {conversation.branchName !== null &&
+                    `${conversation.branchName} · `}
+                  {conversation.provider}
                 </span>
               </Link>
             );

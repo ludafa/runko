@@ -3,10 +3,10 @@
   "properties": {
     "id": { "type": "string" },
     "title": { "type": "string" },
-    "repo": { "type": "string" },
-    "branchName": { "type": "string" },
+    "repo": { "type": ["string", "null"] },
+    "branchName": { "type": ["string", "null"] },
     "sandboxName": { "type": "string" },
-    "provider": { "type": "string", "enum": ["vercel", "e2b"] },
+    "provider": { "type": "string", "enum": ["vercel", "e2b", "local"] },
     "status": { "type": "string", "enum": ["active", "sleeping", "expired"] },
     "lastActiveAt": { "type": "string" },
     "queuedMessages": {

@@ -103,6 +103,9 @@ export function createFakeSandboxManager(
     async ensureLifetime(conversationId: string): Promise<void> {
       ensureLifetimeCalls.push(conversationId);
     },
+    persist(): Promise<void> {
+      return Promise.resolve();
+    },
     release(conversationId: string): void {
       releaseCalls.push(conversationId);
     },

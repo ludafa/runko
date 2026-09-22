@@ -231,6 +231,10 @@ describe('routes/chat', () => {
     });
   }
 
+  /**
+   * 建一个会话。**默认点名 `vercel`**：本文件测的是云沙盒那条路（假的 manager 演它），
+   * 而服务端的缺省档随环境而变（什么 key 都没配时是本地沙盒）。
+   */
   async function createConversationVia(
     app: ReturnType<typeof build>['app'],
     body: Record<string, unknown> = {},
@@ -238,7 +242,7 @@ describe('routes/chat', () => {
     const response = await app.request('/api/chat/conversations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ provider: 'vercel', ...body }),
     });
     return ConversationSchema.parse(await response.json());
   }

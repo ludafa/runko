@@ -28,7 +28,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 import type { Conversation } from '../schema';
 import { formatDuration } from '../timeline';
-import { CONVERSATION_STATUS_LABEL } from './conversation-status-badge';
+import {
+  CONVERSATION_STATUS_LABEL,
+  displayConversationStatus,
+} from './conversation-status-badge';
 import { count } from './turn-stats-dialog';
 
 /** 固定用 ISO 风格的本地时间，不走 `toLocaleString()`——后者的输出随环境 ICU 数据变化，测试里对不齐。 */
@@ -256,23 +259,35 @@ export function ConversationDetailsDialog({
 
           <TabsContent value="detail">
             <dl className="flex flex-col gap-3">
-              <Row label="分支">
-                <span className="font-mono text-[0.8125rem]">
-                  {conversation.branchName}
-                </span>
-              </Row>
-              <Row label="仓库">
-                <span className="font-mono text-[0.8125rem]">
-                  {conversation.repo}
-                </span>
-              </Row>
+              {/* [本地沙盒](../../../../../../docs/terms.md)没有仓库、没有分支——`null` 时这两行整个不渲染，而不是显示空字符串。 */}
+              {conversation.branchName !== null && (
+                <Row label="分支">
+                  <span className="font-mono text-[0.8125rem]">
+                    {conversation.branchName}
+                  </span>
+                </Row>
+              )}
+              {conversation.repo !== null && (
+                <Row label="仓库">
+                  <span className="font-mono text-[0.8125rem]">
+                    {conversation.repo}
+                  </span>
+                </Row>
+              )}
               <Row label="沙盒">
                 <span className="font-mono text-[0.8125rem]">
                   {conversation.provider}
                 </span>
               </Row>
               <Row label="状态">
-                {CONVERSATION_STATUS_LABEL[conversation.status]}
+                {
+                  CONVERSATION_STATUS_LABEL[
+                    displayConversationStatus(
+                      conversation.status,
+                      conversation.provider,
+                    )
+                  ]
+                }
               </Row>
               <Row label="创建于">
                 <span className="tabular-nums">

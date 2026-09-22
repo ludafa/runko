@@ -198,6 +198,7 @@ describe('端到端：建 session → core loop 注入 functionId → SQLite 可
         model: stopOnlyModel('done'),
         skills: await loadSkillsFromWorkspace(fs, silentLogger),
         instructions: buildInstructions({
+          kind: 'repo',
           repoOwner: 'acme',
           repoName: 'demo',
           defaultBranch: 'main',
@@ -251,6 +252,7 @@ describe('端到端：建 session → core loop 注入 functionId → SQLite 可
         ),
         skills: await loadSkillsFromWorkspace(fs, silentLogger),
         instructions: buildInstructions({
+          kind: 'repo',
           repoOwner: 'acme',
           repoName: 'demo',
           defaultBranch: 'main',

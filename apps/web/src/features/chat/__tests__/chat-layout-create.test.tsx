@@ -6,22 +6,28 @@
  * 「还没 resolve 但界面已经切了」，再放行。以及失败路径：此前 `handleCreate`
  * 只有 `finally` 没有 `catch`，请求一挂就静默吞掉，界面毫无变化。
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Conversation } from '../schema';
+import type { ChatConfig, Conversation } from '../schema';
 
-const { createConversationMock, listConversationsMock, navigateMock } =
-  vi.hoisted(() => ({
-    createConversationMock: vi.fn(),
-    listConversationsMock: vi.fn(),
-    navigateMock: vi.fn(),
-  }));
+const {
+  createConversationMock,
+  listConversationsMock,
+  fetchChatConfigMock,
+  navigateMock,
+} = vi.hoisted(() => ({
+  createConversationMock: vi.fn(),
+  listConversationsMock: vi.fn(),
+  fetchChatConfigMock: vi.fn(),
+  navigateMock: vi.fn(),
+}));
 
 vi.mock('@/features/chat/api', () => ({
   createConversation: (...args: unknown[]) => createConversationMock(...args),
   listConversations: (...args: unknown[]) => listConversationsMock(...args),
+  fetchChatConfig: (...args: unknown[]) => fetchChatConfigMock(...args),
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -56,6 +62,16 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
   };
 }
 
+/** `/api/chat/config` 的默认夹具：三档都开，默认选 vercel——与现有用例假设的旧行为一致。 */
+function chatConfig(overrides: Partial<ChatConfig> = {}): ChatConfig {
+  return {
+    providers: ['vercel', 'e2b', 'local'],
+    defaultProvider: 'vercel',
+    model: 'deepseek',
+    ...overrides,
+  };
+}
+
 /** 一个由测试决定何时 resolve/reject 的 promise。 */
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -80,8 +96,10 @@ async function submitCreate(user: ReturnType<typeof userEvent.setup>) {
 beforeEach(() => {
   createConversationMock.mockReset();
   listConversationsMock.mockReset();
+  fetchChatConfigMock.mockReset();
   navigateMock.mockReset();
   listConversationsMock.mockResolvedValue([]);
+  fetchChatConfigMock.mockResolvedValue(chatConfig());
   navigateMock.mockResolvedValue(undefined);
 });
 
@@ -301,5 +319,83 @@ describe('ChatLayout — 会话列表里的「在等你」', () => {
     expect(badge).toHaveAttribute('title', '有 2 处在等你答复');
     expect(screen.getAllByTestId('waiting-for-you-badge')).toHaveLength(1);
     expect(badge.closest('a')).toHaveTextContent('等审批的');
+  });
+});
+
+describe('ChatLayout — 本地沙盒会话（无仓库无分支）', () => {
+  it('渲染 provider 为 local、repo/branchName 为 null 的会话，不崩、不落回空列表', async () => {
+    listConversationsMock.mockResolvedValue([
+      conversation({
+        id: 'conv-local',
+        title: '本地跑一下',
+        provider: 'local',
+        repo: null,
+        branchName: null,
+      }),
+    ]);
+    render(
+      <ChatLayout activeSessionId={undefined}>
+        <p>会话区</p>
+      </ChatLayout>,
+    );
+
+    expect(await screen.findByText('本地跑一下')).toBeInTheDocument();
+    expect(
+      screen.queryByText('还没有会话。新建一个，它会拿到自己的分支。'),
+    ).not.toBeInTheDocument();
+    // 行尾没有分支名可显示，只剩 provider
+    expect(screen.getByText('local')).toBeInTheDocument();
+  });
+});
+
+describe('ChatLayout — 新建会话弹窗的 provider 选项', () => {
+  it('选项从 /api/chat/config 来，默认选中 defaultProvider', async () => {
+    fetchChatConfigMock.mockResolvedValue(
+      chatConfig({ providers: ['e2b', 'local'], defaultProvider: 'local' }),
+    );
+    const user = userEvent.setup();
+    render(
+      <ChatLayout activeSessionId={undefined}>
+        <p>之前的会话内容</p>
+      </ChatLayout>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '新建会话' })).toBeEnabled();
+    });
+    await user.click(screen.getByRole('button', { name: '新建会话' }));
+    const dialog = await screen.findByRole('dialog');
+
+    // 只列出服务端给的那两档——写死的 vercel 选项不该再出现
+    expect(within(dialog).getByText('E2B')).toBeInTheDocument();
+    expect(within(dialog).getByText('本地')).toBeInTheDocument();
+    expect(within(dialog).queryByText('Vercel')).not.toBeInTheDocument();
+    expect(
+      within(dialog).getByText(/没有 git、不联网，不需要任何云账号/),
+    ).toBeInTheDocument();
+
+    // 默认选中 defaultProvider（local）
+    expect(
+      within(dialog).getByRole('button', { name: /本地/, pressed: true }),
+    ).toBeInTheDocument();
+  });
+
+  it('拿不到 /api/chat/config 时按钮不卡死，退回本地这一档', async () => {
+    fetchChatConfigMock.mockRejectedValue(new Error('network down'));
+    const user = userEvent.setup();
+    render(
+      <ChatLayout activeSessionId={undefined}>
+        <p>之前的会话内容</p>
+      </ChatLayout>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '新建会话' })).toBeEnabled();
+    });
+    await user.click(screen.getByRole('button', { name: '新建会话' }));
+    const dialog = await screen.findByRole('dialog');
+
+    expect(
+      within(dialog).getByRole('button', { name: /本地/, pressed: true }),
+    ).toBeInTheDocument();
   });
 });

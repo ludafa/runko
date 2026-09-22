@@ -1,0 +1,13 @@
+{
+  "type": "object",
+  "properties": {
+    "providers": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["vercel", "e2b", "local"] }
+    },
+    "defaultProvider": { "type": "string", "enum": ["vercel", "e2b", "local"] },
+    "model": { "type": "string", "enum": ["deepseek", "demo"] }
+  },
+  "required": ["providers", "defaultProvider", "model"],
+  "x-readme-ref-name": "ChatConfig"
+}

@@ -16,6 +16,7 @@ const PROVIDER_META: Record<
 > = {
   vercel: { label: 'vercel', dotClassName: 'bg-foreground/70' },
   e2b: { label: 'e2b', dotClassName: 'bg-orange-500' },
+  local: { label: 'local', dotClassName: 'bg-emerald-500' },
 };
 
 export function ProviderBadge({

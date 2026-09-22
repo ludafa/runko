@@ -6,6 +6,7 @@
 export const createConversationInputProviderEnum = {
   vercel: 'vercel',
   e2b: 'e2b',
+  local: 'local',
 } as const;
 
 export type CreateConversationInputProviderEnumKey =

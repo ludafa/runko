@@ -1,7 +1,14 @@
 export type { AbortTurnAck, AbortTurnAckOkEnumKey } from './AbortTurnAck.ts';
+export type { Activity } from './Activity.ts';
 export type { ApiError } from './ApiError.ts';
 export type { ApprovalAck, ApprovalAckOkEnumKey } from './ApprovalAck.ts';
 export type { ChatChunkEnvelope } from './ChatChunkEnvelope.ts';
+export type {
+  ChatConfig,
+  ChatConfigDefaultProviderEnumKey,
+  ChatConfigModelEnumKey,
+  ChatConfigProvidersEnumKey,
+} from './ChatConfig.ts';
 export type { ChatMessageFrame } from './ChatMessageFrame.ts';
 export type { ChatQueueFrame } from './ChatQueueFrame.ts';
 export type { ChatTurnStateFrame } from './ChatTurnStateFrame.ts';
@@ -33,6 +40,12 @@ export type {
   DeleteApiChatConversationsIdQueueMessageidPathParams,
 } from './DeleteApiChatConversationsIdQueueMessageid.ts';
 export type {
+  GetApiChatConfig200,
+  GetApiChatConfig401,
+  GetApiChatConfigQuery,
+  GetApiChatConfigQueryResponse,
+} from './GetApiChatConfig.ts';
+export type {
   GetApiChatConversations200,
   GetApiChatConversations401,
   GetApiChatConversationsQuery,
@@ -46,6 +59,14 @@ export type {
   GetApiChatConversationsIdQuery,
   GetApiChatConversationsIdQueryResponse,
 } from './GetApiChatConversationsId.ts';
+export type {
+  GetApiChatConversationsIdActivity200,
+  GetApiChatConversationsIdActivity401,
+  GetApiChatConversationsIdActivity404,
+  GetApiChatConversationsIdActivityPathParams,
+  GetApiChatConversationsIdActivityQuery,
+  GetApiChatConversationsIdActivityQueryResponse,
+} from './GetApiChatConversationsIdActivity.ts';
 export type {
   GetApiChatConversationsIdMessages200,
   GetApiChatConversationsIdMessages401,
@@ -195,6 +216,9 @@ export type { TurnTelemetry } from './TurnTelemetry.ts';
 export type { TurnTelemetryEvent } from './TurnTelemetryEvent.ts';
 export { abortTurnAckOkEnum } from './AbortTurnAck.ts';
 export { approvalAckOkEnum } from './ApprovalAck.ts';
+export { chatConfigDefaultProviderEnum } from './ChatConfig.ts';
+export { chatConfigModelEnum } from './ChatConfig.ts';
+export { chatConfigProvidersEnum } from './ChatConfig.ts';
 export { conversationProviderEnum } from './Conversation.ts';
 export { conversationStatusEnum } from './Conversation.ts';
 export { createConversationInputProviderEnum } from './CreateConversationInput.ts';

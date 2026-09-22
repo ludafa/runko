@@ -19,8 +19,8 @@ related: ["ingress/features/unified-demo.md", "ingress/tech/unified-demo.md", "h
 | U0 | 三份文档 + 术语登记 | ✅ 待你过目 |
 | U1 | 框架：租约启动时收拾自己名下的旧租约 | ✅ 2026-09-22 |
 | U2 | 数据层换 Kysely，框架的表换 persist-kysely（仍只有 SQLite） | ✅ 2026-09-22 |
-| U3 | 零配置：演示模型、本地沙盒、GitHub 可选、配置接口、web | ⬜ |
-| U4 | Postgres | ⬜ |
+| U3 | 零配置：演示模型、本地沙盒、GitHub 可选、配置接口、web | ✅ 2026-09-22 |
+| U4 | Postgres | ✅ 2026-09-22 |
 | U5 | 多副本：转发、在场进库、镜像与验证环境 | ⬜ |
 | U6 | 把 persist-demo 的真进程测试搬过来，接进 CI | ⬜ |
 | U7 | 删 persist-demo，清理文档 | ⬜ |
@@ -77,13 +77,15 @@ related: ["ingress/features/unified-demo.md", "ingress/tech/unified-demo.md", "h
   - 前端：`apps/web` 的 schema、建会话弹窗、会话页、分支栏、详情弹窗、准备中视图、登录页。
   - 其他：`.env.template`、`openapi.yml` 与 `apps/web/src/gen` 重新生成、chat 应用的 README。
 - **产出**：演示模型（`run:` / `ask:` / 复述）；本地沙盒加快照表；`GET /api/chat/config`；`GET /api/auth-config`。
-- **验收**：演示模型、本地沙盒、快照版本比较都有单测；web 测试覆盖 `local` 这一档；不配 key 时，按[功能手册 §5](../features/unified-demo.md#_5-成功标准) 第 1 条的步骤实测一遍（服务要你来起）。
+- **实际**：演示模型把「这一步产出什么」抽成 `demoStreamFor(prompt)`，测试直接喂提示词，不必绕过 AI SDK 的类型；本地沙盒的快照带版本号，跨进程与跨副本都验了；`usesGit=false` 让建盒后的 git/skill 三步整段跳过。前端的沙盒选项改由 `/api/chat/config` 驱动，拿不到配置时退到只有本地一档。
+- **验收结论**：✅ 服务端新增 3 个测试文件（演示模型 7 条、本地沙盒 6 条、零配置端到端 5 条），前端 323 条全绿。**零配置端到端实测**：一个 key 都不配，建会话落到本地沙盒、`run: cat /README.md` 真的跑了、危险命令弹审批、批准后结清——全在测试里跑通（`test/routes/zero-config.test.ts`）。
 
 ### U4 · Postgres
 
 - **目标**：配了 `DATABASE_URL` 就跑在 Postgres 上。见[技术方案 §5](../tech/unified-demo.md#_5-postgres)。
 - **涉及**：`db/` 的方言选择和 int8 解析、迁移的列类型分支、store 测试的双库参数化。
-- **验收**：store 层测试在 SQLite 和 pglite 上都绿；用 CI 的 Postgres 服务（或本地 docker 的 Postgres）跑一遍 `db:migrate` 和路由测试。
+- **实际**：方言在 `db/instance.ts` 一处分叉（配了 `DATABASE_URL` 就是 Postgres）；pg 连接池就地配 int8 解析器，毫秒时间戳读回来是数字不是字符串。新增 `test/db/dialects.test.ts`：同一批读写（建表、会话往返、null 的仓库/分支、推送 upsert、会话级授权）在 SQLite 与 pglite 上各跑一遍。
+- **验收结论**：✅ 两种库各 5 条全绿；对着真 Postgres 跑 `db:migrate`，15 张表（better-auth 5 + 应用 4 + 框架 4 + 迁移记录 2）建好。
 
 ### U5 · 多副本
 

@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Db } from '../../src/agent/store.js';
 import { createConversation } from '../../src/agent/store.js';
 import { createChatNotifier } from '../../src/push/notifier.js';
-import { markPresent, resetPresence } from '../../src/push/presence.js';
+import { markPresent } from '../../src/push/presence.js';
 import type { PushTransport } from '../../src/push/sender.js';
 import { upsertSubscription } from '../../src/push/store.js';
 import type { PushPayload } from '../../src/push/types.js';
@@ -58,7 +58,6 @@ describe('push/notifier', () => {
   let db: Db;
 
   beforeEach(async () => {
-    resetPresence();
     process.env.VAPID_PUBLIC_KEY = 'pub';
     process.env.VAPID_PRIVATE_KEY = 'priv';
     process.env.VAPID_SUBJECT = 'mailto:me@example.com';
@@ -83,7 +82,6 @@ describe('push/notifier', () => {
   });
 
   afterEach(() => {
-    resetPresence();
     delete process.env.VAPID_PUBLIC_KEY;
     delete process.env.VAPID_PRIVATE_KEY;
     delete process.env.VAPID_SUBJECT;
@@ -279,7 +277,7 @@ describe('push/notifier', () => {
   });
 
   it('闸门 2（前台抑制）：人正盯着这条会话就一条都不发', async () => {
-    markPresent('user-1', CONVERSATION_ID);
+    await markPresent(db, 'user-1', CONVERSATION_ID);
     const { sent, transport } = collector();
     notifier(transport).approvalPending({
       conversationId: CONVERSATION_ID,
@@ -294,7 +292,7 @@ describe('push/notifier', () => {
   });
 
   it('在场是按会话记的：盯着别的会话不影响这一条', async () => {
-    markPresent('user-1', 'another-conversation');
+    await markPresent(db, 'user-1', 'another-conversation');
     const { sent, transport } = collector();
     notifier(transport).approvalPending({
       conversationId: CONVERSATION_ID,

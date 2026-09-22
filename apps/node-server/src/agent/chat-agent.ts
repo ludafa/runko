@@ -17,14 +17,29 @@ import type { RunkoExec, RunkoFS } from '@runko/core';
  * unless the user's *current* message actually asks for a code change —
  * multi-turn chat means most turns are just questions/discussion.
  */
-export function buildInstructions(opts: {
+/** 云沙盒那一档：仓库已经 clone 好，有 git 也有网。 */
+export interface RepoInstructionsInput {
+  kind: 'repo';
   repoOwner: string;
   repoName: string;
   defaultBranch: string;
   branchName: string;
   /** `web-search` 是否注册进了工具表——没注册就不提它，免得指令让模型去找一个不存在的工具（docs/logic/engine/tech/web-search.md §5）。 */
   hasWebSearch: boolean;
-}): string {
+}
+
+/** [本地沙盒](../../../../docs/terms.md)那一档：没有仓库、没有 git、不联网。 */
+export interface LocalInstructionsInput {
+  kind: 'local';
+  hasWebSearch: boolean;
+}
+
+export type InstructionsInput = RepoInstructionsInput | LocalInstructionsInput;
+
+export function buildInstructions(opts: InstructionsInput): string {
+  if (opts.kind === 'local') {
+    return buildLocalInstructions(opts);
+  }
   const { repoOwner, repoName, defaultBranch, branchName } = opts;
   const webSearchLine =
     opts.hasWebSearch ?
@@ -39,6 +54,27 @@ export function buildInstructions(opts: {
 - 只有当用户明确要求提交/推送/开 PR 时，才执行 git 操作；push 前确保当前分支就是 "${branchName}"；开 PR 时用 curl 调 GitHub REST API（\`$GH_TOKEN\` 已是沙盒环境变量，直接引用，不要猜测、复述或打印它的值），head 用 "${branchName}"，base 用 "${defaultBranch}"。
 - 开 PR 前要先检查一下之前的 PR 是否已经被合入：若已合入，请新开个 PR。
 - 每次回复如实说明这一轮做了什么、为什么这么做，或者为什么这一轮没有改动代码——不要夸大、不要编造未发生的操作结果。
+- 当你需要用户做决定或澄清需求时，用 ask-user 工具直接提问，不要在回复文本里空等。${webSearchLine}`;
+}
+
+/**
+ * 本地沙盒那一版提示词。
+ *
+ * 跟云沙盒那版的差别全在「这里没有什么」：没有仓库、没有 git、不联网，所以只字不提分支、
+ * commit、PR——提了模型只会去试一堆注定失败的命令，把一轮浪费在报错上。
+ */
+function buildLocalInstructions(opts: LocalInstructionsInput): string {
+  const webSearchLine =
+    opts.hasWebSearch ?
+      `
+- 遇到你不确定、或可能已经过时的外部信息，先用 web-search 工具查一遍再动手；引用结论时带上来源网址。`
+    : '';
+  return `你在一个**本地沙盒**里工作：文件都在服务端进程的内存里，工作区根目录是 "/"，里面预置了一个小示例项目。
+
+- 这里**没有 git、也连不了网**：不要执行 git、curl、wget、npm install 这类命令，它们一定失败。
+- 可以自由读写与运行 shell 命令（ls/cat/grep/sed/mkdir/rm 等都能用）。改动跨轮保留。
+- **如果用户这条消息没有明确要求你修改文件**（只是提问、请你解释、请你规划），就只读、不要写。
+- 每次回复如实说明这一轮做了什么、为什么这么做——不要夸大、不要编造未发生的操作结果。
 - 当你需要用户做决定或澄清需求时，用 ask-user 工具直接提问，不要在回复文本里空等。${webSearchLine}`;
 }
 

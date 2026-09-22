@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   chatReplayFrameSchema,
+  conversationListSchema,
   conversationMessagesListSchema,
+  conversationSchema,
   frameSeq,
   isMessageFrame,
   parseChatReplayFrame,
@@ -132,5 +134,55 @@ describe('conversationMessagesListSchema', () => {
   it('accepts an empty frame list (a brand-new session with no history yet)', () => {
     const result = conversationMessagesListSchema.safeParse({ frames: [] });
     expect(result.success).toBe(true);
+  });
+});
+
+describe('conversationSchema — 本地沙盒（provider: local，repo/branchName: null）', () => {
+  /** 本地沙盒没有仓库、没有分支——服务端会给 `repo`/`branchName` 记 `null`（docs/ingress/tech/unified-demo.md §4.3）。 */
+  function localConversation(): unknown {
+    return {
+      id: 'conv-local',
+      title: null,
+      repo: null,
+      branchName: null,
+      sandboxName: 'runko-conv-local',
+      provider: 'local',
+      status: 'active',
+      lastActiveAt: new Date(0).toISOString(),
+      queuedMessages: [],
+      availableSkills: [],
+      turnInProgress: false,
+      pendingDecisions: 0,
+      createdAt: new Date(0).toISOString(),
+    };
+  }
+
+  it('解析 provider: local 且 repo/branchName: null，不报错', () => {
+    const result = conversationSchema.safeParse(localConversation());
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+    expect(result.data.provider).toBe('local');
+    expect(result.data.repo).toBeNull();
+    expect(result.data.branchName).toBeNull();
+  });
+
+  it('会话列表里混着云沙盒（有仓库/分支）与本地沙盒（都是 null）也能一起解析', () => {
+    const result = conversationListSchema.safeParse([
+      localConversation(),
+      {
+        ...localConversation(),
+        id: 'conv-cloud',
+        provider: 'e2b',
+        repo: 'acme/demo',
+        branchName: 'runko/chat-abc',
+      },
+    ]);
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+    expect(result.data).toHaveLength(2);
   });
 });

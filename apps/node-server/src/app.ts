@@ -25,6 +25,12 @@ app.use(
 );
 
 // Mount routes
+/**
+ * 健康检查。**不鉴权、不碰数据库**：docker 的 healthcheck 与 nginx 用它判断这个副本起没起来，
+ * 库连不上时它也该老实说「我在」——那是另一个问题，不该让编排以为整个容器废了。
+ */
+app.get('/health', (c) => c.json({ ok: true }));
+
 app.route('/', authApp);
 app.route('/', exampleApp);
 app.route('/', chatApp);

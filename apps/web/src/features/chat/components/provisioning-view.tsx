@@ -67,6 +67,52 @@ function useElapsedMs(startedAt: number): number {
   return elapsedMs;
 }
 
+/** 占住 BranchHeader 的位置，就绪后原地换成真的，不跳版——两档 provider 共用同一条页眉。 */
+function ProvisioningHeader({
+  title,
+  provider,
+}: {
+  title: string;
+  provider: ConversationProvider;
+}) {
+  return (
+    <div className="border-border flex items-center gap-2 border-b pb-2">
+      <LoaderIcon
+        className="text-muted-foreground size-3.5 shrink-0 animate-spin"
+        aria-hidden="true"
+      />
+      <span className="truncate text-[0.8125rem] leading-snug">
+        {title.length > 0 ? title : '新会话'}
+      </span>
+      <span className="text-muted-foreground shrink-0 font-mono text-[0.6875rem]">
+        {provider}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * [本地沙盒](../../../../../../docs/terms.md)几乎是瞬间建好的——没有云沙盒建盒/clone/装
+ * skill 那几步要等，播一段按实测耗时估的假进度反而是骗人。这里只给一句简短的文案。
+ */
+function LocalProvisioningView({ title }: { title: string }) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+      <ProvisioningHeader title={title} provider="local" />
+      <p className="text-muted-foreground pl-7 text-sm leading-relaxed">
+        正在准备本地工作区…
+      </p>
+      {/* 占住 composer 的位置——形状对得上，就绪后不跳版 */}
+      <div
+        aria-hidden="true"
+        className="border-border text-muted-foreground/60 rounded-md border px-3 py-2.5 text-sm"
+      >
+        工作区准备好后就能发消息
+      </div>
+    </div>
+  );
+}
+
 export function ProvisioningView({
   title,
   provider,
@@ -80,21 +126,13 @@ export function ProvisioningView({
   const activeIndex = activePhaseIndex(elapsedMs);
   const seconds = Math.floor(elapsedMs / 1000);
 
+  if (provider === 'local') {
+    return <LocalProvisioningView title={title} />;
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-      {/* 占住 BranchHeader 的位置，就绪后原地换成真的，不跳版 */}
-      <div className="border-border flex items-center gap-2 border-b pb-2">
-        <LoaderIcon
-          className="text-muted-foreground size-3.5 shrink-0 animate-spin"
-          aria-hidden="true"
-        />
-        <span className="truncate text-[0.8125rem] leading-snug">
-          {title.length > 0 ? title : '新会话'}
-        </span>
-        <span className="text-muted-foreground shrink-0 font-mono text-[0.6875rem]">
-          {provider}
-        </span>
-      </div>
+      <ProvisioningHeader title={title} provider={provider} />
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 pl-7">
         <ol

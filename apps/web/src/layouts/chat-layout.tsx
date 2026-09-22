@@ -20,13 +20,18 @@ import {
   SidebarInset,
   SidebarProvider,
 } from '@/components/ui/sidebar';
-import { createConversation, listConversations } from '@/features/chat/api';
+import {
+  createConversation,
+  fetchChatConfig,
+  listConversations,
+} from '@/features/chat/api';
 import { SessionList } from '@/features/chat/components/conversation-list';
 import {
   ProvisioningError,
   ProvisioningView,
 } from '@/features/chat/components/provisioning-view';
 import type {
+  ChatConfig,
   Conversation,
   ConversationProvider,
 } from '@/features/chat/schema';
@@ -48,6 +53,9 @@ export function ChatLayout({
 }) {
   const navigate = useNavigate();
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [chatConfig, setChatConfig] = useState<ChatConfig | undefined>(
+    undefined,
+  );
   const [loading, setLoading] = useState(true);
   // 「建会话中」不再只是一个 boolean：会话区要立刻显示是哪个会话在准备、准备了
   // 多久，失败后还要能原样重试，所以整份输入都留着。
@@ -58,10 +66,19 @@ export function ChatLayout({
 
   useEffect(() => {
     const controller = new AbortController();
-    listConversations(controller.signal)
-      .then(setConversations)
-      .catch(() => {
-        /* left as an empty list; SessionList already handles the empty state */
+    // 两个请求各自兜底：会话列表拿不到就留空（SessionList 已经有空态），
+    // 能力快照拿不到就留 `undefined`（SessionList 退回 `FALLBACK_CHAT_CONFIG`）——
+    // 一个失败不该拖累另一个，也不该让「新建会话」按钮一直转圈。
+    const conversationsPromise = listConversations(controller.signal).catch(
+      () => [] as Conversation[],
+    );
+    const chatConfigPromise = fetchChatConfig(controller.signal).catch(
+      () => undefined,
+    );
+    Promise.all([conversationsPromise, chatConfigPromise])
+      .then(([loadedConversations, loadedChatConfig]) => {
+        setConversations(loadedConversations);
+        setChatConfig(loadedChatConfig);
       })
       .finally(() => setLoading(false));
     return () => controller.abort();
@@ -141,6 +158,7 @@ export function ChatLayout({
               activeSessionId={activeSessionId}
               onCreate={handleCreate}
               pendingTitle={pending?.title}
+              chatConfig={chatConfig}
             />
           }
         </SidebarContent>

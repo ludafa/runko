@@ -178,11 +178,12 @@ export const ConversationSchema = z
   .object({
     id: z.string(),
     title: z.string(),
-    repo: z.string(),
-    branchName: z.string(),
+    /** 仓库与工作分支——[本地沙盒](../../../../docs/terms.md)这一档没有，为 null。 */
+    repo: z.string().nullable(),
+    branchName: z.string().nullable(),
     sandboxName: z.string(),
     /** 沙盒 provider——前端据此渲染 provider 徽标。 */
-    provider: z.enum(['vercel', 'e2b']),
+    provider: z.enum(['vercel', 'e2b', 'local']),
     status: z.enum(['active', 'sleeping', 'expired']),
     lastActiveAt: z.string(),
     /** 这个会话的[待发队列](../../../../docs/terms.md)——页面加载时的初始快照，之后由 `QueueFrame` 或队列端点响应刷新。列表端点也带（侧边栏可显示「N 条待发」）。 */
@@ -219,7 +220,7 @@ export const CreateConversationInputSchema = z
   .object({
     title: z.string().min(1).max(255).optional(),
     /** 这次会话用哪家沙盒；省略时落服务端默认 `SANDBOX_PROVIDER`（未配则 `vercel`）。 */
-    provider: z.enum(['vercel', 'e2b']).optional(),
+    provider: z.enum(['vercel', 'e2b', 'local']).optional(),
   })
   .openapi('CreateConversationInput');
 
@@ -368,6 +369,47 @@ export const PostAnswerInputSchema = z
  * 只有页面自己知道这三件事，所以必须由它上报：服务端能看到的「有没有活的 SSE 连接」在被
  * 切到后台的标签页上照样为真，而那恰恰是最需要通知的情形。
  */
+/**
+ * 这台服务端的能力快照（`GET /api/chat/config`）——前端据此决定新建会话弹窗里能选哪几档
+ * 沙盒、要不要在会话页标「演示模型」。
+ *
+ * **不是配置项的镜像**：它只回答「现在能做什么」，不回答「配了哪些 key」，更不外泄 key 本身。
+ */
+export const ChatConfigSchema = z
+  .object({
+    /** 这台服务端配得起的[沙盒 provider](../../../../docs/terms.md)，至少有 `local`。 */
+    providers: z.array(z.enum(['vercel', 'e2b', 'local'])),
+    defaultProvider: z.enum(['vercel', 'e2b', 'local']),
+    /** `demo` = 没配模型 key，用的是[演示模型](../../../../docs/terms.md)。 */
+    model: z.enum(['deepseek', 'demo']),
+  })
+  .openapi('ChatConfig');
+
+export type ChatConfigDto = z.infer<typeof ChatConfigSchema>;
+
+/**
+ * 登录页要知道的那点事（`GET /api/auth-config`，**不需要登录**）：只有「GitHub 登录开没开」。
+ * 单开一个不鉴权的端点，是因为这个问题恰恰要在登录之前回答。
+ */
+export const AuthConfigSchema = z
+  .object({ github: z.boolean() })
+  .openapi('AuthConfig');
+
+/**
+ * 这条会话此刻有没有轮在跑、归哪个副本跑（`GET …/activity`）。
+ *
+ * 给运维与多副本验证环境用：转发对不对、接管有没有发生，看的就是 `holder` 这一列。
+ * `local` = 就在你问的这个副本上。
+ */
+export const ActivitySchema = z
+  .object({
+    active: z.boolean(),
+    local: z.boolean(),
+    /** 持有者的可达地址；单进程跑法与没人持有时没有这个字段。 */
+    holder: z.string().optional(),
+  })
+  .openapi('Activity');
+
 export const PresenceInputSchema = z
   .object({ focused: z.boolean() })
   .openapi('PresenceInput');

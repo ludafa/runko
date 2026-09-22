@@ -3,15 +3,11 @@ import { serve } from '@hono/node-server';
 import { app } from './app.js';
 import { db, flavor } from './db/instance.js';
 import { migrateDatabase } from './db/migrate.js';
-import { generateOpenAPISpec } from './generate-spec.js';
 import { logger } from './logger.js';
 import { logPushStartup } from './push/vapid.js';
 import { chatRuntime } from './routes/chat.js';
 
 const LOG_SCOPE = 'server';
-
-// Generate openapi.yml on dev server start
-generateOpenAPISpec(app);
 
 // SQLite 那一档**启动时自己把表建好**：零配置——clone 下来直接起，不用先记得跑一条建表命令。
 // 单进程，不会有两个人同时建表。Postgres 不在这里建（多副本会撞在一起），要显式跑 `db:migrate`。

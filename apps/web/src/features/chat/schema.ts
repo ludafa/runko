@@ -235,8 +235,8 @@ export const conversationStatusSchema = z.enum([
 
 export type ConversationStatus = z.infer<typeof conversationStatusSchema>;
 
-/** 沙盒 provider（docs/host/contract/tech/sandbox-provider.md）——这次会话跑在哪家云沙盒上，建会话时选定、1:1 绑定。 */
-export const conversationProviderSchema = z.enum(['vercel', 'e2b']);
+/** 沙盒 provider（docs/host/contract/tech/sandbox-provider.md）——这次会话跑在哪个[沙盒](../../../../../docs/terms.md)上，建会话时选定、1:1 绑定。`local` 是[本地沙盒](../../../../../docs/terms.md)：跑在服务端进程内存里，没有仓库、没有分支。 */
+export const conversationProviderSchema = z.enum(['vercel', 'e2b', 'local']);
 
 export type ConversationProvider = z.infer<typeof conversationProviderSchema>;
 
@@ -255,8 +255,10 @@ export type SkillSummary = z.infer<typeof skillSummarySchema>;
 export const conversationSchema = z.object({
   id: z.string(),
   title: z.string().nullable(),
-  repo: z.string(),
-  branchName: z.string(),
+  /** [本地沙盒](../../../../../docs/terms.md)没有仓库——建会话时不拉代码，`repo` 恒为 `null`。 */
+  repo: z.string().nullable(),
+  /** 同上，本地沙盒没有 git，也就没有分支。 */
+  branchName: z.string().nullable(),
   sandboxName: z.string(),
   provider: conversationProviderSchema,
   status: conversationStatusSchema,
@@ -314,3 +316,29 @@ export type TurnTelemetryEvent = z.infer<typeof turnTelemetryEventSchema>;
 export const turnTelemetrySchema = z.object({
   events: z.array(turnTelemetryEventSchema),
 });
+
+// ---- 服务端能力快照（docs/ingress/tech/unified-demo.md §4.3） ----
+
+/**
+ * `GET /api/chat/config` 的响应（要登录）——这台服务端现在能做什么：新建会话弹窗据此
+ * 渲染可选的[沙盒](../../../../../docs/terms.md) provider，会话页据此判断要不要标
+ * 「[演示模型](../../../../../docs/terms.md)」。**不是配置项的镜像**：只回答「现在能做什么」，
+ * 不回答「配了哪些 key」。
+ */
+export const chatConfigSchema = z.object({
+  /** 这台服务端配得起的 provider，至少有 `'local'`。 */
+  providers: z.array(conversationProviderSchema),
+  defaultProvider: conversationProviderSchema,
+  /** `'demo'` = 没配模型 key，用的是[演示模型](../../../../../docs/terms.md)。 */
+  model: z.enum(['deepseek', 'demo']),
+});
+
+export type ChatConfig = z.infer<typeof chatConfigSchema>;
+
+/**
+ * `GET /api/auth-config` 的响应（**不需要登录**）——登录页要在登录之前知道 GitHub
+ * 登录开没开。
+ */
+export const authConfigSchema = z.object({ github: z.boolean() });
+
+export type AuthConfig = z.infer<typeof authConfigSchema>;

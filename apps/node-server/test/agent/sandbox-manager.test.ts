@@ -13,6 +13,7 @@ import type {
   SandboxProvider,
 } from '../../src/agent/sandbox-manager.js';
 import {
+  availableProviders,
   createSandboxManager,
   resolveDefaultProvider,
 } from '../../src/agent/sandbox-manager.js';
@@ -104,6 +105,7 @@ function createFakeProvider(opts: {
   const createdSandboxes: FakeProvisioned[] = [];
   const provider: SandboxProvider = {
     id: 'vercel',
+    usesGit: true,
     async create(params) {
       createCalls.push(params);
       const provisioned = createFakeProvisioned(params.name, opts.exitCodeFor);
@@ -609,12 +611,23 @@ describe('resolveDefaultProvider (docs/host/contract/tech/sandbox-provider.md §
     }
   });
 
-  it('defaults to "vercel" when SANDBOX_PROVIDER is unset', () => {
+  it('没点名时挑这台服务端真配得起的第一档：配了 Vercel 就是 vercel', () => {
     delete process.env.SANDBOX_PROVIDER;
-    expect(resolveDefaultProvider()).toBe('vercel');
+    expect(resolveDefaultProvider({ VERCEL_TOKEN: 'tok' })).toBe('vercel');
   });
 
-  it('resolves "e2b" when SANDBOX_PROVIDER=e2b', () => {
+  it('**什么 key 都没配 → local**，于是零配置也建得了会话', () => {
+    delete process.env.SANDBOX_PROVIDER;
+    expect(resolveDefaultProvider({})).toBe('local');
+    expect(availableProviders({})).toEqual(['local']);
+  });
+
+  it('只配了 E2B → e2b 排在前面', () => {
+    expect(resolveDefaultProvider({ E2B_API_KEY: 'k' })).toBe('e2b');
+    expect(availableProviders({ E2B_API_KEY: 'k' })).toEqual(['e2b', 'local']);
+  });
+
+  it('点名 e2b 就用 e2b', () => {
     process.env.SANDBOX_PROVIDER = 'e2b';
     expect(resolveDefaultProvider()).toBe('e2b');
   });
@@ -627,15 +640,21 @@ describe('resolveDefaultProvider (docs/host/contract/tech/sandbox-provider.md §
     expect(resolveDefaultProvider()).toBe('e2b');
   });
 
-  it('falls back to "vercel" for any other value ("foo", "Vercel", empty string)', () => {
-    process.env.SANDBOX_PROVIDER = 'foo';
-    expect(resolveDefaultProvider()).toBe('vercel');
+  it('认不出来的值（"foo"、空串）当没点名，回落到配得起的第一档', () => {
+    expect(
+      resolveDefaultProvider({ SANDBOX_PROVIDER: 'foo', VERCEL_TOKEN: 'tok' }),
+    ).toBe('vercel');
+    expect(resolveDefaultProvider({ SANDBOX_PROVIDER: '' })).toBe('local');
+  });
 
-    process.env.SANDBOX_PROVIDER = 'Vercel';
-    expect(resolveDefaultProvider()).toBe('vercel');
-
-    process.env.SANDBOX_PROVIDER = '';
-    expect(resolveDefaultProvider()).toBe('vercel');
+  it('点名 local 就用 local（哪怕云沙盒的 key 都配着）', () => {
+    expect(
+      resolveDefaultProvider({
+        SANDBOX_PROVIDER: 'local',
+        VERCEL_TOKEN: 'tok',
+        E2B_API_KEY: 'k',
+      }),
+    ).toBe('local');
   });
 });
 

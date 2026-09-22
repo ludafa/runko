@@ -2,9 +2,16 @@ export type {
   AbortTurnAck,
   AbortTurnAckOkEnumKey,
 } from './types/AbortTurnAck.ts';
+export type { Activity } from './types/Activity.ts';
 export type { ApiError } from './types/ApiError.ts';
 export type { ApprovalAck, ApprovalAckOkEnumKey } from './types/ApprovalAck.ts';
 export type { ChatChunkEnvelope } from './types/ChatChunkEnvelope.ts';
+export type {
+  ChatConfig,
+  ChatConfigDefaultProviderEnumKey,
+  ChatConfigModelEnumKey,
+  ChatConfigProvidersEnumKey,
+} from './types/ChatConfig.ts';
 export type { ChatMessageFrame } from './types/ChatMessageFrame.ts';
 export type { ChatQueueFrame } from './types/ChatQueueFrame.ts';
 export type { ChatTurnStateFrame } from './types/ChatTurnStateFrame.ts';
@@ -36,6 +43,12 @@ export type {
   DeleteApiChatConversationsIdQueueMessageidPathParams,
 } from './types/DeleteApiChatConversationsIdQueueMessageid.ts';
 export type {
+  GetApiChatConfig200,
+  GetApiChatConfig401,
+  GetApiChatConfigQuery,
+  GetApiChatConfigQueryResponse,
+} from './types/GetApiChatConfig.ts';
+export type {
   GetApiChatConversations200,
   GetApiChatConversations401,
   GetApiChatConversationsQuery,
@@ -49,6 +62,14 @@ export type {
   GetApiChatConversationsIdQuery,
   GetApiChatConversationsIdQueryResponse,
 } from './types/GetApiChatConversationsId.ts';
+export type {
+  GetApiChatConversationsIdActivity200,
+  GetApiChatConversationsIdActivity401,
+  GetApiChatConversationsIdActivity404,
+  GetApiChatConversationsIdActivityPathParams,
+  GetApiChatConversationsIdActivityQuery,
+  GetApiChatConversationsIdActivityQueryResponse,
+} from './types/GetApiChatConversationsIdActivity.ts';
 export type {
   GetApiChatConversationsIdMessages200,
   GetApiChatConversationsIdMessages401,
@@ -198,8 +219,10 @@ export type { TurnTelemetry } from './types/TurnTelemetry.ts';
 export type { TurnTelemetryEvent } from './types/TurnTelemetryEvent.ts';
 export { deleteApiChatConversationsIdQueue } from './clients/deleteApiChatConversationsIdQueue.ts';
 export { deleteApiChatConversationsIdQueueMessageid } from './clients/deleteApiChatConversationsIdQueueMessageid.ts';
+export { getApiChatConfig } from './clients/getApiChatConfig.ts';
 export { getApiChatConversations } from './clients/getApiChatConversations.ts';
 export { getApiChatConversationsId } from './clients/getApiChatConversationsId.ts';
+export { getApiChatConversationsIdActivity } from './clients/getApiChatConversationsIdActivity.ts';
 export { getApiChatConversationsIdMessages } from './clients/getApiChatConversationsIdMessages.ts';
 export { getApiChatConversationsIdStream } from './clients/getApiChatConversationsIdStream.ts';
 export { getApiChatConversationsIdTurnsTurnTelemetry } from './clients/getApiChatConversationsIdTurnsTurnTelemetry.ts';
@@ -217,6 +240,9 @@ export { postApiPushTest } from './clients/postApiPushTest.ts';
 export { postApiPushUnsubscribe } from './clients/postApiPushUnsubscribe.ts';
 export { abortTurnAckOkEnum } from './types/AbortTurnAck.ts';
 export { approvalAckOkEnum } from './types/ApprovalAck.ts';
+export { chatConfigDefaultProviderEnum } from './types/ChatConfig.ts';
+export { chatConfigModelEnum } from './types/ChatConfig.ts';
+export { chatConfigProvidersEnum } from './types/ChatConfig.ts';
 export { conversationProviderEnum } from './types/Conversation.ts';
 export { conversationStatusEnum } from './types/Conversation.ts';
 export { createConversationInputProviderEnum } from './types/CreateConversationInput.ts';
@@ -226,9 +252,11 @@ export { pushAckOkEnum } from './types/PushAck.ts';
 export { startTurnAckModeEnum } from './types/StartTurnAck.ts';
 export { startTurnAckOkEnum } from './types/StartTurnAck.ts';
 export { abortTurnAckSchema } from './zod/abortTurnAckSchema.ts';
+export { activitySchema } from './zod/activitySchema.ts';
 export { apiErrorSchema } from './zod/apiErrorSchema.ts';
 export { approvalAckSchema } from './zod/approvalAckSchema.ts';
 export { chatChunkEnvelopeSchema } from './zod/chatChunkEnvelopeSchema.ts';
+export { chatConfigSchema } from './zod/chatConfigSchema.ts';
 export { chatMessageFrameSchema } from './zod/chatMessageFrameSchema.ts';
 export { chatQueueFrameSchema } from './zod/chatQueueFrameSchema.ts';
 export { chatTurnStateFrameSchema } from './zod/chatTurnStateFrameSchema.ts';
@@ -250,6 +278,18 @@ export {
   deleteApiChatConversationsIdQueueMutationResponseSchema,
   deleteApiChatConversationsIdQueuePathParamsSchema,
 } from './zod/deleteApiChatConversationsIdQueueSchema.ts';
+export {
+  getApiChatConfig200Schema,
+  getApiChatConfig401Schema,
+  getApiChatConfigQueryResponseSchema,
+} from './zod/getApiChatConfigSchema.ts';
+export {
+  getApiChatConversationsIdActivity200Schema,
+  getApiChatConversationsIdActivity401Schema,
+  getApiChatConversationsIdActivity404Schema,
+  getApiChatConversationsIdActivityPathParamsSchema,
+  getApiChatConversationsIdActivityQueryResponseSchema,
+} from './zod/getApiChatConversationsIdActivitySchema.ts';
 export {
   getApiChatConversationsIdMessages200Schema,
   getApiChatConversationsIdMessages401Schema,

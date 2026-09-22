@@ -205,6 +205,16 @@ export function createChatRuntime(deps: ChatRuntimeDeps): AgentRuntime {
     },
     onTurnSettled: ({ conversationId, status, input }) => {
       markActive(conversationId);
+      // [本地沙盒](../../../../docs/terms.md)的文件在内存里，这里存一份快照下来——进程没了、
+      // 或者下一轮落在别的副本上，都还能接着用。别的档是空操作。
+      void deps.sandboxManager
+        .persist(conversationId)
+        .catch((error: unknown) => {
+          log.warn(LOG_SCOPE, 'failed to persist local workspace', {
+            conversationId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
       deps.notifier?.turnSettled({
         conversationId,
         userId: input.userId ?? '',
@@ -266,8 +276,11 @@ export function createChatRuntime(deps: ChatRuntimeDeps): AgentRuntime {
       }
 
       const model = deps.resolveModel();
-      const repoRef = resolveRepo();
-      const githubPat = resolveGithubPat();
+      // [本地沙盒](../../../../docs/terms.md)没有 git：仓库与令牌这两个配置这一档不读，
+      // 什么都没配也起得来。
+      const usesGit = row.provider !== 'local';
+      const repoRef = usesGit ? resolveRepo() : undefined;
+      const githubPat = usesGit ? resolveGithubPat() : undefined;
 
       const acquireStopwatch = startStopwatch();
       const acquired = await deps.sandboxManager.acquire({
@@ -279,11 +292,15 @@ export function createChatRuntime(deps: ChatRuntimeDeps): AgentRuntime {
           row.provider === 'e2b' ?
             (row.sandboxId ?? undefined)
           : row.sandboxName,
-        branchName: row.branchName,
-        repoCloneUrl: repoRef.cloneUrl,
-        repoOwner: repoRef.owner,
-        repoName: repoRef.repo,
-        githubPat,
+        ...(row.branchName !== null ? { branchName: row.branchName } : {}),
+        ...(repoRef !== undefined ?
+          {
+            repoCloneUrl: repoRef.cloneUrl,
+            repoOwner: repoRef.owner,
+            repoName: repoRef.repo,
+          }
+        : {}),
+        ...(githubPat !== undefined ? { githubPat } : {}),
       });
       const acquireMs = acquireStopwatch();
 
@@ -380,13 +397,18 @@ export function createChatRuntime(deps: ChatRuntimeDeps): AgentRuntime {
         workspace,
         model,
         skills,
-        instructions: buildInstructions({
-          repoOwner: repoRef.owner,
-          repoName: repoRef.repo,
-          defaultBranch: acquired.defaultBranch,
-          branchName: row.branchName,
-          hasWebSearch: tools['web-search'] !== undefined,
-        }),
+        instructions: buildInstructions(
+          repoRef === undefined || row.branchName === null ?
+            { kind: 'local', hasWebSearch: tools['web-search'] !== undefined }
+          : {
+              kind: 'repo',
+              repoOwner: repoRef.owner,
+              repoName: repoRef.repo,
+              defaultBranch: acquired.defaultBranch,
+              branchName: row.branchName,
+              hasWebSearch: tools['web-search'] !== undefined,
+            },
+        ),
         onApproval,
         modelText,
         ...(Object.keys(tools).length > 0 ? { tools } : {}),

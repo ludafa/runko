@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import {
+  fetchChatConfig,
   fetchConversationMessages,
   getConversation,
 } from '@/features/chat/api';
@@ -8,7 +9,11 @@ import { BranchHeader } from '@/features/chat/components/branch-header';
 import { MessageComposer } from '@/features/chat/components/message-composer';
 import { QueuedMessages } from '@/features/chat/components/queued-messages';
 import { TimelineView } from '@/features/chat/components/timeline-view';
-import type { ChatReplayFrame, Conversation } from '@/features/chat/schema';
+import type {
+  ChatConfig,
+  ChatReplayFrame,
+  Conversation,
+} from '@/features/chat/schema';
 import { useChatMessages } from '@/features/chat/use-chat-messages';
 import { usePresence } from '@/features/chat/use-presence';
 import { ChatLayout } from '@/layouts/chat-layout';
@@ -48,6 +53,9 @@ function ConversationContent({ conversationId }: { conversationId: string }) {
     ChatReplayFrame[] | undefined
   >(undefined);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
+  const [model, setModel] = useState<ChatConfig['model'] | undefined>(
+    undefined,
+  );
 
   useEffect(() => {
     // No need to reset loadError here — the parent mounts this component with
@@ -74,6 +82,18 @@ function ConversationContent({ conversationId }: { conversationId: string }) {
     return () => controller.abort();
   }, [conversationId]);
 
+  useEffect(() => {
+    // 独立请求、独立兜底：这是服务端全局的能力快照，不是这条会话独有的数据，
+    // 拿不到只是不标「演示模型」，不该拖累会话本身的加载。
+    const controller = new AbortController();
+    fetchChatConfig(controller.signal)
+      .then((config) => setModel(config.model))
+      .catch(() => {
+        /* 拿不到就不标，见上 */
+      });
+    return () => controller.abort();
+  }, [conversationId]);
+
   if (loadError !== undefined) {
     return (
       <p className="text-destructive text-sm">加载会话失败：{loadError}</p>
@@ -89,6 +109,7 @@ function ConversationContent({ conversationId }: { conversationId: string }) {
       conversationId={conversationId}
       conversation={conversation}
       initialFrames={initialFrames}
+      model={model}
     />
   );
 }
@@ -97,10 +118,12 @@ function ConversationTimeline({
   conversationId,
   conversation,
   initialFrames,
+  model,
 }: {
   conversationId: string;
   conversation: Conversation;
   initialFrames: ChatReplayFrame[];
+  model: ChatConfig['model'] | undefined;
 }) {
   // 队列初值来自会话详情（docs/logic/orchestration/tech/steer-and-queue.md §4.2）——之后由直播流的
   // `QueueFrame` 快照接管，不再读这份初值。
@@ -119,7 +142,11 @@ function ConversationTimeline({
     // h-[calc(100vh-8rem)]——那个魔数假设了 header + main 内边距正好 8rem，实际是
     // 8rem+45px，多出来的部分让文档整体可滚动，就成了「双滚动条 + 底部空白」。
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <BranchHeader conversation={conversation} messages={chat.messages} />
+      <BranchHeader
+        conversation={conversation}
+        messages={chat.messages}
+        model={model}
+      />
 
       {wasSleeping && chat.awaitingFirstEvent && (
         <p className="text-muted-foreground border-border border-l-2 py-0.5 pl-3 text-xs leading-snug">

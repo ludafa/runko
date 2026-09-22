@@ -123,3 +123,73 @@ describe('BranchHeader', () => {
     expect(within(dialog).getByText('活跃')).toBeInTheDocument();
   });
 });
+
+describe('BranchHeader — 本地沙盒（没有仓库、没有分支）', () => {
+  it('branchName 为 null 时不显示分支名，也没有「复制分支名」按钮', () => {
+    render(
+      <BranchHeader
+        conversation={conversation({ provider: 'local', branchName: null })}
+      />,
+    );
+
+    expect(screen.queryByText(/runko\/chat-/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: '复制分支名' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('即使服务端给了 sleeping，本地沙盒也标「活跃」，不标「休眠」', () => {
+    render(
+      <BranchHeader
+        conversation={conversation({
+          provider: 'local',
+          branchName: null,
+          status: 'sleeping',
+        })}
+      />,
+    );
+
+    expect(screen.getByRole('img', { name: '活跃' })).toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: '休眠' })).not.toBeInTheDocument();
+  });
+
+  it('会话详情弹窗仍然打得开——只是分支入口没了', async () => {
+    const user = userEvent.setup();
+    render(
+      <BranchHeader
+        conversation={conversation({ provider: 'local', branchName: null })}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: '会话详情' }));
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  });
+});
+
+describe('BranchHeader — 演示模型标记', () => {
+  it('model 为 demo 时在标题旁标出「演示模型」', () => {
+    render(<BranchHeader conversation={conversation()} model="demo" />);
+
+    expect(screen.getByText('演示模型')).toBeInTheDocument();
+  });
+
+  it('model 为 deepseek 或缺席时不标', () => {
+    const { rerender } = render(
+      <BranchHeader conversation={conversation()} model="deepseek" />,
+    );
+    expect(screen.queryByText('演示模型')).not.toBeInTheDocument();
+
+    rerender(<BranchHeader conversation={conversation()} />);
+    expect(screen.queryByText('演示模型')).not.toBeInTheDocument();
+  });
+
+  it('hover 时说清这是替身模型，怎么触发工具与提问卡片', async () => {
+    const user = userEvent.setup();
+    render(<BranchHeader conversation={conversation()} model="demo" />);
+
+    await user.hover(screen.getByText('演示模型'));
+
+    expect(await screen.findByText(/发 "run: ls" 调工具/)).toBeInTheDocument();
+  });
+});

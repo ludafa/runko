@@ -1,6 +1,8 @@
 import { createDeepSeek } from '@ai-sdk/deepseek';
 import type { LanguageModel } from 'ai';
 
+import { createDemoModel } from './demo-model.js';
+
 // DeepSeek direct-connect (docs/ingress/tech/chat-webapp.md §2.2 `model.ts` /
 // docs/host/contract/tech/sandbox.md §8.4): same "v4 pro" default tier as
 // examples/src/12-vercel-sandbox-real-project.ts's
@@ -20,7 +22,26 @@ export class ModelConfigError extends Error {
   }
 }
 
+/** 配没配真模型。前端据此在会话页上标「演示模型」（`GET /api/chat/config`）。 */
+export function hasRealModel(env: NodeJS.ProcessEnv = process.env): boolean {
+  const baseURL = env.DEEPSEEK_API_BASE_URL?.trim();
+  const apiKey = env.DEEPSEEK_API_TOKEN?.trim();
+  return (
+    baseURL !== undefined &&
+    baseURL.length > 0 &&
+    apiKey !== undefined &&
+    apiKey.length > 0
+  );
+}
+
+/**
+ * 这一轮用哪个模型。**没配 key 就用[演示模型](../../../../docs/terms.md)**，不抛错——
+ * 零配置跑起来是这个应用的第一条承诺，没有 key 时最该发生的事是「能用，只是不聪明」。
+ */
 export function resolveModel(): LanguageModel {
+  if (!hasRealModel()) {
+    return createDemoModel();
+  }
   const baseURL = process.env.DEEPSEEK_API_BASE_URL?.trim();
   const apiKey = process.env.DEEPSEEK_API_TOKEN?.trim();
   if (
@@ -30,7 +51,7 @@ export function resolveModel(): LanguageModel {
     apiKey.length === 0
   ) {
     throw new ModelConfigError(
-      'DEEPSEEK_API_BASE_URL and DEEPSEEK_API_TOKEN must both be set to use the chat agent (see .env.example).',
+      'DEEPSEEK_API_BASE_URL and DEEPSEEK_API_TOKEN must both be set to use the chat agent (see .env.template).',
     );
   }
   const deepseek = createDeepSeek({ baseURL, apiKey });

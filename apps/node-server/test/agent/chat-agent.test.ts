@@ -183,24 +183,28 @@ describe('buildInstructions', () => {
   };
 
   it('把仓库、默认分支、工作分支都烤进提示词——模型不必去猜', () => {
-    const text = buildInstructions({ ...base, hasWebSearch: false });
+    const text = buildInstructions({
+      kind: 'repo',
+      ...base,
+      hasWebSearch: false,
+    });
     expect(text).toContain('acme/demo');
     expect(text).toContain('main');
     expect(text).toContain('runko/chat-abc');
   });
 
   it('没注册 web-search 时不提它——否则指令会让模型去调一个不存在的工具', () => {
-    expect(buildInstructions({ ...base, hasWebSearch: false })).not.toContain(
-      'web-search',
-    );
-    expect(buildInstructions({ ...base, hasWebSearch: true })).toContain(
-      'web-search',
-    );
+    expect(
+      buildInstructions({ kind: 'repo', ...base, hasWebSearch: false }),
+    ).not.toContain('web-search');
+    expect(
+      buildInstructions({ kind: 'repo', ...base, hasWebSearch: true }),
+    ).toContain('web-search');
   });
 
   it('写着「用户没明确要求就只读不写」——多轮对话里绝大多数轮次只是提问', () => {
-    expect(buildInstructions({ ...base, hasWebSearch: false })).toContain(
-      '只读、不要写',
-    );
+    expect(
+      buildInstructions({ kind: 'repo', ...base, hasWebSearch: false }),
+    ).toContain('只读、不要写');
   });
 });

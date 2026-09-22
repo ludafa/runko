@@ -175,7 +175,7 @@ export function createChatNotifier(deps: ChatNotifierDeps): ChatNotifier {
     }
     // [前台抑制](../../../../docs/terms.md)：人就盯着这条会话，审批卡片已经在他
     // 眼前了，再弹一条系统通知纯属打扰。
-    if (isPresent(userId, conversationId)) {
+    if (await isPresent(deps.db, userId, conversationId)) {
       return undefined;
     }
     const row = await getConversation(deps.db, conversationId, userId);

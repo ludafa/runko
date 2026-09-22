@@ -9,6 +9,7 @@ import type { SkillSummary } from './SkillSummary.ts';
 export const conversationProviderEnum = {
   vercel: 'vercel',
   e2b: 'e2b',
+  local: 'local',
 } as const;
 
 export type ConversationProviderEnumKey =
@@ -33,13 +34,13 @@ export type Conversation = {
    */
   title: string;
   /**
-   * @type string
+   * @type string,null
    */
-  repo: string;
+  repo: string | null;
   /**
-   * @type string
+   * @type string,null
    */
-  branchName: string;
+  branchName: string | null;
   /**
    * @type string
    */

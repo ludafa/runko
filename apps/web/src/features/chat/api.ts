@@ -9,6 +9,10 @@
  */
 import {
   abortTurnAckSchema,
+  type AuthConfig,
+  authConfigSchema,
+  type ChatConfig,
+  chatConfigSchema,
   type ChatReplayFrame,
   type Conversation,
   conversationListSchema,
@@ -90,6 +94,29 @@ export async function getConversation(
     { method: 'GET', signal },
   );
   return conversationSchema.parse(json);
+}
+
+/**
+ * `GET /api/chat/config`（要登录，docs/ingress/tech/unified-demo.md §4.3）：这台服务端现在
+ * 能做什么——新建会话弹窗据此渲染可选的沙盒 provider，会话页据此判断要不要标
+ * 「[演示模型](../../../../../docs/terms.md)」。
+ */
+export async function fetchChatConfig(
+  signal?: AbortSignal,
+): Promise<ChatConfig> {
+  const json = await requestJson('/api/chat/config', { method: 'GET', signal });
+  return chatConfigSchema.parse(json);
+}
+
+/**
+ * `GET /api/auth-config`（**不需要登录**，docs/ingress/tech/unified-demo.md §4.3）：登录页要在
+ * 登录之前知道 GitHub 登录开没开。
+ */
+export async function fetchAuthConfig(
+  signal?: AbortSignal,
+): Promise<AuthConfig> {
+  const json = await requestJson('/api/auth-config', { method: 'GET', signal });
+  return authConfigSchema.parse(json);
 }
 
 /**

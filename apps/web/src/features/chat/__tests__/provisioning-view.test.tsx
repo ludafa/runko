@@ -107,6 +107,32 @@ describe('ProvisioningView', () => {
   });
 });
 
+describe('ProvisioningView — 本地沙盒', () => {
+  it('不播云沙盒那几段假进度，只给一句简短文案', () => {
+    vi.setSystemTime(T0);
+    render(
+      <ProvisioningView title="本地跑一下" provider="local" startedAt={T0} />,
+    );
+
+    expect(screen.getByText(/正在准备本地工作区/)).toBeInTheDocument();
+    for (const label of [
+      '创建沙盒',
+      '拉取仓库代码',
+      '安装 frontend-design 技能',
+      '准备工作分支',
+    ]) {
+      expect(screen.queryByText(label)).not.toBeInTheDocument();
+    }
+  });
+
+  it('不喊「比平时久」——本地沙盒没有慢的这一说', () => {
+    vi.setSystemTime(T0 + 60_000);
+    render(<ProvisioningView title="x" provider="local" startedAt={T0} />);
+
+    expect(screen.queryByText(/比平时久一些/)).not.toBeInTheDocument();
+  });
+});
+
 describe('ProvisioningError', () => {
   it('把失败原因显示出来（此前这里完全静默）', () => {
     render(

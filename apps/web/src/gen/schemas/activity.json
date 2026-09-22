@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "active": { "type": "boolean" },
+    "local": { "type": "boolean" },
+    "holder": { "type": "string" }
+  },
+  "required": ["active", "local"],
+  "x-readme-ref-name": "Activity"
+}

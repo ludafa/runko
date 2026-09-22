@@ -40,7 +40,7 @@ export interface UserTable {
 }
 
 /** 沙盒 provider（docs/host/contract/tech/sandbox-provider.md）：这次会话跑在哪一档沙盒上，建会话时选定、1:1 绑定、运行中不切换。 */
-export type ConversationProvider = 'vercel' | 'e2b';
+export type ConversationProvider = 'vercel' | 'e2b' | 'local';
 
 export type ConversationStatus = 'active' | 'sleeping' | 'expired';
 
@@ -55,8 +55,9 @@ export interface ConversationsTable {
   id: string;
   user_id: string;
   title: string;
-  repo: string;
-  branch_name: string;
+  /** [本地沙盒](../../../../docs/terms.md)没有仓库、也没有分支，这两列为空。 */
+  repo: string | null;
+  branch_name: string | null;
   sandbox_name: string;
   provider: ConversationProvider;
   /** E2B 的[重连令牌](../../../../docs/terms.md)：建盒后服务端分配的 sandboxId，落库才能跨进程恢复。Vercel 按确定性沙盒名恢复，恒为空。 */
@@ -114,10 +115,39 @@ export interface ConversationGrantsTable {
   created_at: number;
 }
 
+/**
+ * [本地沙盒](../../../../docs/terms.md)的文件。
+ *
+ * 那一档的文件在进程内存里，进程一死就没了，所以每轮收尾存一份快照。`version` 每存一次加一，
+ * 副本手上的缓存据此判断自己是不是已经过期（别的副本跑过一轮）。
+ */
+export interface LocalWorkspacesTable {
+  /** 沙盒名——由会话 id 派生，跨进程稳定。 */
+  sandbox_name: string;
+  version: number;
+  /** `MemoryFS.snapshot()` 的 JSON。 */
+  snapshot: string;
+  updated_at: number;
+}
+
+/**
+ * [在场](../../../../docs/terms.md)：某个用户此刻正盯着某条会话，到点自动作废。
+ *
+ * 进库而不是留在内存里，是因为**上报与读取常常不在同一个副本**：心跳打到哪个副本由负载
+ * 均衡决定，读它的却是正在跑这一轮的那个。
+ */
+export interface ChatPresenceTable {
+  user_id: string;
+  conversation_id: string;
+  expires_at: number;
+}
+
 /** 本应用与 better-auth 的表；框架那四张由 `RunkoDatabase` 带进来。 */
 export interface ChatDatabase extends RunkoDatabase {
   user: UserTable;
   conversations: ConversationsTable;
   push_subscriptions: PushSubscriptionsTable;
   conversation_grants: ConversationGrantsTable;
+  local_workspaces: LocalWorkspacesTable;
+  chat_presence: ChatPresenceTable;
 }

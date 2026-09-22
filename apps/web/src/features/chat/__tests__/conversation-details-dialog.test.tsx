@@ -174,6 +174,49 @@ describe('ConversationDetailsDialog — 详情 tab', () => {
   });
 });
 
+describe('ConversationDetailsDialog — 本地沙盒（没有仓库、没有分支）', () => {
+  it('repo/branchName 为 null 时，「分支」「仓库」整行都不渲染', async () => {
+    const user = userEvent.setup();
+    render(
+      <ConversationDetailsDialog
+        conversation={conversation({
+          provider: 'local',
+          repo: null,
+          branchName: null,
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: '会话详情' }));
+    const dialog = await screen.findByRole('dialog');
+
+    expect(within(dialog).queryByText('分支')).not.toBeInTheDocument();
+    expect(within(dialog).queryByText('仓库')).not.toBeInTheDocument();
+    // 沙盒与状态两行照样在
+    expect(within(dialog).getByText('local')).toBeInTheDocument();
+  });
+
+  it('本地沙盒即使 status 是 sleeping，「状态」一行也显示活跃', async () => {
+    const user = userEvent.setup();
+    render(
+      <ConversationDetailsDialog
+        conversation={conversation({
+          provider: 'local',
+          repo: null,
+          branchName: null,
+          status: 'sleeping',
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: '会话详情' }));
+    const dialog = await screen.findByRole('dialog');
+
+    expect(within(dialog).getByText('活跃')).toBeInTheDocument();
+    expect(within(dialog).queryByText('休眠')).not.toBeInTheDocument();
+  });
+});
+
 describe('ConversationDetailsDialog — 统计 tab', () => {
   it('显示整个会话的汇总，不是单轮', async () => {
     const user = userEvent.setup();
