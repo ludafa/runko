@@ -349,13 +349,18 @@ await Skill.fromFS(fs, "/.agents/skills/frontend-design") // 从任意 RunkoFS �
 
 [`apps/`](../apps) 下是一个**基于** runko 构建的完整 chat agent 网页应用——SDK 的一个产品形态的具体演示。用户在 chat 界面里驱动 agent 在 Vercel 沙盒里修改真实仓库、开 PR、触发 Vercel 部署。亮点：会话级沙盒生命周期（活跃时保持、空闲快照休眠、下一条消息带分支代码恢复）、loop 每个事件断线可续地 SSE 流式推给前端（刷新/HMR 不断）、完整对话 SQLite 持久化、streamdown markdown 渲染、每轮 token 统计（含缓存命中）。设计见 [chat webapp 功能](./ingress/features/chat-webapp.md) / [技术方案](./ingress/tech/chat-webapp.md) / [施工进展](./ingress/plans/chat-webapp.md)。
 
+**不需要任何账号就能试。** 什么 key 都不填时它会退到[演示模型](./terms.md)加[本地沙盒](./terms.md)
+（发 `run: ls` 调 bash、发 `ask: …` 弹提问卡片），审批、提问、[挂起](./terms.md)与恢复都能离线走一遍：
+
 ```sh
-cp .env.template .env         # 填入必需的 key（见模板注释）
 pnpm install
-pnpm chat:bootstrap           # db migrate + openapi + api client 生成
-pnpm chat:server              # API 服务
+pnpm build                    # @runko/* 都从 dist 导出，先编译
+pnpm chat:server              # API 服务（第一次启动自动建库）
 pnpm chat:web                 # web 开发服务器
 ```
+
+想接真模型与真云沙盒（跑你自己的仓库）再 `cp .env.template .env` 填 key，
+见[唯一 demo · 功能手册](./ingress/features/unified-demo.md)。
 
 ## 更多
 

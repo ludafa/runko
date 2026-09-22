@@ -230,13 +230,20 @@ markdown rendering, and per-turn token stats including cache hits. Design in
 [chat webapp feature](./docs/ingress/features/chat-webapp.md) /
 [tech](./docs/ingress/tech/chat-webapp.md) / [plan](./docs/ingress/plans/chat-webapp.md).
 
+**No accounts needed to try it.** Without any keys it falls back to a demo model
+(`run: ls` calls bash, `ask: …` opens a question card) and a local in-memory
+sandbox, so approvals, questions, suspend/resume all work offline:
+
 ```sh
-cp .env.template .env         # fill in the required keys (see the template's comments)
 pnpm install
-pnpm chat:bootstrap           # db migrate + openapi + api client codegen
-pnpm chat:server              # API server
+pnpm build                    # @runko/* export from dist
+pnpm chat:server              # API server (creates the SQLite database on first start)
 pnpm chat:web                 # web dev server
 ```
+
+Add real keys later (`cp .env.template .env`) to get a real model, cloud sandboxes
+running your own repo, GitHub login and push notifications — see
+[apps/node-server/README.md](./apps/node-server/README.md).
 
 ## More
 

@@ -4,9 +4,9 @@
  * 两个用处：
  *
  * - `test:lab` 每个场景结束都调一次 `collectLabLogs`（测试中途失败或被 Ctrl+C 也留得下「到上一个场景为止」的日志）；
- * - 手动起的那套环境：`pnpm --filter @runko-demo/persist-demo lab:logs` 存一份。
+ * - 手动起的那套环境：`pnpm --filter @runko-chat/node-server lab:logs` 存一份。
  *
- * 目录是 `apps/persist-demo/logs/lab-<时间>/`（不进 git），`logs/lab-latest` 指向最近一次：
+ * 目录是 `apps/node-server/logs/lab-<时间>/`（不进 git），`logs/lab-latest` 指向最近一次：
  *
  * | 文件 | 内容 |
  * |---|---|
@@ -32,7 +32,7 @@ import { promisify } from 'node:util';
 
 const run = promisify(execFile);
 
-/** `apps/persist-demo/logs` */
+/** `apps/node-server/logs` */
 export const LOGS_ROOT = fileURLToPath(new URL('../logs', import.meta.url));
 /** 手动环境用的 compose 文件与项目名（`lab:up` 起的那套）。 */
 export const DEFAULT_COMPOSE_FILE = fileURLToPath(
