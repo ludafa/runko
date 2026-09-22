@@ -750,8 +750,24 @@ export function createChatApp(deps: ChatRouteDeps) {
     // `held_by_other`：归属在别的副本手上。**框架把地址放在 `holder` 字段里**（不是那句
     // 文案里），照着转就行；已经转过一次的不再转，回 503 让客户端稍后重试。
     if (outcome.reason === 'held_by_other') {
-      // 走到这里说明归属**刚刚**易了主：前面那道转发中间件问的时候还在本地。窄竞态，
-      // 回「稍后再试」而不是报错——客户端重发时中间件就会把它转到新的持有者那边。
+      // 走到这里说明归属**刚刚**易了主：前面那道转发中间件问的时候还在本地，等框架真去抢
+      // 的时候已经不在了。两个人同时发消息就会撞上，所以不能简单回「稍后再试」——
+      // **就地转过去**，把持有者的回执原样交回。
+      //
+      // 这条路不能复用那道中间件：它返回的是上游那条原样的响应，而这个处理器的返回类型
+      // 被 OpenAPI 路由定义钉死。回执只有几十字节、没有流，读出来再照着回一次就行。
+      const forwarder = deps.forwarder;
+      if (
+        outcome.holder !== undefined &&
+        forwarder !== undefined &&
+        !forwarder.isForwarded(c)
+      ) {
+        const upstream = await forwarder.forward(c, outcome.holder);
+        const ack = StartTurnAckSchema.safeParse(await upstream.json());
+        if (ack.success) {
+          return c.json(ack.data, 202);
+        }
+      }
       c.header('retry-after', RETRY_AFTER_SECONDS);
       return c.json({ error: outcome.message }, RETRY_LATER_STATUS);
     }

@@ -139,7 +139,7 @@ describe('conversationMessagesListSchema', () => {
 
 describe('conversationSchema — 本地沙盒（provider: local，repo/branchName: null）', () => {
   /** 本地沙盒没有仓库、没有分支——服务端会给 `repo`/`branchName` 记 `null`（docs/ingress/tech/unified-demo.md §4.3）。 */
-  function localConversation(): unknown {
+  function localConversation(): Record<string, unknown> {
     return {
       id: 'conv-local',
       title: null,

@@ -32,6 +32,13 @@ import {
   useHeaderLeadingSlot,
 } from '@/layouts/app-layout';
 
+/** 设计预览用的服务端能力：三档沙盒都摆出来，好看清每一档的样子。 */
+const PREVIEW_CHAT_CONFIG = {
+  providers: ['vercel' as const, 'e2b' as const, 'local' as const],
+  defaultProvider: 'local' as const,
+  model: 'demo' as const,
+};
+
 function noop(): void {
   /* 工作台里所有交互都是空转——这里只看样子 */
 }
@@ -72,6 +79,7 @@ export function DesignPreviewPage() {
                   activeSessionId={active.id}
                   onCreate={noop}
                   pendingTitle={undefined}
+                  chatConfig={PREVIEW_CHAT_CONFIG}
                 />
               </SidebarContent>
             </Sidebar>

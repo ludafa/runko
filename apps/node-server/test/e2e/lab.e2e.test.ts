@@ -83,6 +83,12 @@ const C: Replica = {
 };
 const LB_URL = `http://127.0.0.1:${String(PORTS.lb)}`;
 
+/**
+ * 请求带的来源。容器里 `NODE_ENV=production`，better-auth 在这一档**要求带 Origin 且必须在
+ * 信任列表里**（列表就是副本的 `CLIENT_URL`）——浏览器永远会带，这里手动补上。
+ */
+const ORIGIN = `http://localhost:${String(PORTS.lb)}`;
+
 /** 与 `@runko/agent` 的 `ABORT_REASON_HOLDER_LOST` / `ABORT_REASON_SHUTDOWN` 同一份文案。 */
 const HOLDER_LOST = 'another node took over';
 const SHUTDOWN = 'shutting down';
@@ -187,6 +193,7 @@ let cookie = '';
 async function request(url: string, init: RequestInit = {}): Promise<Reply> {
   const started = Date.now();
   const headers = new Headers(init.headers);
+  headers.set('origin', ORIGIN);
   if (cookie !== '') {
     headers.set('cookie', cookie);
   }
@@ -214,7 +221,7 @@ const postJson = (url: string, payload: JsonObject): Promise<Reply> =>
 async function signUp(replica: Replica): Promise<void> {
   const res = await fetch(`${replica.url}/api/auth/sign-up/email`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', origin: ORIGIN },
     body: JSON.stringify({
       email: `lab-${String(Date.now())}@example.com`,
       password: 'lab-password-1234',
@@ -222,11 +229,15 @@ async function signUp(replica: Replica): Promise<void> {
     }),
     signal: AbortSignal.timeout(30_000),
   });
-  const setCookie = res.headers.getSetCookie().join('; ');
-  if (!res.ok || setCookie === '') {
+  // 只留 `name=value`：`Path`/`HttpOnly`/`SameSite` 是说给浏览器听的，不属于 cookie 值。
+  const pairs = res.headers
+    .getSetCookie()
+    .map((raw) => raw.split(';')[0])
+    .filter((pair): pair is string => pair !== undefined && pair.length > 0);
+  if (!res.ok || pairs.length === 0) {
     throw new Error(`注册失败：${String(res.status)} ${await res.text()}`);
   }
-  cookie = setCookie;
+  cookie = pairs.join('; ');
 }
 
 async function createConversation(replica: Replica): Promise<string> {
@@ -305,11 +316,17 @@ function expectCleanSeqs(rows: readonly LedgerRow[]): void {
   expect(seqs).toEqual([...seqs].sort((x, y) => x - y));
 }
 
-/** 这一轮的用户消息与收尾状态——断言里只关心这两样，正文太长不便直接比。 */
+/**
+ * 这一轮的用户消息与收尾状态——断言里只关心这两样。
+ *
+ * 用户消息尾部那串填充（`longText` 加的，用来把一轮撑到足够久）在这里去掉，留下开头那个标签。
+ */
 function shape(rows: readonly LedgerRow[]): [string, string][] {
   return rows.map((row) => [
     row.role,
-    row.role === 'user' ? (row.text ?? '').slice(0, 4) : (row.status ?? ''),
+    row.role === 'user' ?
+      (row.text ?? '').replace(/字+$/u, '')
+    : (row.status ?? ''),
   ]);
 }
 
@@ -380,7 +397,10 @@ async function* turnStates(
   url: string,
   signal: AbortSignal,
 ): AsyncGenerator<TurnStateEvent> {
-  const res = await fetch(url, { headers: { cookie }, signal });
+  const res = await fetch(url, {
+    headers: { cookie, origin: ORIGIN },
+    signal,
+  });
   const body = res.body;
   if (body === null) {
     throw new Error('SSE 没有响应体');
