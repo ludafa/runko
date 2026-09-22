@@ -45,6 +45,7 @@ import {
   parseAvailableSkills,
   syncAvailableSkills,
 } from '../agent/store.js';
+import { createChatStream } from '../agent/stream.js';
 import { db as defaultDb } from '../db/instance.js';
 import { logger as defaultLogger } from '../logger.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -117,6 +118,14 @@ export interface ChatRouteDeps {
    * 一律本地答。
    */
   forwarder?: Forwarder;
+  /**
+   * 直播流要不要也转给持有者。
+   *
+   * **配了 Redis 广播就不转**（`false`）：内容会到每个副本，就地订阅即可——转过去只是
+   * 多一跳，持有者一崩连接还跟着断。没有 Redis 时必须转：[进行中草稿](../../../../docs/terms.md)
+   * 只在持有者内存里。见 docs/host/node/tech/cluster-lab.md §5。
+   */
+  forwardStream?: boolean;
   sandboxManager: SandboxManager;
   resolveModel: () => LanguageModel;
   /**
@@ -266,7 +275,8 @@ function toQueueDto(queue: readonly QueuedInput[]): QueuedMessage[] {
  * [进行中草稿](../../../../docs/terms.md)搬进内存之后，`chunk` 帧**一律没有 `seq`**
  * ——它们只直播、不落库、不参与 `after=` 续传，与从前的 ephemeral chunk 走同一条路。
  */
-function toWireFrame(frame: Frame): ChatReplayFrame {
+/** 框架的 `Frame` → wire 帧。**导出**是因为 WebSocket 那条通道要用同一个函数（见 `chat-ws.ts`）。 */
+export function toWireFrame(frame: Frame): ChatReplayFrame {
   switch (frame.kind) {
     case 'message':
       return { seq: frame.seq, message: frame.message };
@@ -340,20 +350,25 @@ export function createChatApp(deps: ChatRouteDeps) {
     return undefined;
   };
 
-  // 这几条的状态在持有者的进程内存里：[进行中草稿](../../../../docs/terms.md)、
-  // 那一轮的 `AbortController`、正在等人的那个 promise、以及改完队列要广播的那帧快照。
+  // 这几条的状态在持有者的进程内存里：那一轮的 `AbortController`、正在等人的那个 promise、
+  // 以及改完队列要广播的那帧快照。
   //
   // `…/messages` 在列表里只因为它的 **POST**（起轮/插话/排队要在持有者那边发生）；它的
   // GET 是纯回放、哪个副本都能答，但转过去也只是多一跳，不值得为此再拆一条路由。
-  for (const path of [
+  //
+  // 直播流（`…/stream` 与 WebSocket 那条）单独一档：配了 Redis 广播就不转，见 `forwardStream`。
+  const forwardedPaths = [
     '/api/chat/conversations/:id/messages',
-    '/api/chat/conversations/:id/stream',
     '/api/chat/conversations/:id/abort',
     '/api/chat/conversations/:id/queue',
     '/api/chat/conversations/:id/queue/:messageId',
     '/api/chat/conversations/:id/approvals/:callId',
     '/api/chat/conversations/:id/questions/:callId',
-  ]) {
+    ...(deps.forwardStream === false ?
+      []
+    : ['/api/chat/conversations/:id/stream']),
+  ];
+  for (const path of forwardedPaths) {
     app.use(path, forwardToHolderMiddleware);
   }
 
@@ -1294,20 +1309,35 @@ const defaultTelemetry: {
  */
 const defaultNotifier = createChatNotifier({ db: defaultDb });
 
+const defaultNode = resolveNodeIdentity();
+
+/**
+ * [流分发](../../../../docs/terms.md)：配了 `REDIS_URL` 就广播给所有副本。
+ * 单独导出是为了让进程退出时收掉那两条连接（`index.ts`）。
+ */
+export const chatStream = createChatStream({
+  url: process.env.REDIS_URL,
+  nodeId: defaultNode?.url ?? 'local',
+  logger: defaultLogger,
+});
+
 export const chatRuntime = createChatRuntime({
   db: defaultDb,
   sandboxManager: defaultSandboxManager,
   resolveModel,
   notifier: defaultNotifier,
+  ...(chatStream.fanout !== undefined ? { stream: chatStream.fanout } : {}),
   ...defaultTelemetry,
 });
 
-const defaultForwarder = createForwarder(resolveNodeIdentity(), defaultLogger);
+const defaultForwarder = createForwarder(defaultNode, defaultLogger);
 
 export const chatApp = createChatApp({
   db: defaultDb,
   runtime: chatRuntime,
   forwarder: defaultForwarder,
+  // 广播到了每个副本，直播流就不必再转给持有者。
+  forwardStream: !chatStream.broadcasts,
   decisions: createChatPersistence(defaultDb).decisions,
   sandboxManager: defaultSandboxManager,
   resolveModel,

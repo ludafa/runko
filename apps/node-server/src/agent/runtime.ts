@@ -17,6 +17,7 @@ import type {
   AgentRuntime,
   RuntimeHooks,
   SessionFactory,
+  StreamFanout,
   TurnPreparation,
 } from '@runko/agent';
 import { createAgentRuntime } from '@runko/agent';
@@ -88,6 +89,11 @@ function startStopwatch(): () => number {
 
 export interface ChatRuntimeDeps {
   db: Db;
+  /**
+   * [流分发](../../../../docs/terms.md)：多副本时传 Redis 那份（见 `agent/stream.ts`），
+   * 不传就是框架内置的进程内 fan-out。
+   */
+  stream?: StreamFanout;
   sandboxManager: SandboxManager;
   resolveModel: () => LanguageModel;
   /** telemetry 事件集成（透传给 core，逐 turn 的模型调用事件）。缺省 = 不采集。 */
@@ -260,6 +266,7 @@ export function createChatRuntime(deps: ChatRuntimeDeps): AgentRuntime {
     agent: defineAgent({ model: PLACEHOLDER_MODEL }),
     persistence: createChatPersistence(deps.db),
     arbitration: createChatArbitration(deps.db),
+    ...(deps.stream !== undefined ? { stream: deps.stream } : {}),
     logger: log,
     ...(memoryWindowMs !== undefined ?
       { suspend: { memoryWindow: memoryWindowMs } }

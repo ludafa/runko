@@ -1,11 +1,11 @@
 import { serve } from '@hono/node-server';
 
-import { app } from './app.js';
+import { app, injectWebSocket } from './app.js';
 import { db, flavor } from './db/instance.js';
 import { migrateDatabase } from './db/migrate.js';
 import { logger } from './logger.js';
 import { logPushStartup } from './push/vapid.js';
-import { chatRuntime } from './routes/chat.js';
+import { chatRuntime, chatStream } from './routes/chat.js';
 
 const LOG_SCOPE = 'server';
 
@@ -57,6 +57,9 @@ const server = serve({ fetch: app.fetch, port }, (info) => {
   console.log(`OpenAPI spec at http://localhost:${info.port}/doc`);
 });
 
+// WebSocket 的升级要挂在 HTTP 服务器上，所以只能在 `serve()` 之后。
+injectWebSocket(server);
+
 /**
  * 关闭顺序是硬要求（docs/logic/orchestration/tech/graceful-shutdown.md §3.2）：
  *
@@ -82,6 +85,13 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
 
   const result = await chatRuntime.shutdown({
     graceMs: SHUTDOWN_TIMEOUT_MS,
+  });
+
+  // 轮都收完了再收 Redis 连接：反过来的话，最后几帧广播不出去。
+  await chatStream.close().catch((error: unknown) => {
+    logger.warn(LOG_SCOPE, 'failed to close the redis connections', {
+      error: error instanceof Error ? error.message : String(error),
+    });
   });
 
   server.close(() => {

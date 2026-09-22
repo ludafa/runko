@@ -47,6 +47,20 @@ pnpm chat:web       # 另开一个终端
 DATABASE_URL=postgres://… pnpm --filter @runko-chat/node-server db:migrate
 ```
 
+## 起多个副本
+
+三个环境变量，缺一个就退回单进程跑法：
+
+| 变量 | 作用 |
+| --- | --- |
+| `RUNKO_NODE_URL` | **这个副本自己的地址**（别的副本照这个找它）。不配 = 单进程，什么都不转发 |
+| `RUNKO_PEER_TOKEN` | 副本之间的口令。防的是外面伪造「我是转发来的」这个标记 |
+| `REDIS_URL` | 配了就把[直播流](../../docs/terms.md)广播给所有副本；不配就靠转发给[持有者](../../docs/terms.md) |
+
+差别只在直播流这一条：**配了 Redis，连哪个副本都能直接看**；没配，看直播的请求会被转发到正在跑这一轮的那台机器上（WebSocket 没法转发，所以多副本下想用它就得配 Redis）。其余要在持有者内存里办的事（发消息、停止、答审批）两档都照样转发。
+
+现成的一套见[集群实验环境](../../docs/host/node/features/cluster-lab.md)。
+
 ## 常用命令
 
 ```sh

@@ -1,13 +1,26 @@
+import { createNodeWebSocket } from '@hono/node-ws';
 import { swaggerUI } from '@hono/swagger-ui';
 import { OpenAPIHono } from '@hono/zod-openapi';
 import { cors } from 'hono/cors';
 
+import { db } from './db/instance.js';
+import { requireAuth } from './middleware/auth.js';
 import { authApp } from './routes/auth.js';
-import { chatApp } from './routes/chat.js';
+import { chatApp, chatRuntime, toWireFrame } from './routes/chat.js';
+import { createChatWsApp } from './routes/chat-ws.js';
 import { exampleApp } from './routes/example.js';
 import { pushApp } from './routes/push.js';
 
 const app = new OpenAPIHono();
+
+/**
+ * WebSocket 的升级发生在 HTTP 服务器那一层，所以要在这里把它造出来、再由 `index.ts` 在
+ * `serve()` 之后注进去。**顺序是硬的**：`createNodeWebSocket` 要先拿到 app 的引用，
+ * 之后才轮到把 WebSocket 路由挂上去。
+ */
+const { upgradeWebSocket, injectWebSocket } = createNodeWebSocket({ app });
+
+export { injectWebSocket };
 
 // CORS for client dev server. Derived from CLIENT_URL, falling back to
 // CLIENT_PORT (matches vite.config.ts's same-named fallback).
@@ -32,6 +45,16 @@ app.use(
 app.get('/health', (c) => c.json({ ok: true }));
 
 app.route('/', authApp);
+app.route(
+  '/',
+  createChatWsApp({
+    db,
+    runtime: chatRuntime,
+    authMiddleware: requireAuth,
+    upgradeWebSocket,
+    toWire: toWireFrame,
+  }),
+);
 app.route('/', exampleApp);
 app.route('/', chatApp);
 app.route('/', pushApp);
