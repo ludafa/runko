@@ -7,7 +7,7 @@
  *
  * | 谁 | 怎么做 |
  * |---|---|
- * | `subscribe` | 同步挂进**本地登记簿**并立刻返回退订函数；真正的 Redis 订阅在后台补上 |
+ * | `subscribe` | 同步挂进**本地登记簿**并立刻返回退订函数；真正的 Redis 订阅在后台补上（订不上就退避重试） |
  * | `publish` | **先同步发给本进程的订阅者**（零空隙的保证一字不改），再异步发给 Redis |
  * | 收到 Redis 消息 | 是自己发的就丢掉——否则本进程的订阅者会收到两遍 |
  *
@@ -22,6 +22,19 @@ import type { Frame, Logger, StreamFanout } from "@runko/agent";
 const CHANNEL_PREFIX = "runko:stream:";
 
 const LOG_SCOPE = "stream-redis";
+
+/**
+ * 订阅失败之后的退避节奏：200ms 起步、每失败一次翻倍、封顶 5s，不加随机抖动。
+ *
+ * 不抖动是有意的：一个进程同时在重的频道数最多是「本副本正在看的会话数」，量级很小，
+ * 没有惊群问题；固定节奏换来行为可预期（出事时看日志就能对上第几次重试）。
+ */
+const RETRY_BASE_MS = 200;
+const RETRY_MAX_MS = 5000;
+
+function retryDelayMs(failures: number): number {
+  return Math.min(RETRY_BASE_MS * 2 ** (failures - 1), RETRY_MAX_MS);
+}
 
 /**
  * 需要的 Redis 客户端能力——**手写的最小结构接口**，运行时不 import 任何驱动。
@@ -93,12 +106,22 @@ function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** 一个频道的订阅进度。**没订上时要么有一次请求在飞，要么有一个重试定时器在等**，二者必居其一。 */
+interface ChannelState {
+  /** Redis 那边确认订上了。退订时据此决定要不要真发 `UNSUBSCRIBE`。 */
+  subscribed: boolean;
+  /** 连续失败几次了，决定下次等多久。 */
+  failures: number;
+  /** 正在等的重试定时器。同一频道同一时刻最多一个，退订时要清掉。 */
+  retryTimer: ReturnType<typeof setTimeout> | undefined;
+}
+
 export function redisFanout(opts: RedisFanoutOptions): StreamFanout {
   const log = opts.logger ?? noopLogger;
   /** 会话 → 本进程挂着的监听器。**它是同步那一半**，Redis 只是把别的副本的帧送进来。 */
   const local = new Map<string, Set<(frame: Frame) => void>>();
-  /** 已经（或正在）向 Redis 订阅的频道。 */
-  const channels = new Set<string>();
+  /** 已经（或正在）向 Redis 订阅的频道 → 它的订阅进度。 */
+  const channels = new Map<string, ChannelState>();
 
   const deliverLocally = (conversationId: string, frame: Frame): void => {
     const listeners = local.get(conversationId);
@@ -140,34 +163,105 @@ export function redisFanout(opts: RedisFanoutOptions): StreamFanout {
     deliverLocally(parsed.conversationId, parsed.frame);
   };
 
-  const ensureChannel = (conversationId: string): void => {
-    const channel = `${CHANNEL_PREFIX}${conversationId}`;
-    if (channels.has(channel)) {
-      return;
-    }
-    channels.add(channel);
-    // 后台补上。这中间到达的远端帧会漏——契约允许（「掉了靠回放补」），客户端连上时
-    // 本来就先回放账本。
-    void opts.subscriber.subscribe(channel, onMessage).catch((error: unknown) => {
-      channels.delete(channel);
-      log.warn(LOG_SCOPE, "failed to subscribe to a stream channel", {
-        conversationId,
-        error: describe(error),
-      });
-    });
-  };
-
-  const releaseChannel = (conversationId: string): void => {
-    const channel = `${CHANNEL_PREFIX}${conversationId}`;
-    if (!channels.delete(channel)) {
-      return;
-    }
+  const unsubscribeQuietly = (conversationId: string, channel: string): void => {
     void opts.subscriber.unsubscribe(channel).catch((error: unknown) => {
       log.warn(LOG_SCOPE, "failed to unsubscribe from a stream channel", {
         conversationId,
         error: describe(error),
       });
     });
+  };
+
+  /**
+   * 发一次 `SUBSCRIBE`，**失败就排一个退避重试**——只要本地还有人在看这个会话。
+   *
+   * 为什么非重试不可：node-redis 只在命令 resolve 之后才把监听器记进它的 pub-sub 表
+   * （`reject` 那条路什么都不记）。所以一次失败之后，连 Redis 自己重连时的 `resubscribe`
+   * 也救不回来——这个会话的远端帧会**永久**收不到。订阅正好赶上 Redis 重启就是这个场面。
+   */
+  const attemptSubscribe = (
+    conversationId: string,
+    channel: string,
+    state: ChannelState,
+  ): void => {
+    state.retryTimer = undefined;
+    void opts.subscriber.subscribe(channel, onMessage).then(
+      () => {
+        if (channels.get(channel) !== state) {
+          // 这次成功属于一次「已经没人要了」的旧尝试。频道没被重新要上的话，把它退掉，
+          // 别在 Redis 上留个没人看的订阅；被重新要上了就不碰——那份订阅正是新的那位要的
+          // （监听器是同一个函数引用，node-redis 按 Set 存，不会重复投递）。
+          if (!channels.has(channel)) {
+            unsubscribeQuietly(conversationId, channel);
+          }
+          return;
+        }
+        state.subscribed = true;
+        state.failures = 0;
+      },
+      (error: unknown) => {
+        state.failures += 1;
+        if (channels.get(channel) !== state) {
+          // 重试的意义是「本地还有人在等远端帧」。这次请求在飞的过程中最后一个监听器走了，
+          // 那就到此为止。
+          log.warn(
+            LOG_SCOPE,
+            "gave up subscribing to a stream channel: no listeners left",
+            { conversationId, attempts: state.failures, error: describe(error) },
+          );
+          return;
+        }
+        const delay = retryDelayMs(state.failures);
+        log.warn(LOG_SCOPE, "failed to subscribe to a stream channel; retrying", {
+          conversationId,
+          attempt: state.failures,
+          retryInMs: delay,
+          error: describe(error),
+        });
+        state.retryTimer = setTimeout(() => {
+          attemptSubscribe(conversationId, channel, state);
+        }, delay);
+      },
+    );
+  };
+
+  const ensureChannel = (conversationId: string): void => {
+    const channel = `${CHANNEL_PREFIX}${conversationId}`;
+    if (channels.has(channel)) {
+      return;
+    }
+    const state: ChannelState = {
+      subscribed: false,
+      failures: 0,
+      retryTimer: undefined,
+    };
+    channels.set(channel, state);
+    // 后台补上。订上之前到达的远端帧会漏——契约允许（「掉了靠回放补」），客户端连上时
+    // 本来就先回放账本。
+    attemptSubscribe(conversationId, channel, state);
+  };
+
+  const releaseChannel = (conversationId: string): void => {
+    const channel = `${CHANNEL_PREFIX}${conversationId}`;
+    const state = channels.get(channel);
+    if (state === undefined) {
+      return;
+    }
+    channels.delete(channel);
+    if (state.retryTimer !== undefined) {
+      // 还没订上就没人看了：把等着的定时器清掉。留着既是白重试，也会吊住 Node 进程不退出。
+      clearTimeout(state.retryTimer);
+      state.retryTimer = undefined;
+      log.warn(LOG_SCOPE, "gave up subscribing to a stream channel: no listeners left", {
+        conversationId,
+        attempts: state.failures,
+      });
+    }
+    if (state.subscribed) {
+      unsubscribeQuietly(conversationId, channel);
+    }
+    // 没订上就不发 `UNSUBSCRIBE`：没有什么要撤的。万一还有一次请求在飞，它 resolve 时
+    // 会在 `attemptSubscribe` 里自己收尾。
   };
 
   return {

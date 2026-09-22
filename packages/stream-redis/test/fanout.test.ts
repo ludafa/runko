@@ -7,60 +7,8 @@
 import type { Frame } from "@runko/agent";
 import { describe, expect, it } from "vitest";
 
-import type { RedisPublisher, RedisSubscriber } from "../src/index.js";
 import { redisFanout } from "../src/index.js";
-
-/** 一个进程内的假 Redis：谁订了哪个频道、发出去的消息给谁。 */
-function fakeRedis() {
-  const channels = new Map<string, Set<(message: string) => void>>();
-  const published: { channel: string; message: string }[] = [];
-  let failNextPublish = false;
-
-  const publisher: RedisPublisher = {
-    publish(channel, message) {
-      if (failNextPublish) {
-        failNextPublish = false;
-        return Promise.reject(new Error("redis is down"));
-      }
-      published.push({ channel, message });
-      for (const listener of channels.get(channel) ?? []) {
-        listener(message);
-      }
-      return Promise.resolve(1);
-    },
-  };
-
-  const subscriberFor = (): RedisSubscriber => ({
-    subscribe(channel, listener) {
-      let listeners = channels.get(channel);
-      if (listeners === undefined) {
-        listeners = new Set();
-        channels.set(channel, listeners);
-      }
-      listeners.add(listener);
-      return Promise.resolve();
-    },
-    unsubscribe(channel) {
-      channels.delete(channel);
-      return Promise.resolve();
-    },
-  });
-
-  return {
-    publisher,
-    subscriberFor,
-    published,
-    channelCount: () => channels.size,
-    breakNextPublish: () => {
-      failNextPublish = true;
-    },
-  };
-}
-
-const frame = (text: string): Frame => ({
-  kind: "chunk",
-  chunk: { type: "text-delta", id: "t1", delta: text },
-});
+import { fakeRedis, frame } from "./fake-redis.js";
 
 /** 让后台那次 `SUBSCRIBE` 落地。 */
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
