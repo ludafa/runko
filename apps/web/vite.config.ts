@@ -53,7 +53,7 @@ export default defineConfig(({ mode }) => {
         '/api': {
           target: serverUrl,
           changeOrigin: true,
-          // 直播流的 WebSocket 通道也走这条代理（VITE_CHAT_TRANSPORT=ws）。
+          // 直播流的 WebSocket 通道也走这条代理（走哪条通道由设置页决定，见 features/chat/transport.ts）。
           ws: true,
         },
       },
