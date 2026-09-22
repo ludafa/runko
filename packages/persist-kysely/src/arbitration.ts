@@ -25,7 +25,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { Arbitration, AcquireContext, AcquireResult, Grant, OwnershipInfo, SeqResult, StaleOwnership } from "@runko/agent";
-import type { Kysely } from "kysely";
+import type { ExpressionBuilder, Kysely } from "kysely";
 
 import type { Flavor, FlavorTraits } from "./flavor.js";
 import { toNumber, traitsOf } from "./flavor.js";
@@ -84,6 +84,35 @@ export function leaseArbitration(db: Kysely<RunkoDatabase>, opts: LeaseArbitrati
     );
   }
 
+  /**
+   * 本进程起来的时刻。
+   *
+   * **挂在自己名下、心跳却早于这一刻的租约，一定是上一辈子留下的**——一个刚起来的进程
+   * 不可能已经在跑任何一轮。启动扫描据此立刻收拾它，不必干等[接管阈值](../../../docs/terms.md)：
+   * 崩溃后马上重启的会话，重启完就能用。
+   *
+   * **前提是每个进程的 `holder` 唯一。** 两个活着的进程配成同一个名字时，后起来的那个会把
+   * 先来的那一轮抢过去；先来的手里那个[租期标识](../../../docs/terms.md)已经作废、写不进账本，
+   * 所以坏的是那一轮，不是数据。
+   */
+  const startedAt = now();
+
+  /** 挂在我名下、心跳早于本进程启动 = 上一辈子的残留。 */
+  const isMyOrphan = (row: { holder: string | null; heartbeat_at: number }): boolean =>
+    row.holder === opts.holder && toNumber(row.heartbeat_at) < startedAt;
+
+  /**
+   * 陈旧判据：心跳超过接管阈值没续，**或者**是我自己上一辈子的残留。
+   *
+   * `listStale`、`clearStale`、`acquire` 三处共用这一条——判据一旦不一致，`recover()` 的
+   * `listStale → clearStale → acquire` 会互相打架（见 `clearStale` 的注释）。
+   */
+  const isStaleWhere = (eb: ExpressionBuilder<RunkoDatabase, typeof LEASES_TABLE>, at: number) =>
+    eb.or([
+      eb("heartbeat_at", "<", at - takeoverMs),
+      eb.and([eb("holder", "=", opts.holder), eb("heartbeat_at", "<", startedAt)]),
+    ]);
+
   const readRow = async (conversationId: string) =>
     await db
       .selectFrom(LEASES_TABLE)
@@ -97,9 +126,9 @@ export function leaseArbitration(db: Kysely<RunkoDatabase>, opts: LeaseArbitrati
     return row !== undefined && row.lease_token === token;
   };
 
-  /** 一行是不是「有人持有且还活着」。 */
-  const isLive = (row: { lease_token: string | null; heartbeat_at: number }, at: number): boolean =>
-    row.lease_token !== null && at - toNumber(row.heartbeat_at) <= takeoverMs;
+  /** 一行是不是「有人持有且还活着」。我自己上一辈子的残留不算活着。 */
+  const isLive = (row: { holder: string | null; lease_token: string | null; heartbeat_at: number }, at: number): boolean =>
+    row.lease_token !== null && at - toNumber(row.heartbeat_at) <= takeoverMs && !isMyOrphan(row);
 
   async function acquire(conversationId: string, ctx: AcquireContext): Promise<AcquireResult> {
     const at = now();
@@ -137,9 +166,7 @@ export function leaseArbitration(db: Kysely<RunkoDatabase>, opts: LeaseArbitrati
       .updateTable(LEASES_TABLE)
       .set({ holder: opts.holder, lease_token: token, heartbeat_at: at, acquired_at: at })
       .where("conversation_id", "=", conversationId)
-      .where((eb) =>
-        eb.or([eb("lease_token", "is", null), eb("heartbeat_at", "<", at - takeoverMs)]),
-      )
+      .where((eb) => eb.or([eb("lease_token", "is", null), isStaleWhere(eb, at)]))
       .execute();
 
     const after = await readRow(conversationId);
@@ -328,7 +355,7 @@ export function leaseArbitration(db: Kysely<RunkoDatabase>, opts: LeaseArbitrati
         .selectFrom(LEASES_TABLE)
         .select(["conversation_id", "holder"])
         .where("lease_token", "is not", null)
-        .where("heartbeat_at", "<", now() - takeoverMs)
+        .where((eb) => isStaleWhere(eb, now()))
         .execute();
       return rows.map((row) => ({
         conversationId: row.conversation_id,
@@ -353,7 +380,7 @@ export function leaseArbitration(db: Kysely<RunkoDatabase>, opts: LeaseArbitrati
         .updateTable(LEASES_TABLE)
         .set({ holder: null, lease_token: null })
         .where("conversation_id", "=", conversationId)
-        .where("heartbeat_at", "<", now() - takeoverMs)
+        .where((eb) => isStaleWhere(eb, now()))
         .execute();
     },
   };

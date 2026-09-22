@@ -1,6 +1,7 @@
 /**
- * **[归属仲裁机制](../../../docs/terms.md)的一致性套件**，按能力分四组导出（第四组 `arbitrationTakeoverReportCases`
- * 是可选能力，见它自己的注释）。
+ * **[归属仲裁机制](../../../docs/terms.md)的一致性套件**，按能力分五组导出。后两组只对
+ * 「看得见上次崩溃残留」的实现成立：`arbitrationTakeoverReportCases` 与
+ * `arbitrationRestartCases`，各见它们自己的注释。
  *
  * 三种实现的「独占」不是同一个级别的保证（内存版与 Durable Object 是**真保证**，租约版是
  * **尽力 + 可检测**），所以这里**不是一个数组配可选字段**，而是三个数组配三种 setup 类型。
@@ -13,8 +14,19 @@ import type {
   ArbitrationConformanceSetup,
   ConformanceCase,
   MultiNodeConformanceSetup,
+  RestartConformanceSetup,
   TakeoverConformanceSetup,
 } from "./types.js";
+
+/**
+ * 让真实时钟往前走一点。
+ *
+ * 「上一辈子」与「重启之后」必须落在不同的毫秒上，判据才分得开（判据是严格早于启动时刻，
+ * 同一毫秒不算）。真实的进程重启远不止这点时间，这里只是把测试拉开。
+ */
+function tick(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 5));
+}
 
 /** 每次都从 0 起——账本是空的。 */
 function ctx(seed = 0): { seedSeq: () => Promise<number> } {
@@ -349,6 +361,90 @@ export const arbitrationTakeoverReportCases: readonly ConformanceCase<TakeoverCo
       if (!b.ok) {return;}
       assert.notSame(b.takeover, undefined, "顶掉了一个过期持有者，应当报 takeover");
       assert.same(b.takeover?.holder, a.grant.holder);
+    },
+  },
+];
+
+/**
+ * **同名重启这一组**：进程崩了，按同一个 `holder` 重新起来。
+ *
+ * 要验的是一条判据：**挂在自己名下、心跳早于本进程启动的租约，立刻算陈旧**，不必干等
+ * [接管阈值](../../../docs/terms.md)。一个刚起来的进程不可能已经在跑任何一轮，所以这种
+ * 租约一定是上一辈子留下的。没有这条的话，崩溃后马上重启，那条会话要等一个接管阈值
+ * （默认 60 秒）才能再用。
+ *
+ * **只有看得见「上次崩溃残留」的实现才跑这一组**——内存版的归属表跟进程同生共死，
+ * 压根没有残留可言。
+ */
+export const arbitrationRestartCases: readonly ConformanceCase<RestartConformanceSetup>[] = [
+  {
+    name: "重启后：自己上一辈子的租约立刻算陈旧，不必等接管阈值",
+    async run(setup) {
+      const got = await setup.arbitration.acquire("c1", ctx());
+      assert.same(got.ok, true);
+      await setup.freezeClock();
+      await tick();
+
+      const restarted = await setup.restart();
+      const stale = await restarted.listStale();
+      assert.same(stale.length, 1, "重启后应当扫到上一辈子那条");
+      assert.same(stale[0]?.conversationId, "c1");
+    },
+  },
+  {
+    name: "重启后：`listStale → clearStale → acquire` 三步走得通（三处判据必须是同一条）",
+    async run(setup) {
+      const got = await setup.arbitration.acquire("c1", ctx());
+      assert.same(got.ok, true);
+      await setup.freezeClock();
+      await tick();
+
+      const restarted = await setup.restart();
+      await restarted.clearStale("c1");
+      assert.equal(await restarted.listStale(), [], "清过之后不该还扫得到");
+      const again = await restarted.acquire("c1", ctx());
+      assert.same(again.ok, true, "清过之后应当抢得到");
+    },
+  },
+  {
+    name: "重启后：不清直接抢也抢得到，并报 `takeover`（轮编排据此给那一轮补「已停止」）",
+    async run(setup) {
+      const got = await setup.arbitration.acquire("c1", ctx());
+      assert.same(got.ok, true);
+      await setup.freezeClock();
+      await tick();
+
+      const restarted = await setup.restart();
+      const again = await restarted.acquire("c1", ctx());
+      assert.same(again.ok, true);
+      if (!again.ok) {return;}
+      assert.notSame(again.takeover, undefined, "顶掉的是一条还挂着令牌的租约，应当报 takeover");
+    },
+  },
+  {
+    name: "重启后：**别人**还活着的租约不算我的残留——扫不到它，抢它还是 busy",
+    async run(setup) {
+      const theirs = await setup.other.acquire("c2", ctx());
+      assert.same(theirs.ok, true);
+      await tick();
+
+      const restarted = await setup.restart();
+      assert.equal(await restarted.listStale(), [], "别人活着的租约不该被当成残留");
+      const mine = await restarted.acquire("c2", ctx());
+      assert.same(mine.ok, false);
+      if (mine.ok) {return;}
+      assert.same(mine.reason, "busy");
+    },
+  },
+  {
+    name: "重启后：**这一辈子**自己抢的租约不算残留（判据要同时看名字与启动时刻）",
+    async run(setup) {
+      const restarted = await setup.restart();
+      const got = await restarted.acquire("c3", ctx());
+      assert.same(got.ok, true);
+
+      assert.equal(await restarted.listStale(), [], "自己正持有的租约不该被自己当成残留");
+      assert.same((await restarted.inspect("c3")).held, true);
     },
   },
 ];

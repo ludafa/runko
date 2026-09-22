@@ -17,7 +17,7 @@ related: ["ingress/features/unified-demo.md", "ingress/tech/unified-demo.md", "h
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | U0 | 三份文档 + 术语登记 | ✅ 待你过目 |
-| U1 | 框架：租约启动时收拾自己名下的旧租约 | ⬜ |
+| U1 | 框架：租约启动时收拾自己名下的旧租约 | ✅ 2026-09-22 |
 | U2 | 数据层换 Kysely，框架的表换 persist-kysely（仍只有 SQLite） | ⬜ |
 | U3 | 零配置：演示模型、本地沙盒、GitHub 可选、配置接口、web | ⬜ |
 | U4 | Postgres | ⬜ |
@@ -38,7 +38,7 @@ related: ["ingress/features/unified-demo.md", "ingress/tech/unified-demo.md", "h
 | # | 问题 | 我的建议 |
 |---|---|---|
 | 1 | **旧数据搬不搬？** 新代码用新库文件 `chat.db`，旧的 `data.db` 原样留在磁盘上。不搬的话，你本地的历史会话和账号在新版里看不到，要重新注册 | **不搬**。demo 的数据都是测试对话；导入脚本要 150–250 行，还要转换 better-auth 的日期和字段名（见[技术方案 附录 B](../tech/unified-demo.md#附录-b-顺手但不做的事)） |
-| 2 | **U1 的版本级别。** persist-kysely、persist-mongo 的恢复判据多了一支；conformance 多一条用例。已经自己实现了归属仲裁的宿主，跑新版 conformance 时可能多挂一条 | persist-kysely、persist-mongo 标 **patch**（修掉「同名重启要白等 60 秒」，接口不变）；conformance 标 **minor**，changeset 里写明新用例对自写实现的要求 |
+| 2 | ~~U1 的版本级别~~ | ✅ 已定：persist-kysely、persist-mongo 标 patch，conformance 标 minor |
 
 ## 各阶段
 
@@ -46,8 +46,9 @@ related: ["ingress/features/unified-demo.md", "ingress/tech/unified-demo.md", "h
 
 - **目标**：同名进程重启后，`recover()` 立刻收拾上一辈子留下的租约。见[技术方案 §3](../tech/unified-demo.md#_3-租约-启动时收拾自己名下的旧租约-框架小改)。
 - **涉及**：`packages/persist-kysely/src/arbitration.ts`、`packages/persist-mongo` 的租约实现、`packages/conformance` 的仲裁用例，以及归属仲裁的技术文档（把新判据写进契约）。
-- **产出**：`listStale` / `clearStale` / `acquire` 用同一条新判据；conformance 新用例在四种真库上跑绿；changeset（级别待确认 #2）。
-- **验收**：去掉新判据，新用例会失败。
+- **产出**：`listStale` / `clearStale` / `acquire` 用同一条新判据；conformance 新增 `arbitrationRestartCases`（5 条）与 `RestartConformanceSetup`；changeset `lease-restart-reclaim`。
+- **实际**：判据写成一处共用的 `isStaleWhere` / `staleOr`，`isLive` 一并收口（自己上一辈子的租约不算活着，所以 `inspect` 与 `acquire` 的快路也跟着对）。套件的 setup 多了两个钩子：`restart()` 再造一个同名实例，`freezeClock()` 把上一辈子那个实例的时钟钉死（测试里它还活着、还在打心跳，不钉死就判不出残留）。
+- **验收结论**：✅ persist-sqlite 69 条、persist-kysely 273 条（含 Postgres、MySQL 真库）、persist-mongo 83 条（真库）全绿。变异检验 5 处全被抓到：整条判据去掉（6 条红）、只看名字不看启动时刻（8 条红）、只看启动时刻不看名字（2 条红）、只改 `listStale` 忘了 `acquire`（2 条红）、Mongo 那份去掉判据（3 条红）。
 
 ### U2 · 数据层换 Kysely（仍只有 SQLite）
 
@@ -114,3 +115,4 @@ related: ["ingress/features/unified-demo.md", "ingress/tech/unified-demo.md", "h
 | 日期 | 变更 |
 |---|---|
 | 2026-09-19 | U0：三份文档初稿；术语表登记「本地沙盒」「演示模型」 |
+| 2026-09-22 | U1 完成：租约陈旧判据加「同名重启」一支，两个存储包 + 一致性套件；归属仲裁技术方案补 §4.4 |

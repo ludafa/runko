@@ -40,7 +40,7 @@ import type {
   SeqResult,
   StaleOwnership,
 } from "@runko/agent";
-import type { Collection, Db } from "mongodb";
+import type { Collection, Db, Filter } from "mongodb";
 
 import type { LeaseDoc } from "./collections.js";
 import { LEASES_COLLECTION } from "./collections.js";
@@ -96,9 +96,37 @@ export function mongoArbitration(db: Db, opts: MongoArbitrationOptions): Arbitra
 
   const col: Collection<LeaseDoc> = db.collection<LeaseDoc>(LEASES_COLLECTION);
 
-  /** 一条租约是不是「有人持有且还活着」。 */
-  const isLive = (doc: Pick<LeaseDoc, "leaseToken" | "heartbeatAt">, at: number): boolean =>
-    doc.leaseToken !== null && at - doc.heartbeatAt <= takeoverMs;
+  /**
+   * 本进程起来的时刻。
+   *
+   * **挂在自己名下、心跳却早于这一刻的租约，一定是上一辈子留下的**——一个刚起来的进程
+   * 不可能已经在跑任何一轮。启动扫描据此立刻收拾它，不必干等[接管阈值](../../../docs/terms.md)：
+   * 崩溃后马上重启的会话，重启完就能用。
+   *
+   * **前提是每个进程的 `holder` 唯一。** 两个活着的进程配成同一个名字时，后起来的那个会把
+   * 先来的那一轮抢过去；先来的手里那个[租期标识](../../../docs/terms.md)已经作废、写不进账本，
+   * 所以坏的是那一轮，不是数据。
+   */
+  const startedAt = now();
+
+  /** 挂在我名下、心跳早于本进程启动 = 上一辈子的残留。 */
+  const isMyOrphan = (doc: Pick<LeaseDoc, "holder" | "heartbeatAt">): boolean =>
+    doc.holder === opts.holder && doc.heartbeatAt < startedAt;
+
+  /**
+   * 陈旧判据：心跳超过接管阈值没续，**或者**是我自己上一辈子的残留。
+   *
+   * `listStale`、`clearStale`、`acquire` 三处共用这一条——判据一旦不一致，`recover()` 的
+   * `listStale → clearStale → acquire` 会互相打架（见 `clearStale` 的注释）。
+   */
+  const staleOr = (at: number): Filter<LeaseDoc>[] => [
+    { heartbeatAt: { $lt: at - takeoverMs } },
+    { holder: opts.holder, heartbeatAt: { $lt: startedAt } },
+  ];
+
+  /** 一条租约是不是「有人持有且还活着」。我自己上一辈子的残留不算活着。 */
+  const isLive = (doc: Pick<LeaseDoc, "holder" | "leaseToken" | "heartbeatAt">, at: number): boolean =>
+    doc.leaseToken !== null && at - doc.heartbeatAt <= takeoverMs && !isMyOrphan(doc);
 
   async function acquire(conversationId: string, ctx: AcquireContext): Promise<AcquireResult> {
     const at = now();
@@ -146,7 +174,7 @@ export function mongoArbitration(db: Db, opts: MongoArbitrationOptions): Arbitra
     const won = await col.findOneAndUpdate(
       {
         _id: conversationId,
-        $or: [{ leaseToken: null }, { heartbeatAt: { $lt: at - takeoverMs } }],
+        $or: [{ leaseToken: null }, ...staleOr(at)],
       },
       { $set: { holder: opts.holder, leaseToken: token, heartbeatAt: at, acquiredAt: at } },
       { returnDocument: "after" },
@@ -332,7 +360,7 @@ export function mongoArbitration(db: Db, opts: MongoArbitrationOptions): Arbitra
     async listStale(): Promise<StaleOwnership[]> {
       const docs = await col
         .find(
-          { leaseToken: { $ne: null }, heartbeatAt: { $lt: now() - takeoverMs } },
+          { leaseToken: { $ne: null }, $or: staleOr(now()) },
           { projection: { holder: 1 } },
         )
         .toArray();
@@ -353,7 +381,7 @@ export function mongoArbitration(db: Db, opts: MongoArbitrationOptions): Arbitra
      */
     async clearStale(conversationId: string): Promise<void> {
       await col.updateOne(
-        { _id: conversationId, heartbeatAt: { $lt: now() - takeoverMs } },
+        { _id: conversationId, $or: staleOr(now()) },
         { $set: { holder: null, leaseToken: null } },
       );
     },

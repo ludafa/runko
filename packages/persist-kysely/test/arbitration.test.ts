@@ -18,11 +18,13 @@ import type {
   ArbitrationConformanceSetup,
   ConformanceCase,
   MultiNodeConformanceSetup,
+  RestartConformanceSetup,
   TakeoverConformanceSetup,
 } from "@runko/conformance";
 import {
   arbitrationCases,
   arbitrationMultiNodeCases,
+  arbitrationRestartCases,
   arbitrationTakeoverCases,
   arbitrationTakeoverReportCases,
 } from "@runko/conformance";
@@ -61,7 +63,7 @@ function runCases<S extends { cleanup?: () => Promise<void> | void }>(
 }
 
 /** 一档的完整装配：两个「节点」+ 一个让持有者看起来死掉的钩子。 */
-function setupFor(db: Kysely<RunkoDatabase>, flavor: Flavor): TakeoverConformanceSetup {
+function setupFor(db: Kysely<RunkoDatabase>, flavor: Flavor): TakeoverConformanceSetup & RestartConformanceSetup {
   const traits = traitsOf(flavor);
   // **心跳调到 40ms / 判死 200ms**（仍满足「阈值 ≥ 3× 心跳」那条硬规矩）：默认的
   // 5s/60s 让「心跳自己发现被接管」那条用例要等一分钟。语义不变，只是把时间轴压扁。
@@ -70,11 +72,17 @@ function setupFor(db: Kysely<RunkoDatabase>, flavor: Flavor): TakeoverConformanc
   // 持有者那一侧的时钟。`expire` 把它拨到很久以前并**留在那儿**——于是持有者后面每一拍
   // 心跳写进 `heartbeat_at` 的都是过期的时刻，另一个节点稳定地看到它已死。
   let holderSkew = 0;
-  const holderNow = (): number => Date.now() - holderSkew;
+  /** 钉死之后，持有者那一侧的时钟停在这一刻——它的心跳再也写不出新的时刻。 */
+  let holderFrozenAt: number | undefined;
+  const holderNow = (): number => holderFrozenAt ?? Date.now() - holderSkew;
 
   return {
     arbitration: leaseArbitration(db, { flavor: traits, holder: "node-a", now: holderNow, ...timings }),
     other: leaseArbitration(db, { flavor: traits, holder: "node-b", ...timings }),
+    restart: () => leaseArbitration(db, { flavor: traits, holder: "node-a", ...timings }),
+    freezeClock: () => {
+      holderFrozenAt = holderNow();
+    },
     expire: async (conversationId: string): Promise<void> => {
       holderSkew = timings.takeoverMs * 10;
       await db
@@ -102,11 +110,12 @@ function closing(db: Kysely<RunkoDatabase>): { cleanup: () => Promise<void> } {
  * 三组都写出来，跑了什么一眼可查，而不是漏了 `expire` 就静默跳过还显示绿。（三个数组
  * 之间没有类型绑定，少接一组编译照过；这条靠评审守，不靠编译器。）
  */
-function runAllGroups(title: string, make: () => Promise<TakeoverConformanceSetup>): void {
+function runAllGroups(title: string, make: () => Promise<TakeoverConformanceSetup & RestartConformanceSetup>): void {
   runCases<ArbitrationConformanceSetup>(`${title} · 通用`, arbitrationCases, make);
   runCases<MultiNodeConformanceSetup>(`${title} · 多节点`, arbitrationMultiNodeCases, make);
   runCases<TakeoverConformanceSetup>(`${title} · 超时接管`, arbitrationTakeoverCases, make);
   runCases<TakeoverConformanceSetup>(`${title} · 报 takeover`, arbitrationTakeoverReportCases, make);
+  runCases<RestartConformanceSetup>(`${title} · 同名重启`, arbitrationRestartCases, make);
 }
 
 // ---------------------------------------------------------------------------

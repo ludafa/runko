@@ -52,6 +52,26 @@ export interface MultiNodeConformanceSetup extends ArbitrationConformanceSetup {
   other: Arbitration;
 }
 
+export interface RestartConformanceSetup extends MultiNodeConformanceSetup {
+  /**
+   * 再造一个**同名**实例——进程崩溃后按同一个 `holder` 重启，就是这个样子。
+   *
+   * 每调一次都要是一个新实例（它得记住「我是什么时候起来的」），后端与 `holder` 与
+   * `arbitration` 那个相同。
+   */
+  restart: () => Arbitration | Promise<Arbitration>;
+  /**
+   * 把 `arbitration` 那个实例的时钟**钉死在此刻**：它后面每一拍心跳写进库里的都还是这个
+   * 时刻，不再往前走。
+   *
+   * 为什么要这个钩子：真实世界里上一个进程已经没了，心跳自然停。测试里它还活着、还在
+   * 打心跳，会把心跳时刻一路刷新到重启之后——「这条是上一辈子留下的」就再也判不出来。
+   * 与 `expire` 的区别是它**不把时刻推到过期**：留在此刻，才能把「同名重启」这条判据
+   * 与「超时接管」那条分开验。
+   */
+  freezeClock: () => void | Promise<void>;
+}
+
 export interface TakeoverConformanceSetup extends MultiNodeConformanceSetup {
   /**
    * 让当前持有者**看起来死了**，好在不等真实超时的前提下测接管。

@@ -12,6 +12,7 @@ export type {
   ConformanceCase,
   MultiNodeConformanceSetup,
   PersistenceConformanceSetup,
+  RestartConformanceSetup,
   TakeoverConformanceSetup,
 } from "./types.js";
 export { ConformanceAssertionError } from "./assert.js";
@@ -19,6 +20,7 @@ export { persistenceCases } from "./persistence.js";
 export {
   arbitrationCases,
   arbitrationMultiNodeCases,
+  arbitrationRestartCases,
   arbitrationTakeoverCases,
   arbitrationTakeoverReportCases,
 } from "./arbitration.js";

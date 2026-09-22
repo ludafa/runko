@@ -22,11 +22,13 @@ import type {
   ArbitrationConformanceSetup,
   ConformanceCase,
   MultiNodeConformanceSetup,
+  RestartConformanceSetup,
   TakeoverConformanceSetup,
 } from "@runko/conformance";
 import {
   arbitrationCases,
   arbitrationMultiNodeCases,
+  arbitrationRestartCases,
   arbitrationTakeoverCases,
   arbitrationTakeoverReportCases,
 } from "@runko/conformance";
@@ -69,15 +71,21 @@ function runCases<S extends { cleanup?: () => Promise<void> | void }>(
 const TIMINGS = { heartbeatMs: 40, takeoverMs: 200 };
 
 /** 一档的完整装配：两个「副本」+ 一个让持有者看起来死掉的钩子。 */
-function setupFor(db: Db): TakeoverConformanceSetup {
+function setupFor(db: Db): TakeoverConformanceSetup & RestartConformanceSetup {
   // 持有者那一侧的时钟。`expire` 把它拨到很久以前并**留在那儿**——于是持有者后面每一拍
   // 心跳写进 `heartbeatAt` 的都是过期的时刻，另一个副本稳定地看到它已死。
   let holderSkew = 0;
-  const holderNow = (): number => Date.now() - holderSkew;
+  /** 钉死之后，持有者那一侧的时钟停在这一刻——它的心跳再也写不出新的时刻。 */
+  let holderFrozenAt: number | undefined;
+  const holderNow = (): number => holderFrozenAt ?? Date.now() - holderSkew;
 
   return {
     arbitration: mongoArbitration(db, { holder: "node-a", now: holderNow, ...TIMINGS }),
     other: mongoArbitration(db, { holder: "node-b", ...TIMINGS }),
+    restart: () => mongoArbitration(db, { holder: "node-a", ...TIMINGS }),
+    freezeClock: () => {
+      holderFrozenAt = holderNow();
+    },
     expire: async (conversationId: string): Promise<void> => {
       holderSkew = TIMINGS.takeoverMs * 10;
       await db
@@ -88,17 +96,18 @@ function setupFor(db: Db): TakeoverConformanceSetup {
 }
 
 /**
- * 四组全跑。
+ * 五组全跑。
  *
- * **四组是分开接的，不是一个数组配可选字段**——租约版声称自己支持多节点、接管、报
- * `takeover`，就把四组都写出来，跑了什么一眼可查，而不是漏了 `expire` 就静默跳过还显示绿。
- * （四个数组之间没有类型绑定，少接一组编译照过；这条靠评审守，不靠编译器。）
+ * **五组是分开接的，不是一个数组配可选字段**——租约版声称自己支持多节点、接管、报
+ * `takeover`、同名重启，就把五组都写出来，跑了什么一眼可查，而不是漏了 `expire` 就静默
+ * 跳过还显示绿。（五个数组之间没有类型绑定，少接一组编译照过；这条靠评审守，不靠编译器。）
  */
-function runAllGroups(title: string, make: () => Promise<TakeoverConformanceSetup>): void {
+function runAllGroups(title: string, make: () => Promise<TakeoverConformanceSetup & RestartConformanceSetup>): void {
   runCases<ArbitrationConformanceSetup>(`${title} · 通用`, arbitrationCases, make);
   runCases<MultiNodeConformanceSetup>(`${title} · 多节点`, arbitrationMultiNodeCases, make);
   runCases<TakeoverConformanceSetup>(`${title} · 超时接管`, arbitrationTakeoverCases, make);
   runCases<TakeoverConformanceSetup>(`${title} · 报 takeover`, arbitrationTakeoverReportCases, make);
+  runCases<RestartConformanceSetup>(`${title} · 同名重启`, arbitrationRestartCases, make);
 }
 
 const MONGO_URL = process.env["RUNKO_TEST_MONGO_URL"];

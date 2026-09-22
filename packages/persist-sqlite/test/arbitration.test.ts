@@ -12,11 +12,13 @@ import type {
   ArbitrationConformanceSetup,
   ConformanceCase,
   MultiNodeConformanceSetup,
+  RestartConformanceSetup,
   TakeoverConformanceSetup,
 } from "@runko/conformance";
 import {
   arbitrationCases,
   arbitrationMultiNodeCases,
+  arbitrationRestartCases,
   arbitrationTakeoverCases,
   arbitrationTakeoverReportCases,
 } from "@runko/conformance";
@@ -54,17 +56,23 @@ function runCases<S extends { cleanup?: () => Promise<void> | void }>(
  * 活着，它的下一拍心跳会把时刻刷回来，接管于是随机失败。冻住时钟之后它爱跳多少拍都
  * 写不出一个「新鲜」的时刻。
  */
-async function setupFor(): Promise<TakeoverConformanceSetup> {
+async function setupFor(): Promise<TakeoverConformanceSetup & RestartConformanceSetup> {
   const db = new Database(":memory:");
   await migrate(db);
   const timings = { heartbeatMs: 40, takeoverMs: 200 };
 
   let holderSkew = 0;
-  const holderNow = (): number => Date.now() - holderSkew;
+  /** 钉死之后，持有者那一侧的时钟停在这一刻——它的心跳再也写不出新的时刻。 */
+  let holderFrozenAt: number | undefined;
+  const holderNow = (): number => holderFrozenAt ?? Date.now() - holderSkew;
 
   return {
     arbitration: sqliteArbitration(db, { holder: "node-a", now: holderNow, ...timings }),
     other: sqliteArbitration(db, { holder: "node-b", ...timings }),
+    restart: () => sqliteArbitration(db, { holder: "node-a", ...timings }),
+    freezeClock: () => {
+      holderFrozenAt = holderNow();
+    },
     expire: (conversationId: string): Promise<void> => {
       holderSkew = timings.takeoverMs * 10;
       db.prepare("UPDATE agent_leases SET heartbeat_at = ? WHERE conversation_id = ?").run(holderNow(), conversationId);
@@ -80,6 +88,7 @@ runCases<ArbitrationConformanceSetup>("persist-sqlite 仲裁 · 通用", arbitra
 runCases<MultiNodeConformanceSetup>("persist-sqlite 仲裁 · 多节点", arbitrationMultiNodeCases, setupFor);
 runCases<TakeoverConformanceSetup>("persist-sqlite 仲裁 · 超时接管", arbitrationTakeoverCases, setupFor);
 runCases<TakeoverConformanceSetup>("persist-sqlite 仲裁 · 报 takeover", arbitrationTakeoverReportCases, setupFor);
+runCases<RestartConformanceSetup>("persist-sqlite 仲裁 · 同名重启", arbitrationRestartCases, setupFor);
 
 describe("persist-sqlite 仲裁的装配", () => {
   it("租约与账本落在同一个库——取号从账本水位接着数，不从 0 重来", async () => {
