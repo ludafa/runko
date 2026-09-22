@@ -8,7 +8,7 @@
 import type { AgentDefinition, RunkoUIMessage } from "@runko/core";
 import { describe, expect, it, vi } from "vitest";
 
-import type { AgentRuntime, Arbitration, Frame, OwnershipInfo, Takeover, TurnInput, TurnPreparation } from "../src/index.js";
+import type { AgentRuntime, Arbitration, Frame, OwnershipInfo, StreamFanout, Takeover, TurnInput, TurnPreparation } from "../src/index.js";
 import { createAgentRuntime, inProcessArbitration, memoryPersistence } from "../src/index.js";
 import { ABORT_REASON_HOLDER_LOST } from "../src/runtime/reasons.js";
 import { buildResumeState } from "../src/runtime/turn.js";
@@ -108,6 +108,29 @@ function takeoverArbitration(takeover: Takeover | undefined): Arbitration {
     inspect: (): Promise<OwnershipInfo> => Promise.resolve({ held: false }),
     listStale: () => Promise.resolve([]),
     clearStale: () => Promise.resolve(),
+  };
+}
+
+/**
+ * 一个「一组回调」式的假[流分发](../../../docs/terms.md)，默认自称**能跨进程**
+ * （`crossInstance: true`，Redis 那一档就是这样）。测试直接调它的 `publish` 就相当于
+ * 「别的副本广播了一帧过来」。
+ */
+function broadcastFanout(opts: { crossInstance?: boolean } = {}): StreamFanout {
+  const listeners = new Map<string, Set<(frame: Frame) => void>>();
+  return {
+    crossInstance: opts.crossInstance ?? true,
+    publish(conversationId: string, frame: Frame): void {
+      for (const listener of [...(listeners.get(conversationId) ?? [])]) {listener(frame);}
+    },
+    subscribe(conversationId: string, listener: (frame: Frame) => void): () => void {
+      const set = listeners.get(conversationId) ?? new Set<(frame: Frame) => void>();
+      set.add(listener);
+      listeners.set(conversationId, set);
+      return () => {
+        set.delete(listener);
+      };
+    },
   };
 }
 
@@ -247,6 +270,37 @@ describe("subscribe", () => {
     expect(tail.frames.map((f) => f.kind)).toEqual(["queue", "activity"]);
     // 关键：不是 `{ active: false }`——那是「本进程不知道」，不是「没有轮在跑」。
     expect(tail.frames.at(-1)).toMatchObject({ kind: "activity", active: true, holder: "node-b" });
+  });
+
+  it("一轮跑在别的副本上、而流分发能跨进程时：**留着等**，别的副本广播来的帧照样收得到", async () => {
+    // 没有这一条，多副本 + Redis 广播那一档会静默退化：连上去只收到两帧快照，流就关了
+    // ——正在跑的那一轮用户一个字也看不到，界面停在那儿，也不报错。
+    const stream = broadcastFanout();
+    const { runtime } = setup({ arbitration: remoteArbitration("node-b"), stream });
+
+    const tail = collect(runtime, "conv-remote-live");
+    await vi.waitFor(() => {
+      expect(tail.frames.some((f) => f.kind === "activity")).toBe(true);
+    });
+    // 别的副本正在说话：它 publish 的帧经广播到这里。
+    stream.publish("conv-remote-live", { kind: "chunk", chunk: { type: "text-delta", id: "t1", delta: "你好" } });
+    await vi.waitFor(() => {
+      expect(tail.frames.some((f) => f.kind === "chunk")).toBe(true);
+    });
+
+    // 那一轮在别处收尾时会广播 `activity:false`——收线的时机与本地那一档一样。
+    stream.publish("conv-remote-live", { kind: "activity", active: false });
+    await tail.done;
+  });
+
+  it("同样跑在别的副本上、但流分发只管本进程时：就地收线（等也等不到）", async () => {
+    const { runtime } = setup({ arbitration: remoteArbitration("node-b"), stream: broadcastFanout({ crossInstance: false }) });
+
+    const tail = collect(runtime, "conv-remote-nolive");
+    await tail.done; // 不等——宿主会把请求转给持有者，或者客户端重连
+
+    expect(tail.frames.map((f) => f.kind)).toEqual(["queue", "activity"]);
+    expect(tail.frames.at(-1)).toMatchObject({ active: true, holder: "node-b" });
   });
 
   it("归属报的是**我们自己**上一次的 holder 时，不算「有轮在跑」", async () => {

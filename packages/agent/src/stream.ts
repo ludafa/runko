@@ -20,4 +20,14 @@ export interface StreamFanout {
   publish(conversationId: string, frame: Frame): void;
   /** 同步挂上订阅（理由见文件头约束 ②），返回退订函数。 */
   subscribe(conversationId: string, listener: (frame: Frame) => void): () => void;
+  /**
+   * **这份实现会不会把别的进程发的帧也送过来**（Redis 那种广播 = `true`；进程内的
+   * EventEmitter = 缺省的 `false`）。
+   *
+   * 它只影响一件事：一轮正跑在**别的副本**上时，本副本的 `subscribe` 要不要继续等。
+   *
+   * - `false`：等也等不到，就地收线。订阅方据此重连、或由宿主把请求转给持有者。
+   * - `true`：留着。内容马上会从别的副本广播过来，收线反而让人看不到正在跑的这一轮。
+   */
+  readonly crossInstance?: boolean;
 }

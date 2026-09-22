@@ -171,6 +171,10 @@ export function redisFanout(opts: RedisFanoutOptions): StreamFanout {
   };
 
   return {
+    // 别的副本发的帧这里收得到——所以一轮跑在别处时，订阅方**留着等**而不是收线
+    // （框架据此决定，见 `StreamFanout.crossInstance`）。
+    crossInstance: true,
+
     publish(conversationId: string, frame: Frame): void {
       // ① 本进程的订阅者先拿到——这一步是同步的，契约里那条「零空隙」保证靠它。
       deliverLocally(conversationId, frame);

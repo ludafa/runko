@@ -358,7 +358,17 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
         ...(holder !== undefined ? { holder } : {}),
       };
 
-      if (!localActive && follow === "turn") {return;}
+      // **这一轮跑在别的副本上时，等不等得看流分发能不能跨进程送帧**
+      // （`StreamFanout.crossInstance`）。
+      //
+      // 进程内那一档等也等不到，就地收线是诚实的：宿主要么把请求转给持有者、要么让
+      // 客户端重连。换成广播那一档，帧马上就会从别的副本过来——这时收线，用户就看不到
+      // 正在跑的这一轮了（连上去只收到几帧快照然后流就关了）。
+      //
+      // 收线的时机两档一样：那一轮收尾时会广播一帧 `activity:false`，下面第 ⑤ 步的循环
+      // 见到它就结束。
+      const followRemote = heldElsewhere && stream.crossInstance === true;
+      if (!localActive && !followRemote && follow === "turn") {return;}
 
       // ⑤ 直播。「先看有没有货，没货才等」——`scheduleWake` 换新 promise 的写法下，一个在
       //    本循环 yield 期间到达的帧唤醒的是已经没人等的旧 promise，那次唤醒会丢；先看
