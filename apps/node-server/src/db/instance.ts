@@ -15,14 +15,17 @@
  *    要到某次查询才炸。这里当场报错，并告诉人怎么办——**不自动删、也不自动迁，删数据只能
  *    由人来做。**
  *
- * ③ **Postgres 的大整数当数字读。** 毫秒时间戳存在 `bigint` 列里，pg 驱动缺省把它读成
+ * ③ **哪种库就只加载哪个驱动。** 两个驱动都是运行时才 `import` 进来的：跑 Postgres 的部署
+ *    根本不会碰 better-sqlite3（一个原生模块，某些平台上装不起来），反过来也一样。
+ *
+ * ④ **Postgres 的大整数当数字读。** 毫秒时间戳存在 `bigint` 列里，pg 驱动缺省把它读成
  *    字符串（怕溢出）。时间戳离 2^53 还差着几千年，所以就地配一个解析器读成 number，
  *    省得每个取值点都要记得转一次。
  */
 import type { Flavor } from '@runko/persist-kysely';
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import { Kysely, PostgresDialect, SqliteDialect } from 'kysely';
-import { Pool, TypeOverrides } from 'pg';
+import type pg from 'pg';
 
 import type { ChatDatabase } from './schema.js';
 
@@ -58,14 +61,16 @@ export function assertNotLegacy(sqlite: Database.Database, path: string): void {
   );
 }
 
-function openSqlite(): Database.Database {
-  const sqlite = new Database(SQLITE_PATH);
+async function openSqlite(): Promise<Database.Database> {
+  const { default: BetterSqlite3 } = await import('better-sqlite3');
+  const sqlite = new BetterSqlite3(SQLITE_PATH);
   sqlite.pragma('journal_mode = WAL');
   assertNotLegacy(sqlite, SQLITE_PATH);
   return sqlite;
 }
 
-function openPostgres(connectionString: string): Pool {
+async function openPostgres(connectionString: string): Promise<pg.Pool> {
+  const { Pool, TypeOverrides } = await import('pg');
   const types = new TypeOverrides();
   types.setTypeParser(PG_INT8_OID, (value: string) => Number(value));
   return new Pool({ connectionString, types });
@@ -74,11 +79,9 @@ function openPostgres(connectionString: string): Pool {
 function createDialect(): SqliteDialect | PostgresDialect {
   if (DATABASE_URL !== undefined && DATABASE_URL.length > 0) {
     const url = DATABASE_URL;
-    return new PostgresDialect({
-      pool: () => Promise.resolve(openPostgres(url)),
-    });
+    return new PostgresDialect({ pool: () => openPostgres(url) });
   }
-  return new SqliteDialect({ database: () => Promise.resolve(openSqlite()) });
+  return new SqliteDialect({ database: () => openSqlite() });
 }
 
 /**

@@ -2,6 +2,9 @@
   "name": "@runko-chat/node-server",
   "version": "0.0.0",
   "private": true,
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "scripts": {
     "dev": "node --env-file-if-exists=../../.env --env-file-if-exists=.env --import tsx --watch src/index.ts",
@@ -17,7 +20,8 @@
     "lab:up": "docker compose -f docker/compose.yml up -d --build --wait",
     "lab:down": "docker compose -f docker/compose.yml down -v --remove-orphans",
     "test:lab": "RUNKO_TEST_LAB=1 vitest run test/e2e/lab.e2e.test.ts",
-    "lab:logs": "node --import tsx scripts/lab-logs.ts"
+    "lab:logs": "node --import tsx scripts/lab-logs.ts",
+    "build:dist": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
     "@ai-sdk/deepseek": "^3.0.7",

@@ -21,7 +21,7 @@ related: ["ingress/features/unified-demo.md", "ingress/tech/unified-demo.md", "h
 | U2 | 数据层换 Kysely，框架的表换 persist-kysely（仍只有 SQLite） | ✅ 2026-09-22 |
 | U3 | 零配置：演示模型、本地沙盒、GitHub 可选、配置接口、web | ✅ 2026-09-22 |
 | U4 | Postgres | ✅ 2026-09-22 |
-| U5 | 多副本：转发、在场进库、镜像与验证环境 | ⬜ |
+| U5 | 多副本：转发、在场进库、镜像与验证环境 | ✅ 2026-09-22 |
 | U6 | 把 persist-demo 的真进程测试搬过来，接进 CI | ⬜ |
 | U7 | 删 persist-demo，清理文档 | ⬜ |
 | U8 | 验证方案、端到端实测、代码审查 | ⬜ |
@@ -94,7 +94,8 @@ related: ["ingress/features/unified-demo.md", "ingress/tech/unified-demo.md", "h
   - 路由：转发器（从 persist-demo 搬过来，加上复制 cookie）、`routes/chat.ts` 七类要转发的请求、`push/presence.ts` 进库、`/health` 与 `…/activity`。
   - 构建：`build` 与 `start`；启动时不再写 `openapi.yml`。
   - 验证环境：`docker/` 下的 Dockerfile、`compose.yml`（含一次性的 `migrate` 服务）、`nginx.conf`，以及 `lab:*` 脚本。
-- **验收**：转发的单测（非持有者转给持有者、带 cookie、成环回 503、持有者连不上回 503）；在场状态跨副本的单测。
+- **实际**：转发写成**中间件**而不是写在各处理器里——处理器的返回类型被 OpenAPI 路由定义钉死，而转发要原样交回上游那条响应（含 SSE 流），写在里面只能靠类型断言绕过。会话归属改由持有者再查一遍（它跑的是同一份代码）。发消息那条也走中间件先转；框架仍报 `held_by_other` 的窄竞态回 503 让客户端重试。日志行格式抽成 `formatLogLine` 导出，验证环境才能把测试步骤与各容器日志合并成一条时间线。
+- **验收结论**：✅ 转发 8 条单测（cookie、环路、令牌、连不上、不开口、身份解析）；在场跨副本单测；编译产物起得来（`/health` 与 `/api/auth-config` 实测 200）。
 
 ### U6 · 搬测试
 
@@ -115,6 +116,44 @@ related: ["ingress/features/unified-demo.md", "ingress/tech/unified-demo.md", "h
 - 一轮代码审查，问题修完再交。
 
 ## 验证方案
+
+分三档：**自动跑的**（CI 与本地都跑）、**要 docker 的**（本地手动跑一次）、**要人眼看的**（浏览器）。
+
+### 一、自动跑的（`pnpm -r test`）
+
+| 验什么 | 在哪 |
+|---|---|
+| 零配置：一个 key 都不配，建会话 → `run:` 真的跑了命令 → 危险命令弹审批 → 批准后结清 | `apps/node-server/test/routes/zero-config.test.ts` |
+| 演示模型：指令认得准、上一条是工具结果就收尾（恢复轮不重复执行） | `test/agent/demo-model.test.ts` |
+| 本地沙盒：快照跨进程恢复、别的副本改过后自己的缓存作废、坏快照不炸 | `test/agent/local-sandbox.test.ts` |
+| 两种库同一批读写（毫秒时间戳、upsert、null） | `test/db/dialects.test.ts` |
+| 转发四条防线：cookie、环路、副本间令牌、失联回 503 | `test/routes/forward.test.ts` |
+| 在场跨副本 | `test/push/presence.test.ts` |
+| 多副本与挂起恢复（两个真进程共用一个库） | `test/e2e/` |
+| 租约「同名重启立刻回收」 | 四种真库上的一致性套件 |
+
+### 二、要 docker 的（本地手动跑一次）
+
+```sh
+pnpm --filter @runko-chat/node-server test:lab     # 自带起停：跑完就把环境删掉
+```
+
+八个故障场景（并发抢占、SSE 经非持有者、停止转发、数据库卡顿、`kill -9` 接管、重启扫描、
+冻住持有者、网络分区）。日志留在 `apps/node-server/logs/lab-<时间>/`。
+
+### 三、要人眼看的（浏览器）
+
+服务要你来起（`pnpm chat:server` + `pnpm chat:web`）。依次确认：
+
+1. **零配置**：不填任何 key，注册 → 新建会话（沙盒只有「本地」一项）→ 顶部有「演示模型」标记。
+2. 发 `run: ls -la` → 出现工具卡片与命令输出。
+3. 发 `run: rm -rf dist` → 弹审批卡片 → 点「允许」→ 命令执行。
+4. 发 `ask: 用 A 还是 B？` → 弹提问卡片 → 回答 → 这一轮接着跑。
+5. 把 `CHAT_SUSPEND_MEMORY_WINDOW` 设成 `20000` 重启，重复第 3 步但不点按钮：20 秒后这一轮挂起，
+   卡片仍可点，点完接着跑；会话列表出现「等你」。
+6. 本地沙盒的会话不显示仓库、分支与「休眠」。
+
+### 实际结果
 
 开发全部完成后填写。
 

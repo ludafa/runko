@@ -85,16 +85,52 @@ export function truncate(value: string, maxLength: number): string {
   return `${value.slice(0, maxLength)}…(+${String(value.length - maxLength)})`;
 }
 
+/**
+ * 一行日志长什么样。**单独导出**，是因为[多副本验证环境](../../../docs/terms.md)的测试要写
+ * 自己的步骤行，再跟各容器的日志**按时间合并成一条时间线**——两边的行格式必须一模一样，
+ * 否则合并出来的时间线读不成。
+ */
+export function formatLogLine(line: {
+  at: Date;
+  /** 哪个副本打的；合并时间线时靠它分辨来源。测试自己的步骤行写 `test`。 */
+  node?: string;
+  level: string;
+  scope: string;
+  message: string;
+  fields?: LogFields;
+}): string {
+  const hasFields =
+    line.fields !== undefined && Object.keys(line.fields).length > 0;
+  const suffix = hasFields ? ` ${JSON.stringify(line.fields)}` : '';
+  const node =
+    line.node !== undefined && line.node !== '' ? `${line.node} ` : '';
+  return `${line.at.toISOString()} ${node}${line.level.toUpperCase()} [${line.scope}] ${line.message}${suffix}`;
+}
+
 function formatLine(
   level: LogLevel,
   scope: string,
   message: string,
   fields?: LogFields,
 ): string {
-  const timestamp = new Date().toISOString();
-  const hasFields = fields !== undefined && Object.keys(fields).length > 0;
-  const suffix = hasFields ? ` ${JSON.stringify(fields)}` : '';
-  return `${timestamp} ${level.toUpperCase()} [${scope}] ${message}${suffix}`;
+  return formatLogLine({
+    at: new Date(),
+    node: process.env.RUNKO_NODE_URL === undefined ? '' : nodeName(),
+    level,
+    scope,
+    message,
+    ...(fields !== undefined ? { fields } : {}),
+  });
+}
+
+/** 多副本时日志里带上副本名（从可达地址取主机名），单进程时不带。 */
+function nodeName(): string {
+  const url = process.env.RUNKO_NODE_URL?.trim() ?? '';
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
 }
 
 /**

@@ -18,6 +18,20 @@ export function createChatPersistence(db: Db): Persistence {
   return kyselyPersistence(db, { flavor });
 }
 
+/**
+ * 读一个毫秒数的环境变量。**空串与写错的值一律当没配**：k8s / compose 里「声明了但没给值」
+ * 很常见，那会把心跳配成 0（每毫秒两条查询），或者把接管阈值配成 0 让构造直接抛——
+ * 报错还指着一个用户根本没设过的数字。
+ */
+function readMs(name: string, env: NodeJS.ProcessEnv): number | undefined {
+  const raw = env[name]?.trim();
+  if (raw === undefined || raw === '') {
+    return undefined;
+  }
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
 export interface ChatArbitrationOptions {
   /**
    * 这个进程的名字。多副本时要填本副本的可达地址（别的副本据此把请求转过来），
@@ -32,10 +46,20 @@ export interface ChatArbitrationOptions {
 export function createChatArbitration(
   db: Db,
   opts: ChatArbitrationOptions = {},
+  env: NodeJS.ProcessEnv = process.env,
 ): Arbitration {
-  const nodeUrl = process.env.RUNKO_NODE_URL?.trim();
+  const nodeUrl = env.RUNKO_NODE_URL?.trim();
   const holder =
     opts.holder ??
     (nodeUrl !== undefined && nodeUrl !== '' ? nodeUrl : 'local');
-  return leaseArbitration(db, { flavor, holder });
+  // 心跳与接管阈值可调：验证环境要把时间轴压扁（缺省 5 秒 / 60 秒，一个场景要等一分钟）。
+  // 不配就用框架的缺省值。
+  const heartbeatMs = readMs('RUNKO_HEARTBEAT_MS', env);
+  const takeoverMs = readMs('RUNKO_TAKEOVER_MS', env);
+  return leaseArbitration(db, {
+    flavor,
+    holder,
+    ...(heartbeatMs !== undefined ? { heartbeatMs } : {}),
+    ...(takeoverMs !== undefined ? { takeoverMs } : {}),
+  });
 }
