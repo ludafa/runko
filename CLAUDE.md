@@ -21,6 +21,7 @@ pnpm workspace 三组成员（见 [pnpm-workspace.yaml](./pnpm-workspace.yaml)�
 | `@runko/persist-postgres`   | 薄壳：吃 `pg.Pool`                                                           | agent, persist-kysely       |
 | `@runko/persist-mysql`      | 薄壳：吃 mysql2 连接池                                                       | agent, persist-kysely       |
 | `@runko/persist-mongo`      | **非** 薄壳：MongoDB 直接实现三个领域接口 + 租约版仲裁（Kysely 是 SQL，用不上） | agent, core（peer mongodb） |
+| `@runko/stream-redis`       | 流分发实现：Redis 发布/订阅广播，多副本时直播流连哪个副本都能看（peer `redis`）  | agent, core                |
 | `@runko/conformance`        | 契约一致性套件：持久化 / 归属仲裁的用例数据（`{ name, run }`），**不依赖任何测试框架** | agent（peer）、core（dev） |
 | `@runko/sdk`                | 主包门面：re-export core + virtual-fs + mini-bash，不放实现                  | core, virtual-fs, mini-bash |
 

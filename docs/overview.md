@@ -307,7 +307,7 @@ await Skill.fromFS(fs, "/.agents/skills/frontend-design") // 从任意 RunkoFS �
 | 宿主层 · **沙盒**（远端） | `@runko/sandbox-e2b` · `-vercel` · `-cloudflare` | ✅ 已有 |
 | 宿主层 · **持久化 + 归属仲裁机制** | `@runko/persist-kysely`（核心，方言是参数）· `-sqlite` · `-postgres` · `-mysql`（三个薄壳）· `-mongo` | ✅ 已有 |
 | 契约自证 | `@runko/conformance`（一致性套件，验一个实现合不合契约） | ✅ 已有 |
-| 宿主层 · **流分发** | `@runko/stream-redis`（Redis Streams） | 🚧 待建 |
+| 宿主层 · **流分发** | `@runko/stream-redis`（Redis 发布/订阅广播） | ✅ 已有 |
 | Cloudflare DO **全套** | `@runko/durable-object`（持久化 + 平凡仲裁 + 实例内流分发） | 🚧 待建 |
 | 门面 | `@runko/sdk` | ✅ 已有 |
 | 开箱应用 | `@runko/cli`（**不是框架包，是拿框架搭的成品**） | 🚧 待建 |
@@ -332,6 +332,7 @@ await Skill.fromFS(fs, "/.agents/skills/frontend-design") // 从任意 RunkoFS �
 | `@runko/persist-postgres`   | 薄壳：吃 `pg.Pool`                                                                                                                                    | [packages/persist-postgres](../packages/persist-postgres/README.md)     |
 | `@runko/persist-mysql`      | 薄壳：吃 mysql2 连接池                                                                                                                                | [packages/persist-mysql](../packages/persist-mysql/README.md)           |
 | `@runko/persist-mongo`      | MongoDB 直接实现三个领域接口 + 租约版归属仲裁（不走 Kysely——那是 SQL 的东西）                                                                          | [packages/persist-mongo](../packages/persist-mongo/README.md)           |
+| `@runko/stream-redis`       | 流分发的 Redis 实现：多副本时把正在产生的内容广播给所有副本，「看直播」连到哪个副本都行（吃你自己的 Redis 客户端实例，**不随 sdk 装入**）              | [packages/stream-redis](../packages/stream-redis/README.md)             |
 | `@runko/conformance`        | 契约一致性套件：写了自己的持久化 / 归属仲裁实现，拿它验合不合契约（**不依赖任何测试框架**）                                                            | [packages/conformance](../packages/conformance/README.md)               |
 
 **bash 分档说明**：`bash` 工具的命令执行环境（`RunkoExec`）分两档，按需二选一注入，一行代码互换、loop/session 代码零改动（[tech/core-sdk §4.5b](./logic/engine/tech/core-sdk.md)）——
