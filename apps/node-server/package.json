@@ -13,7 +13,11 @@
     "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
     "lint:fix": "eslint . --fix",
     "test": "vitest run",
-    "db:migrate": "node --env-file-if-exists=../../.env --env-file-if-exists=.env --import tsx src/db/migrate-cli.ts"
+    "db:migrate": "node --env-file-if-exists=../../.env --env-file-if-exists=.env --import tsx src/db/migrate-cli.ts",
+    "lab:up": "docker compose -f docker/compose.yml up -d --build --wait",
+    "lab:down": "docker compose -f docker/compose.yml down -v --remove-orphans",
+    "test:lab": "RUNKO_TEST_LAB=1 vitest run test/e2e/lab.e2e.test.ts",
+    "lab:logs": "node --import tsx scripts/lab-logs.ts"
   },
   "dependencies": {
     "@ai-sdk/deepseek": "^3.0.7",

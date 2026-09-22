@@ -2,7 +2,7 @@
  * [在场](../../../../docs/terms.md)心跳接口（docs/ingress/tech/push-notification.md §5.2）
  * ——`POST .../presence`。
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { Db } from '../../src/agent/store.js';
 import { createConversation } from '../../src/agent/store.js';
@@ -30,7 +30,6 @@ describe('routes/chat —— 在场心跳', () => {
       sandboxName: `runko-chat-${CONVERSATION_ID}`,
     });
   });
-
 
   function app(userId: string) {
     return buildChatApp({

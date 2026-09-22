@@ -8,12 +8,19 @@
 import { Hono } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
 
-import { createForwarder, resolveNodeIdentity } from '../../src/routes/forward.js';
+import {
+  createForwarder,
+  resolveNodeIdentity,
+} from '../../src/routes/forward.js';
 import { silentLogger } from '../helpers/silent-logger.js';
 
 /** 起一个「持有者」：记下收到的请求，按给定的方式回应。 */
 function holderApp(
-  respond: (info: { cookie?: string; forwarded?: string; token?: string }) => Response,
+  respond: (info: {
+    cookie?: string;
+    forwarded?: string;
+    token?: string;
+  }) => Response,
 ) {
   const seen: { cookie?: string; forwarded?: string; token?: string }[] = [];
   const app = new Hono();
@@ -71,7 +78,7 @@ describe('转发', () => {
     const holder = holderApp(() => new Response('ok', { status: 200 }));
     const response = await forwardOnce({
       headers: { cookie: 'session=abc' },
-      holderFetch: (input, init) => holder.app.request(input, init),
+      holderFetch: async (input, init) => await holder.app.request(input, init),
     });
 
     expect(response.status).toBe(200);
@@ -81,7 +88,7 @@ describe('转发', () => {
   it('**带转发标记进去**，对面就不会再转一次（防环路）', async () => {
     const holder = holderApp(() => new Response('ok', { status: 200 }));
     await forwardOnce({
-      holderFetch: (input, init) => holder.app.request(input, init),
+      holderFetch: async (input, init) => await holder.app.request(input, init),
     });
 
     expect(holder.seen[0]?.forwarded).toBe('1');
@@ -91,7 +98,7 @@ describe('转发', () => {
     const holder = holderApp(() => new Response('ok', { status: 200 }));
     await forwardOnce({
       peerToken: 'shhh',
-      holderFetch: (input, init) => holder.app.request(input, init),
+      holderFetch: async (input, init) => await holder.app.request(input, init),
     });
     expect(holder.seen[0]?.token).toBe('shhh');
 
@@ -112,7 +119,10 @@ describe('转发', () => {
     app.all('*', (c) => c.json({ ok: true }));
 
     const bad = await app.request('/x', {
-      headers: { 'x-runko-forwarded': '1', 'x-runko-peer-token': 'wrong-token' },
+      headers: {
+        'x-runko-forwarded': '1',
+        'x-runko-peer-token': 'wrong-token',
+      },
     });
     expect(bad.status).toBe(401);
 

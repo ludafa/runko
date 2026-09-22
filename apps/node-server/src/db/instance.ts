@@ -74,7 +74,9 @@ function openPostgres(connectionString: string): Pool {
 function createDialect(): SqliteDialect | PostgresDialect {
   if (DATABASE_URL !== undefined && DATABASE_URL.length > 0) {
     const url = DATABASE_URL;
-    return new PostgresDialect({ pool: () => Promise.resolve(openPostgres(url)) });
+    return new PostgresDialect({
+      pool: () => Promise.resolve(openPostgres(url)),
+    });
   }
   return new SqliteDialect({ database: () => Promise.resolve(openSqlite()) });
 }

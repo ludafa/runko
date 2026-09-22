@@ -27,13 +27,22 @@ export async function markPresent(
   const expiresAt = Date.now() + PRESENCE_TTL_MS;
   await db
     .insertInto('chat_presence')
-    .values({ user_id: userId, conversation_id: conversationId, expires_at: expiresAt })
+    .values({
+      user_id: userId,
+      conversation_id: conversationId,
+      expires_at: expiresAt,
+    })
     .onConflict((oc) =>
-      oc.columns(['user_id', 'conversation_id']).doUpdateSet({ expires_at: expiresAt }),
+      oc
+        .columns(['user_id', 'conversation_id'])
+        .doUpdateSet({ expires_at: expiresAt }),
     )
     .execute();
   // 顺手清掉过期的行。写入很稀（每人每 20 秒一次），多这一句换来「这张表不会长胖」。
-  await db.deleteFrom('chat_presence').where('expires_at', '<=', Date.now()).execute();
+  await db
+    .deleteFrom('chat_presence')
+    .where('expires_at', '<=', Date.now())
+    .execute();
 }
 
 /** 页面上报「我不看了」（切标签页、失焦、卸载）。立即生效，不等过期。 */

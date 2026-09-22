@@ -37,7 +37,7 @@ related: ["host/node/features/multi-replica.md", "host/node/features/deployment.
 |---|---|---|---|
 | 1 | 同一时刻只有一个副本在推进这份对话 | 租约版归属仲裁机制 | ✅ Kysely 三方言、三个薄壳与 **Mongo 版**均已交付 |
 | 2 | 被误判出局的老持有者写不进账本 | [租期标识](../../../terms.md) + 每次取号 CAS | ✅ 已交付并有一致性套件钉住 |
-| 3 | 请求打到哪个副本都能被送到持有者手上 | 接入层转发（框架给 `holder`） | ✅ `holder` 结构化 + persist-demo 转发示范（§5） |
+| 3 | 请求打到哪个副本都能被送到持有者手上 | 接入层转发（框架给 `holder`） | ✅ `holder` 结构化 + 转发示范（§5） |
 | 4 | 正在看的人能看到正在产生的内容 | 转发[直播流](../../../terms.md)（不外挂广播） | ✅ `subscribe` 改用权威轮状态（§5.2） |
 | 5 | 崩溃那一轮在账本里有收尾 | 接管时由新持有者补「已停止」标记 | ✅ 第二批（§9）；仍有一条冷门路径补不上，见 §9.5 |
 | 6 | 持有者卡死时，请求很快有回应 | 转发设「等对方开口」的超时 | ✅ 第二批（§10） |
@@ -64,11 +64,11 @@ related: ["host/node/features/multi-replica.md", "host/node/features/deployment.
 | **Mongo 版仲裁** | ✅ 第二批 M2（2026-09-18） | `persist-mongo` |
 | **`enqueue` 被拒时的结构化 `holder`** | ✅ 第一批 M4 | `packages/agent/src/types.ts` |
 | **`subscribe` 的[轮状态快照](../../../terms.md)** | ✅ 第一批 M3 | `packages/agent/src/runtime.ts` |
-| **接入层转发的示范** | ✅ 第一批 M5 | `apps/persist-demo` |
+| **接入层转发的示范** | ✅ 第一批 M5 | `apps/node-server`（当时在 `apps/persist-demo`，已并入） |
 | **两个真进程的端到端** | ✅ 第一批 M6（SQLite 文件档） | 同上 |
 | **接管时补「已停止」标记**（第二批） | ✅ 第二批 M12 | `packages/agent/src/runtime.ts` · `runtime/queue.ts` |
-| **转发等回话的超时**（第二批） | ✅ 第二批 M11 | `apps/persist-demo/src/forward.ts` |
-| **跨容器 + 真 Postgres 的端到端**（第二批） | ✅ 第二批 M10 / M13 | `apps/persist-demo/docker/` |
+| **转发等回话的超时**（第二批） | ✅ 第二批 M11 | `apps/node-server/src/routes/forward.ts` |
+| **跨容器 + 真 Postgres 的端到端**（第二批） | ✅ 第二批 M10 / M13 | `apps/node-server/docker/` |
 
 ## 4. 缺口一：四个持久化包里只有一个能拿到租约版仲裁
 
@@ -568,7 +568,7 @@ sequenceDiagram
 ### 10.3 修法：只给「等对方开口」设超时
 
 ```ts
-// apps/persist-demo/src/forward.ts（示意）
+// apps/node-server/src/routes/forward.ts（示意）
 const timeout = new AbortController();
 const timer = setTimeout(() => timeout.abort(), forwardTimeoutMs);   // 缺省 10 秒
 try {
@@ -631,7 +631,7 @@ sequenceDiagram
 
 ## 11. 多副本验证环境（第二批）
 
-[多副本验证环境](../../../terms.md)是一套 docker-compose，放在 `apps/persist-demo/docker/`。
+[多副本验证环境](../../../terms.md)是一套 docker-compose，放在 `apps/node-server/docker/`。
 它回答一个问题：**第一批在「两个进程 + 一个 SQLite 文件」上证明的事，换成真跨容器、真 Postgres、
 真网络故障之后还成立吗？**
 
@@ -664,7 +664,7 @@ flowchart TB
 | 3 | **两个网络**：`app` 放副本与 nginx，`db` 放副本与 Postgres | 这样才能**只切断「某个副本 ↔ 库」**，同时副本之间照样能互相转发——这正是[自我围栏](../../../terms.md)要应对的形状 |
 | 4 | **时间轴压扁**：心跳 1 秒、接管阈值 5 秒、每轮 10 秒、转发超时 2 秒 | 默认值下一个场景要等一分钟。5 秒 = 5 倍心跳，满足「≥ 3 倍」的构造期校验。一轮 10 秒是为了让「围栏约 4～5 秒停手」与「模型睡完自然结束」之间留足区分度 |
 | 5 | **端口与项目名都能用环境变量覆盖** | `test:lab` 用另一套项目名和端口，**不会碰到你手动起着的那套** |
-| 6 | **镜像分两个阶段，两段都用 `node:24-alpine`**。构建阶段只装 persist-demo 的依赖链，编译它和它依赖的 `@runko/*`，再用 `pnpm deploy --prod` 挑出运行要的文件；最终镜像只有 Node 加这些文件，跑 `node dist/index.js`，约 224MB | `@runko/*` 的 `exports` 指向 `dist`，得先编译。开发依赖、编译器、源码都不该进运行镜像。两个阶段必须用同一种 C 库。唯一的原生模块 better-sqlite3 加载时优先用包里自带的二进制（含 musl 版），所以装包和 deploy 都加 `--ignore-scripts`，不让 pnpm 替它跑 `node-gyp rebuild`（那一步没有编译工具就失败，编出来的也用不上）。deploy 要求打开 `injectWorkspacePackages`，只在那一条命令上用 `--config` 打开，仓库配置不动 |
+| 6 | **镜像分两个阶段，两段都用 `node:24-alpine`**。构建阶段只装 chat 应用的依赖链，编译它和它依赖的 `@runko/*`，再用 `pnpm deploy --prod` 挑出运行要的文件；最终镜像只有 Node 加这些文件，跑 `node dist/index.js`，约 224MB | `@runko/*` 的 `exports` 指向 `dist`，得先编译。开发依赖、编译器、源码都不该进运行镜像。两个阶段必须用同一种 C 库。唯一的原生模块 better-sqlite3 加载时优先用包里自带的二进制（含 musl 版），所以装包和 deploy 都加 `--ignore-scripts`，不让 pnpm 替它跑 `node-gyp rebuild`（那一步没有编译工具就失败，编出来的也用不上）。deploy 要求打开 `injectWorkspacePackages`，只在那一条命令上用 `--config` 打开，仓库配置不动 |
 | 7 | nginx 配 `proxy_buffering off` | 与 `forward.ts` 的「背压」同一个坑：缓冲会让 SSE 变成「一轮跑完才一次性出现」 |
 | 8 | 库用 `postgres:18-alpine`，不用共享 SQLite 卷 | SQLite 那一档第一批的 e2e 已经覆盖；而且 macOS 上 bind mount 的文件锁不可靠。不挂数据卷，每次从空库开始 |
 | 9 | 回声模型的等待**能被中断**（`timers/promises` 的 `setTimeout` + `abortSignal`） | 跟真 provider 一样。否则被停掉的轮也要睡满整段才结束，「自己停的」和「睡完自然结束的」分不出来（S8 就靠这个区分） |
@@ -697,7 +697,7 @@ flowchart TB
 
 ### 11.5 自动化怎么跑
 
-`apps/persist-demo/test/lab.e2e.test.ts`，vitest 写，用 `child_process` 调 `docker compose`。
+`apps/node-server/test/e2e/lab.e2e.test.ts`，vitest 写，用 `child_process` 调 `docker compose`。
 
 - **门禁**：没设 `RUNKO_TEST_LAB=1` 整个文件跳过。所以 `pnpm test` 与 CI 不受影响（CI 上构建镜像太重，不接）。
 - **自带起停**：`beforeAll` 用独立项目名 `runko-lab-e2e` + 独立端口 `up --build --wait`；`afterAll` 一律 `down -v`。
@@ -734,7 +734,7 @@ sequenceDiagram
 ### 11.6 日志：看清每个阶段在哪个副本、按什么顺序、花了多久
 
 **问题**：场景跑绿之后，想知道「一次请求到底走了哪条路」只能读测试代码去猜。副本本身什么都不打——
-`@runko/agent` 的日志出口缺省是 `noopLogger`，persist-demo 从没注入过；转发代码里连日志调用都没有；
+`@runko/agent` 的日志出口缺省是 `noopLogger`，当时那个 demo 从没注入过；转发代码里连日志调用都没有；
 而 `down -v` 会把容器日志一起删掉。
 
 **做法分两层**（都在宿主这一侧）：
@@ -742,7 +742,7 @@ sequenceDiagram
 | 层 | 做什么 | 落在哪 |
 |---|---|---|
 | demo | 一个零依赖的文本 logger（写 stdout），`RUNKO_LOG_LEVEL` 控级别，`RUNKO_NODE_URL` 的主机名当副本名；注入 runtime（于是框架已有的起轮收尾、出队、接管补收尾、启动扫描日志都打得出来）与转发。HTTP 层每个改变状态的请求一行「方法 路径 → 状态 耗时」，普通的读记 debug，`/health` 与 `/activity` 这类轮询不记 | `apps/persist-demo/src/logger.ts` 等 |
-| 验证环境 | `test:lab` 每个场景结束都把各容器日志存一份，测试自己的每一步写 `test.log`，再按时间合并成 `timeline.log` | `apps/persist-demo/logs/lab-<时间>/`（不进 git） |
+| 验证环境 | `test:lab` 每个场景结束都把各容器日志存一份，测试自己的每一步写 `test.log`，再按时间合并成 `timeline.log` | `apps/node-server/logs/lab-<时间>/`（不进 git） |
 
 **框架层这一次刻意不补日志。** 施工中曾给租约实现加过一个 `logger` 选项（抢到、被占、顶掉、心跳失败、自我围栏、释放），
 实跑有效，但方向不对：文案与级别写死在框架里，宿主只能决定写到哪。已对齐改为「**框架发带类型的事件，宿主订阅后自己决定
@@ -790,7 +790,7 @@ sequenceDiagram
 ### 11.7 这套环境测不了的
 
 - **时钟不同步**：所有容器共用宿主机内核的时钟。要测得引入 libfaketime 一类工具。
-- **审批与提问的转发**：验证环境的副本跑的是回声模型，不调工具，触发不了待裁决项。这两条改由 persist-demo 的两进程 e2e（`test/suspend-resume.e2e.test.ts`，四档库）覆盖：窗口内打到非持有者照旧转发、挂起之后打到任一副本都能恢复。
+- **审批与提问的转发**由两进程的端到端测试覆盖（`apps/node-server/test/e2e/suspend-resume.e2e.test.ts`）：窗口内打到非持有者照旧转发、挂起之后打到任一副本都能恢复。验证环境里也能手动走一遍——那里的副本跑[演示模型](../../../terms.md)，发一句 `run: ls` 就会弹审批卡片。
 - **Mongo 档**：租约版已经有了（M2），但这套 compose 只起了 Postgres——换库要另加一组服务。
 - **跨机网络延迟**：容器之间走的是同一台机器的虚拟网桥，往返在 1 毫秒以内。
 
@@ -819,9 +819,9 @@ sequenceDiagram
 
 - **`@runko/stream-redis`**（外挂广播）。理由见 §6：这一档转发够用。它属于 Vercel 那条线。
 - **`@runko/durable-object`**。另一档宿主，另一条线。
-- **改造 chat 应用（`@runko-chat/node-server`）跑多副本。** 它是单进程 + SQLite，`held_by_other`
-  这条路走不到（代码里那行 500 的注释已经写明了）。多副本的示范放在
-  `@runko-demo/persist-demo`——它本来就支持 Postgres / MySQL / Mongo。
+- ~~**改造 chat 应用跑多副本。**~~ **2026-09-22 起不再是非目标**：chat 应用已经是仓库里唯一的
+  demo，多副本就在它身上（Postgres + 转发 + docker 验证环境），见
+  [唯一 demo · 技术方案](../../../ingress/tech/unified-demo.md)。
 - **依赖基础设施提供 sticky routing。** 亲和的单位是「一次排空」，不是一轮、也不是会话永久
   绑定，用现成的 sticky 会话反而绑得太死。
 - **跨会话的资源冲突。** 独占按会话保证，不按目录、不按机器。
@@ -886,7 +886,7 @@ k8s 里 pod 是直接可寻址的（pod IP 或 service 地址），`holder` 里�
 
 **现状**：仓库里没有 OpenTelemetry。chat 应用有一套「[遥测](../../../terms.md)」，接的是 AI SDK 自带的回调接口
 （见[遥测 · 技术方案](../../../ingress/tech/telemetry.md)），数据写 SQLite，记的是模型调用、工具执行、起轮装配——
-**多副本关心的抢占、转发、接管、自我围栏，它一个都不记**，persist-demo 也没接它。
+**多副本关心的抢占、转发、接管、自我围栏，它一个都不记**。
 
 **OTel 能多给的**：一次请求跨副本的**调用链**。副本 B 把请求转给 A 时带上 `traceparent` 头，Jaeger 这类界面里
 就能看到一棵树：B 收到请求 → 抢租约失败 → 转发 → A 起轮 → 写账本……每一段是一根横条，长短就是耗时。
@@ -909,7 +909,7 @@ k8s 里 pod 是直接可寻址的（pod IP 或 service 地址），`holder` 里�
 | 4 | `RuntimeHooks` | 并进事件后删除 |
 | 5 | 让 AI SDK 的 span 挂到「轮」下面 | 订阅者可选 `wrap`，框架只在一整轮与单次工具执行处调用 |
 | 6 | 排队后起的轮 | 订阅者可选 `capture()` 抓调用链载体，随输入存进队列项 JSON，出队起轮时用 span link 指回原请求 |
-| 7 | 分期 | 一期：事件层 + `@runko/otel`（含 persist-demo 接入与 Jaeger）；二期：Cloudflare Workers / Vercel |
+| 7 | 分期 | 一期：事件层 + `@runko/otel`（含 chat 应用接入与 Jaeger）；二期：Cloudflare Workers / Vercel |
 
 **为什么不只用 `diagnostics_channel`**：Vercel Edge 与浏览器没有它；`TracingChannel` 到 Node 26.8 才标 Stable、`bindStore`
 仍是实验性；OTel 的 `@opentelemetry/api` 1.9.1 还没有把通道事件接进上下文所需的 attach/detach。

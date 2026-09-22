@@ -46,13 +46,6 @@ import {
   syncAvailableSkills,
 } from '../agent/store.js';
 import { db as defaultDb } from '../db/instance.js';
-import type { Forwarder } from './forward.js';
-import {
-  createForwarder,
-  RETRY_AFTER_SECONDS,
-  RETRY_LATER_STATUS,
-  resolveNodeIdentity,
-} from './forward.js';
 import { logger as defaultLogger } from '../logger.js';
 import { requireAuth } from '../middleware/auth.js';
 import { createChatNotifier } from '../push/notifier.js';
@@ -87,6 +80,13 @@ import {
 } from '../schemas/chat.js';
 import type { TelemetryStore } from '../telemetry.js';
 import { getChatTelemetry, getChatTelemetryStore } from '../telemetry.js';
+import type { Forwarder } from './forward.js';
+import {
+  createForwarder,
+  resolveNodeIdentity,
+  RETRY_AFTER_SECONDS,
+  RETRY_LATER_STATUS,
+} from './forward.js';
 
 // ---------------------------------------------------------------------------
 // docs/ingress/tech/chat-webapp.md §2.2 `routes/chat.ts` (+ §2.2c（审批链）'s
@@ -957,8 +957,7 @@ export function createChatApp(deps: ChatRouteDeps) {
     method: 'get',
     path: '/api/chat/conversations/{id}/activity',
     tags: ['Chat'],
-    summary:
-      '这条会话此刻有没有轮在跑、归哪个副本跑（多副本运维与验证用）',
+    summary: '这条会话此刻有没有轮在跑、归哪个副本跑（多副本运维与验证用）',
     request: { params: ConversationParamsSchema },
     responses: {
       200: {

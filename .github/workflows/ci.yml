@@ -80,3 +80,10 @@ jobs:
       # 源码注释里的文档链接死链检查。docs 站的死链检查藏在 pnpm -r build 里，
       # 但它管不到源码注释——那 800 多处失效引用就是这么攒出来的。
       - run: pnpm check:doc-links
+
+      # chat 应用的多副本与挂起恢复端到端，**再用真 Postgres 跑一遍**。
+      # 上面 `pnpm -r test` 里它们跑的是「几个进程共用一个 SQLite 文件」那一档——核心路径
+      # 一样，但跨机器部署只能用 Postgres，两档都跑过才算数。
+      - run: pnpm --filter @runko-chat/node-server exec vitest run test/e2e
+        env:
+          DATABASE_URL: postgres://runko:runko@127.0.0.1:5432/runko

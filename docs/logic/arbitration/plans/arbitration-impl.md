@@ -11,6 +11,9 @@ related: ["logic/arbitration/features/arbitration-impl.md", "logic/arbitration/t
 
 # 归属仲裁机制 · 租约版（施工计划）
 
+> **`apps/persist-demo` 已于 2026-09-22 并入 chat 应用并删除**（见 [唯一 demo · 施工](../../../ingress/plans/unified-demo.md)）。下文里提到它的地方是**当时的记录**，照原样留着；它承担的验收现在都在 `apps/node-server` 上。
+
+
 > 相关：[功能手册](../features/arbitration-impl.md) ·
 > [技术方案](../tech/arbitration-impl.md) ·
 > [架构总纲 · 施工](../../../architecture/plans/agent-kernel.md)（这是其中的 **K6**）

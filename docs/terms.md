@@ -172,7 +172,7 @@
 | **runner（示例分发器）** | — | `examples/run.ts`：`pnpm example <编号或名字前缀>` 背后的分发器，按前缀在 `src/` 下唯一匹配一个脚本、用当前 node 直跑（Node 原生 type stripping，无需编译）。是工具、不是示例；新增示例零维护。 |
 | **确定性段** | — | 示例脚本中不依赖模型/网络、零 key 即可确定性跑通的那一段（打印 JSON Schema、直调 exec/fs、fake 沙盒往返等），用来在无凭证下验证机制正确；与「模型驱动段」相对。 |
 | **模型驱动段** | — | 示例脚本中需真实模型（可能还需云凭证）才运行、用来验证 agent 端到端行为的那一段；与「确定性段」相对。 |
-| **多副本验证环境（lab）** | — | `apps/persist-demo/docker/` 下的一套 docker-compose：一个 Postgres + 三个 persist-demo 副本 + 一个 nginx。用 `docker kill`（崩溃）、`docker pause`（冻住）、`docker network disconnect`（断网）故意制造故障，验证租约版[归属仲裁机制](#十三架构分层)与[应用层转发](#十三架构分层)在真跨容器下的行为。见 [多副本部署 · 功能](./host/node/features/multi-replica.md)。 |
+| **多副本验证环境（lab）** | — | `apps/node-server/docker/` 下的一套 docker-compose：一个 Postgres + 三个 chat 应用副本 + 一个 nginx。用 `docker kill`（崩溃）、`docker pause`（冻住）、`docker network disconnect`（断网）故意制造故障，验证租约版[归属仲裁机制](#十三架构分层)与[应用层转发](#十三架构分层)在真跨容器下的行为。见 [多副本部署 · 功能](./host/node/features/multi-replica.md)。 |
 | **gate（配置闸门）** | — | 示例脚本在发起任何模型调用/网络请求之前，按序检查所需环境变量/凭证；任一未配置就打印指引并干净退出或 return（exit 0），全程不创建沙盒、不发起模型调用、不产生副作用。 |
 | **演示模型（demo model）** | 回声模型 | chat 应用没配模型 key 时用的替身模型，不联网、不花钱。用户消息里写 `run: <命令>` 它就调 bash，写 `ask: <问题>` 它就调 ask-user，别的话原样复述一遍。目的是零配置也能把审批、提问、挂起、排队这些交互走一遍，不是冒充真 AI。见 docs/ingress/features/unified-demo.md。 |
 

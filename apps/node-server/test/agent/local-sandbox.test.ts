@@ -101,7 +101,9 @@ describe('本地沙盒', () => {
 
   it('库里没有快照、进程里也没有缓存 → unavailable（交给调用方重建）', async () => {
     const db = await createTestDb();
-    const resumed = await provider(db).resume('runko-chat-从没见过', { idleTimeoutMs: 60_000 });
+    const resumed = await provider(db).resume('runko-chat-从没见过', {
+      idleTimeoutMs: 60_000,
+    });
     expect(resumed.kind).toBe('unavailable');
   });
 
@@ -117,7 +119,9 @@ describe('本地沙盒', () => {
       })
       .execute();
 
-    const resumed = await provider(db).resume(SANDBOX, { idleTimeoutMs: 60_000 });
+    const resumed = await provider(db).resume(SANDBOX, {
+      idleTimeoutMs: 60_000,
+    });
     expect(resumed.kind).toBe('unavailable');
   });
 });

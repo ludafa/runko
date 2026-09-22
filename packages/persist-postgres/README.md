@@ -75,4 +75,4 @@ createAgentRuntime({
 [技术方案](../../docs/host/contract/tech/persistence.md) ·
 [施工进展](../../docs/host/contract/plans/persistence.md)
 
-跑得起来的例子：`apps/persist-demo`——一个零 ORM 的 Hono 服务，三种库都能跑。
+跑得起来的例子：`apps/node-server`（chat 应用）——它把框架的表和自己的业务表放进同一个 Kysely 实例，SQLite 与 Postgres 都能跑。

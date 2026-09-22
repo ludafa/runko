@@ -48,7 +48,7 @@ related: ["host/node/tech/multi-replica.md", "host/node/plans/multi-replica.md",
 
 ## 4. 怎么开
 
-拿 `@runko-demo/persist-demo` 举例，**一个环境变量**就开：
+拿 chat 应用（`@runko-chat/node-server`）举例，**一个环境变量**就开：
 
 | 环境变量 | 缺省 | 作用 |
 |---|---|---|
@@ -80,7 +80,7 @@ createAgentRuntime({
 | MySQL | `@runko/persist-mysql` | `mysqlPersistence(pool)` · `mysqlArbitration(pool, { holder })` |
 | MongoDB | `@runko/persist-mongo` | `mongoPersistence(db)` · `mongoArbitration(db, { holder })` |
 
-转发怎么写看 `apps/persist-demo/src/forward.ts`。哪些端点要转、哪些不用，见[技术方案 §5.3](../tech/multi-replica.md)。
+转发怎么写看 `apps/node-server/src/routes/forward.ts`。哪些端点要转、哪些不用，见[技术方案 §5.3](../tech/multi-replica.md)。
 
 ## 5. 出故障时，用户会看到什么
 
@@ -124,8 +124,8 @@ createAgentRuntime({
 ### 6.1 起、停
 
 ```sh
-pnpm --filter @runko-demo/persist-demo lab:up     # 构建镜像并起好，等到全部健康才返回
-pnpm --filter @runko-demo/persist-demo lab:down   # 全部删掉，连库里的数据一起
+pnpm --filter @runko-chat/node-server lab:up     # 构建镜像并起好，等到全部健康才返回
+pnpm --filter @runko-chat/node-server lab:down   # 全部删掉，连库里的数据一起
 ```
 
 第一次要构建镜像，几分钟。之后改了代码重跑 `lab:up` 就会重新构建。
@@ -134,7 +134,7 @@ pnpm --filter @runko-demo/persist-demo lab:down   # 全部删掉，连库里的�
 
 | 想模拟 | 命令 |
 |---|---|
-| 进程崩溃（`kill -9`） | `docker compose -f apps/persist-demo/docker/compose.yml kill -s SIGKILL replica-a` |
+| 进程崩溃（`kill -9`） | `docker compose -f apps/node-server/docker/compose.yml kill -s SIGKILL replica-a` |
 | 进程冻住（像长时间 GC 或虚机被挂起） | `… pause replica-a`，恢复用 `… unpause replica-a` |
 | 副本和数据库断网 | `docker network disconnect runko-lab_db runko-lab-replica-a-1`，恢复用 `connect` |
 | 数据库卡顿 | `… pause postgres`，恢复用 `… unpause postgres` |
@@ -143,7 +143,7 @@ pnpm --filter @runko-demo/persist-demo lab:down   # 全部删掉，连库里的�
 ### 6.3 一键跑完全部场景
 
 ```sh
-pnpm --filter @runko-demo/persist-demo test:lab
+pnpm --filter @runko-chat/node-server test:lab
 ```
 
 它会自己起一套**独立的**环境（换了项目名和端口，不会碰你手动起的那套），跑完全部八个场景，再自己删干净。
@@ -153,7 +153,7 @@ pnpm --filter @runko-demo/persist-demo test:lab
 
 ### 6.4 看日志：每一步在哪个副本、按什么顺序、花了多久
 
-每跑一次 `test:lab`，日志都会存到 `apps/persist-demo/logs/lab-<时间>/`（不进 git），`logs/lab-latest` 指向最近一次。
+每跑一次 `test:lab`，日志都会存到 `apps/node-server/logs/lab-<时间>/`（不进 git），`logs/lab-latest` 指向最近一次。
 测试一开始就会把这个目录打印出来，跑的过程中也能 `tail -f`。
 
 | 文件 | 里面是什么 |
@@ -181,8 +181,8 @@ pnpm --filter @runko-demo/persist-demo test:lab
 **手动起的那套环境**也能看、也能存：
 
 ```sh
-docker compose -f apps/persist-demo/docker/compose.yml logs -f        # 实时看三个副本
-pnpm --filter @runko-demo/persist-demo lab:logs                       # 存一份到 logs/lab-<时间>/
+docker compose -f apps/node-server/docker/compose.yml logs -f        # 实时看三个副本
+pnpm --filter @runko-chat/node-server lab:logs                       # 存一份到 logs/lab-<时间>/
 ```
 
 日志详细程度用 `RUNKO_LOG_LEVEL` 控制（`debug` / `info` / `warn` / `error` / `silent`），两处缺省都是 `info`。
@@ -200,11 +200,11 @@ pnpm --filter @runko-demo/persist-demo lab:logs                       # 存一�
 
 ## 8. 范围与非目标
 
-- **不替你写转发。** 框架只给持有者地址。示范在 `apps/persist-demo`，照着改。
+- **不替你写转发。** 框架只给持有者地址。示范在 `apps/node-server/src/routes/forward.ts`，照着改。
 - **不依赖负载均衡的会话粘滞（sticky session）。** 粘滞的单位不对，见[应用层转发](../../../terms.md)。
 - **崩溃不恢复进度。** 崩溃那一轮只会被标成「已停止」，不会从中间接着跑。
 - **有一种情况连「已停止」也补不上**：持有者被冻住了很久、这段时间没人往这份对话发消息，它醒来后自己停手。
   那一轮只会剩下用户消息。见[技术方案 §9.6](../tech/multi-replica.md)。
-- **验证环境只起了 Postgres。** 四档库（SQLite / Postgres / MySQL / MongoDB）都有租约版实现、都能跑多副本，但 `apps/persist-demo` 的 compose 只编排了 Postgres 那一档；换库要自己加一组服务。
+- **验证环境只起了 Postgres。** 四档库（SQLite / Postgres / MySQL / MongoDB）都有租约版实现、都能跑多副本，但 `apps/node-server` 的 compose 只编排了 Postgres 那一档；换库要自己加一组服务。
 - **验证环境测不了时钟不同步。** 所有容器共用宿主机的时钟。
-- **验证环境测不了审批与提问的转发。** 验证环境的副本跑回声模型，不调工具，触发不了待裁决项。这两条改由 persist-demo 的两进程 e2e 覆盖（四档库都跑）：内存窗口里打到非持有者照旧转发；[挂起](../../../terms.md)之后打到任一副本都能恢复。
+- **审批与提问的转发**由两进程的端到端测试覆盖（`apps/node-server/test/e2e/`）：内存窗口里打到非持有者照旧转发；[挂起](../../../terms.md)之后打到任一副本都能恢复。验证环境里也能手动走一遍——那里的副本跑[演示模型](../../../terms.md)，发一句 `run: ls` 就会弹审批卡片。

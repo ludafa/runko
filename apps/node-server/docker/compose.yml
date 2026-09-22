@@ -1,0 +1,130 @@
+# 多副本验证环境：一个 Postgres + 三个 node-server 副本 + 一个 nginx。
+# 设计见 docs/host/node/tech/multi-replica.md §11。
+#
+#   pnpm --filter @runko-demo/node-server lab:up     # 构建并起好，全部健康才返回
+#   pnpm --filter @runko-demo/node-server lab:down   # 连数据一起删掉
+#
+# 端口与时间参数都能用环境变量覆盖（LAB_*）。test:lab 就是靠这个另起一套、不碰你手动起的这套。
+name: runko-chat-lab
+
+# 三个副本共用一个镜像，但 `build:` 只写在 replica-a 上。
+# 每个带 `build:` 的服务 compose 都会各构建一次，产出的镜像只差一个服务名标签；
+# 名字只能贴在其中一个上，其余的立刻变成悬空镜像。
+# b、c 不带 `build:`，一起起的时候 compose 认得出它们的 `image` 由 a 构建。
+# 它们另外写了 `pull_policy: never`：单独起 b 或 c 又没有本地镜像时，直接报「找不到镜像」，
+# 不去 Docker Hub 拉一个同名的别人的镜像。先 `lab:up` 一次就有了。
+x-replica-build: &replica-build
+  context: ../../..
+  dockerfile: apps/node-server/docker/Dockerfile
+
+x-replica: &replica
+  image: runko-chat-lab/node-server:dev
+  init: true
+  # 两个网络：app 给副本之间互相转发，db 给副本连库。分开才能「只切断某个副本和库」。
+  networks: [app, db]
+  healthcheck:
+    test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3900/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+    interval: 2s
+    timeout: 2s
+    retries: 60
+
+x-replica-env: &replica-env
+  SERVER_PORT: "3900"
+  DATABASE_URL: postgres://runko:runko@postgres:5432/runko
+  # 三个副本必须用同一个登录密钥与同一个对外地址，否则 cookie 在副本之间认不过。
+  BETTER_AUTH_SECRET: lab-auth-secret-not-for-production
+  SERVER_URL: http://localhost:${LAB_LB_PORT:-3930}
+  CLIENT_URL: http://localhost:${LAB_LB_PORT:-3930}
+  RUNKO_PEER_TOKEN: lab-peer-token
+  # 时间轴压扁：缺省值下（5 秒 / 60 秒）一个场景要等一分钟。
+  # 接管阈值必须 ≥ 3 倍心跳，否则副本启动时就抛。
+  RUNKO_HEARTBEAT_MS: ${LAB_HEARTBEAT_MS:-1000}
+  RUNKO_TAKEOVER_MS: ${LAB_TAKEOVER_MS:-5000}
+  RUNKO_FORWARD_TIMEOUT_MS: ${LAB_FORWARD_TIMEOUT_MS:-2000}
+  # 演示模型复述时每小段之间的间隔：调大 = 一轮跑得久，「这一轮还在跑」才是确定事实，
+  # 中途杀进程才杀得准。
+  CHAT_DEMO_DELAY_MS: ${LAB_CHUNK_DELAY_MS:-400}
+  # 全量人审：每条命令都弹审批卡片，挂起与恢复的场景才好造。
+  CHAT_APPROVAL_MODE: ${LAB_APPROVAL_MODE:-all}
+  # 等人先在内存里等这么久，等不到就挂起。
+  CHAT_SUSPEND_MEMORY_WINDOW: ${LAB_MEMORY_WINDOW_MS:-3000}
+  # 验证环境缺省 info：起轮收尾、转发与改变状态的请求都在；debug 再加上普通的读请求（很吵）。
+  # 存到本地见 `lab:logs`。
+  LOG_LEVEL: ${LAB_LOG_LEVEL:-info}
+
+services:
+  postgres:
+    # 不挂数据卷：验证环境每次都从空库开始，`down -v` 之后什么都不留。
+    # （PG 18 起镜像的数据目录改成了 /var/lib/postgresql/18/docker，要挂卷的话挂 /var/lib/postgresql。）
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: runko
+      POSTGRES_PASSWORD: runko
+      POSTGRES_DB: runko
+    networks: [db]
+    ports: ["${LAB_PG_PORT:-55433}:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U runko -d runko"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  # 建表只跑一次，跑完即退。Postgres 上让三个副本各建一次会撞 pg_type 的唯一索引
+  # （见 packages/persist-kysely/src/migrate.ts 末尾的注释）。
+  migrate:
+    image: runko-chat-lab/node-server:dev
+    pull_policy: never
+    init: true
+    networks: [db]
+    environment:
+      <<: *replica-env
+    command: ["node", "dist/db/migrate-cli.js"]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  # **每个副本单独一个 service，不能用 deploy.replicas: 3。** holder 会被原样当成转发目标，
+  # 必须唯一、且能直接找到这个副本；replicas 下三个副本共用一个服务名，DNS 轮流返回，转发会打到随机副本。
+  #
+  # **a → b → c 串行启动。** 副本自己不建表（Postgres 那一档建表要显式跑），由下面的
+  # `migrate` 服务先跑一次；串行启动是为了让健康检查一个一个过，日志也好读。
+  replica-a:
+    <<: *replica
+    build: *replica-build
+    environment:
+      <<: *replica-env
+      RUNKO_NODE_URL: http://replica-a:3900
+    ports: ["${LAB_A_PORT:-3931}:3900"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  replica-b:
+    <<: *replica
+    pull_policy: never
+    environment:
+      <<: *replica-env
+      RUNKO_NODE_URL: http://replica-b:3900
+    ports: ["${LAB_B_PORT:-3932}:3900"]
+    depends_on:
+      replica-a: { condition: service_healthy }
+
+  replica-c:
+    <<: *replica
+    pull_policy: never
+    environment:
+      <<: *replica-env
+      RUNKO_NODE_URL: http://replica-c:3900
+    ports: ["${LAB_C_PORT:-3933}:3900"]
+    depends_on:
+      replica-b: { condition: service_healthy }
+
+  lb:
+    image: nginx:1.27-alpine
+    volumes: ["./nginx.conf:/etc/nginx/conf.d/default.conf:ro"]
+    networks: [app]
+    ports: ["${LAB_LB_PORT:-3930}:80"]
+    depends_on:
+      replica-c: { condition: service_healthy }
+
+networks:
+  app: {}
+  db: {}

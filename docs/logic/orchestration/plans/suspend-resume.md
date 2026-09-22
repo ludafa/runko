@@ -10,6 +10,9 @@ related: ["logic/orchestration/features/suspend-resume.md", "logic/orchestration
 ---
 # 挂起与恢复（施工进展）
 
+> **`apps/persist-demo` 已于 2026-09-22 并入 chat 应用并删除**（见 [唯一 demo · 施工](../../../ingress/plans/unified-demo.md)）。下文里提到它的地方是**当时的记录**，照原样留着；它承担的验收现在都在 `apps/node-server` 上。
+
+
 > 相关：[功能](../features/suspend-resume.md)，[技术方案](../tech/suspend-resume.md)。
 > 这是[路线图](../../../architecture/plans/agent-kernel.md)里的 **K3**——框架主线中唯一还没做的核心能力。
 

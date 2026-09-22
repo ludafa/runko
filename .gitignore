@@ -9,7 +9,8 @@ coverage/
 !.env.template
 # Local agent transcripts (examples/shared/transcript-store.ts) — dev data, never committed
 .transcripts/
-# apps/persist-demo 多副本验证环境的本地日志（test:lab / lab:logs 写入）
+# 多副本验证环境的本地日志（test:lab / lab:logs 写入）
+apps/node-server/logs/
 apps/persist-demo/logs/
 # apps/node-server dev sqlite (drizzle/better-sqlite3)
 apps/node-server/data.db

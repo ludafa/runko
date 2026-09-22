@@ -4,7 +4,7 @@ slug: observability
 view: 施工
 layer: 总纲
 module: —
-packages: ["@runko/core", "@runko/agent", "@runko/persist-kysely", "@runko/persist-mongo", "@runko/conformance", "@runko/otel", "@runko-chat/node-server", "@runko-demo/persist-demo"]
+packages: ["@runko/core", "@runko/agent", "@runko/persist-kysely", "@runko/persist-mongo", "@runko/conformance", "@runko/otel", "@runko-chat/node-server"]
 tags: ["可观测性", "事件", "OTel", "拆单", "Jaeger", "破坏性变更"]
 related: ["architecture/features/observability.md", "architecture/tech/observability.md", "host/node/plans/multi-replica.md"]
 ---
@@ -34,8 +34,8 @@ related: ["architecture/features/observability.md", "architecture/tech/observabi
 | AI SDK 遥测透传 `SessionTelemetry` | `packages/core/src/loop.ts` · `TurnPreparation.telemetry` | 原样保留；`@runko/otel` 往里塞 `@ai-sdk/otel` 集成 |
 | core 替 AI SDK 补发工具开始 / 结束 | `loop.ts` 的 `notifyToolExecution*` | `tool.*` 事件与 `wrap` 落在同一位置 |
 | 接管补收尾、`AcquireResult.takeover` | `packages/agent/src/runtime/queue.ts` · `persist-kysely/src/arbitration.ts` | `turn.displaced-settled` · `lease.taken-over` 的触发点 |
-| 多副本验证环境（compose · 八个场景 · 日志收集） | `apps/persist-demo/docker/` · `test/lab.e2e.test.ts` · `scripts/lab-logs.ts` | 加 Jaeger 与调用链断言 |
-| demo 文本 logger | `apps/persist-demo/src/logger.ts` | 改由事件订阅者驱动 |
+| 多副本验证环境（compose · 八个场景 · 日志收集） | `apps/node-server/docker/` · `test/e2e/lab.e2e.test.ts` · `scripts/lab-logs.ts` | 加 Jaeger 与调用链断言 |
+| 应用的文本 logger | `apps/node-server/src/logger.ts` | 改由事件订阅者驱动 |
 
 ## 2. 拆单总表
 
@@ -48,7 +48,7 @@ flowchart LR
     O3 --> O7
     O4 --> O5
     O2 --> O6["O6 chat 应用迁移"]
-    O5 --> O7["O7 persist-demo 迁移 + Jaeger + 调用链断言"]
+    O5 --> O7["O7 chat 应用 迁移 + Jaeger + 调用链断言"]
     O6 --> O8["O8 code review"]
     O7 --> O8
     O8 --> O9["O9 文档回填 · changeset · 验证方案执行"]
@@ -62,7 +62,7 @@ flowchart LR
 | **O4** | `TurnInput.trace`；一致性用例「入队带的 `trace` 出队原样带回」 | `@runko/agent` · `@runko/conformance` · 四个 `persist-*` 的测试 | S | ⬜ |
 | **O5** | 新包 `@runko/otel`：`otelObserver()`（turn / tool span、点状事件映射、capture / link）、`otelTelemetry()`（桥接 `@ai-sdk/otel`） | 新包 `packages/otel` | L | ⬜ |
 | **O6** | chat 应用：6 个钩子 + `logger` 改成一个按类型分派的订阅者 | `apps/node-server` | M | ⬜ |
-| **O7** | persist-demo：事件 → 文本行订阅者（租约行回到时间线）；`src/otel.ts`；转发注入 / 服务端 extract `traceparent`；compose 加 Jaeger；`test:lab` 加调用链断言 | `apps/persist-demo` | L | ⬜ |
+| **O7** | chat 应用：事件 → 文本行订阅者（租约行回到时间线）；`src/otel.ts`；转发注入 / 服务端 extract `traceparent`；compose 加 Jaeger；`test:lab` 加调用链断言 | `apps/chat 应用` | L | ⬜ |
 | **O8** | 对本期全部改动做 code review（全新上下文的审查 agent） | 全部 | M | ⬜ |
 | **O9** | 回填三份文档、agent / core / persist README、术语表；changeset；按 §4 执行验证方案并回填 | `docs` · `.changeset/` | M | ⬜ |
 
@@ -143,7 +143,7 @@ flowchart LR
 
 **怎么验**：`apps/node-server` 的 typecheck / lint / test；推送通知相关用例照绿；`turn-prepare` / `turn-first-output` 遥测写入的用例照绿。**不起常驻进程**——需要真机验证推送时，告诉用户起什么、验什么。
 
-### O7 · persist-demo 迁移、Jaeger 与调用链断言
+### O7 · chat 应用 迁移、Jaeger 与调用链断言
 
 **做什么**：
 
@@ -181,8 +181,8 @@ flowchart LR
 pnpm build && pnpm typecheck && pnpm test                     # 全部包（含 @runko/otel）
 pnpm -r lint
 pnpm --filter @runko-chat/node-server typecheck && pnpm --filter @runko-chat/node-server test
-pnpm --filter @runko-demo/persist-demo typecheck && pnpm --filter @runko-demo/persist-demo test
-pnpm --filter @runko-demo/persist-demo test:lab               # 验证环境 + Jaeger，跑两次
+pnpm --filter @runko-demo/chat 应用 typecheck && pnpm --filter @runko-demo/chat 应用 test
+pnpm --filter @runko-demo/chat 应用 test:lab               # 验证环境 + Jaeger，跑两次
 grep -rn "logger\.\|hooks\." packages/agent/src               # 应为空
 pnpm docs:check && pnpm docs:build
 ```

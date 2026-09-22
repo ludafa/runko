@@ -4,7 +4,7 @@ slug: observability
 view: 功能
 layer: 总纲
 module: —
-packages: ["@runko/core", "@runko/agent", "@runko/persist-kysely", "@runko/otel", "@runko-chat/node-server", "@runko-demo/persist-demo"]
+packages: ["@runko/core", "@runko/agent", "@runko/persist-kysely", "@runko/otel", "@runko-chat/node-server"]
 tags: ["可观测性", "事件", "OTel", "调用链", "diagnostics_channel", "日志", "破坏性变更"]
 related: ["architecture/tech/observability.md", "architecture/plans/observability.md", "host/node/tech/multi-replica.md", "ingress/tech/telemetry.md"]
 ---
@@ -136,13 +136,13 @@ POST /api/chat/conversations/c1/messages            replica-a   52ms
 | `createAgentRuntime({ logger })` 与 `Logger` / `noopLogger` 导出 | `observers` + 自己写一个记日志的订阅者 |
 | `createAgentRuntime({ hooks })` 与 `RuntimeHooks` | 同一个 `observers`，按 `event.type` 分派 |
 
-仓库里的两个宿主（chat 应用、persist-demo）随本次施工一起迁移。
+仓库里的宿主（chat 应用）随本次施工一起迁移。
 
 ## 7. 成功标准
 
 - 框架里**没有一处**写死文案的日志；原来 42 处日志与 6 个钩子覆盖的时刻，事件全都有。
 - chat 应用迁移后：推送通知（等审批、agent 提问、一轮结束）与「本轮准备」遥测**行为不变**。
-- persist-demo 的验证环境里：
+- 多副本验证环境里：
   - 一次被转发的请求，在 Jaeger 里是**一棵树**，跨两个副本；
   - 排队后才执行的那一轮，能顺着 link 找回原请求；
   - 接管场景里能看到 `lease.taken-over` 与补「已停止」；

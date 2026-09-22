@@ -11,6 +11,9 @@ related: ["host/node/tech/multi-replica.md", "host/node/features/multi-replica.m
 
 # 多副本部署（Node 长驻）— 施工计划
 
+> **`apps/persist-demo` 已于 2026-09-22 并入 chat 应用并删除**（见 [唯一 demo · 施工](../../../ingress/plans/unified-demo.md)）。下文里提到它的地方是**当时的记录**，照原样留着；它承担的验收现在都在 `apps/node-server` 上。
+
+
 > 相关：[使用手册](../features/multi-replica.md) · [技术方案](../tech/multi-replica.md) · [Node 长驻 · 功能](../features/deployment.md) ·
 > [归属仲裁机制 · 施工](../../../logic/arbitration/plans/arbitration-impl.md)（本计划接着它的 L7–L10 往下做）。
 

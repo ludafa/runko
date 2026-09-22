@@ -72,8 +72,8 @@ class PGliteConnection implements DatabaseConnection {
     };
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async *streamQuery<R>(): AsyncIterableIterator<QueryResult<R>> {
+  /** 本应用不用流式查询；真要用到时在这里炸掉比悄悄返回空好。 */
+  streamQuery<R>(): AsyncIterableIterator<QueryResult<R>> {
     throw new Error('pglite dialect does not stream');
   }
 }
@@ -83,7 +83,10 @@ function pgliteDialect(client: PGlite): Dialect {
   const driver: Driver = {
     init: () => Promise.resolve(),
     acquireConnection: () => Promise.resolve(connection),
-    beginTransaction: async (conn: DatabaseConnection, _s: TransactionSettings) => {
+    beginTransaction: async (
+      conn: DatabaseConnection,
+      _s: TransactionSettings,
+    ) => {
       await conn.executeQuery(CompiledQuery.raw('begin'));
     },
     commitTransaction: async (conn: DatabaseConnection) => {
@@ -218,9 +221,9 @@ describe.each(DIALECTS)('两种库跑同一批读写 · $name', ({ make }) => {
     expect(rows[0]?.p256dh).toBe('key-2');
 
     await markSent(db, 'https://push.example/1');
-    expect((await listSubscriptions(db, 'user-1'))[0]?.lastSentAt).toBeInstanceOf(
-      Date,
-    );
+    expect(
+      (await listSubscriptions(db, 'user-1'))[0]?.lastSentAt,
+    ).toBeInstanceOf(Date);
   });
 
   it('会话级授权：重复授权幂等，查得到自己的、查不到别人的', async () => {

@@ -4,7 +4,7 @@ slug: observability
 view: 技术
 layer: 总纲
 module: —
-packages: ["@runko/core", "@runko/agent", "@runko/persist-kysely", "@runko/persist-mongo", "@runko/conformance", "@runko/otel", "@runko-chat/node-server", "@runko-demo/persist-demo"]
+packages: ["@runko/core", "@runko/agent", "@runko/persist-kysely", "@runko/persist-mongo", "@runko/conformance", "@runko/otel", "@runko-chat/node-server"]
 tags: ["可观测性", "事件", "OTel", "TracingChannel", "diagnostics_channel", "span link", "gen_ai", "破坏性变更"]
 related: ["architecture/features/observability.md", "architecture/plans/observability.md", "architecture/tech/agent-kernel.md", "host/node/tech/multi-replica.md", "ingress/tech/telemetry.md"]
 ---
@@ -32,7 +32,7 @@ related: ["architecture/features/observability.md", "architecture/plans/observab
 | AI SDK 遥测透传 | `packages/core/src/loop.ts` 的 `SessionTelemetry`，经 `TurnPreparation.telemetry` 注入 | 模型调用 + core 替 AI SDK 补发的工具开始/结束 | 只管模型那一段；关联键是 `"<sessionId>#<turn>"` |
 | 租约仲裁 | `packages/persist-kysely/src/arbitration.ts` | **零** | 抢占、接管、心跳失败、自我围栏都看不见 |
 
-唯二的消费方：chat 应用（`apps/node-server/src/agent/runtime.ts` 用了全部 6 个钩子 + 注入 logger）与 persist-demo（注入 logger）。
+唯一的消费方：chat 应用（`apps/node-server/src/agent/runtime.ts` 用了全部 6 个钩子 + 注入 logger）。
 `apps/cloudflare-worker-server` 只用 `@runko/sdk`，不经过 `@runko/agent`，本次不受影响。
 
 ## 3. 总体设计
@@ -288,7 +288,7 @@ sequenceDiagram
 ### 7.3 转发：宿主的事，但文档要点明
 
 副本之间的转发属于同一次请求，**父子关系**就对：转发方 `propagation.inject(context.active(), headers)`，持有者一侧的 HTTP
-中间件 `extract`。装了 `@opentelemetry/instrumentation-undici` 时 `fetch` 会自动注入，不用手写。persist-demo 会示范。
+中间件 `extract`。装了 `@opentelemetry/instrumentation-undici` 时 `fetch` 会自动注入，不用手写。chat 应用会示范。
 
 ### 7.4 定时器里的事件没有「当前轮」
 
@@ -390,7 +390,7 @@ erDiagram
 
 验收看两件事不变：推送通知三类照常弹、`telemetry.db` 里 `turn-prepare` 与 `turn-first-output` 照常有行。
 
-### 10.3 persist-demo
+### 10.3 chat 应用
 
 - `src/logger.ts` 保留；新增一个「事件 → 文本行」的订阅者，同时交给 runtime 与租约仲裁。`timeline.log` 重新读得出租约行。
 - 新增 `src/otel.ts`：设了 `OTEL_EXPORTER_OTLP_ENDPOINT` 才启用 OTel SDK（`--import` 注册）；转发时注入 `traceparent`，HTTP 层 extract。
