@@ -45,7 +45,6 @@ import type {
 import { createFakeSessions } from '../helpers/fake-turn-session.js';
 import { capturingModel, stopOnlyModel } from '../helpers/mock-model.js';
 import { collectText } from '../helpers/runko-chunks.js';
-import { silentLogger } from '../helpers/silent-logger.js';
 import { createTestDb, seedUser } from '../helpers/test-db.js';
 
 // ---------------------------------------------------------------------------
@@ -207,12 +206,12 @@ describe('routes/chat', () => {
   let sandboxManager: FakeSandboxManager;
   let sessions: FakeSessions;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.stubEnv('GITHUB_REPO', 'git@github.com:acme/demo.git');
     vi.stubEnv('GITHUB_PAT', 'test-pat');
-    db = createTestDb();
-    seedUser(db, USER_ID);
-    seedUser(db, 'user-2');
+    db = await createTestDb();
+    await seedUser(db, USER_ID);
+    await seedUser(db, 'user-2');
     sandboxManager = createFakeSandboxManager();
     sessions = createFakeSessions();
   });
@@ -257,9 +256,7 @@ describe('routes/chat', () => {
   }
 
   async function ledgerMessages(id: string): Promise<RunkoUIMessage[]> {
-    const entries = await createChatPersistence(db, silentLogger).ledger.read(
-      id,
-    );
+    const entries = await createChatPersistence(db).ledger.read(id);
     return entries.map((entry) => entry.message);
   }
 
@@ -304,7 +301,7 @@ describe('routes/chat', () => {
       const { app } = build();
       const waiting = await createConversationVia(app);
       const idle = await createConversationVia(app);
-      const decisions = createChatPersistence(db, silentLogger).decisions;
+      const decisions = createChatPersistence(db).decisions;
       const requestedAt = 1_700_000_000_000;
       await decisions.record({
         conversationId: waiting.id,
@@ -357,8 +354,12 @@ describe('routes/chat', () => {
       const e2b = await createConversationVia(app, { provider: 'e2b' });
       const vercel = await createConversationVia(app, { provider: 'vercel' });
 
-      expect(getConversation(db, e2b.id, USER_ID)?.sandboxId).not.toBeNull();
-      expect(getConversation(db, vercel.id, USER_ID)?.sandboxId).toBeNull();
+      expect(
+        (await getConversation(db, e2b.id, USER_ID))?.sandboxId,
+      ).not.toBeNull();
+      expect(
+        (await getConversation(db, vercel.id, USER_ID))?.sandboxId,
+      ).toBeNull();
     });
   });
 
@@ -708,7 +709,7 @@ describe('routes/chat', () => {
       await session.started;
 
       const pending = requestReview(session, 'call-1');
-      const decisions = createChatPersistence(db, silentLogger).decisions;
+      const decisions = createChatPersistence(db).decisions;
       await vi.waitFor(async () => {
         expect(await decisions.listPending(created.id)).toHaveLength(1);
       });
@@ -763,9 +764,7 @@ describe('routes/chat', () => {
       const pending = requestReview(session, 'call-3');
       await vi.waitFor(async () => {
         expect(
-          await createChatPersistence(db, silentLogger).decisions.listPending(
-            created.id,
-          ),
+          await createChatPersistence(db).decisions.listPending(created.id),
         ).toHaveLength(1);
       });
 
@@ -782,7 +781,7 @@ describe('routes/chat', () => {
       const { hasConversationGrant } =
         await import('../../src/agent/conversation-grants.js');
       expect(
-        hasConversationGrant(db, created.id, USER_ID, 'bash', {
+        await hasConversationGrant(db, created.id, USER_ID, 'bash', {
           command: 'rm -rf build',
         }),
       ).toBe(true);
@@ -923,15 +922,18 @@ describe('routes/chat', () => {
   });
 
   describe('崩溃恢复', () => {
-    it('库里还留着[起轮标记](../../../../docs/terms.md)= 那一轮没人管了，启动扫描补一条「已停止」', async () => {
+    it('库里还留着归属、却没人在驱动那一轮 = 孤儿轮，启动扫描补一条「已停止」', async () => {
       const { app } = build();
       const created = await createConversationVia(app);
       await post(app, created.id, { text: 'hello' });
       const session = await sessions.next();
       await session.started;
 
-      // 模拟进程被强杀：起轮标记留在库里，但没有任何进程在驱动这一轮。
-      // 新进程起来后扫描，认出它并补收尾。
+      // 模拟进程被强杀：归属还挂在库里（holder 是同一个名字），但没有任何进程在驱动这一轮。
+      // 同名的新进程起来后扫描，认出这是上一辈子留下的，补收尾。
+      // 等一毫秒再造新进程：判据是「这条归属比我这个进程还老」，同一毫秒不算老。
+      // 真实的重启远不止 1 毫秒，这一等只是把测试里挤在一起的时间轴拉开。
+      await new Promise((resolve) => setTimeout(resolve, 5));
       const fresh = build();
       const result = await fresh.runtime.recover();
       expect(result.recovered).toBe(1);

@@ -64,7 +64,7 @@ export function createPushApp(deps: PushRouteDeps): OpenAPIHono<PushEnv> {
     },
   });
 
-  app.openapi(configRoute, (c) => {
+  app.openapi(configRoute, async (c) => {
     const vapid = getVapidConfig();
     return c.json(
       {
@@ -106,14 +106,14 @@ export function createPushApp(deps: PushRouteDeps): OpenAPIHono<PushEnv> {
     },
   });
 
-  app.openapi(subscribeRoute, (c) => {
+  app.openapi(subscribeRoute, async (c) => {
     if (!isPushEnabled()) {
       return c.json({ error: DISABLED_MESSAGE }, 503);
     }
     const userId = c.get('userId');
     const { endpoint, keys, userAgent } = c.req.valid('json');
 
-    upsertSubscription(deps.db, {
+    await upsertSubscription(deps.db, {
       endpoint,
       userId,
       p256dh: keys.p256dh,
@@ -149,12 +149,12 @@ export function createPushApp(deps: PushRouteDeps): OpenAPIHono<PushEnv> {
     },
   });
 
-  app.openapi(unsubscribeRoute, (c) => {
+  app.openapi(unsubscribeRoute, async (c) => {
     const { endpoint } = c.req.valid('json');
     // 刻意不校验这条订阅属不属于调用者：能拿到 endpoint 的只有那台设备的浏览器
     // 自己，而「删掉一条自己的投递地址」本就是它随时可做的事。加一次属主查询
     // 只会让"换账号后退订"这类正常路径莫名失败。
-    deleteSubscription(deps.db, endpoint);
+    await deleteSubscription(deps.db, endpoint);
     return c.json({ ok: true as const }, 200);
   });
 

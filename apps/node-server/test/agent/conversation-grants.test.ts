@@ -10,9 +10,8 @@ import {
   grantConversationApproval,
   hasConversationGrant,
 } from '../../src/agent/conversation-grants.js';
-import type { Db } from '../../src/agent/store.js';
 import { createConversation } from '../../src/agent/store.js';
-import { conversationGrants } from '../../src/db/schema.js';
+import type { Db } from '../../src/db/instance.js';
 import { createTestDb, seedUser } from '../helpers/test-db.js';
 
 const CONV = 'conv-1';
@@ -25,13 +24,13 @@ const CONVS = ['conv-1', 'conv-a', 'conv-b'];
 
 describe('conversation-grants', () => {
   let db: Db;
-  beforeEach(() => {
-    db = createTestDb();
+  beforeEach(async () => {
+    db = await createTestDb();
     for (const id of USERS) {
-      seedUser(db, id);
+      await seedUser(db, id);
     }
     for (const id of CONVS) {
-      createConversation(db, {
+      await createConversation(db, {
         id,
         userId: USER,
         title: id,
@@ -42,88 +41,114 @@ describe('conversation-grants', () => {
     }
   });
 
-  it('grants and matches the exact same call (same conv + user + tool + input)', () => {
+  it('grants and matches the exact same call (same conv + user + tool + input)', async () => {
     expect(
-      hasConversationGrant(db, CONV, USER, 'bash', { command: 'rm -rf build' }),
+      await hasConversationGrant(db, CONV, USER, 'bash', {
+        command: 'rm -rf build',
+      }),
     ).toBe(false);
-    grantConversationApproval(db, CONV, USER, 'bash', {
+    await grantConversationApproval(db, CONV, USER, 'bash', {
       command: 'rm -rf build',
     });
     expect(
-      hasConversationGrant(db, CONV, USER, 'bash', { command: 'rm -rf build' }),
+      await hasConversationGrant(db, CONV, USER, 'bash', {
+        command: 'rm -rf build',
+      }),
     ).toBe(true);
   });
 
-  it('does NOT match a different command on the same tool (按具体调用，非按工具名)', () => {
-    grantConversationApproval(db, CONV, USER, 'bash', {
+  it('does NOT match a different command on the same tool (按具体调用，非按工具名)', async () => {
+    await grantConversationApproval(db, CONV, USER, 'bash', {
       command: 'rm -rf build',
     });
     // 换命令：指纹不同 → 仍需审批（bash 的安全性正靠这个）。
     expect(
-      hasConversationGrant(db, CONV, USER, 'bash', { command: 'git push -f' }),
+      await hasConversationGrant(db, CONV, USER, 'bash', {
+        command: 'git push -f',
+      }),
     ).toBe(false);
     // 同工具名但不同工具也不命中。
     expect(
-      hasConversationGrant(db, CONV, USER, 'write-file', {
+      await hasConversationGrant(db, CONV, USER, 'write-file', {
         command: 'rm -rf build',
       }),
     ).toBe(false);
   });
 
-  it('is isolated per user —— A 的授权不放行 B（多用户前瞻）', () => {
-    grantConversationApproval(db, CONV, 'user-a', 'bash', { command: 'ls' });
+  it('is isolated per user —— A 的授权不放行 B（多用户前瞻）', async () => {
+    await grantConversationApproval(db, CONV, 'user-a', 'bash', {
+      command: 'ls',
+    });
     expect(
-      hasConversationGrant(db, CONV, 'user-a', 'bash', { command: 'ls' }),
+      await hasConversationGrant(db, CONV, 'user-a', 'bash', {
+        command: 'ls',
+      }),
     ).toBe(true);
     // 同会话、同命令，换个用户 → 不命中：授权只放行授权者本人。
     expect(
-      hasConversationGrant(db, CONV, 'user-b', 'bash', { command: 'ls' }),
+      await hasConversationGrant(db, CONV, 'user-b', 'bash', {
+        command: 'ls',
+      }),
     ).toBe(false);
   });
 
-  it('is isolated per conversation', () => {
-    grantConversationApproval(db, 'conv-a', USER, 'bash', { command: 'ls' });
+  it('is isolated per conversation', async () => {
+    await grantConversationApproval(db, 'conv-a', USER, 'bash', {
+      command: 'ls',
+    });
     expect(
-      hasConversationGrant(db, 'conv-a', USER, 'bash', { command: 'ls' }),
+      await hasConversationGrant(db, 'conv-a', USER, 'bash', {
+        command: 'ls',
+      }),
     ).toBe(true);
     expect(
-      hasConversationGrant(db, 'conv-b', USER, 'bash', { command: 'ls' }),
+      await hasConversationGrant(db, 'conv-b', USER, 'bash', {
+        command: 'ls',
+      }),
     ).toBe(false);
   });
 
-  it('input fingerprint is key-order independent (稳定序列化)', () => {
-    grantConversationApproval(db, CONV, USER, 'write-file', {
+  it('input fingerprint is key-order independent (稳定序列化)', async () => {
+    await grantConversationApproval(db, CONV, USER, 'write-file', {
       path: 'a.txt',
       content: 'hi',
     });
     // 同一 JSON 值、键序不同 → 同一指纹 → 命中。
     expect(
-      hasConversationGrant(db, CONV, USER, 'write-file', {
+      await hasConversationGrant(db, CONV, USER, 'write-file', {
         content: 'hi',
         path: 'a.txt',
       }),
     ).toBe(true);
   });
 
-  it('grant is idempotent (重复授权同一条不报错，PK 冲突即忽略)', () => {
-    grantConversationApproval(db, CONV, USER, 'bash', { command: 'ls' });
-    expect(() =>
+  it('grant is idempotent (重复授权同一条不报错，PK 冲突即忽略)', async () => {
+    await grantConversationApproval(db, CONV, USER, 'bash', {
+      command: 'ls',
+    });
+    await expect(
       grantConversationApproval(db, CONV, USER, 'bash', { command: 'ls' }),
-    ).not.toThrow();
+    ).resolves.toBeUndefined();
     expect(
-      hasConversationGrant(db, CONV, USER, 'bash', { command: 'ls' }),
+      await hasConversationGrant(db, CONV, USER, 'bash', { command: 'ls' }),
     ).toBe(true);
   });
 
-  it('clearConversationGrants drops all grants for a conversation, all users (会话删除即清)', () => {
-    grantConversationApproval(db, CONV, USER, 'bash', { command: 'ls' });
-    grantConversationApproval(db, CONV, 'user-2', 'bash', { command: 'pwd' });
-    clearConversationGrants(db, CONV);
+  it('clearConversationGrants drops all grants for a conversation, all users (会话删除即清)', async () => {
+    await grantConversationApproval(db, CONV, USER, 'bash', {
+      command: 'ls',
+    });
+    await grantConversationApproval(db, CONV, 'user-2', 'bash', {
+      command: 'pwd',
+    });
+    await clearConversationGrants(db, CONV);
     expect(
-      hasConversationGrant(db, CONV, USER, 'bash', { command: 'ls' }),
+      await hasConversationGrant(db, CONV, USER, 'bash', { command: 'ls' }),
     ).toBe(false);
     expect(
-      hasConversationGrant(db, CONV, 'user-2', 'bash', { command: 'pwd' }),
+      await hasConversationGrant(db, CONV, 'user-2', 'bash', {
+        command: 'pwd',
+      }),
     ).toBe(false);
   });
 
@@ -135,8 +160,10 @@ describe('conversation-grants', () => {
     const COMPOUND =
       'cd /home/user/repo && rm -rf node_modules package-lock.json && npm install react react-dom next --no-audit --no-fund 2>&1';
 
-    it('授权一条复合命令后，它的任一子集组合直接命中', () => {
-      grantConversationApproval(db, CONV, USER, 'bash', { command: COMPOUND });
+    it('授权一条复合命令后，它的任一子集组合直接命中', async () => {
+      await grantConversationApproval(db, CONV, USER, 'bash', {
+        command: COMPOUND,
+      });
 
       for (const command of [
         COMPOUND,
@@ -148,14 +175,16 @@ describe('conversation-grants', () => {
         'npm install react react-dom next --no-audit --no-fund 2>&1 || cd /home/user/repo',
         'rm -rf node_modules package-lock.json ; cd /home/user/repo',
       ]) {
-        expect(hasConversationGrant(db, CONV, USER, 'bash', { command })).toBe(
-          true,
-        );
+        expect(
+          await hasConversationGrant(db, CONV, USER, 'bash', { command }),
+        ).toBe(true);
       }
     });
 
-    it('含任何一段新命令就不命中（有一段没批过 → 照常弹卡片）', () => {
-      grantConversationApproval(db, CONV, USER, 'bash', { command: COMPOUND });
+    it('含任何一段新命令就不命中（有一段没批过 → 照常弹卡片）', async () => {
+      await grantConversationApproval(db, CONV, USER, 'bash', {
+        command: COMPOUND,
+      });
 
       for (const command of [
         'cd /home/user/repo && npm install zod', // 换了包
@@ -163,202 +192,217 @@ describe('conversation-grants', () => {
         'npm install react react-dom next --no-audit', // 少一个选项 = 另一条命令
         'cd /home/user/repo2', // 换了目录参数
       ]) {
-        expect(hasConversationGrant(db, CONV, USER, 'bash', { command })).toBe(
-          false,
-        );
+        expect(
+          await hasConversationGrant(db, CONV, USER, 'bash', { command }),
+        ).toBe(false);
       }
     });
 
-    it('授权 rm -rf a 不放行 rm -rf b（不是按命令名记）', () => {
-      grantConversationApproval(db, CONV, USER, 'bash', {
+    it('授权 rm -rf a 不放行 rm -rf b（不是按命令名记）', async () => {
+      await grantConversationApproval(db, CONV, USER, 'bash', {
         command: 'rm -rf node_modules',
       });
       for (const command of ['rm -rf src', 'rm -rf /', 'rm -rf', 'rm']) {
-        expect(hasConversationGrant(db, CONV, USER, 'bash', { command })).toBe(
-          false,
-        );
+        expect(
+          await hasConversationGrant(db, CONV, USER, 'bash', { command }),
+        ).toBe(false);
       }
     });
 
-    it('授权 npm install 不放行 npm publish（不是按命令名记）', () => {
-      grantConversationApproval(db, CONV, USER, 'bash', {
+    it('授权 npm install 不放行 npm publish（不是按命令名记）', async () => {
+      await grantConversationApproval(db, CONV, USER, 'bash', {
         command: 'npm install react',
       });
       expect(
-        hasConversationGrant(db, CONV, USER, 'bash', {
+        await hasConversationGrant(db, CONV, USER, 'bash', {
           command: 'npm publish',
         }),
       ).toBe(false);
     });
 
-    it('引号造成的词边界差异是两个不同的键（rm -rf "my dir" ≠ rm -rf my dir）', () => {
-      grantConversationApproval(db, CONV, USER, 'bash', {
+    it('引号造成的词边界差异是两个不同的键（rm -rf "my dir" ≠ rm -rf my dir）', async () => {
+      await grantConversationApproval(db, CONV, USER, 'bash', {
         command: 'rm -rf "my dir"',
       });
       expect(
-        hasConversationGrant(db, CONV, USER, 'bash', {
+        await hasConversationGrant(db, CONV, USER, 'bash', {
           command: 'rm -rf my dir',
         }),
       ).toBe(false);
       // 反过来同样不放行
-      grantConversationApproval(db, CONV, USER, 'bash', {
+      await grantConversationApproval(db, CONV, USER, 'bash', {
         command: 'rm -rf a b',
       });
       expect(
-        hasConversationGrant(db, CONV, USER, 'bash', {
+        await hasConversationGrant(db, CONV, USER, 'bash', {
           command: 'rm -rf "a b"',
         }),
       ).toBe(false);
     });
 
-    it('cwd 进键：换了工作目录不命中', () => {
-      grantConversationApproval(db, CONV, USER, 'bash', {
+    it('cwd 进键：换了工作目录不命中', async () => {
+      await grantConversationApproval(db, CONV, USER, 'bash', {
         command: 'rm -rf build',
         cwd: '/repo',
       });
       expect(
-        hasConversationGrant(db, CONV, USER, 'bash', {
+        await hasConversationGrant(db, CONV, USER, 'bash', {
           command: 'rm -rf build',
           cwd: '/repo',
         }),
       ).toBe(true);
       expect(
-        hasConversationGrant(db, CONV, USER, 'bash', {
+        await hasConversationGrant(db, CONV, USER, 'bash', {
           command: 'rm -rf build',
           cwd: '/',
         }),
       ).toBe(false);
       // 不带 cwd 与带 cwd 也不是同一条
       expect(
-        hasConversationGrant(db, CONV, USER, 'bash', {
+        await hasConversationGrant(db, CONV, USER, 'bash', {
           command: 'rm -rf build',
         }),
       ).toBe(false);
     });
 
-    it('timeout_ms 不进键：只有它变仍然命中', () => {
-      grantConversationApproval(db, CONV, USER, 'bash', {
+    it('timeout_ms 不进键：只有它变仍然命中', async () => {
+      await grantConversationApproval(db, CONV, USER, 'bash', {
         command: 'npm run build',
         timeout_ms: 1000,
       });
       expect(
-        hasConversationGrant(db, CONV, USER, 'bash', {
+        await hasConversationGrant(db, CONV, USER, 'bash', {
           command: 'npm run build',
           timeout_ms: 60000,
         }),
       ).toBe(true);
     });
 
-    it('重定向是命令的一部分：写到别的文件不命中', () => {
-      grantConversationApproval(db, CONV, USER, 'bash', {
+    it('重定向是命令的一部分：写到别的文件不命中', async () => {
+      await grantConversationApproval(db, CONV, USER, 'bash', {
         command: 'npm run build > ok.log',
       });
       expect(
-        hasConversationGrant(db, CONV, USER, 'bash', {
+        await hasConversationGrant(db, CONV, USER, 'bash', {
           command: 'npm run build > other.log',
         }),
       ).toBe(false);
       expect(
-        hasConversationGrant(db, CONV, USER, 'bash', {
+        await hasConversationGrant(db, CONV, USER, 'bash', {
           command: 'npm run build > ok.log',
         }),
       ).toBe(true);
     });
 
-    it('拆不动的命令退回整串匹配（行为与本功能上线前逐字一致）', () => {
+    it('拆不动的命令退回整串匹配（行为与本功能上线前逐字一致）', async () => {
       const unsplittable = 'echo $(whoami) && ls';
-      grantConversationApproval(db, CONV, USER, 'bash', {
+      await grantConversationApproval(db, CONV, USER, 'bash', {
         command: unsplittable,
       });
       // 整串相同 → 命中
       expect(
-        hasConversationGrant(db, CONV, USER, 'bash', { command: unsplittable }),
+        await hasConversationGrant(db, CONV, USER, 'bash', {
+          command: unsplittable,
+        }),
       ).toBe(true);
       // 整串授权**不**泄漏成分段授权：其中的 `ls` 并没有被单独授权
       expect(
-        hasConversationGrant(db, CONV, USER, 'bash', { command: 'ls' }),
+        await hasConversationGrant(db, CONV, USER, 'bash', { command: 'ls' }),
       ).toBe(false);
       // 反过来，分段授权也不放行拆不动的整串
-      grantConversationApproval(db, CONV, USER, 'bash', { command: 'pwd' });
+      await grantConversationApproval(db, CONV, USER, 'bash', {
+        command: 'pwd',
+      });
       expect(
-        hasConversationGrant(db, CONV, USER, 'bash', {
+        await hasConversationGrant(db, CONV, USER, 'bash', {
           command: 'pwd && $(x)',
         }),
       ).toBe(false);
     });
 
-    it('非 bash 工具不受影响，仍按整条入参指纹', () => {
-      grantConversationApproval(db, CONV, USER, 'write-file', {
+    it('非 bash 工具不受影响，仍按整条入参指纹', async () => {
+      await grantConversationApproval(db, CONV, USER, 'write-file', {
         command: 'a && b',
       });
       expect(
-        hasConversationGrant(db, CONV, USER, 'write-file', {
+        await hasConversationGrant(db, CONV, USER, 'write-file', {
           command: 'a && b',
         }),
       ).toBe(true);
       expect(
-        hasConversationGrant(db, CONV, USER, 'write-file', { command: 'a' }),
+        await hasConversationGrant(db, CONV, USER, 'write-file', {
+          command: 'a',
+        }),
       ).toBe(false);
     });
 
-    it('分段授权同样按用户、按会话隔离', () => {
-      grantConversationApproval(db, CONV, 'user-a', 'bash', {
+    it('分段授权同样按用户、按会话隔离', async () => {
+      await grantConversationApproval(db, CONV, 'user-a', 'bash', {
         command: 'cd /x && ls',
       });
       expect(
-        hasConversationGrant(db, CONV, 'user-a', 'bash', { command: 'ls' }),
+        await hasConversationGrant(db, CONV, 'user-a', 'bash', {
+          command: 'ls',
+        }),
       ).toBe(true);
       expect(
-        hasConversationGrant(db, CONV, 'user-b', 'bash', { command: 'ls' }),
+        await hasConversationGrant(db, CONV, 'user-b', 'bash', {
+          command: 'ls',
+        }),
       ).toBe(false);
       expect(
-        hasConversationGrant(db, 'conv-b', 'user-a', 'bash', { command: 'ls' }),
+        await hasConversationGrant(db, 'conv-b', 'user-a', 'bash', {
+          command: 'ls',
+        }),
       ).toBe(false);
     });
 
-    it('重复段只记一行，且复合命令的授权是幂等的', () => {
-      expect(() => {
+    it('重复段只记一行，且复合命令的授权是幂等的', async () => {
+      await grantConversationApproval(db, CONV, USER, 'bash', {
+        command: 'ls && ls',
+      });
+      await expect(
         grantConversationApproval(db, CONV, USER, 'bash', {
           command: 'ls && ls',
-        });
-        grantConversationApproval(db, CONV, USER, 'bash', {
-          command: 'ls && ls',
-        });
-      }).not.toThrow();
+        }),
+      ).resolves.toBeUndefined();
       expect(
-        hasConversationGrant(db, CONV, USER, 'bash', { command: 'ls' }),
+        await hasConversationGrant(db, CONV, USER, 'bash', { command: 'ls' }),
       ).toBe(true);
     });
 
-    it('本功能上线前落下的整串授权行仍然有效（向后兼容，无需迁移回填）', () => {
+    it('本功能上线前落下的整串授权行仍然有效（向后兼容，无需迁移回填）', async () => {
       // 直接按旧格式插一行——`grantConversationApproval` 如今对可拆的 bash 会走分段，
       // 造不出这种历史行，所以绕过它直插，模拟升级前就存在的数据。
       const legacyInput = { command: 'cd /repo && npm test' };
-      db.insert(conversationGrants)
+      await db
+        .insertInto('conversation_grants')
         .values({
-          conversationId: CONV,
-          userId: USER,
-          grantKey: `bash ${JSON.stringify(legacyInput)}`,
-          createdAt: new Date(),
+          conversation_id: CONV,
+          user_id: USER,
+          grant_key: `bash ${JSON.stringify(legacyInput)}`,
+          created_at: Date.now(),
         })
-        .run();
+        .execute();
 
-      expect(hasConversationGrant(db, CONV, USER, 'bash', legacyInput)).toBe(
-        true,
-      );
+      expect(
+        await hasConversationGrant(db, CONV, USER, 'bash', legacyInput),
+      ).toBe(true);
       // 旧行是整串语义，不会被解读成分段授权
       expect(
-        hasConversationGrant(db, CONV, USER, 'bash', { command: 'npm test' }),
+        await hasConversationGrant(db, CONV, USER, 'bash', {
+          command: 'npm test',
+        }),
       ).toBe(false);
     });
 
-    it('clearConversationGrants 同样清掉分段授权', () => {
-      grantConversationApproval(db, CONV, USER, 'bash', {
+    it('clearConversationGrants 同样清掉分段授权', async () => {
+      await grantConversationApproval(db, CONV, USER, 'bash', {
         command: 'cd /x && ls',
       });
-      clearConversationGrants(db, CONV);
+      await clearConversationGrants(db, CONV);
       expect(
-        hasConversationGrant(db, CONV, USER, 'bash', { command: 'ls' }),
+        await hasConversationGrant(db, CONV, USER, 'bash', { command: 'ls' }),
       ).toBe(false);
     });
   });

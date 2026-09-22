@@ -164,7 +164,7 @@ export async function sendToUser(
 
   let subscriptions;
   try {
-    subscriptions = listSubscriptions(db, userId);
+    subscriptions = await listSubscriptions(db, userId);
   } catch (error) {
     log.error(LOG_SCOPE, '读订阅失败，本次不投递', {
       userId,
@@ -194,11 +194,11 @@ export async function sendToUser(
           body,
           options,
         );
-        markSent(db, row.endpoint);
+        await markSent(db, row.endpoint);
       } catch (error) {
         const statusCode = statusCodeOf(error);
         if (statusCode === 404 || statusCode === 410) {
-          deleteSubscription(db, row.endpoint);
+          await deleteSubscription(db, row.endpoint);
           log.info(LOG_SCOPE, '订阅已失效，已回收', {
             userId,
             statusCode,
@@ -206,7 +206,7 @@ export async function sendToUser(
           return;
         }
         const message = describe(error);
-        markError(db, row.endpoint, message);
+        await markError(db, row.endpoint, message);
         log.warn(LOG_SCOPE, '投递失败，保留订阅', {
           userId,
           kind: payload.kind,

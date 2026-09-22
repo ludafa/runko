@@ -148,18 +148,17 @@ export function createChatRuntime(deps: ChatRuntimeDeps): AgentRuntime {
    * 比空闲窗口还久时，界面中途就会把它显示成休眠。
    */
   const markActive = (conversationId: string): void => {
-    try {
-      updateConversation(deps.db, conversationId, {
-        status: 'active',
-        lastActiveAt: new Date(),
-      });
-    } catch (error) {
-      // 纯展示用的一列，写失败不该反噬到这一轮。
+    // 不等它写完：纯展示用的一列，这一轮没必要为它多等一次往返。
+    void updateConversation(deps.db, conversationId, {
+      status: 'active',
+      lastActiveAt: new Date(),
+    }).catch((error: unknown) => {
+      // 写失败不该反噬到这一轮。
       log.warn(LOG_SCOPE, 'failed to refresh lastActiveAt', {
         conversationId,
         error: error instanceof Error ? error.message : String(error),
       });
-    }
+    });
   };
 
   const hooks: RuntimeHooks = {
@@ -249,7 +248,7 @@ export function createChatRuntime(deps: ChatRuntimeDeps): AgentRuntime {
     // 底部的单例），那时读环境变量会让「没配 DeepSeek 凭据」从一次请求失败升级成
     // **整个进程 import 就崩**——连不碰 agent 的端点（列会话、推送订阅）都起不来。
     agent: defineAgent({ model: PLACEHOLDER_MODEL }),
-    persistence: createChatPersistence(deps.db, log),
+    persistence: createChatPersistence(deps.db),
     arbitration: createChatArbitration(deps.db),
     logger: log,
     ...(memoryWindowMs !== undefined ?
@@ -261,7 +260,7 @@ export function createChatRuntime(deps: ChatRuntimeDeps): AgentRuntime {
     : {}),
     prepareTurn: async ({ conversationId, input, signal }) => {
       const launchStopwatch = startStopwatch();
-      const row = getConversationById(deps.db, conversationId);
+      const row = await getConversationById(deps.db, conversationId);
       if (row === undefined) {
         throw new Error(`Conversation ${conversationId} no longer exists.`);
       }
@@ -299,7 +298,7 @@ export function createChatRuntime(deps: ChatRuntimeDeps): AgentRuntime {
         row.provider === 'e2b' &&
         acquired.resumeToken !== (row.sandboxId ?? undefined)
       ) {
-        updateConversation(deps.db, conversationId, {
+        await updateConversation(deps.db, conversationId, {
           sandboxId: acquired.resumeToken,
         });
       }
@@ -309,7 +308,7 @@ export function createChatRuntime(deps: ChatRuntimeDeps): AgentRuntime {
       // 顺手刷新 [skill 清单](../../../../docs/terms.md)缓存——用户这一路让 agent 往
       // `.agents/skills/` 装的新 skill 就是靠这里进菜单的，也是「清单最多滞后一轮」的出处。
       // 清单没变时不发 UPDATE（绝大多数轮次都是这样）。
-      syncAvailableSkills(
+      await syncAvailableSkills(
         deps.db,
         conversationId,
         row.availableSkillsJson,
@@ -334,18 +333,18 @@ export function createChatRuntime(deps: ChatRuntimeDeps): AgentRuntime {
       // [审批分类器](../../../../docs/terms.md)：产品决策，归 chat 层。
       // [会话级授权](../../../../docs/terms.md)先行——这次具体调用（tool + 入参指纹）若已被
       // **本轮发起者**在本会话「会话内都允许」过，直接放行；未命中才回落到危险命令分类。
-      const onApproval: ApprovalPolicy = (approvalInput, ctx) =>
-        (
-          hasConversationGrant(
-            deps.db,
-            conversationId,
-            userId,
-            ctx.toolName,
-            approvalInput,
-          )
-        ) ?
-          'allow'
-        : classifyApproval(approvalMode, ctx.toolName, approvalInput);
+      const onApproval: ApprovalPolicy = async (approvalInput, ctx) => {
+        const granted = await hasConversationGrant(
+          deps.db,
+          conversationId,
+          userId,
+          ctx.toolName,
+          approvalInput,
+        );
+        return granted ? 'allow' : (
+            classifyApproval(approvalMode, ctx.toolName, approvalInput)
+          );
+      };
 
       const tools: Record<string, Tool> = {};
       const webSearchTool = deps.webSearchTool ?? createWebSearchToolFromEnv();

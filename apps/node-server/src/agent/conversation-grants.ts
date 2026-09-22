@@ -38,11 +38,9 @@
  *    清空只是「又开始问了」，不影响任何账本数据。
  */
 import type { JsonValue } from '@runko/core';
-import { and, eq, inArray } from 'drizzle-orm';
 
-import { conversationGrants } from '../db/schema.js';
+import type { Db } from '../db/instance.js';
 import { splitCommand } from './split-command.js';
-import type { Db } from './store.js';
 
 /**
  * 稳定序列化：对象键递归排序，保证同一 JSON 值无论键序都得到同一字符串。
@@ -137,21 +135,27 @@ function segmentKeys(toolName: string, input: JsonValue): string[] | undefined {
  *
  * 拆得动的 bash 记 N 行分段键，其余（非 bash、形状不符、拆不动）记 1 行整串键。
  */
-export function grantConversationApproval(
+export async function grantConversationApproval(
   db: Db,
   conversationId: string,
   userId: string,
   toolName: string,
   input: JsonValue,
-): void {
+): Promise<void> {
   const keys = segmentKeys(toolName, input) ?? [grantKey(toolName, input)];
-  const createdAt = new Date();
-  db.insert(conversationGrants)
+  const createdAt = Date.now();
+  await db
+    .insertInto('conversation_grants')
     .values(
-      keys.map((key) => ({ conversationId, userId, grantKey: key, createdAt })),
+      keys.map((key) => ({
+        conversation_id: conversationId,
+        user_id: userId,
+        grant_key: key,
+        created_at: createdAt,
+      })),
     )
-    .onConflictDoNothing()
-    .run();
+    .onConflict((oc) => oc.doNothing())
+    .execute();
 }
 
 /**
@@ -164,32 +168,26 @@ export function grantConversationApproval(
  * 2. **全部分段键命中** —— 拆得动的 bash：每一段都记过才放行；有任何一段是新的
  *    就返回 false、照常弹卡片。
  */
-export function hasConversationGrant(
+export async function hasConversationGrant(
   db: Db,
   conversationId: string,
   userId: string,
   toolName: string,
   input: JsonValue,
-): boolean {
+): Promise<boolean> {
   const wholeKey = grantKey(toolName, input);
   const segKeys = segmentKeys(toolName, input);
   const candidates =
     segKeys === undefined ? [wholeKey] : [wholeKey, ...segKeys];
 
-  const matched = new Set(
-    db
-      .select({ key: conversationGrants.grantKey })
-      .from(conversationGrants)
-      .where(
-        and(
-          eq(conversationGrants.conversationId, conversationId),
-          eq(conversationGrants.userId, userId),
-          inArray(conversationGrants.grantKey, candidates),
-        ),
-      )
-      .all()
-      .map((row) => row.key),
-  );
+  const rows = await db
+    .selectFrom('conversation_grants')
+    .select('grant_key')
+    .where('conversation_id', '=', conversationId)
+    .where('user_id', '=', userId)
+    .where('grant_key', 'in', candidates)
+    .execute();
+  const matched = new Set(rows.map((row) => row.grant_key));
 
   if (matched.has(wholeKey)) {
     return true;
@@ -201,8 +199,12 @@ export function hasConversationGrant(
 }
 
 /** 清空某会话的全部授权（所有用户）。会话删除时 FK 级联已自动清，这是显式入口（如「重置本会话授权」）。 */
-export function clearConversationGrants(db: Db, conversationId: string): void {
-  db.delete(conversationGrants)
-    .where(eq(conversationGrants.conversationId, conversationId))
-    .run();
+export async function clearConversationGrants(
+  db: Db,
+  conversationId: string,
+): Promise<void> {
+  await db
+    .deleteFrom('conversation_grants')
+    .where('conversation_id', '=', conversationId)
+    .execute();
 }

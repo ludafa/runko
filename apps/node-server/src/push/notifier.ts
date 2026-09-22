@@ -16,9 +16,9 @@
  */
 import type { JsonValue } from '@runko/core';
 
-import { parseQueuedInputs } from '../agent/persistence.js';
+import { countQueued } from '../agent/runko-tables.js';
 import type { Db } from '../agent/store.js';
-import { getConversation, getConversationById } from '../agent/store.js';
+import { getConversation } from '../agent/store.js';
 import type { Logger } from '../logger.js';
 import { logger as defaultLogger } from '../logger.js';
 import { isEventEnabled } from './events.js';
@@ -162,11 +162,11 @@ export function createChatNotifier(deps: ChatNotifierDeps): ChatNotifier {
    * 闸门顺序是按"越便宜越靠前"排的：总闸（读三个 env）→ 事件白名单（读一个 env）
    * → 在场（读内存 Map）→ 会话标题（查库）。最后才碰数据库。
    */
-  function prepare(
+  async function prepare(
     kind: PushKind,
     conversationId: string,
     userId: string,
-  ): string | undefined {
+  ): Promise<string | undefined> {
     if (!isPushEnabled()) {
       return undefined;
     }
@@ -178,7 +178,7 @@ export function createChatNotifier(deps: ChatNotifierDeps): ChatNotifier {
     if (isPresent(userId, conversationId)) {
       return undefined;
     }
-    const row = getConversation(deps.db, conversationId, userId);
+    const row = await getConversation(deps.db, conversationId, userId);
     if (row === undefined) {
       return undefined;
     } // 会话已删/易主，没有可通知的对象
@@ -222,22 +222,28 @@ export function createChatNotifier(deps: ChatNotifierDeps): ChatNotifier {
     });
   }
 
-  /** 把整个方法体包起来：闸门查询、查库、拼串里任何一步抛错都不该影响一轮。 */
-  function guard(what: string, fn: () => void): void {
-    try {
-      fn();
-    } catch (error) {
+  /**
+   * 把整个方法体包起来：闸门查询、查库、拼串里任何一步抛错都不该影响一轮。
+   *
+   * **不等它跑完**——通知是旁路，一轮不该为了发通知多等一次数据库往返。
+   */
+  function guard(what: string, fn: () => Promise<void>): void {
+    void fn().catch((error: unknown) => {
       log.error(LOG_SCOPE, '通知决策抛错，已忽略', {
         what,
         error: error instanceof Error ? error.message : String(error),
       });
-    }
+    });
   }
 
   return {
     approvalPending(input) {
-      guard('approvalPending', () => {
-        const title = prepare('approval', input.conversationId, input.userId);
+      guard('approvalPending', async () => {
+        const title = await prepare(
+          'approval',
+          input.conversationId,
+          input.userId,
+        );
         if (title === undefined) {
           return;
         }
@@ -255,8 +261,12 @@ export function createChatNotifier(deps: ChatNotifierDeps): ChatNotifier {
     },
 
     questionPending(input) {
-      guard('questionPending', () => {
-        const title = prepare('question', input.conversationId, input.userId);
+      guard('questionPending', async () => {
+        const title = await prepare(
+          'question',
+          input.conversationId,
+          input.userId,
+        );
         if (title === undefined) {
           return;
         }
@@ -272,10 +282,10 @@ export function createChatNotifier(deps: ChatNotifierDeps): ChatNotifier {
     },
 
     turnSettled(input) {
-      guard('turnSettled', () => {
+      guard('turnSettled', async () => {
         const kind: PushKind =
           input.status === 'completed' ? 'turn-done' : 'turn-failed';
-        const title = prepare(kind, input.conversationId, input.userId);
+        const title = await prepare(kind, input.conversationId, input.userId);
         if (title === undefined) {
           return;
         }
@@ -286,12 +296,10 @@ export function createChatNotifier(deps: ChatNotifierDeps): ChatNotifier {
         //
         // [挂起](../../../../docs/terms.md)除外：这时队列**不会**出队，要等人答完——这条推送正是
         // 叫人回来的那一条，吞掉它会话就一直干等。
-        const row = getConversationById(deps.db, input.conversationId);
-        const queued =
-          row === undefined ?
-            []
-          : parseQueuedInputs(row.queuedMessagesJson, row.id, log);
-        if (input.status !== 'suspended' && queued.length > 0) {
+        if (
+          input.status !== 'suspended' &&
+          (await countQueued(deps.db, input.conversationId)) > 0
+        ) {
           return;
         }
 

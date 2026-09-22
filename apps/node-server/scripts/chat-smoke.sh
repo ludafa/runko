@@ -92,9 +92,9 @@ list) # list —— 列出全部会话
 
 pending) # pending [cid] —— 直接读裁决表里还没结清的（拿 callId 用）
   sqlite3 -header -column "$DB" \
-    "select tool_call_id, kind, tool_name, substr(payload_json,1,60) as payload
-     from conversation_decisions
-     where conversation_id='$(cid "${2:-}")' and outcome is null;"
+    "select tool_call_id, kind, tool_name, substr(payload,1,60) as payload
+     from agent_decisions
+     where conversation_id='$(cid "${2:-}")' and decided_at is null;"
   ;;
 
 approve) # approve <callId> [cid] —— 只准这一次
@@ -121,16 +121,17 @@ clearq) # clearq [cid] —— 清空待发队列
   api -X DELETE "$BASE/api/chat/conversations/$(cid "${2:-}")/queue" | j
   ;;
 
-holder) # holder —— 直接读库看起轮标记（判孤儿轮用）
+holder) # holder —— 直接读库看归属（谁在跑这一轮、心跳多新）
   sqlite3 -header -column "$DB" \
-    "select id, turn_holder, datetime(turn_started_at,'unixepoch','localtime') as started
-     from conversations where turn_holder is not null;"
+    "select conversation_id, holder,
+            datetime(heartbeat_at/1000,'unixepoch','localtime') as last_beat
+     from agent_leases where lease_token is not null;"
   ;;
 
-ledger) # ledger [cid] —— 账本里这条会话有哪些行（验证「只写成品消息」）
+ledger) # ledger [cid] —— 账本里这条会话有多少行、到哪个 seq
   sqlite3 -header -column "$DB" \
-    "select kind, count(*) as rows from conversation_events
-     where conversation_id='$(cid "${2:-}")' group by kind;"
+    "select count(*) as rows, max(seq) as max_seq from agent_ledger
+     where conversation_id='$(cid "${2:-}")';"
   ;;
 
 *)

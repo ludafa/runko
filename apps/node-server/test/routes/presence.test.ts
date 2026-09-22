@@ -17,11 +17,11 @@ const CONVERSATION_ID = 'conv-presence-1';
 describe('routes/chat —— 在场心跳', () => {
   let db: Db;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     resetPresence();
-    db = createTestDb();
-    seedUser(db, 'user-1');
-    seedUser(db, 'user-2');
+    db = await createTestDb();
+    await seedUser(db, 'user-1');
+    await seedUser(db, 'user-2');
     createConversation(db, {
       id: CONVERSATION_ID,
       userId: 'user-1',

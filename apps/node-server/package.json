@@ -13,9 +13,7 @@
     "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
     "lint:fix": "eslint . --fix",
     "test": "vitest run",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
+    "db:migrate": "node --env-file-if-exists=../../.env --env-file-if-exists=.env --import tsx src/db/migrate-cli.ts"
   },
   "dependencies": {
     "@ai-sdk/deepseek": "^3.0.7",
@@ -31,12 +29,13 @@
     "ai": "catalog:",
     "better-auth": "^1.6.9",
     "better-sqlite3": "^12.9.0",
-    "drizzle-orm": "^0.45.2",
     "e2b": "catalog:",
     "hono": "^4.12.16",
     "web-push": "^3.6.7",
     "yaml": "^2.8.3",
-    "zod": "^4.4.2"
+    "zod": "^4.4.2",
+    "kysely": "catalog:",
+    "@runko/persist-kysely": "workspace:*"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -44,7 +43,6 @@
     "@types/node": "catalog:",
     "@types/web-push": "^3.6.4",
     "@vitest/coverage-v8": "^4.1.5",
-    "drizzle-kit": "^0.31.10",
     "eslint": "^10.3.0",
     "eslint-config-prettier": "~10.1.8",
     "eslint-plugin-import": "~2.32.0",

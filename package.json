@@ -17,7 +17,7 @@
     "check:doc-links": "node scripts/check-doc-links.mjs",
     "lint:fix": "pnpm -r run lint:fix",
     "coverage": "vitest run --coverage",
-    "chat:bootstrap": "pnpm --filter @runko-chat/node-server run db:generate && pnpm --filter @runko-chat/node-server run db:migrate && pnpm --filter @runko-chat/node-server run generate:openapi && pnpm --filter @runko-chat/web run generate:api",
+    "chat:bootstrap": "pnpm --filter @runko-chat/node-server run db:migrate && pnpm --filter @runko-chat/node-server run generate:openapi && pnpm --filter @runko-chat/web run generate:api",
     "chat:server": "pnpm --filter @runko-chat/node-server run dev",
     "chat:web": "pnpm --filter @runko-chat/web run dev",
     "prepare": "husky",

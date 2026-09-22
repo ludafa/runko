@@ -16,11 +16,8 @@ import { grantConversationApproval } from '../agent/conversation-grants.js';
 import type { GitHubRepoRef } from '../agent/github-repo.js';
 import { resolveGithubPat, resolveRepo } from '../agent/github-repo.js';
 import { resolveModel } from '../agent/model.js';
-import {
-  countPendingDecisions,
-  createChatPersistence,
-  parseQueuedInputs,
-} from '../agent/persistence.js';
+import { createChatPersistence } from '../agent/persistence.js';
+import { countPendingDecisions } from '../agent/runko-tables.js';
 import { createChatRuntime } from '../agent/runtime.js';
 import type {
   AcquiredSandbox,
@@ -129,9 +126,25 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * 一个会话 DTO 里有三样不在会话表上：排队消息、有没有轮在跑、几处在等人答。
+ * 它们都归框架管，所以由调用方查好了传进来。
+ */
+interface ConversationLiveState {
+  queuedMessages: QueuedMessage[];
+  turnInProgress: boolean;
+  pendingDecisions: number;
+}
+
+const IDLE_LIVE_STATE: ConversationLiveState = {
+  queuedMessages: [],
+  turnInProgress: false,
+  pendingDecisions: 0,
+};
+
 function toConversationDto(
   row: ConversationRow,
-  pendingDecisions = 0,
+  live: ConversationLiveState,
 ): ConversationDto {
   // `sleeping` is derived at read time, never stored: hibernation happens on
   // Vercel's side when the idle timeout elapses (no server-side timer to flip
@@ -150,20 +163,39 @@ function toConversationDto(
     provider: row.provider,
     status: row.status === 'active' && idleElapsed ? 'sleeping' : row.status,
     lastActiveAt: row.lastActiveAt.toISOString(),
-    // 直接解析手上这一行已经 select 出来的列，不再查一次库（docs/logic/orchestration/tech/steer-and-queue.md §4.2）。
-    queuedMessages: toQueueDto(
-      parseQueuedInputs(row.queuedMessagesJson, row.id),
-    ),
+    queuedMessages: live.queuedMessages,
     // 同上，[skill 清单](../../../../docs/terms.md)缓存（docs/ingress/tech/composer-skill-mention.md §2.1）
     // ——读的是库里的快照，这条路径**不碰沙盒**，休眠会话也能列菜单。缓存为空时
     // 退到兜底清单（本功能上线前建的会话就是这一档），否则用户打 `/` 什么都没有。
     availableSkills: resolveSkillCatalog(
       parseAvailableSkills(row.availableSkillsJson, row.id),
     ),
-    // [起轮标记](../../../../docs/terms.md)就是答案，手上这一行已经带着它了。
-    turnInProgress: row.turnHolder !== null,
-    pendingDecisions,
+    turnInProgress: live.turnInProgress,
+    pendingDecisions: live.pendingDecisions,
     createdAt: row.createdAt.toISOString(),
+  };
+}
+
+/**
+ * 把一个会话的实时状态问出来：[待发队列](../../../../docs/terms.md)与「有没有轮在跑」
+ * 都归框架管，答案在框架的表与内存里，不在会话表上。
+ *
+ * 「有没有轮在跑」问的是 `getActivity`：它先看本进程的登记册，再看库里的归属——**这是
+ * 权威答案**，多副本时别的副本正在跑也算。
+ */
+async function readLiveState(
+  runtime: AgentRuntime,
+  conversationId: string,
+  pendingDecisions: number,
+): Promise<ConversationLiveState> {
+  const [queue, activity] = await Promise.all([
+    runtime.listQueue(conversationId),
+    runtime.getActivity(conversationId),
+  ]);
+  return {
+    queuedMessages: toQueueDto(queue),
+    turnInProgress: activity.active,
+    pendingDecisions,
   };
 }
 
@@ -295,7 +327,7 @@ export function createChatApp(deps: ChatRouteDeps) {
       return c.json({ error: describeError(error) }, 500);
     }
 
-    const row = createConversation(deps.db, {
+    const row = await createConversation(deps.db, {
       id: conversationId,
       userId,
       title: input.title ?? 'New chat',
@@ -311,7 +343,7 @@ export function createChatApp(deps: ChatRouteDeps) {
     // 沙盒此刻刚 clone 完、刚装完 frontend-design，就地扫一次写库——否则新会话要等
     // 第一轮跑完才有菜单可用。`loadSkillsFromWorkspace` 自身不抛（扫不到就是空数组），
     // 所以这一步不会让建会话失败。
-    const availableSkillsJson = syncAvailableSkills(
+    const availableSkillsJson = await syncAvailableSkills(
       deps.db,
       conversationId,
       row.availableSkillsJson,
@@ -320,7 +352,11 @@ export function createChatApp(deps: ChatRouteDeps) {
       ),
     );
 
-    return c.json(toConversationDto({ ...row, availableSkillsJson }), 201);
+    // 刚建好的会话：没有排队消息，也还没有轮在跑。
+    return c.json(
+      toConversationDto({ ...row, availableSkillsJson }, IDLE_LIVE_STATE),
+      201,
+    );
   });
 
   // ---- GET /api/chat/conversations ----
@@ -344,17 +380,23 @@ export function createChatApp(deps: ChatRouteDeps) {
     },
   });
 
-  app.openapi(listSessionsRoute, (c) => {
+  app.openapi(listSessionsRoute, async (c) => {
     const userId = c.get('userId');
-    const rows = listConversations(deps.db, userId);
-    const pending = countPendingDecisions(
+    const rows = await listConversations(deps.db, userId);
+    // 「等你答」一次分组查询数完；队列与「有没有轮在跑」按会话问框架。
+    const pending = await countPendingDecisions(
       deps.db,
       rows.map((row) => row.id),
     );
-    return c.json(
-      rows.map((row) => toConversationDto(row, pending.get(row.id) ?? 0)),
-      200,
+    const dtos = await Promise.all(
+      rows.map(async (row) =>
+        toConversationDto(
+          row,
+          await readLiveState(deps.runtime, row.id, pending.get(row.id) ?? 0),
+        ),
+      ),
     );
+    return c.json(dtos, 200);
   });
 
   // ---- GET /api/chat/conversations/{id} ----
@@ -381,15 +423,20 @@ export function createChatApp(deps: ChatRouteDeps) {
     },
   });
 
-  app.openapi(getSessionRoute, (c) => {
+  app.openapi(getSessionRoute, async (c) => {
     const userId = c.get('userId');
     const { id } = c.req.valid('param');
-    const row = getConversation(deps.db, id, userId);
+    const row = await getConversation(deps.db, id, userId);
     if (row === undefined) {
       return c.json({ error: 'Not found' }, 404);
     }
-    const pending = countPendingDecisions(deps.db, [row.id]);
-    return c.json(toConversationDto(row, pending.get(row.id) ?? 0), 200);
+    const pending = await countPendingDecisions(deps.db, [row.id]);
+    const live = await readLiveState(
+      deps.runtime,
+      row.id,
+      pending.get(row.id) ?? 0,
+    );
+    return c.json(toConversationDto(row, live), 200);
   });
 
   // ---- GET /api/chat/conversations/{id}/messages?after=<seq> ----
@@ -425,7 +472,7 @@ export function createChatApp(deps: ChatRouteDeps) {
     const userId = c.get('userId');
     const { id } = c.req.valid('param');
     const { after } = c.req.valid('query');
-    const row = getConversation(deps.db, id, userId);
+    const row = await getConversation(deps.db, id, userId);
     if (row === undefined) {
       return c.json({ error: 'Not found' }, 404);
     }
@@ -469,10 +516,10 @@ export function createChatApp(deps: ChatRouteDeps) {
     },
   });
 
-  app.openapi(turnTelemetryRoute, (c) => {
+  app.openapi(turnTelemetryRoute, async (c) => {
     const userId = c.get('userId');
     const { id, turn } = c.req.valid('param');
-    const row = getConversation(deps.db, id, userId);
+    const row = await getConversation(deps.db, id, userId);
     if (row === undefined) {
       return c.json({ error: 'Not found' }, 404);
     }
@@ -548,7 +595,7 @@ export function createChatApp(deps: ChatRouteDeps) {
     const { id } = c.req.valid('param');
     const { text, intent } = c.req.valid('json');
 
-    const row = getConversation(deps.db, id, userId);
+    const row = await getConversation(deps.db, id, userId);
     if (row === undefined) {
       return c.json({ error: 'Not found' }, 404);
     }
@@ -639,7 +686,7 @@ export function createChatApp(deps: ChatRouteDeps) {
     const userId = c.get('userId');
     const { id } = c.req.valid('param');
 
-    const row = getConversation(deps.db, id, userId);
+    const row = await getConversation(deps.db, id, userId);
     if (row === undefined) {
       return c.json({ error: 'Not found' }, 404);
     }
@@ -684,7 +731,7 @@ export function createChatApp(deps: ChatRouteDeps) {
     const userId = c.get('userId');
     const { id, messageId } = c.req.valid('param');
 
-    const row = getConversation(deps.db, id, userId);
+    const row = await getConversation(deps.db, id, userId);
     if (row === undefined) {
       return c.json({ error: 'Not found' }, 404);
     }
@@ -727,7 +774,7 @@ export function createChatApp(deps: ChatRouteDeps) {
     const userId = c.get('userId');
     const { id } = c.req.valid('param');
 
-    const row = getConversation(deps.db, id, userId);
+    const row = await getConversation(deps.db, id, userId);
     if (row === undefined) {
       return c.json({ error: 'Not found' }, 404);
     }
@@ -770,7 +817,7 @@ export function createChatApp(deps: ChatRouteDeps) {
     const { id } = c.req.valid('param');
     const { after } = c.req.valid('query');
 
-    const row = getConversation(deps.db, id, userId);
+    const row = await getConversation(deps.db, id, userId);
     if (row === undefined) {
       return c.json({ error: 'Not found' }, 404);
     }
@@ -828,7 +875,7 @@ export function createChatApp(deps: ChatRouteDeps) {
     },
   });
 
-  app.openapi(presenceRoute, (c) => {
+  app.openapi(presenceRoute, async (c) => {
     const userId = c.get('userId');
     const { id } = c.req.valid('param');
     const { focused } = c.req.valid('json');
@@ -836,7 +883,7 @@ export function createChatApp(deps: ChatRouteDeps) {
     // 属主校验与本文件其它会话级接口一致（不存在与不属于自己都回 404，不泄露
     // 存在性）。刻意**不** `touch()` 沙盒：心跳每 20 秒一次，让"盯着页面发呆"
     // 无限续沙盒的命，既烧钱又把空闲休眠这套机制架空。
-    const row = getConversation(deps.db, id, userId);
+    const row = await getConversation(deps.db, id, userId);
     if (row === undefined) {
       return c.json({ error: 'Not found' }, 404);
     }
@@ -891,7 +938,7 @@ export function createChatApp(deps: ChatRouteDeps) {
     const { id, callId } = c.req.valid('param');
     const { behavior, message } = c.req.valid('json');
 
-    const row = getConversation(deps.db, id, userId);
+    const row = await getConversation(deps.db, id, userId);
     if (row === undefined) {
       return c.json({ error: 'Not found' }, 404);
     }
@@ -935,7 +982,7 @@ export function createChatApp(deps: ChatRouteDeps) {
     }
 
     if (grant?.toolName !== undefined) {
-      grantConversationApproval(
+      await grantConversationApproval(
         deps.db,
         id,
         userId,
@@ -984,7 +1031,7 @@ export function createChatApp(deps: ChatRouteDeps) {
     const { id, callId } = c.req.valid('param');
     const { answer } = c.req.valid('json');
 
-    const row = getConversation(deps.db, id, userId);
+    const row = await getConversation(deps.db, id, userId);
     if (row === undefined) {
       return c.json({ error: 'Not found' }, 404);
     }

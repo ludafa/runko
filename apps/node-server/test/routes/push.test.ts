@@ -52,9 +52,9 @@ function jsonRequest(path: string, body?: unknown): Request {
 describe('routes/push', () => {
   let db: Db;
 
-  beforeEach(() => {
-    db = createTestDb();
-    seedUser(db, 'user-1');
+  beforeEach(async () => {
+    db = await createTestDb();
+    await seedUser(db, 'user-1');
     disableVapid();
   });
 
@@ -102,7 +102,7 @@ describe('routes/push', () => {
       jsonRequest('/api/push/subscriptions', SUBSCRIPTION),
     );
     expect(res.status).toBe(503);
-    expect(listSubscriptions(db, 'user-1')).toHaveLength(0);
+    expect(await listSubscriptions(db, 'user-1')).toHaveLength(0);
   });
 
   it('登记订阅落库，且带上 userAgent', async () => {
@@ -113,7 +113,7 @@ describe('routes/push', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
 
-    const rows = listSubscriptions(db, 'user-1');
+    const rows = await listSubscriptions(db, 'user-1');
     expect(rows).toHaveLength(1);
     expect(rows[0]?.endpoint).toBe(SUBSCRIPTION.endpoint);
     expect(rows[0]?.userAgent).toBe('Chrome/999');
@@ -123,7 +123,7 @@ describe('routes/push', () => {
     enableVapid();
     await app().request(jsonRequest('/api/push/subscriptions', SUBSCRIPTION));
     await app().request(jsonRequest('/api/push/subscriptions', SUBSCRIPTION));
-    expect(listSubscriptions(db, 'user-1')).toHaveLength(1);
+    expect(await listSubscriptions(db, 'user-1')).toHaveLength(1);
   });
 
   it('缺字段的请求体被 zod 挡下（400），不落库', async () => {
@@ -132,7 +132,7 @@ describe('routes/push', () => {
       jsonRequest('/api/push/subscriptions', { endpoint: 'https://x.example' }),
     );
     expect(res.status).toBe(400);
-    expect(listSubscriptions(db, 'user-1')).toHaveLength(0);
+    expect(await listSubscriptions(db, 'user-1')).toHaveLength(0);
   });
 
   it('退订：删掉那一行', async () => {
@@ -144,7 +144,7 @@ describe('routes/push', () => {
       }),
     );
     expect(res.status).toBe(200);
-    expect(listSubscriptions(db, 'user-1')).toHaveLength(0);
+    expect(await listSubscriptions(db, 'user-1')).toHaveLength(0);
   });
 
   it('退订一个不存在的 endpoint 也返回成功（幂等，不是 404）', async () => {

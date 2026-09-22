@@ -1,34 +1,36 @@
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
 import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { Kysely, SqliteDialect } from 'kysely';
 
-import type { Db } from '../../src/agent/store.js';
-import * as schema from '../../src/db/schema.js';
+import type { Db } from '../../src/db/instance.js';
+import { migrateDatabase } from '../../src/db/migrate.js';
+import type { ChatDatabase } from '../../src/db/schema.js';
+import { silentLogger } from './silent-logger.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const MIGRATIONS_FOLDER = resolve(__dirname, '../../drizzle');
-
-/** A fresh in-memory sqlite database, migrated with the real `drizzle/*.sql` files (not a hand-rolled DDL copy). */
-export function createTestDb(): Db {
-  const sqlite = new Database(':memory:');
-  const db = drizzle(sqlite, { schema });
-  migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+/**
+ * 一个干净的内存库，**用真的那套建表代码**（`migrateDatabase`）建表——better-auth 的表、
+ * 本应用的表、框架的表三段都在，跟线上跑的是同一份。
+ */
+export async function createTestDb(): Promise<Db> {
+  const db = new Kysely<ChatDatabase>({
+    dialect: new SqliteDialect({ database: new Database(':memory:') }),
+  });
+  await migrateDatabase(db, 'sqlite', silentLogger);
   return db;
 }
 
-export function seedUser(db: Db, id: string): void {
-  const now = new Date();
-  db.insert(schema.user)
+/** 插一行用户：会话表的 `user_id` 指向它。 */
+export async function seedUser(db: Db, id: string): Promise<void> {
+  const now = new Date().toISOString();
+  await db
+    .insertInto('user')
     .values({
       id,
       name: id,
       email: `${id}@example.com`,
-      emailVerified: true,
+      emailVerified: 1,
+      image: null,
       createdAt: now,
       updatedAt: now,
     })
-    .run();
+    .execute();
 }

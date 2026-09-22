@@ -11,7 +11,7 @@
  * 1. **独立 db 文件**（缺省 `telemetry.db`，`TELEMETRY_DB_PATH` 覆盖）——
  *    遥测数据是可随意清理/设保留期的耗材，不与聊天账本（data.db）混寿命；
  *    删文件即清空，零迁移负担（表结构自管 CREATE IF NOT EXISTS，不进
- *    drizzle 迁移链）。
+ *    主库那条迁移链）。
  * 2. **载荷收敛**：事件里可能带完整 prompt/响应正文（recordInputs/
  *    recordOutputs 缺省开），体积与敏感性都不适合默认落盘——序列化时把
  *    大块正文键替换成体量摘要（见 `OMITTED_KEYS`），整体再设 16KB 上限；

@@ -1,6 +1,8 @@
 import { serve } from '@hono/node-server';
 
 import { app } from './app.js';
+import { db, flavor } from './db/instance.js';
+import { migrateDatabase } from './db/migrate.js';
 import { generateOpenAPISpec } from './generate-spec.js';
 import { logger } from './logger.js';
 import { logPushStartup } from './push/vapid.js';
@@ -10,6 +12,12 @@ const LOG_SCOPE = 'server';
 
 // Generate openapi.yml on dev server start
 generateOpenAPISpec(app);
+
+// SQLite 那一档**启动时自己把表建好**：零配置——clone 下来直接起，不用先记得跑一条建表命令。
+// 单进程，不会有两个人同时建表。Postgres 不在这里建（多副本会撞在一起），要显式跑 `db:migrate`。
+if (flavor === 'sqlite') {
+  await migrateDatabase(db, flavor, logger);
+}
 
 // 推送通知（docs/ingress/tech/push-notification.md §6.5）：把「开没开、开了哪几类」摊在
 // 启动日志里，且**只在这里**说一遍——`isPushEnabled()` 在每一轮里会被问很多次，

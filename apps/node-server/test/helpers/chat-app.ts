@@ -62,7 +62,7 @@ export function buildChatApp(opts: BuildChatAppOptions) {
   const app = createChatApp({
     db: opts.db,
     runtime,
-    decisions: createChatPersistence(opts.db, silentLogger).decisions,
+    decisions: createChatPersistence(opts.db).decisions,
     sandboxManager: opts.sandboxManager,
     resolveModel: opts.resolveModel,
     authMiddleware:

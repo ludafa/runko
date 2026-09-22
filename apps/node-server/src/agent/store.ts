@@ -7,12 +7,15 @@
  * ——它们是 `@runko/agent` 的宿主能力接口，实现落在 `persistence.ts`。本文件只剩
  * chat 应用自己的那些列：标题、仓库、分支、沙盒 provider/名字、[skill 清单](../../../../docs/terms.md)缓存。
  */
-import type { InferSelectModel } from 'drizzle-orm';
-import { and, asc, eq } from 'drizzle-orm';
+import type { Updateable } from 'kysely';
 import { z } from 'zod';
 
-import type { db as DbInstance } from '../db/instance.js';
-import { conversationEvents, conversations } from '../db/schema.js';
+import type { Db } from '../db/instance.js';
+import type {
+  ConversationProvider,
+  ConversationsTable,
+  ConversationStatus,
+} from '../db/schema.js';
 import type { Logger } from '../logger.js';
 import { logger as defaultLogger } from '../logger.js';
 import type { SkillSummaryDto } from '../schemas/chat.js';
@@ -20,14 +23,53 @@ import { SkillSummarySchema } from '../schemas/chat.js';
 
 const LOG_SCOPE = 'store';
 
-export type Db = typeof DbInstance;
-
-export type ConversationRow = InferSelectModel<typeof conversations>;
-export type ConversationStatus = ConversationRow['status'];
-export type ConversationEventRow = InferSelectModel<typeof conversationEvents>;
-export type ConversationEventKind = ConversationEventRow['kind'];
+export type { Db };
+export type { ConversationStatus };
 
 // ---- conversations ----
+
+/**
+ * `conversations` 一行的领域形状——驼峰命名、时间是 `Date`。库里存的是 snake_case
+ * 列 + 毫秒整数（`ConversationsTable`），两边的映射统一收在 `toRow` 里。
+ */
+export interface ConversationRow {
+  id: string;
+  userId: string;
+  title: string;
+  repo: string;
+  branchName: string;
+  sandboxName: string;
+  provider: ConversationProvider;
+  /** E2B 的[重连令牌](../../../../docs/terms.md) sandboxId；Vercel 恒为 null。 */
+  sandboxId: string | null;
+  status: ConversationStatus;
+  lastActiveAt: Date;
+  availableSkillsJson: string;
+  createdAt: Date;
+}
+
+/** 毫秒整数 → `Date`，与 `updateConversation` 里反方向的转换对应。 */
+function toDate(millis: number): Date {
+  return new Date(millis);
+}
+
+/** 库里的一行 → 领域形状（`toDate` 收口毫秒转换）。 */
+function toRow(raw: ConversationsTable): ConversationRow {
+  return {
+    id: raw.id,
+    userId: raw.user_id,
+    title: raw.title,
+    repo: raw.repo,
+    branchName: raw.branch_name,
+    sandboxName: raw.sandbox_name,
+    provider: raw.provider,
+    sandboxId: raw.sandbox_id,
+    status: raw.status,
+    lastActiveAt: toDate(raw.last_active_at),
+    availableSkillsJson: raw.available_skills_json,
+    createdAt: toDate(raw.created_at),
+  };
+}
 
 export interface CreateConversationInput {
   /**
@@ -41,60 +83,60 @@ export interface CreateConversationInput {
   repo: string;
   branchName: string;
   sandboxName: string;
-  /** 沙盒 provider（docs/host/contract/tech/sandbox-provider.md）。省略时默认 `'vercel'`，与列默认一致——路由侧始终显式传，省略仅便于测试夹具。 */
-  provider?: ConversationRow['provider'];
+  /** 沙盒 provider（docs/host/contract/tech/sandbox-provider.md）。省略时默认 `'vercel'`——路由侧始终显式传，省略仅便于测试夹具。 */
+  provider?: ConversationProvider;
   /** E2B 的[重连令牌](docs/terms.md) sandboxId（建盒后由路由回填）；Vercel/建会话初始为 null。 */
   sandboxId?: string | null;
 }
 
-export function createConversation(
+export async function createConversation(
   db: Db,
   input: CreateConversationInput,
-): ConversationRow {
-  const now = new Date();
-  const row: ConversationRow = {
+): Promise<ConversationRow> {
+  const now = Date.now();
+  const raw: ConversationsTable = {
     id: input.id,
-    userId: input.userId,
+    user_id: input.userId,
     title: input.title,
     repo: input.repo,
-    branchName: input.branchName,
-    sandboxName: input.sandboxName,
+    branch_name: input.branchName,
+    sandbox_name: input.sandboxName,
     provider: input.provider ?? 'vercel',
-    sandboxId: input.sandboxId ?? null,
+    sandbox_id: input.sandboxId ?? null,
     status: 'active',
-    lastActiveAt: now,
-    agentSessionId: null,
-    agentSessionCreatedAt: null,
-    agentSessionTurn: null,
-    queuedMessagesJson: '[]', // 空[待发队列](../../../../docs/terms.md)，与列默认值一致
-    availableSkillsJson: '[]', // 空 [skill 清单](../../../../docs/terms.md)——沙盒就绪后首次填上
-    turnHolder: null, // [起轮标记](../../../../docs/terms.md)：没有轮在跑
-    turnStartedAt: null,
-    createdAt: now,
+    last_active_at: now,
+    available_skills_json: '[]', // 空 [skill 清单](../../../../docs/terms.md)——沙盒就绪后首次填上
+    created_at: now,
   };
-  db.insert(conversations).values(row).run();
-  return row;
+  await db.insertInto('conversations').values(raw).execute();
+  return toRow(raw);
 }
 
-export function listConversations(db: Db, userId: string): ConversationRow[] {
-  return db
-    .select()
-    .from(conversations)
-    .where(eq(conversations.userId, userId))
-    .orderBy(asc(conversations.createdAt))
-    .all();
+export async function listConversations(
+  db: Db,
+  userId: string,
+): Promise<ConversationRow[]> {
+  const rows = await db
+    .selectFrom('conversations')
+    .selectAll()
+    .where('user_id', '=', userId)
+    .orderBy('created_at', 'asc')
+    .execute();
+  return rows.map(toRow);
 }
 
-export function getConversation(
+export async function getConversation(
   db: Db,
   id: string,
   userId: string,
-): ConversationRow | undefined {
-  return db
-    .select()
-    .from(conversations)
-    .where(and(eq(conversations.id, id), eq(conversations.userId, userId)))
-    .get();
+): Promise<ConversationRow | undefined> {
+  const row = await db
+    .selectFrom('conversations')
+    .selectAll()
+    .where('id', '=', id)
+    .where('user_id', '=', userId)
+    .executeTakeFirst();
+  return row === undefined ? undefined : toRow(row);
 }
 
 /**
@@ -105,11 +147,16 @@ export function getConversation(
  * 请求路径上一律用 `getConversation(db, id, userId)`——不存在与不属于自己都回 404，
  * 不泄露存在性。
  */
-export function getConversationById(
+export async function getConversationById(
   db: Db,
   id: string,
-): ConversationRow | undefined {
-  return db.select().from(conversations).where(eq(conversations.id, id)).get();
+): Promise<ConversationRow | undefined> {
+  const row = await db
+    .selectFrom('conversations')
+    .selectAll()
+    .where('id', '=', id)
+    .executeTakeFirst();
+  return row === undefined ? undefined : toRow(row);
 }
 
 export interface ConversationPatch {
@@ -117,39 +164,24 @@ export interface ConversationPatch {
   lastActiveAt?: Date;
   /** E2B 的[重连令牌](docs/terms.md) sandboxId——首建落库、或过期重建后换了新 sandbox 时由路由回写（docs/host/contract/tech/sandbox-provider.md §3.1）。 */
   sandboxId?: string;
-  /**
-   * The runko session-scalar header (docs/logic/orchestration/tech/single-ledger.md §5 单-3, schema.ts's own doc
-   * comment) — all three always written together, at the end of every turn
-   * that finishes gracefully (`@runko/agent`'s `finalize`).
-   * There is no partial-update case, so this is one combined optional group
-   * rather than three independent optional fields.
-   */
-  agentSessionHeader?: {
-    conversationId: string;
-    createdAt: Date;
-    turn: number;
-  };
 }
 
-export function updateConversation(
+export async function updateConversation(
   db: Db,
   id: string,
   patch: ConversationPatch,
-): void {
-  const { agentSessionHeader, ...rest } = patch;
-  db.update(conversations)
-    .set({
-      ...rest,
-      ...(agentSessionHeader !== undefined ?
-        {
-          agentSessionId: agentSessionHeader.conversationId,
-          agentSessionCreatedAt: agentSessionHeader.createdAt,
-          agentSessionTurn: agentSessionHeader.turn,
-        }
-      : {}),
-    })
-    .where(eq(conversations.id, id))
-    .run();
+): Promise<void> {
+  const set: Updateable<ConversationsTable> = {};
+  if (patch.status !== undefined) {
+    set.status = patch.status;
+  }
+  if (patch.lastActiveAt !== undefined) {
+    set.last_active_at = patch.lastActiveAt.getTime();
+  }
+  if (patch.sandboxId !== undefined) {
+    set.sandbox_id = patch.sandboxId;
+  }
+  await db.updateTable('conversations').set(set).where('id', '=', id).execute();
 }
 
 /** 同 `queuedMessagesSchema`：JSON 列的反序列化边界（docs/ingress/tech/composer-skill-mention.md §3）。 */
@@ -211,19 +243,20 @@ export function parseAvailableSkills(
  * 覆盖语义、无合并：清单是「此刻沙盒里有什么」的快照。会话行不存在时
  * `UPDATE ... WHERE id = ?` 匹配零行，静默 no-op——写缓存失败不该让起轮失败。
  */
-export function syncAvailableSkills(
+export async function syncAvailableSkills(
   db: Db,
   conversationId: string,
   currentJson: string,
   skills: readonly SkillSummaryDto[],
-): string {
+): Promise<string> {
   const nextJson = JSON.stringify(skills);
   if (nextJson === currentJson) {
     return currentJson;
   }
-  db.update(conversations)
-    .set({ availableSkillsJson: nextJson })
-    .where(eq(conversations.id, conversationId))
-    .run();
+  await db
+    .updateTable('conversations')
+    .set({ available_skills_json: nextJson })
+    .where('id', '=', conversationId)
+    .execute();
   return nextJson;
 }

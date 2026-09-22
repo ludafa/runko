@@ -18,7 +18,7 @@ related: ["ingress/features/unified-demo.md", "ingress/tech/unified-demo.md", "h
 |---|---|---|
 | U0 | 三份文档 + 术语登记 | ✅ 待你过目 |
 | U1 | 框架：租约启动时收拾自己名下的旧租约 | ✅ 2026-09-22 |
-| U2 | 数据层换 Kysely，框架的表换 persist-kysely（仍只有 SQLite） | ⬜ |
+| U2 | 数据层换 Kysely，框架的表换 persist-kysely（仍只有 SQLite） | ✅ 2026-09-22 |
 | U3 | 零配置：演示模型、本地沙盒、GitHub 可选、配置接口、web | ⬜ |
 | U4 | Postgres | ⬜ |
 | U5 | 多副本：转发、在场进库、镜像与验证环境 | ⬜ |
@@ -37,7 +37,7 @@ related: ["ingress/features/unified-demo.md", "ingress/tech/unified-demo.md", "h
 
 | # | 问题 | 我的建议 |
 |---|---|---|
-| 1 | **旧数据搬不搬？** 新代码用新库文件 `chat.db`，旧的 `data.db` 原样留在磁盘上。不搬的话，你本地的历史会话和账号在新版里看不到，要重新注册 | **不搬**。demo 的数据都是测试对话；导入脚本要 150–250 行，还要转换 better-auth 的日期和字段名（见[技术方案 附录 B](../tech/unified-demo.md#附录-b-顺手但不做的事)） |
+| 1 | ~~旧数据搬不搬~~ | ✅ 已定（2026-09-22）：不搬。库文件名不变，启动时认出旧库就报错退出，由人手动删；不自动删、不自动迁 |
 | 2 | ~~U1 的版本级别~~ | ✅ 已定：persist-kysely、persist-mongo 标 patch，conformance 标 minor |
 
 ## 各阶段
@@ -60,8 +60,14 @@ related: ["ingress/features/unified-demo.md", "ingress/tech/unified-demo.md", "h
   - `agent/persistence.ts`：删掉，改用 persist-kysely 和租约。
   - `test/helpers/test-db.ts` 和 8 个碰库的测试文件。
   - 根 `package.json` 的 `chat:bootstrap`。
-- **产出**：`CHAT_DB_PATH`（缺省 `chat.db`）；SQLite 启动时自动建表；误开旧库时启动报错；`db:migrate` 命令。
-- **验收**：node-server 现有测试全绿；`typecheck`、`lint` 通过；`chat:bootstrap` 能跑通。
+- **产出**：SQLite 启动时自动建表；认出旧版库文件就报错退出；`db:migrate` 命令。
+- **实际**：
+  - `db/` 换成三个文件：表类型（`schema.ts`）、建表（`migrations.ts`，Kysely 的 `Migrator`）、建连（`instance.ts`，用到时才真的开库，顺手认旧库）。建表分三段跑：better-auth 的迁移接口 → 本应用 → persist-kysely，顺序不能换（应用的表有外键指向 `user`）。
+  - `agent/persistence.ts` 从 658 行缩成 40 行：`kyselyPersistence` + `leaseArbitration`。原先落在 `conversations` 上的队列列与[起轮标记](../../terms.md)列一并删掉，归属改由 `agent_leases` 管。
+  - 直接查框架表的只剩两处分组计数，收在 `agent/runko-tables.ts`（理由见[技术方案 §2.5](../tech/unified-demo.md#_2-5-框架的存储改用-persist-kysely)）。
+  - 30 处同步读写改异步，波及路由、推送、起轮装配；`onApproval` 与通知的三个入口跟着改成异步。
+  - `kysely/migration` 是 0.29 的子路径导出，不在包根上——`import { Migrator } from 'kysely'` 会在运行时报「没有这个导出」，类型检查看不出来。
+- **验收结论**：✅ node-server 402 条测试全绿（含新增的旧库守门 2 条）；全仓 `typecheck`/`build`/`test` 与 `lint`、文档三项检查全通过。实测：全新库启动自动建出 14 张表（better-auth 5 + 应用 3 + 框架 4 + 迁移记录 2）；指向旧版库文件时当场报错退出、一个字都没写。
 
 ### U3 · 零配置
 
@@ -116,3 +122,4 @@ related: ["ingress/features/unified-demo.md", "ingress/tech/unified-demo.md", "h
 |---|---|
 | 2026-09-19 | U0：三份文档初稿；术语表登记「本地沙盒」「演示模型」 |
 | 2026-09-22 | U1 完成：租约陈旧判据加「同名重启」一支，两个存储包 + 一致性套件；归属仲裁技术方案补 §4.4 |
+| 2026-09-22 | U2 完成：node-server 数据层换 Kysely，框架的四张表交给 `@runko/persist-kysely`；旧库守门；技术方案 §2.3/§2.5 按实现回填 |

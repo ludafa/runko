@@ -32,7 +32,7 @@ import type { RunkoChunk, RunkoUIMessage } from '@runko/core';
  * chunk / message」。外面那层 `z.ZodType<T>` 把 `any` 关在这一行里——**调用方拿到的仍是
  * 精确类型**。
  *
- * 这两处解析的值都已经过 `JSON.parse`（读回 `conversation_events.payload_json`，或
+ * 这两处解析的值都已经过 `JSON.parse`（从[账本](../../../../docs/terms.md)读回，或
  * `session.stream()` 本来就带类型的输出），不是未经校验的外部输入。
  */
 const runkoChunkSchema: z.ZodType<RunkoChunk> = z.any();
@@ -73,8 +73,8 @@ export const messageFrameSchema = z
 export type MessageFrame = z.infer<typeof messageFrameSchema>;
 
 /**
- * 一条[排队](../../../../docs/terms.md)中的待发消息——`conversations.queued_messages_json`
- * 的数组元素，也是 wire 上 `QueueFrame` 与队列端点响应的元素。
+ * 一条[排队](../../../../docs/terms.md)中的待发消息——[待发队列](../../../../docs/terms.md)
+ * 里的一条，也是 wire 上 `QueueFrame` 与队列端点响应的元素。
  *
  * `userId` 不是冗余镜像 conversation owner：[出队](../../../../docs/terms.md)起轮时
  * [会话级授权](../../../../docs/terms.md)按「本轮发起者」匹配（`conversation-grants.ts`），
@@ -196,8 +196,8 @@ export const ConversationSchema = z
      */
     availableSkills: z.array(SkillSummarySchema),
     /**
-     * 这个会话此刻有没有[轮](../../../../docs/terms.md)在跑——**服务端的权威答案**，直接读
-     * [起轮标记](../../../../docs/terms.md)那一列（`conversations.turn_holder`），零额外查询。
+     * 这个会话此刻有没有[轮](../../../../docs/terms.md)在跑——**服务端的权威答案**：先看本
+     * 进程的登记册，再看库里的归属，所以别的副本正在跑也算。
      *
      * 有了它，页面刚打开的那几十毫秒里前端就不用猜。猜错的后果是把一个正在跑的会话当成
      * 空闲，用户这时发的消息会去起新轮，而不是[排队](../../../../docs/terms.md)。

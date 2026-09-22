@@ -81,9 +81,9 @@ describe('push/sender —— 合并标签与 topic', () => {
 describe('push/sender —— 投递', () => {
   let db: Db;
 
-  beforeEach(() => {
-    db = createTestDb();
-    seedUser(db, 'user-1');
+  beforeEach(async () => {
+    db = await createTestDb();
+    await seedUser(db, 'user-1');
   });
 
   function addSubscription(endpoint: string): void {
@@ -118,7 +118,7 @@ describe('push/sender —— 投递', () => {
       'https://a.example/1',
       'https://b.example/2',
     ]);
-    for (const row of listSubscriptions(db, 'user-1')) {
+    for (const row of await listSubscriptions(db, 'user-1')) {
       expect(row.lastSentAt).toBeInstanceOf(Date);
     }
   });
@@ -137,7 +137,7 @@ describe('push/sender —— 投递', () => {
       logger: silentLogger,
     });
 
-    const rows = listSubscriptions(db, 'user-1');
+    const rows = await listSubscriptions(db, 'user-1');
     expect(rows.map((r) => r.endpoint)).toEqual(['https://ok.example/2']);
     expect(rows[0]?.lastSentAt).toBeInstanceOf(Date);
   });
@@ -151,7 +151,7 @@ describe('push/sender —— 投递', () => {
       transport,
       logger: silentLogger,
     });
-    expect(listSubscriptions(db, 'user-1')).toHaveLength(0);
+    expect(await listSubscriptions(db, 'user-1')).toHaveLength(0);
   });
 
   it('5xx 不删行，只记 last_error（一次网络抖动不该让人默默失去通知）', async () => {
@@ -165,7 +165,7 @@ describe('push/sender —— 投递', () => {
       logger: silentLogger,
     });
 
-    const rows = listSubscriptions(db, 'user-1');
+    const rows = await listSubscriptions(db, 'user-1');
     expect(rows).toHaveLength(1);
     expect(rows[0]?.lastError).toContain('503');
     expect(rows[0]?.lastSentAt).toBeNull();
@@ -180,7 +180,7 @@ describe('push/sender —— 投递', () => {
       transport,
       logger: silentLogger,
     });
-    const rows = listSubscriptions(db, 'user-1');
+    const rows = await listSubscriptions(db, 'user-1');
     expect(rows).toHaveLength(1);
     expect(rows[0]?.lastError).toContain('ECONNREFUSED');
   });
