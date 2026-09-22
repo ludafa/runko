@@ -52,6 +52,18 @@ const DEFAULT_MEMORY_WINDOW: Duration = "5m";
 /** [交权](../../../docs/terms.md)宽限期：正在干活的轮，等多久还没收尾就不等了。 */
 const DEFAULT_SHUTDOWN_GRACE_MS = 15_000;
 const DEFAULT_QUEUE_MAX = 10;
+/**
+ * 跟着别的副本看直播时，没收到货就最多等这么久，然后回头问一次归属还在不在。
+ *
+ * 它只是一道**兜底**：正常收尾由持有者广播的那一帧 `activity:false` 负责，慢几秒没代价。
+ * 有它才不会在「持有者崩了、又没人接管」时永远挂着——那种情形下没有任何进程会发那一帧。
+ */
+const REMOTE_FOLLOW_RECHECK_MS = 3_000;
+
+/** 窄化成[轮状态](../../../docs/terms.md)帧。`Frame` 是判别联合，这里只是把判别写成守卫。 */
+function isActivityFrame(frame: Frame): frame is Extract<Frame, { kind: "activity" }> {
+  return frame.kind === "activity";
+}
 
 export interface AgentRuntimeOptions {
   /** agent 的纯声明值（模型、指令、工具、skills）。每一项都能被 `prepareTurn` 逐轮覆盖。 */
@@ -315,6 +327,16 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       //   消息对本次订阅就永久消失了——而收尾窗口里重连恰恰是最该管用的那一刻。
       //   留下来走第 ⑤ 步既有的 `seq <= maxSeq` 去重，重复也不会多发。
       const carried = buffer.filter((frame): frame is Extract<Frame, { kind: "message" }> => frame.kind === "message");
+      // `activity` 帧本身照旧丢掉（第 ④ 步紧接着发权威快照），但**它带的信息不能跟着丢**。
+      //
+      // 别的副本收尾是「**先**广播 `activity:false`、**后**释放归属」（`queue.ts` 的
+      // `settleTurn`），中间还隔着一次落库。回放恰好落在这段窗口里时，下面的 `inspect()`
+      // 仍会报「有人持有」——若据此去跟远端，第 ⑤ 步就会等一帧**刚被自己丢掉、而且永远
+      // 不会再来**的收尾帧，这条流就挂死了（客户端的转圈也停不下来：流不关就不重连）。
+      //
+      // 只看最后一帧：中间那几帧的状态已经被它覆盖了。
+      const lastBroadcastActivity = [...buffer].reverse().find(isActivityFrame);
+      const remoteEndedDuringReplay = lastBroadcastActivity !== undefined && !lastBroadcastActivity.active;
       buffer.length = 0;
 
       for (const chunk of draft) {yield { kind: "chunk", chunk };}
@@ -351,10 +373,13 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       const heldElsewhere =
         remote?.held === true &&
         (registry.lastHolder === undefined || remote.holder !== registry.lastHolder);
-      const holder = localActive ? turn.grant.holder : heldElsewhere ? remote?.holder : undefined;
+      // 回放期间刚收到过远端的收尾广播，就以那一帧为准：它是持有者自己说的，比还没释放的
+      // 归属记录新（见上面 `remoteEndedDuringReplay` 的注释）。
+      const remoteActive = heldElsewhere && !remoteEndedDuringReplay;
+      const holder = localActive ? turn.grant.holder : remoteActive ? remote?.holder : undefined;
       yield {
         kind: "activity",
-        active: localActive || heldElsewhere,
+        active: localActive || remoteActive,
         ...(holder !== undefined ? { holder } : {}),
       };
 
@@ -365,9 +390,10 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       // 客户端重连。换成广播那一档，帧马上就会从别的副本过来——这时收线，用户就看不到
       // 正在跑的这一轮了（连上去只收到几帧快照然后流就关了）。
       //
-      // 收线的时机两档一样：那一轮收尾时会广播一帧 `activity:false`，下面第 ⑤ 步的循环
-      // 见到它就结束。
-      const followRemote = heldElsewhere && stream.crossInstance === true;
+      // 正常收线还是靠那一帧广播过来的 `activity:false`；**但不能只靠它**——持有者被
+      // `kill -9`（没人接管）或这条订阅漏了，那一帧永远不会到。所以下面第 ⑤ 步给这条路
+      // 加了一道定期复查归属的出口。
+      const followRemote = follow === "turn" && remoteActive && stream.crossInstance === true;
       if (!localActive && !followRemote && follow === "turn") {return;}
 
       // ⑤ 直播。「先看有没有货，没货才等」——`scheduleWake` 换新 promise 的写法下，一个在
@@ -375,8 +401,29 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       //    缓冲就让丢唤醒不再有后果。
       while (!ended) {
         if (buffer.length === 0) {
-          await waiter;
-          continue;
+          if (!followRemote) {
+            await waiter;
+            continue;
+          }
+          // **跟着别的副本看时，等待必须有界。** 收尾那一帧要靠对端广播过来，对端崩了
+          // （没人接管、租约只是静静过期）就永远不会有人发它。所以没货时最多等这么久，
+          // 然后回头问一次归属：还有人持有就接着等（包括被别人接管——那一轮还在跑，
+          // 新持有者的帧照样广播得到），归属没了就自己补一帧收尾并收线。
+          //
+          // 复查间隔不跟[接管阈值](../../../docs/terms.md)对齐：这只是一道兜底，正常路径
+          // 由广播那一帧负责，慢几秒没有代价。
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          await Promise.race([
+            waiter,
+            new Promise<void>((resolve) => {
+              timer = setTimeout(resolve, REMOTE_FOLLOW_RECHECK_MS);
+            }),
+          ]);
+          if (timer !== undefined) {clearTimeout(timer);}
+          if (buffer.length > 0 || ended) {continue;}
+          if ((await arbitration.inspect(conversationId)).held) {continue;}
+          yield { kind: "activity", active: false };
+          return;
         }
         const pending = buffer.splice(0, buffer.length);
         for (const frame of pending) {

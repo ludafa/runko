@@ -293,6 +293,69 @@ describe("subscribe", () => {
     await tail.done;
   });
 
+  it("**回放期间远端广播了「这一轮结束了」**：不许去等一帧永远不会再来的收尾帧", async () => {
+    // 这条守的是一个挂死：远端收尾是「先广播 activity:false、后释放归属」，中间隔着一次
+    // 落库。回放正好落在这段窗口里时，下面的 inspect 仍报「有人持有」；若据此去跟远端，
+    // 就会等一帧刚被清缓冲丢掉、而且永远不会再来的帧——流不关，客户端也就不会重连，
+    // 界面永远转圈。
+    const inner = memoryPersistence();
+    let releaseRead: () => void = () => undefined;
+    const readGate = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    const persistence = {
+      ...inner,
+      ledger: {
+        ...inner.ledger,
+        // 回放慢一拍，好让测试在「挂了订阅、还没发快照」的那一刻插进一帧广播。
+        read: async (conversationId: string, opts?: { afterSeq?: number }) => {
+          await readGate;
+          return inner.ledger.read(conversationId, opts);
+        },
+      },
+    };
+    const stream = broadcastFanout();
+    const { runtime } = setup({ arbitration: remoteArbitration("node-b"), stream, persistence });
+
+    const tail = collect(runtime, "conv-remote-ended");
+    // 远端这一轮收尾了：它先广播，过一会儿才释放归属（这里的假仲裁永远报「还持有」，
+    // 正是那段窗口最坏的样子）。
+    stream.publish("conv-remote-ended", { kind: "activity", active: false });
+    releaseRead();
+
+    await tail.done; // 挂死的话这里会超时
+    expect(tail.frames.at(-1)).toMatchObject({ kind: "activity", active: false });
+  });
+
+  it("**远端此后一帧都不发**（持有者崩了又没人接管）：归属一没就自己收线，不永远挂着", async () => {
+    // 收尾那一帧要靠对端广播。对端被 kill -9 时没有任何进程会发它——租约只是静静过期。
+    // 没有这道定期复查，这条流会一直挂到代理超时。
+    vi.useFakeTimers();
+    let held = true;
+    const arbitration: Arbitration = {
+      acquire: () => Promise.resolve({ ok: false, reason: "busy", holder: "node-b" }),
+      inspect: (): Promise<OwnershipInfo> =>
+        Promise.resolve(held ? { held: true, holder: "node-b" } : { held: false }),
+      listStale: () => Promise.resolve([]),
+      clearStale: () => Promise.resolve(),
+    };
+    const { runtime } = setup({ arbitration, stream: broadcastFanout() });
+
+    const tail = collect(runtime, "conv-remote-gone");
+    await vi.waitFor(() => {
+      expect(tail.frames.some((f) => f.kind === "activity")).toBe(true);
+    });
+    expect(tail.frames.at(-1)).toMatchObject({ active: true, holder: "node-b" });
+
+    // 租约过期（或被清掉）——这一刻起没人持有，也没人会再广播任何东西。
+    held = false;
+    await vi.advanceTimersByTimeAsync(4_000);
+
+    await tail.done;
+    expect(tail.frames.at(-1)).toMatchObject({ kind: "activity", active: false });
+    vi.useRealTimers();
+  });
+
   it("同样跑在别的副本上、但流分发只管本进程时：就地收线（等也等不到）", async () => {
     const { runtime } = setup({ arbitration: remoteArbitration("node-b"), stream: broadcastFanout({ crossInstance: false }) });
 
