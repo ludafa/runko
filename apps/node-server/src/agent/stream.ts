@@ -1,6 +1,7 @@
 /**
  * [流分发](../../../../docs/terms.md)的装配：**配了 `REDIS_URL` 就广播给所有副本，没配就用
- * 框架内置的进程内那份。**
+ * 框架内置的进程内那份。** 广播还要一个**每副本唯一**的 `nodeId`（`RUNKO_NODE_URL`），
+ * 缺了就退回进程内那份并吵一嗓子——理由写在 `createChatStream` 里那道闸上。
  *
  * 为什么要广播：多副本时，看直播的人连到哪个副本是负载均衡说了算，而内容由**正在跑这一轮的
  * 那个副本**产生。不广播的话，只能把那条长连接转给[持有者](../../../../docs/terms.md)——
@@ -62,8 +63,11 @@ async function connectPair(url: string, log: Logger): Promise<RedisPair> {
 
 export interface CreateChatStreamOptions {
   url?: string | undefined;
-  /** 本副本的名字。`@runko/stream-redis` 用它认出「这条是我自己发的」，所以每个进程要唯一。 */
-  nodeId: string;
+  /**
+   * 本副本的名字（`RUNKO_NODE_URL`）。`@runko/stream-redis` 用它认出「这条是我自己发的」，
+   * 所以每个进程必须不同；**没有可用的兜底值**——见下面 `createChatStream` 里那道闸。
+   */
+  nodeId?: string | undefined;
   logger?: Logger;
 }
 
@@ -73,6 +77,24 @@ export function createChatStream(opts: CreateChatStreamOptions): ChatStream {
     return IN_PROCESS;
   }
   const log = opts.logger ?? defaultLogger;
+  const nodeId = opts.nodeId?.trim();
+  if (nodeId === undefined || nodeId.length === 0) {
+    /**
+     * 这里**不能**给 `nodeId` 编一个固定兜底值（比如 `'local'`）：那样每个副本的名字都一样，
+     * 于是每个副本都会把别人广播来的帧当成「我自己发的」丢掉；而这时调用方看到
+     * `broadcasts === true` 又会关掉「转发给持有者」那条退路，两条路同时断，
+     * 非持有者副本上的人一个字都看不到。宁可退回进程内 fan-out（多副本时退化成
+     * 只能看自己这台的直播），也不能悄悄变成两头不通。
+     *
+     * 退回而不是抛：单进程开发时配着 REDIS_URL 也该能把服务起起来。但必须吵一嗓子。
+     */
+    log.error(
+      LOG_SCOPE,
+      '配了 REDIS_URL 却没配 RUNKO_NODE_URL，跨副本广播已停用，退回进程内 fan-out',
+      { redisConfigured: true },
+    );
+    return IN_PROCESS;
+  }
   const connecting = connectPair(url, log);
   // 连不上时不要变成未处理的 rejection——下面每个 await 点都会各自拿到这个失败。
   connecting.catch(() => undefined);
@@ -92,7 +114,7 @@ export function createChatStream(opts: CreateChatStreamOptions): ChatStream {
     fanout: redisFanout({
       publisher,
       subscriber,
-      nodeId: opts.nodeId,
+      nodeId,
       logger: log,
     }),
     broadcasts: true,

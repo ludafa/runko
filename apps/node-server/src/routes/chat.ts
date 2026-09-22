@@ -1314,10 +1314,13 @@ const defaultNode = resolveNodeIdentity();
 /**
  * [流分发](../../../../docs/terms.md)：配了 `REDIS_URL` 就广播给所有副本。
  * 单独导出是为了让进程退出时收掉那两条连接（`index.ts`）。
+ *
+ * `nodeId` 直接给 `defaultNode?.url`、**不编兜底值**：没配 `RUNKO_NODE_URL` 时它就是
+ * `undefined`，由 `createChatStream` 记一行 error 并退回进程内 fan-out。
  */
 export const chatStream = createChatStream({
   url: process.env.REDIS_URL,
-  nodeId: defaultNode?.url ?? 'local',
+  nodeId: defaultNode?.url,
   logger: defaultLogger,
 });
 

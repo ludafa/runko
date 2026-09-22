@@ -25,6 +25,9 @@ import type { ChatReplayFrame } from '../schemas/chat.js';
 
 const LOG_SCOPE = 'chat-ws';
 
+/** 本子应用只有这一条路由；鉴权也只挂它（见下面 `app.use` 的注释）。 */
+const WS_ROUTE = '/api/chat/conversations/:id/ws';
+
 type ChatEnv = { Variables: { userId: string } };
 
 export interface ChatWsOptions {
@@ -51,10 +54,15 @@ export function createChatWsApp(opts: ChatWsOptions): Hono<ChatEnv> {
   const log = opts.logger ?? defaultLogger;
   const app = new Hono<ChatEnv>();
 
-  app.use('/api/chat/*', opts.authMiddleware);
+  /**
+   * 路径**只写这一条 ws 路由**，不能写 `/api/chat/*`：这个子应用经 `app.route('/', ...)`
+   * 并进顶层之后，它的 `use` 会对顶层**全部** chat 路由生效——于是每个 chat 请求都要多做
+   * 一次 better-auth 的查库（`chat.ts` 自己那条鉴权还会再做一次）。功能不坏，但白花一次查询。
+   */
+  app.use(WS_ROUTE, opts.authMiddleware);
 
   app.get(
-    '/api/chat/conversations/:id/ws',
+    WS_ROUTE,
     opts.upgradeWebSocket((c) => {
       // 路径里有 `:id`，所以这里一定有值；拿不到就当空串——下面查归属会得到 404。
       const conversationId = c.req.param('id') ?? '';

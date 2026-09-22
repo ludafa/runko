@@ -59,6 +59,8 @@ DATABASE_URL=postgres://… pnpm --filter @runko-chat/node-server db:migrate
 
 差别只在直播流这一条：**配了 Redis，连哪个副本都能直接看**；没配，看直播的请求会被转发到正在跑这一轮的那台机器上（WebSocket 没法转发，所以多副本下想用它就得配 Redis）。其余要在持有者内存里办的事（发消息、停止、答审批）两档都照样转发。
 
+**只配 `REDIS_URL`、忘了配 `RUNKO_NODE_URL` 会怎样**：启动时报一行 error，广播退回进程内，服务照常起。不这么做的话所有副本会重名，互相把对方发的帧都当成自己发的丢掉——而那时转发也已经因为「有 Redis」被关掉了，两条路同时断，还一行告警都没有。
+
 现成的一套见[集群实验环境](../../docs/host/node/features/cluster-lab.md)。
 
 ## 常用命令
