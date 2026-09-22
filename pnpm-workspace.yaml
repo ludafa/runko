@@ -91,6 +91,9 @@ catalog:
   # 直接实现三个领域接口——它同时是对「不假设事务能跨接口 / 不要求 CAS」这两条
   # 契约准则的硬检验（那两条当初就是为了不把非关系型挡在门外才那么写的）。
   mongodb: ^7.5.0
+  # 集群实验环境：@runko/stream-redis 的驱动（跨副本广播直播内容）。同款姿态——
+  # 包里只 `import type` 一个手写的最小结构接口，运行时零驱动 import，所以只进 devDependencies。
+  redis: ^6.2.1
 
 minimumReleaseAgeExclude:
   - ai@7.0.20
@@ -100,6 +103,7 @@ minimumReleaseAgeExclude:
   - kysely@0.29.5
   - mysql2@3.23.4
   - mongodb@7.5.0
+  - redis@6.2.1
   - just-bash@3.1.0
   - e2b@2.32.0
   - "@vercel/sandbox@2.5.0"

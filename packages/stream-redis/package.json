@@ -1,0 +1,59 @@
+{
+  "name": "@runko/stream-redis",
+  "version": "0.1.2",
+  "description": "流分发实现：Redis 发布/订阅 —— 多副本共享直播内容",
+  "type": "module",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ludafa/runko.git",
+    "directory": "packages/stream-redis"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
+    "lint:fix": "eslint . --fix",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@runko/agent": "workspace:^",
+    "@runko/core": "workspace:^"
+  },
+  "peerDependencies": {
+    "redis": "^6"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "redis": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
