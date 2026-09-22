@@ -68,6 +68,9 @@ import type { ChatReplayFrame, QueuedMessage } from './schema';
 import { frameSeq, isQueueFrame, isTurnStateFrame } from './schema';
 import type { PendingUserEcho } from './timeline';
 import { findWaitingCallIds } from './timeline';
+import type { ChatTransport } from './transport';
+import { useChatTransport } from './transport';
+import { streamConversationTailWs } from './ws';
 
 export type ChatTurnStatus = 'idle' | 'streaming' | 'error';
 
@@ -171,6 +174,16 @@ function errorFromTurnEnd(metadata: RunkoMessageMetadata): string | undefined {
   return metadata.status === 'failed' ? metadata.error?.message : undefined;
 }
 
+/**
+ * [直播流](../../../../../docs/terms.md)走哪条通道，由用户在设置页选（`transport.ts`）。
+ * 两个实现签名相同，重连与断线续传都在本文件里、两边共用。
+ *
+ * 为什么留两条、为什么开关交给用户：见 docs/ingress/features/ws-stream.md。
+ */
+function streamerFor(transport: ChatTransport) {
+  return transport === 'ws' ? streamConversationTailWs : streamConversationTail;
+}
+
 export function useChatMessages(
   conversationId: string,
   initialFrames: ChatReplayFrame[],
@@ -184,6 +197,8 @@ export function useChatMessages(
    */
   initialTurnInProgress = false,
 ): UseChatMessagesResult {
+  /** 用户在设置页选的通道。改了要立刻换——见下面那个开 tail 的 effect。 */
+  const transport = useChatTransport();
   const [messages, setMessages] = useState<RunkoUIMessage[]>([]);
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>(
     () =>
@@ -423,7 +438,8 @@ export function useChatMessages(
       }, delay);
     }
 
-    streamConversationTail(
+    // 每次（重）连都现读一次用户的选择：设置页一改，下一次连接就换通道。
+    streamerFor(transport)(
       conversationId,
       lastSeqRef.current,
       { onFrame: applyFrame },
@@ -453,6 +469,8 @@ export function useChatMessages(
     openTailRef.current();
   }, []);
 
+  // `transport` 在依赖里：用户在设置页换了通道，这里就断开旧连接、用新通道重连。
+  // 不会丢内容——重连带着 `lastSeqRef`，从上次收到的那条接着来（与掉线重连同一条路）。
   useEffect(() => {
     reconnectAttemptRef.current = 0;
     openTail();
@@ -463,7 +481,7 @@ export function useChatMessages(
         reconnectTimeoutRef.current = undefined;
       }
     };
-  }, [conversationId, openTail]);
+  }, [conversationId, openTail, transport]);
 
   const sendMessage = useCallback(
     (text: string, intent: SendIntent = 'queue') => {

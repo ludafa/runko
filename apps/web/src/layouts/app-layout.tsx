@@ -102,6 +102,12 @@ export function AppLayout({ children }: { children: ReactNode }) {
             >
               Chat
             </Link>
+            <Link
+              to="/settings"
+              className="text-muted-foreground hover:text-foreground [&.active]:text-foreground transition-colors"
+            >
+              Settings
+            </Link>
           </nav>
           <div className="flex items-center gap-2 sm:gap-3">
             {session?.user && (
