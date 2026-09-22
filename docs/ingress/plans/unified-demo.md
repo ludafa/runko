@@ -22,8 +22,8 @@ related: ["ingress/features/unified-demo.md", "ingress/tech/unified-demo.md", "h
 | U3 | 零配置：演示模型、本地沙盒、GitHub 可选、配置接口、web | ✅ 2026-09-22 |
 | U4 | Postgres | ✅ 2026-09-22 |
 | U5 | 多副本：转发、在场进库、镜像与验证环境 | ✅ 2026-09-22 |
-| U6 | 把 persist-demo 的真进程测试搬过来，接进 CI | ⬜ |
-| U7 | 删 persist-demo，清理文档 | ⬜ |
+| U6 | 把 persist-demo 的真进程测试搬过来，接进 CI | ✅ 2026-09-22 |
+| U7 | 删 persist-demo，清理文档 | ✅ 2026-09-22 |
 | U8 | 验证方案、端到端实测、代码审查 | ⬜ |
 
 **顺序**：U1 → U2 → U3 → U4 → U5 → U6 → U7 → U8。
@@ -101,13 +101,15 @@ related: ["ingress/features/unified-demo.md", "ingress/tech/unified-demo.md", "h
 
 - **目标**：原 persist-demo 的真进程测试在 node-server 上全部跑通。见[技术方案 §7](../tech/unified-demo.md#_7-测试怎么搬)。
 - **涉及**：`apps/node-server/test/e2e/`（多副本、挂起恢复、docker 验证环境）、日志合并脚本及其测试、`.github/workflows/ci.yml`。
-- **验收**：本地用共享 SQLite 文件跑绿；CI 用 Postgres 跑绿；`test:lab` 在 docker 上跑绿（要你起 docker 验证环境）。
+- **实际**：搬的时候逮到两个缺口：① `RUNKO_HEARTBEAT_MS` / `RUNKO_TAKEOVER_MS` 没接到仲裁实现上——文档与验证环境都按「生效」写的，实际走的是 60 秒缺省值；② 数据库驱动在模块顶层就加载，于是跑 Postgres 的容器也要求 SQLite 的原生模块装得起来（arm64 的 alpine 上装不起来）。都已修。
+- **一处测试本身的坑**：多副本那条「冻住旧持有者」的用例，原先在冻结期间反复发消息等接管——那些请求被转发给冻住的副本，**它的内核照样完成握手、把请求收进缓冲区**，一解冻就挨个处理，凭空多跑四轮。改成先等租约过期再发第一条。
+- **验收结论**：✅ 真进程 8 条（多副本 4 + 挂起恢复 4）本地用共享 SQLite 文件跑绿；变异检验：注释掉转发中间件，两条用例当场变红。CI 多一步用真 Postgres 再跑一遍。
 
 ### U7 · 删 persist-demo
 
 - **目标**：仓库里不再有它，也没有指向它的地方。见[技术方案 §8](../tech/unified-demo.md#_8-删-persist-demo-的清单)。
 - **涉及**：`apps/persist-demo/`、`.gitignore`、`CLAUDE.md`、三个 persist 包的 README、11 份文档、术语表的「多副本验证环境」词条。另外修正多副本技术方案里跟代码对不上的三处（见[技术方案 附录 C](../tech/unified-demo.md#附录-c-多副本技术方案里跟代码对不上的三处)）。
-- **验收**：`grep -r persist-demo`（不含构建产物和 CHANGELOG）为空；`pnpm install` 后锁文件里没有它；`docs:check`、`docs:build`、`check:doc-links` 通过。
+- **验收结论**：✅ 目录删掉；`grep -r persist-demo` 只剩施工进展里的历史记录（页面顶部已注明它已并入并删除）与 CHANGELOG；仓库拓扑表与成员计数已更新；`docs:check`、`docs:build`、`check:doc-links` 全过。
 
 ### U8 · 收尾
 
@@ -153,9 +155,36 @@ pnpm --filter @runko-chat/node-server test:lab     # 自带起停：跑完就把
    卡片仍可点，点完接着跑；会话列表出现「等你」。
 6. 本地沙盒的会话不显示仓库、分支与「休眠」。
 
-### 实际结果
+### 实际结果（2026-09-22）
 
-开发全部完成后填写。
+**一、自动跑的**：✅
+
+| 包 | 结果 |
+|---|---|
+| `@runko-chat/node-server` | 448 条（不含端到端）+ 真进程端到端 8 条，全绿 |
+| `@runko-chat/web` | 323 条全绿 |
+| `packages/*` | 全绿；四种真库上的一致性套件：kysely 273、Mongo 83、SQLite 69 |
+| 全仓 | `pnpm -r build` / `typecheck` / `lint` / `docs:check` / `docs:build` / `check:doc-links` 全通过 |
+
+**变异检验**：注释掉转发中间件 → 多副本场景①与挂起恢复场景④当场变红；去掉租约的「同名重启」判据 → 一致性套件 6 条红。
+
+**二、要 docker 的**：✅ `test:lab` 9 条全绿，168 秒（一个 Postgres + 三个 chat 应用副本 + nginx，跑完自动删环境）：
+
+| 场景 | 验的是 |
+|---|---|
+| S0 | 在 A 注册的 cookie，B 与 C 直接认（登录态不绑单个副本） |
+| S1 | 并发抢占：同时打到两个副本，一个起轮、一个转发后排队 |
+| S2 | SSE 经非持有者与 nginx 订阅，第一帧在一轮跑完之前就到（没被缓冲） |
+| S3 | 停止打到非持有者 → 转给持有者，这一轮以「已停止」收尾 |
+| S4 | 数据库卡顿 1 秒：这一轮不受影响 |
+| S5 | 持有者 `kill -9`：先 503（很快，不是挂着），过接管阈值后别的副本起轮，崩溃那一轮补上「已停止」 |
+| S6 | 持有者 `kill -9` 后**立刻重启它**：启动扫描当场收拾（这就是 U1 那条判据） |
+| S7 | 持有者被冻住：转发在超时附近回 503；接管后老持有者解冻，账本一行不多 |
+| S8 | 网络分区：没人接管它也会自己停手；之后别的副本接管，账本没写坏 |
+
+期间逮到两个真问题：**并发发消息会丢**（S1，已修：就地转发）、**注册被拒**（容器里是生产模式，better-auth 要求带来源头）。
+
+**三、要人眼看的**：**还没做**——服务要你来起（`pnpm chat:server` + `pnpm chat:web`）。这一档的六步在上面。
 
 ## 变更记录
 
