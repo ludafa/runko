@@ -25,6 +25,7 @@
     "cluster:down": "docker compose -f docker/cluster.compose.yml down -v --remove-orphans",
     "cluster:port": "docker compose -f docker/cluster.compose.yml port --index=${CLUSTER_INDEX:-1} node 3900",
     "cluster:ps": "docker compose -f docker/cluster.compose.yml ps",
+    "test:cluster": "RUNKO_TEST_CLUSTER=1 vitest run test/e2e/cluster.e2e.test.ts",
     "build:dist": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
