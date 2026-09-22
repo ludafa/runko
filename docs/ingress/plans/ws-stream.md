@@ -52,6 +52,40 @@ related: ["ingress/features/ws-stream.md", "ingress/tech/ws-stream.md", "host/no
 
 集群里的对照见 [cluster-lab · C5](../../host/node/plans/cluster-lab.md)。
 
+## 验证方案
+
+### 一、自动用例（跑完即退）
+
+| 跑什么 | 覆盖 | 预期 |
+|---|---|---|
+| `pnpm --filter @runko-chat/node-server test` | `test/routes/chat-ws.test.ts`：端点回放、别人的会话连不上、直播真推过来 | 全绿 |
+| `pnpm --filter @runko-chat/web test` | 通道实现、选择的存取、切换接线、设置页 | 全绿 |
+| `pnpm --filter @runko-chat/node-server test:cluster` | 集群里的三条（任意副本都能看、断线带 `after` 重连、Redis 挂掉不影响这一轮） | 8 条全绿，见 [cluster-lab · 验证方案](../../host/node/plans/cluster-lab.md#验证方案) |
+
+### 二、浏览器走查（**要人来做**）
+
+单副本就能验大部分：
+
+```sh
+pnpm chat:server    # 一个终端
+pnpm chat:web       # 另一个终端
+```
+
+1. 建会话，发一条长消息 —— 内容一小段一小段出来（此时走 SSE，默认）。
+2. 顶栏 `Settings` → 切成 **WebSocket** → 回会话页：**正在跑的那一轮不中断**，继续往下出字（切换会重连一次，带着「我看到第几条了」）。
+3. 刷新页面 → 仍在 WebSocket 档，能接上还在跑的那一轮。
+4. 切回 **SSE**，重复 1–3，表现应当一模一样。
+5. 开两个标签页，一个走 SSE、一个走 WebSocket，看同一条会话 —— 内容应当一致。
+
+多副本下的走查见 [cluster-lab · 验证方案](../../host/node/plans/cluster-lab.md#验证方案) 第三层。
+
+## 实测结果
+
+| 时间 | 跑了什么 | 结果 |
+|---|---|---|
+| 2026-09-22 | 上面第一层全部自动用例 | 全绿（WebSocket 相关 25 条 + 集群 8 条） |
+| — | 浏览器走查 | **待做**（要人来点） |
+
 ## 变更记录
 
 | 日期 | 变更 |
