@@ -24,10 +24,14 @@
  *
  * 三条纪律：
  *
- * 1. **持久化到会话（DB，非内存耗材）**：落 `conversation_grants` 子表，随会话
- *    存续、跨进程重启存活、会话删除即随 conversation 级联清。这与「单次授权」
- *    （turn-runner 的 pendingReview，本轮内存态、答复即消费）分工不同——会话级是
- *    刻意要跨轮、跨重启记住的。「会话结束即失效」= 会话被删（级联），而不是进程重启。
+ * 1. **持久化到会话（DB，非内存耗材）**：落 `conversation_grants` 表，随会话存续、
+ *    跨进程重启存活。这与「单次授权」（本轮内存态、答复即消费）分工不同——会话级是
+ *    刻意要跨轮、跨重启记住的：「会话结束即失效」指的是会话被删，不是进程重启。
+ *
+ *    **这张表没有外键**（库里所有按 `conversation_id` 挂的表都没有，含框架那四张）。
+ *    今天没有「删除会话」这条路；真要加的时候，得由那段代码自己把这几张表一并清掉：
+ *    `conversation_grants`、`chat_presence`、`local_workspaces`，以及框架的四张
+ *    （走它的接口，别直接删表）。`clearConversationGrants` 就是这里的那个入口。
  * 2. **按 (会话, **用户**, 记账键) 记账**：`user_id` = 做出授权的人（点按钮的
  *    已认证用户）。查时按**本轮发起者**匹配（routes/chat.ts）——单用户下
  *    发起者≡审批人≡唯一用户，行为无差；将来一个 conversation 多用户时天然是
@@ -198,7 +202,7 @@ export async function hasConversationGrant(
   return segKeys.every((key) => matched.has(key));
 }
 
-/** 清空某会话的全部授权（所有用户）。会话删除时 FK 级联已自动清，这是显式入口（如「重置本会话授权」）。 */
+/** 清空某会话的全部授权（所有用户）。删会话、或者「重置本会话授权」都走它——没有外键级联替你做这件事。 */
 export async function clearConversationGrants(
   db: Db,
   conversationId: string,

@@ -27,7 +27,10 @@ import type Database from 'better-sqlite3';
 import { Kysely, PostgresDialect, SqliteDialect } from 'kysely';
 import type pg from 'pg';
 
+import { logger } from '../logger.js';
 import type { ChatDatabase } from './schema.js';
+
+const LOG_SCOPE = 'db';
 
 /** SQLite 库文件的位置。 */
 const SQLITE_PATH = process.env.DATABASE_PATH ?? 'data.db';
@@ -73,7 +76,18 @@ async function openPostgres(connectionString: string): Promise<pg.Pool> {
   const { Pool, TypeOverrides } = await import('pg');
   const types = new TypeOverrides();
   types.setTypeParser(PG_INT8_OID, (value: string) => Number(value));
-  return new Pool({ connectionString, types });
+  const pool = new Pool({ connectionString, types });
+  /**
+   * **空闲连接出错必须接住。** 主备切换、服务端按 idle 超时掐连接、网络抖动，都会让连接池
+   * 在**没有任何查询在跑**的时候抛错；没人监听 `error` 时 Node 会当成未捕获异常，**整个副本
+   * 进程退出**。记一行就够了：池子自己会把坏连接丢掉，下一次查询拿一条新的。
+   */
+  pool.on('error', (error: Error) => {
+    logger.warn(LOG_SCOPE, 'idle postgres connection failed', {
+      error: error.message,
+    });
+  });
+  return pool;
 }
 
 function createDialect(): SqliteDialect | PostgresDialect {

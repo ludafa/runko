@@ -65,9 +65,9 @@ erDiagram
   user ||--o{ account : "登录方式"
   user ||--o{ conversations : "拥有"
   user ||--o{ push_subscriptions : "订阅"
-  conversations ||--o{ conversation_grants : "本会话都允许"
-  conversations ||--o{ chat_presence : "谁正看着"
-  conversations ||--o| local_workspaces : "本地沙盒的文件"
+  conversations ||--o{ conversation_grants : "conversation_id（无外键）"
+  conversations ||--o{ chat_presence : "conversation_id（无外键）"
+  conversations ||--o| local_workspaces : "sandbox_name（无外键）"
   conversations ||--o{ agent_ledger : "conversation_id（无外键）"
   conversations ||--o{ agent_decisions : "conversation_id（无外键）"
   conversations ||--o{ agent_queue : "conversation_id（无外键）"
@@ -114,6 +114,8 @@ erDiagram
 | better-auth 的 | `user` `session` `account` `verification` `rateLimit` | better-auth 自己的迁移接口建表，字段名用它的缺省（驼峰），我们不改 |
 | chat 应用的 | `conversations` `push_subscriptions` `conversation_grants` `chat_presence` `local_workspaces` | 本应用的 Kysely 迁移 |
 | 框架的 | `agent_ledger` `agent_decisions` `agent_queue` `agent_leases` | `@runko/persist-kysely` 的 `migrate()` 建表，只通过 `Persistence` 接口读写 |
+
+**按会话挂的表一律不建外键**（框架那四张本来就没有，本应用的三张跟着对齐）：删会话这件事今天没有路由，真要加时由那段代码自己把几张表一并清掉——一处显式的清理代码，比四处分散的级联约束好查。用户那两张（`conversations`、`push_subscriptions`）保留指向 `user` 的外键：用户是 better-auth 管的实体，删用户是它的既有能力。
 
 跟现在比，`conversations` 少了六列：`queued_messages_json`、`turn_holder`、`turn_started_at` 挪进框架的表；`agent_session_id`、`agent_session_created_at`、`agent_session_turn` 早就没人写了。时间一律存毫秒整数，跟框架的表一致。
 

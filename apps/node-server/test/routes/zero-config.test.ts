@@ -153,9 +153,9 @@ describe('零配置（本地沙盒 + 演示模型）', () => {
     const callId = pending[0]?.toolCallId ?? '';
     expect(pending[0]?.toolName).toBe('bash');
 
-    // 还没批准：文件还在。
-    const sandbox = await runtime.getActivity(created.id);
-    expect(sandbox.active).toBe(true);
+    // 还没批准：这一轮停在等人上，命令一个字都没跑。
+    expect((await runtime.getActivity(created.id)).active).toBe(true);
+    expect(await ledgerText(created.id)).not.toContain('output-available');
 
     const approve = await app.request(
       `/api/chat/conversations/${created.id}/approvals/${callId}`,
@@ -167,14 +167,19 @@ describe('零配置（本地沙盒 + 演示模型）', () => {
     );
     expect(approve.status).toBe(200);
 
+    // 批准之后**命令真的执行了**：账本里那次调用带上了结果，这一轮也收了尾。
+    // 只断言「裁决不再 pending」是不够的——写下答复就会让它出 pending，跟有没有执行无关。
     await vi.waitFor(
       async () => {
-        const rows = await createChatPersistence(db).decisions.listPending(
-          created.id,
-        );
-        expect(rows).toHaveLength(0);
+        const text = await ledgerText(created.id);
+        expect(text).toContain('output-available');
+        expect(text).toContain('rm -rf /dist');
+        expect((await runtime.getActivity(created.id)).active).toBe(false);
       },
       { timeout: 10_000 },
     );
+    expect(
+      await createChatPersistence(db).decisions.listPending(created.id),
+    ).toHaveLength(0);
   });
 });

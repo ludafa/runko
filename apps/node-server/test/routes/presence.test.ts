@@ -21,7 +21,7 @@ describe('routes/chat —— 在场心跳', () => {
     db = await createTestDb();
     await seedUser(db, 'user-1');
     await seedUser(db, 'user-2');
-    createConversation(db, {
+    await createConversation(db, {
       id: CONVERSATION_ID,
       userId: 'user-1',
       title: 'Session',

@@ -86,8 +86,8 @@ describe('push/sender —— 投递', () => {
     await seedUser(db, 'user-1');
   });
 
-  function addSubscription(endpoint: string): void {
-    upsertSubscription(db, {
+  async function addSubscription(endpoint: string): Promise<void> {
+    await upsertSubscription(db, {
       endpoint,
       userId: 'user-1',
       p256dh: 'k',
@@ -105,8 +105,8 @@ describe('push/sender —— 投递', () => {
   });
 
   it('扇出到每一台设备，成功的记 lastSentAt', async () => {
-    addSubscription('https://a.example/1');
-    addSubscription('https://b.example/2');
+    await addSubscription('https://a.example/1');
+    await addSubscription('https://b.example/2');
     const { calls, transport } = recordingTransport();
 
     await sendToUser(db, 'user-1', payload(), {
@@ -124,8 +124,8 @@ describe('push/sender —— 投递', () => {
   });
 
   it('410 = 订阅作废，就地删行；同一批里成功的那台不受影响', async () => {
-    addSubscription('https://gone.example/1');
-    addSubscription('https://ok.example/2');
+    await addSubscription('https://gone.example/1');
+    await addSubscription('https://ok.example/2');
     const { transport } = recordingTransport((endpoint) => {
       if (endpoint.includes('gone')) {
         throw httpError(410);
@@ -143,7 +143,7 @@ describe('push/sender —— 投递', () => {
   });
 
   it('404 同样回收', async () => {
-    addSubscription('https://gone.example/1');
+    await addSubscription('https://gone.example/1');
     const { transport } = recordingTransport(() => {
       throw httpError(404);
     });
@@ -155,7 +155,7 @@ describe('push/sender —— 投递', () => {
   });
 
   it('5xx 不删行，只记 last_error（一次网络抖动不该让人默默失去通知）', async () => {
-    addSubscription('https://flaky.example/1');
+    await addSubscription('https://flaky.example/1');
     const { transport } = recordingTransport(() => {
       throw httpError(503);
     });
@@ -172,7 +172,7 @@ describe('push/sender —— 投递', () => {
   });
 
   it('没有 statusCode 的普通错误（网络断了）也走"留行记痕"', async () => {
-    addSubscription('https://offline.example/1');
+    await addSubscription('https://offline.example/1');
     const { transport } = recordingTransport(() => {
       throw new Error('ECONNREFUSED');
     });
@@ -186,8 +186,8 @@ describe('push/sender —— 投递', () => {
   });
 
   it('一台设备抛错不影响另一台（allSettled 语义），整体永不 reject', async () => {
-    addSubscription('https://boom.example/1');
-    addSubscription('https://ok.example/2');
+    await addSubscription('https://boom.example/1');
+    await addSubscription('https://ok.example/2');
     const { calls, transport } = recordingTransport((endpoint) => {
       if (endpoint.includes('boom')) {
         throw new Error('boom');
@@ -204,7 +204,7 @@ describe('push/sender —— 投递', () => {
   });
 
   it('审批类走 high 紧急度，TTL 用调用方给的剩余秒数', async () => {
-    addSubscription('https://a.example/1');
+    await addSubscription('https://a.example/1');
     const { calls, transport } = recordingTransport();
 
     await sendToUser(db, 'user-1', payload({ kind: 'approval' }), {
@@ -218,7 +218,7 @@ describe('push/sender —— 投递', () => {
   });
 
   it('一轮结束类走 normal 紧急度与 600 秒默认 TTL', async () => {
-    addSubscription('https://a.example/1');
+    await addSubscription('https://a.example/1');
     const { calls, transport } = recordingTransport();
 
     await sendToUser(db, 'user-1', payload({ kind: 'turn-done' }), {
@@ -231,7 +231,7 @@ describe('push/sender —— 投递', () => {
   });
 
   it('载荷原样 JSON 序列化后交给 transport', async () => {
-    addSubscription('https://a.example/1');
+    await addSubscription('https://a.example/1');
     const { calls, transport } = recordingTransport();
     const sent = payload();
 

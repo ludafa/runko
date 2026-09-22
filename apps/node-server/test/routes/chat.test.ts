@@ -444,7 +444,7 @@ describe('routes/chat', () => {
       const { app } = build();
       const created = await createConversationVia(app);
 
-      updateConversation(db, created.id, { lastActiveAt: new Date(0) });
+      await updateConversation(db, created.id, { lastActiveAt: new Date(0) });
       const stale = await app.request(`/api/chat/conversations/${created.id}`);
       expect(ConversationSchema.parse(await stale.json()).status).toBe(
         'sleeping',

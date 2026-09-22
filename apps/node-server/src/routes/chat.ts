@@ -208,6 +208,12 @@ async function forwardToHolder(
   if (forwarder === undefined || forwarder.isForwarded(c)) {
     return undefined;
   }
+  // 先确认这条会话是调用者自己的，再决定转不转：不是他的就别占着一次跨副本往返，
+  // 让本副本照常答 404（持有者那边也会再查一遍，这里只是别白跑一趟）。
+  const owned = await getConversation(deps.db, conversationId, c.get('userId'));
+  if (owned === undefined) {
+    return undefined;
+  }
   const activity = await deps.runtime.getActivity(conversationId);
   if (!activity.active || activity.local || activity.holder === undefined) {
     return undefined;

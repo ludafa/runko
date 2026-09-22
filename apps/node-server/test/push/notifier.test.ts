@@ -65,7 +65,7 @@ describe('push/notifier', () => {
 
     db = await createTestDb();
     await seedUser(db, 'user-1');
-    createConversation(db, {
+    await createConversation(db, {
       id: CONVERSATION_ID,
       userId: 'user-1',
       title: TITLE,
@@ -73,7 +73,7 @@ describe('push/notifier', () => {
       branchName: 'runko/chat-conv-1',
       sandboxName: 'runko-chat-conv-1',
     });
-    upsertSubscription(db, {
+    await upsertSubscription(db, {
       endpoint: 'https://a.example/1',
       userId: 'user-1',
       p256dh: 'k',
