@@ -21,7 +21,7 @@
     "lab:down": "docker compose -f docker/compose.yml down -v --remove-orphans",
     "test:lab": "RUNKO_TEST_LAB=1 vitest run test/e2e/lab.e2e.test.ts",
     "lab:logs": "node --import tsx scripts/lab-logs.ts",
-    "cluster:up": "docker compose -f docker/cluster.compose.yml up -d --build --wait --scale node=${CLUSTER_REPLICAS:-3}",
+    "cluster:up": "docker compose $([ -f ../../.env ] && echo --env-file ../../.env) -f docker/cluster.compose.yml up -d --build --wait --scale node=${CLUSTER_REPLICAS:-3}",
     "cluster:down": "docker compose -f docker/cluster.compose.yml down -v --remove-orphans",
     "cluster:port": "docker compose -f docker/cluster.compose.yml port --index=${CLUSTER_INDEX:-1} node 3900",
     "cluster:ps": "docker compose -f docker/cluster.compose.yml ps",

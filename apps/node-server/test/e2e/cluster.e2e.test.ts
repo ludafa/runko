@@ -70,6 +70,15 @@ const CLUSTER_ENV = {
   CLUSTER_TAKEOVER_MS: String(TAKEOVER_MS),
   CLUSTER_FORWARD_TIMEOUT_MS: String(FORWARD_TIMEOUT_MS),
   CLUSTER_CHUNK_DELAY_MS: String(CHUNK_DELAY_MS),
+  // **这套用例只认[演示模型](../../../../docs/terms.md)**：断言全建立在「一轮跑多久由
+  // 消息长度决定」上（见 `textFor`），换成真模型就既不确定、又要花钱。
+  //
+  // compose 做变量替换时也会读 shell 里的变量，所以光靠「仓库根 .env 没被喂进来」不够——
+  // 谁在自己 shell 里 export 过 DEEPSEEK_API_TOKEN，这套用例就会莫名其妙地去调真模型。
+  // 这里显式清空，把那条路堵死。
+  DEEPSEEK_API_BASE_URL: '',
+  DEEPSEEK_API_TOKEN: '',
+  RUNKO_MODEL: '',
 };
 
 const LB_URL = `http://127.0.0.1:${String(PORTS.lb)}`;

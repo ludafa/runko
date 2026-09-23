@@ -37,6 +37,18 @@ x-node-env: &node-env
   CHAT_SUSPEND_MEMORY_WINDOW: ${CLUSTER_MEMORY_WINDOW_MS:-3000}
   LOG_LEVEL: ${CLUSTER_LOG_LEVEL:-info}
 
+  # ─── 真模型（可选）──────────────────────────────────────────────────────
+  # 这三个从**仓库根的 `.env`** 透进来（`cluster:up` 把那份文件喂给 compose 做变量替换）。
+  # 那份文件在 `.gitignore` 里，所以 key 不进 git，compose 文件里也只有变量名。
+  #
+  # **按名单透，不整份灌进来**：root `.env` 里还有 SERVER_URL、DATABASE_PATH、
+  # SANDBOX_PROVIDER 这些给单进程开发用的值，整份灌会把集群自己的配置顶掉。
+  #
+  # 两个都空 = 零配置那档，用[演示模型](../../../../docs/terms.md)，不联网不花钱。
+  DEEPSEEK_API_BASE_URL: ${DEEPSEEK_API_BASE_URL:-}
+  DEEPSEEK_API_TOKEN: ${DEEPSEEK_API_TOKEN:-}
+  RUNKO_MODEL: ${RUNKO_MODEL:-}
+
 services:
   postgres:
     # 不挂数据卷：实验环境每次都从空库开始，`down -v` 之后什么都不留。

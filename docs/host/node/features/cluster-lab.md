@@ -76,7 +76,36 @@ SERVER_URL=http://localhost:3940 pnpm chat:web
 
 **不改 `CLUSTER_CLIENT_URL` 会怎样**：注册请求拿到 `403 {"code":"INVALID_ORIGIN"}`，界面上只看得到一次失败的登录，很难猜到原因。所以这一步单独列出来。
 
-### 3.1 故障怎么造
+### 3.3 换成真模型（key 不进 git）
+
+集群缺省跑[演示模型](../../../terms.md)——不联网、不花钱，够验租约与 WebSocket 了。想看真 AI 在集群里跑，**把 key 填进仓库根的 `.env` 就行**，不用改任何 compose 文件：
+
+```sh
+cp .env.template .env        # 第一次才要
+# 在 .env 里填这两行（申请：https://platform.deepseek.com → API Keys）
+#   DEEPSEEK_API_BASE_URL=https://api.deepseek.com
+#   DEEPSEEK_API_TOKEN=sk-...
+```
+
+然后照常 `cluster:up`。起来之后确认一下用的是哪档：
+
+```sh
+curl -s http://localhost:3940/api/chat/config -b cookie.txt
+# {"providers":["local"],"defaultProvider":"local","model":"deepseek"}   ← 真模型
+# model 是 "demo" 就是还没认到 key
+```
+
+（这个接口要登录，先用浏览器注册一个账号、或者拿 cookie 带上。）
+
+**key 为什么不会进 git**：`.env` 与 `.env.*` 都在 `.gitignore` 里；compose 文件里只有变量名，真实值是 `cluster:up` 启动时喂给 compose 的。
+
+**只透三个变量，不整份灌**：`DEEPSEEK_API_BASE_URL`、`DEEPSEEK_API_TOKEN`、`RUNKO_MODEL`。根 `.env` 里还有 `SERVER_URL`、`DATABASE_PATH`、`SANDBOX_PROVIDER` 这些给单进程开发用的值，整份灌进去会把集群自己的配置顶掉。要加别的变量，在 `docker/cluster.compose.yml` 的 `x-node-env` 里照样写一行 `${VAR:-}`。
+
+**云沙盒（E2B / Vercel）没接进来**，这是有意的：集群跑的是[本地沙盒](../../../terms.md)，一个容器就能跑完一轮，不依赖外部账号。要在集群里试云沙盒，同样在 `x-node-env` 里加变量名即可。
+
+**集群端到端测试不受影响**：它显式把这三个变量清空，恒定走演示模型——断言建立在「一轮跑多久由消息长度决定」上，换真模型就既不确定、又要花钱。
+
+### 3.4 故障怎么造
 
 下面的命令都在 `apps/node-server` 目录下跑（`-f docker/cluster.compose.yml` 省略写法见
 `package.json` 里的 `cluster:*` 脚本）。副本的容器名是 `runko-cluster-node-<序号>`。

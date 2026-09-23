@@ -104,7 +104,7 @@ CLUSTER_INDEX=2 pnpm cluster:port       # 第 2 个副本的宿主机端口
 pnpm cluster:down                       # 连数据一起删掉
 ```
 
-逐条对照[功能手册 §3.1](../features/cluster-lab.md#_3-1-故障怎么造)的故障注入命令，看行为对不对。
+逐条对照[功能手册 §3.4](../features/cluster-lab.md#_3-4-故障怎么造)的故障注入命令，看行为对不对。
 
 ### 三、浏览器走查（**要人来做**）
 
