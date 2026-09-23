@@ -57,6 +57,25 @@ pnpm --filter @runko-chat/node-server cluster:down
 
 集群里跑的是零配置那一档：[演示模型](../../../terms.md) + [本地沙盒](../../../terms.md)，不需要任何云账号。
 
+### 3.2 用浏览器连进来
+
+集群只跑服务端，前端还在本机跑。**两处地址要对上**，不然会卡在登录那一步：
+
+```sh
+# ① 起集群。CLUSTER_CLIENT_URL 指到前端的地址——容器里是 production 档，
+#    better-auth 会较真地校验 Origin，不指过去的话注册/登录一律 403。
+cd apps/node-server
+CLUSTER_CLIENT_URL=http://localhost:5273 CLUSTER_REPLICAS=3 pnpm cluster:up
+
+# ② 起前端，把它的 /api 代理指到 nginx（HTTP 与 WebSocket 都走这条）。
+#    端口取自仓库根 .env 的 CLIENT_PORT，缺省 5273。
+SERVER_URL=http://localhost:3940 pnpm chat:web
+```
+
+然后开 `http://localhost:5273`。注册一个账号即可——集群用的是零配置那一档，不需要任何云账号。
+
+**不改 `CLUSTER_CLIENT_URL` 会怎样**：注册请求拿到 `403 {"code":"INVALID_ORIGIN"}`，界面上只看得到一次失败的登录，很难猜到原因。所以这一步单独列出来。
+
 ### 3.1 故障怎么造
 
 下面的命令都在 `apps/node-server` 目录下跑（`-f docker/cluster.compose.yml` 省略写法见

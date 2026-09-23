@@ -109,9 +109,14 @@ pnpm cluster:down                       # 连数据一起删掉
 ### 三、浏览器走查（**要人来做**）
 
 ```sh
-cd apps/node-server && CLUSTER_REPLICAS=3 pnpm cluster:up
-SERVER_URL=http://localhost:3940 pnpm chat:web
+cd apps/node-server
+CLUSTER_CLIENT_URL=http://localhost:5273 CLUSTER_REPLICAS=3 pnpm cluster:up   # ① 集群
+SERVER_URL=http://localhost:3940 pnpm chat:web                                # ② 前端
 ```
+
+`CLUSTER_CLIENT_URL` 不能省——容器里是 production 档，better-auth 只信任这一个来源，
+不指到前端地址的话注册直接 403（见[功能手册 §3.2](../features/cluster-lab.md#_3-2-用浏览器连进来)）。
+浏览器开 `http://localhost:5273`。
 
 1. 注册登录 → 建会话 → 发一条长消息，能看到内容一小段一小段出来。
 2. 顶栏 `Settings` → 把连接方式切成 **WebSocket** → 回会话页，正在跑的那一轮**不断**，继续往下出字。

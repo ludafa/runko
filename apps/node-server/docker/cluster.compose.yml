@@ -18,7 +18,13 @@ x-node-env: &node-env
   # 所有副本必须用同一个登录密钥与同一个对外地址，否则 cookie 在副本之间认不过。
   BETTER_AUTH_SECRET: cluster-auth-secret-not-for-production
   SERVER_URL: http://localhost:${CLUSTER_LB_PORT:-3940}
-  CLIENT_URL: http://localhost:${CLUSTER_LB_PORT:-3940}
+  # **登录只信任这一个来源**（better-auth 的 trustedOrigins，容器里是 production 档，
+  # 会较真地校验 Origin 头）。缺省是 nginx 自己的地址，够测试用（它们手动带这个 Origin）。
+  #
+  # **要用浏览器连进来就得改它**：前端 dev server 跑在另一个端口，浏览器带的 Origin 是
+  # 那个端口，对不上就一律 403、连注册都做不了。所以起集群时把它指到前端的地址：
+  #   CLUSTER_CLIENT_URL=http://localhost:5273 pnpm cluster:up
+  CLIENT_URL: ${CLUSTER_CLIENT_URL:-http://localhost:${CLUSTER_LB_PORT:-3940}}
   RUNKO_PEER_TOKEN: cluster-peer-token
   # 时间轴压扁：缺省值下（5 秒 / 60 秒）一个场景要等一分钟。
   # 接管阈值必须 ≥ 3 倍心跳，否则副本启动时就抛。
