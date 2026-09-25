@@ -42,7 +42,7 @@ related: ["logic/orchestration/features/handover.md", "logic/orchestration/tech/
 | 2 | **发布序号从哪来？** | 由宿主通过环境变量注入（比如 `RUNKO_RELEASE_SEQ`），框架只比大小，不关心它怎么生成。CI 的流水线编号就够用 |
 | 3 | **预留有效期** | 缺省 10 秒，可配 |
 | 4 | **工具上限超时后怎么收尾** | 杀掉工具，结果写成「超过最长执行时间，已终止」，交给模型。和下线无关，平时也这样 |
-| 5 | **版本级别** | `@runko/core` minor（新增交权信号）；`@runko/agent` minor（`ShutdownResult` 与收尾状态有新增，`Arbitration` 接口有新增方法）；`persist-*` minor；`conformance` minor。**`Arbitration` 新增方法对自己实现仲裁的宿主算不算破坏性，需要你拍板** |
+| 5 | **版本级别** | `@runko/core` minor（新增交权信号）；`@runko/agent` **major**（H8 直接删掉 `finishWindowMs` 与 `ShutdownResult.finished`，✅ 2026-09-25 定：不经过废弃期）；其余部分是新增（`ShutdownResult` 与收尾状态、`Arbitration` 接口的新方法）；`persist-*` minor；`conformance` minor。**`Arbitration` 新增方法对自己实现仲裁的宿主算不算破坏性，需要你拍板** |
 
 ## 各阶段
 
@@ -102,13 +102,14 @@ related: ["logic/orchestration/features/handover.md", "logic/orchestration/tech/
 
 ### H8 · 收掉过渡方案
 
-- `@runko/agent`：删掉 `finishWindowMs`（与 `ShutdownResult.finished`）——删参数是破坏性变更，版本级别要你拍板；也可以先标废弃、下个大版本再删。
+- `@runko/agent`：**直接删掉** `finishWindowMs`（`createAgentRuntime` 的 `shutdown.finishWindowMs` 与 `shutdown()` 的同名参数）以及 `ShutdownResult.finished`，不经过废弃期（2026-09-25 定）。这是破坏性变更，changeset 标 **major**，说明里写清「节点下线改用按阶段交权，不再有等待窗口」。
 - node-server：`offline.ts` 去掉转发白名单；`index.ts` 去掉 `SHUTDOWN_FINISH_WINDOW_MS`；集群 compose 去掉对应配置。
-- 文档：集群控制台三份文档里的等待窗口改写成交权；术语表删掉「等待窗口」词条（或挪进同义词列标退役）。
+- 文档：集群控制台三份文档里的等待窗口改写成交权；术语表删掉「等待窗口」词条。
 
 ## 变更记录
 
 | 日期 | 内容 |
 |---|---|
+| 2026-09-25 | 定：H8 直接删除 `finishWindowMs`，不先标废弃；`@runko/agent` 随之 major。 |
 | 2026-09-25 | 合入 main 最新代码后复核：唯一 demo 已落地（G7 消失），集群控制台带来了「节点下线 + 等待窗口」（G6 基本修掉，G1 部分缓解），新发现 G9–G11。定：以本方案为准，等待窗口过渡保留、H8 收掉；术语「下线中」并入已有的「节点下线」。 |
 | 2026-09-25 | 立项。起因：想让 node-server 支持滚动发布，分析后发现框架只做到「如实交代中断」，做不到「任务搬走接着跑」；并用临时测试确认了三个「有活没人推」的缺口。讨论中先后推翻了九种做法（技术方案附录 A），最关键的一条来自实际踩过的坑：mesh 的入站入口跟着 SIGTERM 一起下线，所以旧节点不能在收尾期间继续持有对话。 |
