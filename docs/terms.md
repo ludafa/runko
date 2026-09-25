@@ -173,6 +173,11 @@
 | **确定性段** | — | 示例脚本中不依赖模型/网络、零 key 即可确定性跑通的那一段（打印 JSON Schema、直调 exec/fs、fake 沙盒往返等），用来在无凭证下验证机制正确；与「模型驱动段」相对。 |
 | **模型驱动段** | — | 示例脚本中需真实模型（可能还需云凭证）才运行、用来验证 agent 端到端行为的那一段；与「确定性段」相对。 |
 | **多副本验证环境（lab）** | — | `apps/node-server/docker/` 下的一套 docker-compose：一个 Postgres + 三个 chat 应用副本 + 一个 nginx。用 `docker kill`（崩溃）、`docker pause`（冻住）、`docker network disconnect`（断网）故意制造故障，验证租约版[归属仲裁机制](#十三架构分层)与[应用层转发](#十三架构分层)在真跨容器下的行为。见 [多副本部署 · 功能](./host/node/features/multi-replica.md)。 |
+| **集群实验环境（cluster lab）** | — | `apps/node-server/docker/cluster.compose.yml` 那一套：nginx 统一入口 + 1–5 个 chat 应用副本（`--scale` 调）+ Postgres + Redis，HTTP 与 WebSocket 同一个端口。与[多副本验证环境](#十验证与示例脚本)并存：那套侧重故障注入，这套侧重副本数可变与 Redis 广播。见 [集群实验环境 · 功能](./host/node/features/cluster-lab.md)。 |
+| **集群控制台（cluster console）** | — | chat 前端里的 `/console` 页面：列出[集群实验环境](#十验证与示例脚本)里每个节点的状态、每个会话此刻在哪个节点上跑，并能让某个节点[下线](#十验证与示例脚本)或重新上线。登录即可用，没有管理员概念（demo 项目）。见 [集群控制台 · 功能](./host/node/features/cluster-console.md)。 |
+| **节点下线（node offline）** | 排空节点、drain（**别用**：drain 已被 [conversation-drained](#十三架构分层) 占了） | 让一个副本平稳退出集群：先不再接新流量（HTTP 与 WebSocket 都换到别的节点），手上正在跑的[轮](#一agent-运行的基本单位)尽量让它自然跑完，**2 分钟内**自己退出；到点还没退就被强杀。是[交权](#十三架构分层)在「整个节点」这个粒度上的落地。 |
+| **等待窗口（finish window）** | drain、drainMs（**别用**：drain 已被 [conversation-drained](#十三架构分层) 占了） | [交权](#十三架构分层)时先不中止、让干活的[轮](#一agent-运行的基本单位)自己跑完的那段时间，上限由 `finishWindowMs` 配（缺省 0 = 不等）。窗口里等人的轮立刻[挂起](#十三架构分层)；到点还没跑完的才中止。[节点下线](#十验证与示例脚本)时配成 90 秒。 |
+| **运维容器（ops）** | — | [集群实验环境](#十验证与示例脚本)里专门替[集群控制台](#十验证与示例脚本)操作 Docker 的那个容器：挂着 `docker.sock`，能列出节点容器、`docker stop -t 120`（下线）、`docker start`（重新上线）。它等于拿到整台机器的管理员权限，所以**只在集群内网里监听**、不对外开端口，而且要带内部令牌才肯干活。 |
 | **gate（配置闸门）** | — | 示例脚本在发起任何模型调用/网络请求之前，按序检查所需环境变量/凭证；任一未配置就打印指引并干净退出或 return（exit 0），全程不创建沙盒、不发起模型调用、不产生副作用。 |
 | **演示模型（demo model）** | 回声模型 | chat 应用没配模型 key 时用的替身模型，不联网、不花钱。用户消息里写 `run: <命令>` 它就调 bash，写 `ask: <问题>` 它就调 ask-user，别的话原样复述一遍。目的是零配置也能把审批、提问、挂起、排队这些交互走一遍，不是冒充真 AI。见 docs/ingress/features/unified-demo.md。 |
 

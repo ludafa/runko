@@ -99,11 +99,13 @@ curl -s http://localhost:3940/api/chat/config -b cookie.txt
 
 **key 为什么不会进 git**：`.env` 与 `.env.*` 都在 `.gitignore` 里；compose 文件里只有变量名，真实值是 `cluster:up` 启动时喂给 compose 的。
 
-**只透三个变量，不整份灌**：`DEEPSEEK_API_BASE_URL`、`DEEPSEEK_API_TOKEN`、`RUNKO_MODEL`。根 `.env` 里还有 `SERVER_URL`、`DATABASE_PATH`、`SANDBOX_PROVIDER` 这些给单进程开发用的值，整份灌进去会把集群自己的配置顶掉。要加别的变量，在 `docker/cluster.compose.yml` 的 `x-node-env` 里照样写一行 `${VAR:-}`。
+**按名单透，不整份灌**：模型是 `DEEPSEEK_API_BASE_URL`、`DEEPSEEK_API_TOKEN`、`RUNKO_MODEL` 三个，云沙盒见下一段。根 `.env` 里还有 `SERVER_URL`、`DATABASE_PATH`、`SANDBOX_PROVIDER` 这些给单进程开发用的值，整份灌进去会把集群自己的配置顶掉。要加别的变量，在 `docker/cluster.compose.yml` 的 `x-node-env` 里照样写一行 `${VAR:-}`。
 
-**云沙盒（E2B / Vercel）没接进来**，这是有意的：集群跑的是[本地沙盒](../../../terms.md)，一个容器就能跑完一轮，不依赖外部账号。要在集群里试云沙盒，同样在 `x-node-env` 里加变量名即可。
+**云沙盒（E2B / Vercel）也一样从根 `.env` 透进来**：`E2B_API_KEY`、`E2B_TEMPLATE`、`VERCEL_TOKEN`、`VERCEL_TEAM_ID`、`VERCEL_PROJECT_ID`，外加云沙盒 clone 仓库要用的 `GITHUB_REPO`、`GITHUB_PAT`，以及 `SANDBOX_IDLE_TIMEOUT_MS`。服务端按 key 在不在决定「新建会话」弹窗里能选哪几档：`E2B_API_KEY` 有值才出现 E2B，`VERCEL_TOKEN` 有值才出现 Vercel，全空就只剩本地。改完 `.env` 要重新 `cluster:up` 才生效（环境变量只在容器创建时读一次）。`SANDBOX_PROVIDER` 故意不透——集群里让用户在弹窗里自己选。
 
-**集群端到端测试不受影响**：它显式把这三个变量清空，恒定走演示模型——断言建立在「一轮跑多久由消息长度决定」上，换真模型就既不确定、又要花钱。
+**集群端到端测试不受影响**：它显式把模型的三个变量和两把云沙盒 key 清空，恒定走演示模型 + 本地沙盒——断言建立在「一轮跑多久由消息长度决定」上，换真模型就既不确定、又要花钱。
+
+**想看会话在哪个节点上、或让某个节点平稳下线**：用[集群控制台](./cluster-console.md)（前端顶部导航「集群控制台」）。
 
 ### 3.4 故障怎么造
 
