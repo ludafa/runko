@@ -663,6 +663,8 @@ runtime.reportPresence(conversationId: string): void
 
 `ShutdownResult` 多了一个 `suspended` 计数，与 `aborted` 并列。
 
+> 表里「其余照旧中止」一行将被取代：按阶段[交权](../../../terms.md)后，模型输出段重来、工具段在旧节点跑完、对话交给接手节点，见 [交权与任务迁移 · 技术方案 §6](./handover.md)。等人那一行不变。
+
 两种都**不清队列**：服务重启不该吞掉用户排的消息。
 
 > 被中止的轮如果在宽限期里又想等人，会被 `aborted` 闸门直接拒掉（这是既有行为），不会等到窗口。

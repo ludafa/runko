@@ -14,6 +14,8 @@ related: ["logic/orchestration/features/graceful-shutdown.md", "logic/orchestrat
 > 依赖/延续：[停止本轮](./turn-abort.md) §3（`abortTurn` 与[起轮占位](../../../terms.md)，本方案整个建在它上面）· [chat webapp](../../../ingress/tech/chat-webapp.md) §5.1（[轮状态快照](../../../terms.md)，界面层的第三道防线）· [核心 SDK](../../engine/tech/core-sdk.md) §4.2（`TurnOptions.signal`）。
 > 术语一律以 [../terms.md](../../../terms.md) 为准（**优雅关闭**、**孤儿轮**、[轮](../../../terms.md)、[step](../../../terms.md)、[账本](../../../terms.md)、[停止](../../../terms.md)）。
 
+> **⚠️ 本文「关闭时一律中止正在干活的轮」的做法已被取代**（2026-09-25）：多副本下改为按阶段[交权](../../../terms.md)、指定节点接手接着跑，见 [交权与任务迁移 · 技术方案](./handover.md)。本文的崩溃恢复（启动扫描补「已停止」）仍然有效。
+
 ## 1. 方案总览：三道防线，各兜一个洞
 
 进程消失分两种，能做的事完全不同：

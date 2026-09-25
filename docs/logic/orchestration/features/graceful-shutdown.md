@@ -13,6 +13,8 @@ related: ["logic/orchestration/plans/graceful-shutdown.md", "logic/orchestration
 > 相关：[技术方案](../tech/graceful-shutdown.md)，[施工进展](../plans/graceful-shutdown.md)。
 > 依赖/延续：[停止本轮](./turn-abort.md)（本功能整个建在它的[停止](../../../terms.md)机制上——服务要关闭时，就是替用户按一次停止）· [chat 聊天 webapp](../../../ingress/features/chat-webapp.md) §已知限制 4（本功能把那条「进程重启会中断进行中的一轮」从「静默卡死」变成「如实交代」）。
 
+> **⚠️ 「关闭时这一轮被中断」的行为将被取代**（2026-09-25）：多副本下改为把任务搬到别的节点接着跑，用户不再看到中断，见 [交权与任务迁移 · 功能](./handover.md)。
+
 这一份是**产品/使用视角**：解决什么问题、用户看得到什么行为、边界在哪。内部实现看 [技术方案](../tech/graceful-shutdown.md)。
 
 ## 0. 一句话
