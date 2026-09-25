@@ -7,6 +7,7 @@ export { getApiChatConversationsIdActivity } from './getApiChatConversationsIdAc
 export { getApiChatConversationsIdMessages } from './getApiChatConversationsIdMessages.ts';
 export { getApiChatConversationsIdStream } from './getApiChatConversationsIdStream.ts';
 export { getApiChatConversationsIdTurnsTurnTelemetry } from './getApiChatConversationsIdTurnsTurnTelemetry.ts';
+export { getApiConsoleOverview } from './getApiConsoleOverview.ts';
 export { getApiNotes } from './getApiNotes.ts';
 export { getApiPushConfig } from './getApiPushConfig.ts';
 export { postApiChatConversations } from './postApiChatConversations.ts';
@@ -15,6 +16,8 @@ export { postApiChatConversationsIdApprovalsCallid } from './postApiChatConversa
 export { postApiChatConversationsIdMessages } from './postApiChatConversationsIdMessages.ts';
 export { postApiChatConversationsIdPresence } from './postApiChatConversationsIdPresence.ts';
 export { postApiChatConversationsIdQuestionsCallid } from './postApiChatConversationsIdQuestionsCallid.ts';
+export { postApiConsoleNodesIdOffline } from './postApiConsoleNodesIdOffline.ts';
+export { postApiConsoleNodesIdOnline } from './postApiConsoleNodesIdOnline.ts';
 export { postApiNotes } from './postApiNotes.ts';
 export { postApiPushSubscriptions } from './postApiPushSubscriptions.ts';
 export { postApiPushTest } from './postApiPushTest.ts';

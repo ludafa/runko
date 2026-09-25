@@ -54,6 +54,13 @@ export const postApiChatConversationsIdMessages503Schema = z.lazy(
   () => apiErrorSchema,
 );
 
+/**
+ * @description Forwarded to the holder, but it did not answer in time — the message may or may not have been accepted. Check the conversation before resending
+ */
+export const postApiChatConversationsIdMessages504Schema = z.lazy(
+  () => apiErrorSchema,
+);
+
 export const postApiChatConversationsIdMessagesMutationRequestSchema = z.lazy(
   () => postChatMessageInputSchema,
 );

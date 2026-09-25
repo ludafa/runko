@@ -1,6 +1,7 @@
 import './lib/zod-error-map';
 import './lib/api';
 
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createRouter, RouterProvider } from '@tanstack/react-router';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
@@ -9,6 +10,14 @@ import { installPushNavigationBridge } from './features/notifications/sw-bridge'
 import { routeTree } from './routeTree.gen';
 
 const router = createRouter({ routeTree });
+
+/**
+ * 目前只有[集群控制台](../../../docs/terms.md)一个页面在用 TanStack Query（轮询
+ * `refetchInterval: 2000`，见 `features/console/use-console.ts`）——其余数据请求都是
+ * 手写 `fetch`（`features/chat/api.ts`、`features/notifications/api.ts`）。这里只放
+ * 一个最省事的默认 `QueryClient`，不需要跨页面共享的缓存策略。
+ */
+const queryClient = new QueryClient();
 
 declare module '@tanstack/react-router' {
   interface Register {
@@ -28,6 +37,8 @@ installPushNavigationBridge((url) => {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <RouterProvider router={router} />
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>
   </React.StrictMode>,
 );

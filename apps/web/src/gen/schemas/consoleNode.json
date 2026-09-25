@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "properties": {
+    "id": { "type": "string" },
+    "index": { "type": ["integer", "null"] },
+    "url": { "type": ["string", "null"] },
+    "state": {
+      "type": "string",
+      "enum": ["online", "going_offline", "offline", "unknown"]
+    },
+    "dockerState": { "type": ["string", "null"] },
+    "offlineDeadline": { "type": ["number", "null"] }
+  },
+  "required": ["id", "index", "url", "state", "dockerState", "offlineDeadline"],
+  "x-readme-ref-name": "ConsoleNode"
+}

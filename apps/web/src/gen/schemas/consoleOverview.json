@@ -1,0 +1,59 @@
+{
+  "type": "object",
+  "properties": {
+    "controllable": { "type": "boolean" },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "index": { "type": ["integer", "null"] },
+          "url": { "type": ["string", "null"] },
+          "state": {
+            "type": "string",
+            "enum": ["online", "going_offline", "offline", "unknown"]
+          },
+          "dockerState": { "type": ["string", "null"] },
+          "offlineDeadline": { "type": ["number", "null"] }
+        },
+        "required": [
+          "id",
+          "index",
+          "url",
+          "state",
+          "dockerState",
+          "offlineDeadline"
+        ],
+        "x-readme-ref-name": "ConsoleNode"
+      }
+    },
+    "conversations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "ownerEmail": { "type": "string" },
+          "holder": { "type": "string" },
+          "heartbeatAt": { "type": "number" },
+          "stale": { "type": "boolean" }
+        },
+        "required": [
+          "id",
+          "title",
+          "ownerEmail",
+          "holder",
+          "heartbeatAt",
+          "stale"
+        ],
+        "x-readme-ref-name": "ConsoleConversation"
+      }
+    },
+    "now": { "type": "number" },
+    "opsError": { "type": "string" }
+  },
+  "required": ["controllable", "nodes", "conversations", "now"],
+  "x-readme-ref-name": "ConsoleOverview"
+}

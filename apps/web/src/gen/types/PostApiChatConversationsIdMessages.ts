@@ -44,6 +44,11 @@ export type PostApiChatConversationsIdMessages500 = ApiError;
  */
 export type PostApiChatConversationsIdMessages503 = ApiError;
 
+/**
+ * @description Forwarded to the holder, but it did not answer in time — the message may or may not have been accepted. Check the conversation before resending
+ */
+export type PostApiChatConversationsIdMessages504 = ApiError;
+
 export type PostApiChatConversationsIdMessagesMutationRequest =
   PostChatMessageInput;
 
@@ -59,5 +64,6 @@ export type PostApiChatConversationsIdMessagesMutation = {
     | PostApiChatConversationsIdMessages404
     | PostApiChatConversationsIdMessages409
     | PostApiChatConversationsIdMessages500
-    | PostApiChatConversationsIdMessages503;
+    | PostApiChatConversationsIdMessages503
+    | PostApiChatConversationsIdMessages504;
 };

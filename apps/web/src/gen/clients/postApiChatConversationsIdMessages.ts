@@ -13,6 +13,7 @@ import type {
   PostApiChatConversationsIdMessages409,
   PostApiChatConversationsIdMessages500,
   PostApiChatConversationsIdMessages503,
+  PostApiChatConversationsIdMessages504,
 } from '../types/PostApiChatConversationsIdMessages.ts';
 import type {
   Client,
@@ -53,6 +54,7 @@ export async function postApiChatConversationsIdMessages(
       | PostApiChatConversationsIdMessages409
       | PostApiChatConversationsIdMessages500
       | PostApiChatConversationsIdMessages503
+      | PostApiChatConversationsIdMessages504
     >,
     PostApiChatConversationsIdMessagesMutationRequest
   >({

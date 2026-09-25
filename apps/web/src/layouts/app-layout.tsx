@@ -108,6 +108,14 @@ export function AppLayout({ children }: { children: ReactNode }) {
             >
               Settings
             </Link>
+            {/* [集群控制台](../../../../docs/terms.md)：demo 项目不设管理员，登录了就有入口
+                （docs/host/node/features/cluster-console.md §2）。 */}
+            <Link
+              to="/console"
+              className="text-muted-foreground hover:text-foreground [&.active]:text-foreground transition-colors"
+            >
+              集群控制台
+            </Link>
           </nav>
           <div className="flex items-center gap-2 sm:gap-3">
             {session?.user && (

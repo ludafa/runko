@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "ok": { "type": "boolean", "enum": [true] },
+    "offlineDeadline": { "type": "number" }
+  },
+  "required": ["ok", "offlineDeadline"],
+  "x-readme-ref-name": "ConsoleOfflineAck"
+}

@@ -15,6 +15,20 @@ export type {
 export type { ChatMessageFrame } from './types/ChatMessageFrame.ts';
 export type { ChatQueueFrame } from './types/ChatQueueFrame.ts';
 export type { ChatTurnStateFrame } from './types/ChatTurnStateFrame.ts';
+export type { ConsoleConversation } from './types/ConsoleConversation.ts';
+export type {
+  ConsoleNode,
+  ConsoleNodeStateEnumKey,
+} from './types/ConsoleNode.ts';
+export type {
+  ConsoleOfflineAck,
+  ConsoleOfflineAckOkEnumKey,
+} from './types/ConsoleOfflineAck.ts';
+export type {
+  ConsoleOnlineAck,
+  ConsoleOnlineAckOkEnumKey,
+} from './types/ConsoleOnlineAck.ts';
+export type { ConsoleOverview } from './types/ConsoleOverview.ts';
 export type {
   Conversation,
   ConversationProviderEnumKey,
@@ -97,6 +111,12 @@ export type {
   GetApiChatConversationsIdTurnsTurnTelemetryQueryResponse,
 } from './types/GetApiChatConversationsIdTurnsTurnTelemetry.ts';
 export type {
+  GetApiConsoleOverview200,
+  GetApiConsoleOverview401,
+  GetApiConsoleOverviewQuery,
+  GetApiConsoleOverviewQueryResponse,
+} from './types/GetApiConsoleOverview.ts';
+export type {
   GetApiNotes200,
   GetApiNotes401,
   GetApiNotesQuery,
@@ -143,6 +163,7 @@ export type {
   PostApiChatConversationsIdMessages409,
   PostApiChatConversationsIdMessages500,
   PostApiChatConversationsIdMessages503,
+  PostApiChatConversationsIdMessages504,
   PostApiChatConversationsIdMessagesMutation,
   PostApiChatConversationsIdMessagesMutationRequest,
   PostApiChatConversationsIdMessagesMutationResponse,
@@ -166,6 +187,26 @@ export type {
   PostApiChatConversationsIdQuestionsCallidMutationResponse,
   PostApiChatConversationsIdQuestionsCallidPathParams,
 } from './types/PostApiChatConversationsIdQuestionsCallid.ts';
+export type {
+  PostApiConsoleNodesIdOffline202,
+  PostApiConsoleNodesIdOffline401,
+  PostApiConsoleNodesIdOffline404,
+  PostApiConsoleNodesIdOffline409,
+  PostApiConsoleNodesIdOffline502,
+  PostApiConsoleNodesIdOfflineMutation,
+  PostApiConsoleNodesIdOfflineMutationResponse,
+  PostApiConsoleNodesIdOfflinePathParams,
+} from './types/PostApiConsoleNodesIdOffline.ts';
+export type {
+  PostApiConsoleNodesIdOnline202,
+  PostApiConsoleNodesIdOnline401,
+  PostApiConsoleNodesIdOnline404,
+  PostApiConsoleNodesIdOnline409,
+  PostApiConsoleNodesIdOnline502,
+  PostApiConsoleNodesIdOnlineMutation,
+  PostApiConsoleNodesIdOnlineMutationResponse,
+  PostApiConsoleNodesIdOnlinePathParams,
+} from './types/PostApiConsoleNodesIdOnline.ts';
 export type {
   PostApiNotes201,
   PostApiNotes401,
@@ -226,6 +267,7 @@ export { getApiChatConversationsIdActivity } from './clients/getApiChatConversat
 export { getApiChatConversationsIdMessages } from './clients/getApiChatConversationsIdMessages.ts';
 export { getApiChatConversationsIdStream } from './clients/getApiChatConversationsIdStream.ts';
 export { getApiChatConversationsIdTurnsTurnTelemetry } from './clients/getApiChatConversationsIdTurnsTurnTelemetry.ts';
+export { getApiConsoleOverview } from './clients/getApiConsoleOverview.ts';
 export { getApiNotes } from './clients/getApiNotes.ts';
 export { getApiPushConfig } from './clients/getApiPushConfig.ts';
 export { postApiChatConversations } from './clients/postApiChatConversations.ts';
@@ -234,6 +276,8 @@ export { postApiChatConversationsIdApprovalsCallid } from './clients/postApiChat
 export { postApiChatConversationsIdMessages } from './clients/postApiChatConversationsIdMessages.ts';
 export { postApiChatConversationsIdPresence } from './clients/postApiChatConversationsIdPresence.ts';
 export { postApiChatConversationsIdQuestionsCallid } from './clients/postApiChatConversationsIdQuestionsCallid.ts';
+export { postApiConsoleNodesIdOffline } from './clients/postApiConsoleNodesIdOffline.ts';
+export { postApiConsoleNodesIdOnline } from './clients/postApiConsoleNodesIdOnline.ts';
 export { postApiNotes } from './clients/postApiNotes.ts';
 export { postApiPushSubscriptions } from './clients/postApiPushSubscriptions.ts';
 export { postApiPushTest } from './clients/postApiPushTest.ts';
@@ -243,6 +287,9 @@ export { approvalAckOkEnum } from './types/ApprovalAck.ts';
 export { chatConfigDefaultProviderEnum } from './types/ChatConfig.ts';
 export { chatConfigModelEnum } from './types/ChatConfig.ts';
 export { chatConfigProvidersEnum } from './types/ChatConfig.ts';
+export { consoleNodeStateEnum } from './types/ConsoleNode.ts';
+export { consoleOfflineAckOkEnum } from './types/ConsoleOfflineAck.ts';
+export { consoleOnlineAckOkEnum } from './types/ConsoleOnlineAck.ts';
 export { conversationProviderEnum } from './types/Conversation.ts';
 export { conversationStatusEnum } from './types/Conversation.ts';
 export { createConversationInputProviderEnum } from './types/CreateConversationInput.ts';
@@ -260,6 +307,11 @@ export { chatConfigSchema } from './zod/chatConfigSchema.ts';
 export { chatMessageFrameSchema } from './zod/chatMessageFrameSchema.ts';
 export { chatQueueFrameSchema } from './zod/chatQueueFrameSchema.ts';
 export { chatTurnStateFrameSchema } from './zod/chatTurnStateFrameSchema.ts';
+export { consoleConversationSchema } from './zod/consoleConversationSchema.ts';
+export { consoleNodeSchema } from './zod/consoleNodeSchema.ts';
+export { consoleOfflineAckSchema } from './zod/consoleOfflineAckSchema.ts';
+export { consoleOnlineAckSchema } from './zod/consoleOnlineAckSchema.ts';
+export { consoleOverviewSchema } from './zod/consoleOverviewSchema.ts';
 export { conversationMessagesListSchema } from './zod/conversationMessagesListSchema.ts';
 export { conversationSchema } from './zod/conversationSchema.ts';
 export { createConversationInputSchema } from './zod/createConversationInputSchema.ts';
@@ -326,6 +378,11 @@ export {
   getApiChatConversationsQueryResponseSchema,
 } from './zod/getApiChatConversationsSchema.ts';
 export {
+  getApiConsoleOverview200Schema,
+  getApiConsoleOverview401Schema,
+  getApiConsoleOverviewQueryResponseSchema,
+} from './zod/getApiConsoleOverviewSchema.ts';
+export {
   getApiNotes200Schema,
   getApiNotes401Schema,
   getApiNotesQueryResponseSchema,
@@ -360,6 +417,7 @@ export {
   postApiChatConversationsIdMessages409Schema,
   postApiChatConversationsIdMessages500Schema,
   postApiChatConversationsIdMessages503Schema,
+  postApiChatConversationsIdMessages504Schema,
   postApiChatConversationsIdMessagesMutationRequestSchema,
   postApiChatConversationsIdMessagesMutationResponseSchema,
   postApiChatConversationsIdMessagesPathParamsSchema,
@@ -387,6 +445,24 @@ export {
   postApiChatConversationsMutationRequestSchema,
   postApiChatConversationsMutationResponseSchema,
 } from './zod/postApiChatConversationsSchema.ts';
+export {
+  postApiConsoleNodesIdOffline202Schema,
+  postApiConsoleNodesIdOffline401Schema,
+  postApiConsoleNodesIdOffline404Schema,
+  postApiConsoleNodesIdOffline409Schema,
+  postApiConsoleNodesIdOffline502Schema,
+  postApiConsoleNodesIdOfflineMutationResponseSchema,
+  postApiConsoleNodesIdOfflinePathParamsSchema,
+} from './zod/postApiConsoleNodesIdOfflineSchema.ts';
+export {
+  postApiConsoleNodesIdOnline202Schema,
+  postApiConsoleNodesIdOnline401Schema,
+  postApiConsoleNodesIdOnline404Schema,
+  postApiConsoleNodesIdOnline409Schema,
+  postApiConsoleNodesIdOnline502Schema,
+  postApiConsoleNodesIdOnlineMutationResponseSchema,
+  postApiConsoleNodesIdOnlinePathParamsSchema,
+} from './zod/postApiConsoleNodesIdOnlineSchema.ts';
 export {
   postApiNotes201Schema,
   postApiNotes401Schema,

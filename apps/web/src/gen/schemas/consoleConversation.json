@@ -1,0 +1,13 @@
+{
+  "type": "object",
+  "properties": {
+    "id": { "type": "string" },
+    "title": { "type": "string" },
+    "ownerEmail": { "type": "string" },
+    "holder": { "type": "string" },
+    "heartbeatAt": { "type": "number" },
+    "stale": { "type": "boolean" }
+  },
+  "required": ["id", "title", "ownerEmail", "holder", "heartbeatAt", "stale"],
+  "x-readme-ref-name": "ConsoleConversation"
+}

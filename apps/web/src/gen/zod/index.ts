@@ -7,6 +7,11 @@ export { chatConfigSchema } from './chatConfigSchema.ts';
 export { chatMessageFrameSchema } from './chatMessageFrameSchema.ts';
 export { chatQueueFrameSchema } from './chatQueueFrameSchema.ts';
 export { chatTurnStateFrameSchema } from './chatTurnStateFrameSchema.ts';
+export { consoleConversationSchema } from './consoleConversationSchema.ts';
+export { consoleNodeSchema } from './consoleNodeSchema.ts';
+export { consoleOfflineAckSchema } from './consoleOfflineAckSchema.ts';
+export { consoleOnlineAckSchema } from './consoleOnlineAckSchema.ts';
+export { consoleOverviewSchema } from './consoleOverviewSchema.ts';
 export { conversationMessagesListSchema } from './conversationMessagesListSchema.ts';
 export { conversationSchema } from './conversationSchema.ts';
 export { createConversationInputSchema } from './createConversationInputSchema.ts';
@@ -73,6 +78,11 @@ export {
   getApiChatConversationsQueryResponseSchema,
 } from './getApiChatConversationsSchema.ts';
 export {
+  getApiConsoleOverview200Schema,
+  getApiConsoleOverview401Schema,
+  getApiConsoleOverviewQueryResponseSchema,
+} from './getApiConsoleOverviewSchema.ts';
+export {
   getApiNotes200Schema,
   getApiNotes401Schema,
   getApiNotesQueryResponseSchema,
@@ -107,6 +117,7 @@ export {
   postApiChatConversationsIdMessages409Schema,
   postApiChatConversationsIdMessages500Schema,
   postApiChatConversationsIdMessages503Schema,
+  postApiChatConversationsIdMessages504Schema,
   postApiChatConversationsIdMessagesMutationRequestSchema,
   postApiChatConversationsIdMessagesMutationResponseSchema,
   postApiChatConversationsIdMessagesPathParamsSchema,
@@ -134,6 +145,24 @@ export {
   postApiChatConversationsMutationRequestSchema,
   postApiChatConversationsMutationResponseSchema,
 } from './postApiChatConversationsSchema.ts';
+export {
+  postApiConsoleNodesIdOffline202Schema,
+  postApiConsoleNodesIdOffline401Schema,
+  postApiConsoleNodesIdOffline404Schema,
+  postApiConsoleNodesIdOffline409Schema,
+  postApiConsoleNodesIdOffline502Schema,
+  postApiConsoleNodesIdOfflineMutationResponseSchema,
+  postApiConsoleNodesIdOfflinePathParamsSchema,
+} from './postApiConsoleNodesIdOfflineSchema.ts';
+export {
+  postApiConsoleNodesIdOnline202Schema,
+  postApiConsoleNodesIdOnline401Schema,
+  postApiConsoleNodesIdOnline404Schema,
+  postApiConsoleNodesIdOnline409Schema,
+  postApiConsoleNodesIdOnline502Schema,
+  postApiConsoleNodesIdOnlineMutationResponseSchema,
+  postApiConsoleNodesIdOnlinePathParamsSchema,
+} from './postApiConsoleNodesIdOnlineSchema.ts';
 export {
   postApiNotes201Schema,
   postApiNotes401Schema,

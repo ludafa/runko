@@ -12,6 +12,17 @@ export type {
 export type { ChatMessageFrame } from './ChatMessageFrame.ts';
 export type { ChatQueueFrame } from './ChatQueueFrame.ts';
 export type { ChatTurnStateFrame } from './ChatTurnStateFrame.ts';
+export type { ConsoleConversation } from './ConsoleConversation.ts';
+export type { ConsoleNode, ConsoleNodeStateEnumKey } from './ConsoleNode.ts';
+export type {
+  ConsoleOfflineAck,
+  ConsoleOfflineAckOkEnumKey,
+} from './ConsoleOfflineAck.ts';
+export type {
+  ConsoleOnlineAck,
+  ConsoleOnlineAckOkEnumKey,
+} from './ConsoleOnlineAck.ts';
+export type { ConsoleOverview } from './ConsoleOverview.ts';
 export type {
   Conversation,
   ConversationProviderEnumKey,
@@ -94,6 +105,12 @@ export type {
   GetApiChatConversationsIdTurnsTurnTelemetryQueryResponse,
 } from './GetApiChatConversationsIdTurnsTurnTelemetry.ts';
 export type {
+  GetApiConsoleOverview200,
+  GetApiConsoleOverview401,
+  GetApiConsoleOverviewQuery,
+  GetApiConsoleOverviewQueryResponse,
+} from './GetApiConsoleOverview.ts';
+export type {
   GetApiNotes200,
   GetApiNotes401,
   GetApiNotesQuery,
@@ -140,6 +157,7 @@ export type {
   PostApiChatConversationsIdMessages409,
   PostApiChatConversationsIdMessages500,
   PostApiChatConversationsIdMessages503,
+  PostApiChatConversationsIdMessages504,
   PostApiChatConversationsIdMessagesMutation,
   PostApiChatConversationsIdMessagesMutationRequest,
   PostApiChatConversationsIdMessagesMutationResponse,
@@ -163,6 +181,26 @@ export type {
   PostApiChatConversationsIdQuestionsCallidMutationResponse,
   PostApiChatConversationsIdQuestionsCallidPathParams,
 } from './PostApiChatConversationsIdQuestionsCallid.ts';
+export type {
+  PostApiConsoleNodesIdOffline202,
+  PostApiConsoleNodesIdOffline401,
+  PostApiConsoleNodesIdOffline404,
+  PostApiConsoleNodesIdOffline409,
+  PostApiConsoleNodesIdOffline502,
+  PostApiConsoleNodesIdOfflineMutation,
+  PostApiConsoleNodesIdOfflineMutationResponse,
+  PostApiConsoleNodesIdOfflinePathParams,
+} from './PostApiConsoleNodesIdOffline.ts';
+export type {
+  PostApiConsoleNodesIdOnline202,
+  PostApiConsoleNodesIdOnline401,
+  PostApiConsoleNodesIdOnline404,
+  PostApiConsoleNodesIdOnline409,
+  PostApiConsoleNodesIdOnline502,
+  PostApiConsoleNodesIdOnlineMutation,
+  PostApiConsoleNodesIdOnlineMutationResponse,
+  PostApiConsoleNodesIdOnlinePathParams,
+} from './PostApiConsoleNodesIdOnline.ts';
 export type {
   PostApiNotes201,
   PostApiNotes401,
@@ -219,6 +257,9 @@ export { approvalAckOkEnum } from './ApprovalAck.ts';
 export { chatConfigDefaultProviderEnum } from './ChatConfig.ts';
 export { chatConfigModelEnum } from './ChatConfig.ts';
 export { chatConfigProvidersEnum } from './ChatConfig.ts';
+export { consoleNodeStateEnum } from './ConsoleNode.ts';
+export { consoleOfflineAckOkEnum } from './ConsoleOfflineAck.ts';
+export { consoleOnlineAckOkEnum } from './ConsoleOnlineAck.ts';
 export { conversationProviderEnum } from './Conversation.ts';
 export { conversationStatusEnum } from './Conversation.ts';
 export { createConversationInputProviderEnum } from './CreateConversationInput.ts';
