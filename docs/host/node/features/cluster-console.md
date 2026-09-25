@@ -11,6 +11,8 @@ related: ["host/node/tech/cluster-console.md", "host/node/plans/cluster-console.
 # 集群控制台 — 功能手册
 
 > 术语见 [术语表](../../../terms.md)（[集群控制台](../../../terms.md)、[节点下线](../../../terms.md)、[运维容器](../../../terms.md)）。
+>
+> **⚠️ 下线时「手上的活尽量干完」「下线期间给这个会话发新消息会被拒」这两条是过渡行为**（2026-09-25）：将改为把任务立刻交给别的节点接着跑，下线期间发消息照常有效，见[交权与任务迁移 · 功能](../../../logic/orchestration/features/handover.md)。
 > 技术方案见 [cluster-console · 技术](../tech/cluster-console.md)，施工见 [cluster-console · 施工](../plans/cluster-console.md)。
 > 建在[集群实验环境](./cluster-lab.md)之上。
 

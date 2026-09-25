@@ -12,6 +12,8 @@ related: ["host/node/features/cluster-console.md", "host/node/plans/cluster-cons
 
 > 术语见 [术语表](../../../terms.md)。要做什么见[功能手册](../features/cluster-console.md)；拆单见[施工](../plans/cluster-console.md)。
 > 建在[集群实验环境 · 技术](./cluster-lab.md)与[优雅关闭 · 技术](../../../logic/orchestration/tech/graceful-shutdown.md)之上。
+>
+> **⚠️ 本文的「等待窗口」与「闸门放行转发来的请求」是过渡方案**（2026-09-25）：以[交权与任务迁移 · 技术方案](../../../logic/orchestration/tech/handover.md)为准——节点下线时几百毫秒内把对话交给别的节点，模型输出重来、工具留在旧节点跑完。逐项处置（保留哪些、去掉哪些）见那份文档 §3.3。运维容器、控制台、`docker stop -t 120` 不受影响。
 
 ## 1. 长什么样
 

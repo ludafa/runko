@@ -12,7 +12,8 @@ related: ["logic/orchestration/features/handover.md", "logic/orchestration/tech/
 # 交权与任务迁移 — 施工进展
 
 > 相关：[功能](../features/handover.md) · [技术方案](../tech/handover.md)。
-> 前置：[唯一 demo · 施工](../../../ingress/plans/unified-demo.md) 的 U1–U5（node-server 换上官方租约、转发与 Postgres 之后，才有多副本可以迁移）。
+> 前置：[唯一 demo · 施工](../../../ingress/plans/unified-demo.md) 的 U1–U5（✅ 2026-09-22 已完成）。
+> 与现有实现的关系：[集群控制台](../../../host/node/plans/cluster-console.md) 已落地的「节点下线 + 等待窗口」以本方案为准逐项处置，见[技术方案 §3.3](../tech/handover.md)。
 > 术语见 [术语表](../../../terms.md)。
 
 ## 当前状态
@@ -28,9 +29,10 @@ related: ["logic/orchestration/features/handover.md", "logic/orchestration/tech/
 | H4 | 兜底：定时回捞 | ⬜ |
 | H5 | 工具最长执行时间 | ⬜ |
 | H6 | 接入层（node-server + web）：请接手端点、退出条件、请重连帧、快速重连 | ⬜ |
-| H7 | 多副本验证环境加发布场景，按功能手册 §5 验收 | ⬜ |
+| H7 | 集群实验环境加发布场景，按功能手册 §5 验收 | ⬜ |
+| H8 | 收掉过渡方案：去掉等待窗口与闸门的转发白名单，改写集群控制台三份文档 | ⬜ |
 
-**顺序**：H0 随时可做。H1、H2 互不依赖，可以并行。H3 依赖 H1、H2。H4、H5 依赖 H3。H6 依赖 H3 与唯一 demo 的 U5。H7 最后。
+**顺序**：H0 随时可做。H1、H2 互不依赖，可以并行。H3 依赖 H1、H2。H4、H5 依赖 H3。H6 依赖 H3。H7 在 H6 之后。H8 最后——等按阶段交权在集群里验收通过，再删等待窗口，中间不留空档。
 
 ## 待确认
 
@@ -46,11 +48,12 @@ related: ["logic/orchestration/features/handover.md", "logic/orchestration/tech/
 
 ### H0 · 顺手修掉的小缺口
 
-与主线无关，可以先做（技术方案 §3.2 的 G4、G5、G6）：
+与主线无关，可以先做（技术方案 §3.2 的 G4、G5）：
 
 - web 的 `turn-marker.tsx` 文案常量对齐 `@runko/agent` 的 `ABORT_REASON_SHUTDOWN`，并补一条防漂移的测试。
 - 中止路径也把还没交给模型的插话转进待发队列（今天只有挂起时转）。
-- node-server 的 `index.ts` 加退出兜底：`server.close()` 之后若干秒强制断开所有连接并退出。
+
+原来这里还有一条「进程退不掉」的兜底（G6），main 上的节点下线已经基本修掉，不再单列。
 
 ### H1 · core：交权信号
 
@@ -93,11 +96,19 @@ related: ["logic/orchestration/features/handover.md", "logic/orchestration/tech/
 
 ### H7 · 验证环境与验收
 
-- 多副本验证环境加两个场景：先启再停滚动三节点、先停再启分批。发布期间持续有会话处在五个阶段中的某一个。
+- [集群实验环境](../../../host/node/features/cluster-lab.md)加两个场景：先启再停滚动三节点、先停再启分批。发布期间持续有会话处在五个阶段中的某一个。
+- 闸门不再放行转发来的请求（见 H8），这样验证环境才能复现「入站随 SIGTERM 一起关」（技术方案 F1）。
 - 断言按功能手册 §5 的七条，一律落在账本、租约表、收尾记录上。
+
+### H8 · 收掉过渡方案
+
+- `@runko/agent`：删掉 `finishWindowMs`（与 `ShutdownResult.finished`）——删参数是破坏性变更，版本级别要你拍板；也可以先标废弃、下个大版本再删。
+- node-server：`offline.ts` 去掉转发白名单；`index.ts` 去掉 `SHUTDOWN_FINISH_WINDOW_MS`；集群 compose 去掉对应配置。
+- 文档：集群控制台三份文档里的等待窗口改写成交权；术语表删掉「等待窗口」词条（或挪进同义词列标退役）。
 
 ## 变更记录
 
 | 日期 | 内容 |
 |---|---|
+| 2026-09-25 | 合入 main 最新代码后复核：唯一 demo 已落地（G7 消失），集群控制台带来了「节点下线 + 等待窗口」（G6 基本修掉，G1 部分缓解），新发现 G9–G11。定：以本方案为准，等待窗口过渡保留、H8 收掉；术语「下线中」并入已有的「节点下线」。 |
 | 2026-09-25 | 立项。起因：想让 node-server 支持滚动发布，分析后发现框架只做到「如实交代中断」，做不到「任务搬走接着跑」；并用临时测试确认了三个「有活没人推」的缺口。讨论中先后推翻了九种做法（技术方案附录 A），最关键的一条来自实际踩过的坑：mesh 的入站入口跟着 SIGTERM 一起下线，所以旧节点不能在收尾期间继续持有对话。 |
