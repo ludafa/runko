@@ -25,14 +25,15 @@ related: ["logic/orchestration/features/handover.md", "logic/orchestration/tech/
 | H0 | 顺手修掉的小缺口（与主线无关，可先做） | ⬜ |
 | H1 | core：「交权」信号，与「中止」分开 | ⬜ |
 | H2 | 归属仲裁：租约预留 + 节点登记表（四档库 + 一致性套件） | ⬜ |
-| H3 | 轮编排：按阶段交权、工具收尾、接手、待接手 | ⬜ |
+| H3 | 轮编排：按阶段交权、工具收尾、接手、待接手；**同时删掉等待窗口** | ⬜ |
 | H4 | 兜底：定时回捞 | ⬜ |
 | H5 | 工具最长执行时间 | ⬜ |
-| H6 | 接入层（node-server + web）：请接手端点、退出条件、请重连帧、快速重连 | ⬜ |
-| H7 | 集群实验环境加发布场景，按功能手册 §5 验收 | ⬜ |
-| H8 | 收掉过渡方案：去掉等待窗口与闸门的转发白名单，改写集群控制台三份文档 | ⬜ |
+| H6 | 接入层（node-server + web）：请接手端点、退出条件、请重连帧、快速重连；**同时删掉等待窗口配置与闸门的转发白名单** | ⬜ |
+| H7 | 集群实验环境加发布场景，按功能手册 §5 验收；改写集群控制台的三份文档 | ⬜ |
 
-**顺序**：H0 随时可做。H1、H2 互不依赖，可以并行。H3 依赖 H1、H2。H4、H5 依赖 H3。H6 依赖 H3。H7 在 H6 之后。H8 最后——等按阶段交权在集群里验收通过，再删等待窗口，中间不留空档。
+**顺序**：H0 随时可做。H1、H2 互不依赖，可以并行。H3 依赖 H1、H2。H4、H5 依赖 H3。H6 依赖 H3。H7 在 H6 之后。
+
+**等待窗口不单独留一个阶段**：它在交权落地的同一次改造里删掉（H3 删框架里的，H6 删 node-server 里的），不先标废弃，也不在交权之后另找时间收尾。H3 到 H6 之间 `main` 上不能出现「等待窗口删了、交权还没接上」的状态，所以这几个阶段在一个分支上做完、一起合入。
 
 ## 待确认
 
@@ -42,7 +43,7 @@ related: ["logic/orchestration/features/handover.md", "logic/orchestration/tech/
 | 2 | **发布序号从哪来？** | 由宿主通过环境变量注入（比如 `RUNKO_RELEASE_SEQ`），框架只比大小，不关心它怎么生成。CI 的流水线编号就够用 |
 | 3 | **预留有效期** | 缺省 10 秒，可配 |
 | 4 | **工具上限超时后怎么收尾** | 杀掉工具，结果写成「超过最长执行时间，已终止」，交给模型。和下线无关，平时也这样 |
-| 5 | **版本级别** | `@runko/core` minor（新增交权信号）；`@runko/agent` **major**（H8 直接删掉 `finishWindowMs` 与 `ShutdownResult.finished`，✅ 2026-09-25 定：不经过废弃期）；其余部分是新增（`ShutdownResult` 与收尾状态、`Arbitration` 接口的新方法）；`persist-*` minor；`conformance` minor。**`Arbitration` 新增方法对自己实现仲裁的宿主算不算破坏性，需要你拍板** |
+| 5 | **版本级别** | `@runko/core` minor（新增交权信号）；`@runko/agent` **major**（H3 直接删掉 `finishWindowMs` 与 `ShutdownResult.finished`，✅ 2026-09-25 定：在交权这次改造里一并删，不经过废弃期）；其余部分是新增（`ShutdownResult` 与收尾状态、`Arbitration` 接口的新方法）；`persist-*` minor；`conformance` minor。**`Arbitration` 新增方法对自己实现仲裁的宿主算不算破坏性，需要你拍板** |
 
 ## 各阶段
 
@@ -74,6 +75,7 @@ related: ["logic/orchestration/features/handover.md", "logic/orchestration/tech/
 - 工具收尾：登记记录、跑完写结果、查停止标记、截止时间到了由持有者写「未知」。
 - 接手入口 `runtime.takeOver(conversationIds)`：逐个抢归属，按账本末尾决定接下来做什么（技术方案 §7.5）。
 - 一个都挑不到时标待接手；`recover()` 同时扫待接手。
+- **删掉等待窗口**：`createAgentRuntime` 的 `shutdown.finishWindowMs`、`shutdown()` 的同名参数、`ShutdownResult.finished`，以及它们的测试（`shutdown-finish-window.test.ts`）。不经过废弃期；changeset 标 **major**，说明里写清「节点下线改用按阶段交权，不再有等待窗口」。
 - 验收：五个阶段各一条用例；附录 B 的 P1–P3 改写成正式用例并跑绿。
 
 ### H4 · 定时回捞
@@ -92,24 +94,20 @@ related: ["logic/orchestration/features/handover.md", "logic/orchestration/tech/
 - node-server：`POST /internal/takeover`（带 `RUNKO_PEER_TOKEN`）；登记本节点；SIGTERM 处理改成调新的 `shutdown()`；退出条件 = 没有工具在跑且没有连接，加硬上限；启动时先监听、再扫待接手。
 - 直播流加请重连帧；非本节点持有的转发流在 SIGTERM 后直接关。
 - web：收到请重连帧走快速重连（200～300 毫秒一次），重连后整体替换草稿。
+- **删掉等待窗口的接线**：`index.ts` 的 `SHUTDOWN_FINISH_WINDOW_MS`、集群 compose 里对应的配置；`offline.ts` 的闸门不再放行转发来的请求（交接几百毫秒就完成，之后没有请求需要转给旧节点）。
 - 验收：node-server 与 web 各自的测试跑绿；openapi 与前端 client 重新生成。
 
 ### H7 · 验证环境与验收
 
 - [集群实验环境](../../../host/node/features/cluster-lab.md)加两个场景：先启再停滚动三节点、先停再启分批。发布期间持续有会话处在五个阶段中的某一个。
-- 闸门不再放行转发来的请求（见 H8），这样验证环境才能复现「入站随 SIGTERM 一起关」（技术方案 F1）。
+- 闸门不再放行转发来的请求（H6 已改），所以验证环境能复现「入站随 SIGTERM 一起关」（技术方案 F1）。
 - 断言按功能手册 §5 的七条，一律落在账本、租约表、收尾记录上。
-
-### H8 · 收掉过渡方案
-
-- `@runko/agent`：**直接删掉** `finishWindowMs`（`createAgentRuntime` 的 `shutdown.finishWindowMs` 与 `shutdown()` 的同名参数）以及 `ShutdownResult.finished`，不经过废弃期（2026-09-25 定）。这是破坏性变更，changeset 标 **major**，说明里写清「节点下线改用按阶段交权，不再有等待窗口」。
-- node-server：`offline.ts` 去掉转发白名单；`index.ts` 去掉 `SHUTDOWN_FINISH_WINDOW_MS`；集群 compose 去掉对应配置。
-- 文档：集群控制台三份文档里的等待窗口改写成交权；术语表删掉「等待窗口」词条。
+- 文档：[集群控制台](../../../host/node/tech/cluster-console.md)三份文档里的等待窗口改写成交权；术语表删掉「等待窗口」词条。
 
 ## 变更记录
 
 | 日期 | 内容 |
 |---|---|
-| 2026-09-25 | 定：H8 直接删除 `finishWindowMs`，不先标废弃；`@runko/agent` 随之 major。 |
+| 2026-09-25 | 定：等待窗口在交权落地的这次改造里直接删除（H3 删框架、H6 删 node-server），不先标废弃、不单独留阶段；原来的 H8 拆进 H3、H6、H7。`@runko/agent` 随之 major。 |
 | 2026-09-25 | 合入 main 最新代码后复核：唯一 demo 已落地（G7 消失），集群控制台带来了「节点下线 + 等待窗口」（G6 基本修掉，G1 部分缓解），新发现 G9–G11。定：以本方案为准，等待窗口过渡保留、H8 收掉；术语「下线中」并入已有的「节点下线」。 |
 | 2026-09-25 | 立项。起因：想让 node-server 支持滚动发布，分析后发现框架只做到「如实交代中断」，做不到「任务搬走接着跑」；并用临时测试确认了三个「有活没人推」的缺口。讨论中先后推翻了九种做法（技术方案附录 A），最关键的一条来自实际踩过的坑：mesh 的入站入口跟着 SIGTERM 一起下线，所以旧节点不能在收尾期间继续持有对话。 |
