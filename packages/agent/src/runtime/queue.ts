@@ -209,6 +209,7 @@ async function runToCompletion(ctx: RuntimeContext, turn: ActiveTurn): Promise<v
   }
 
   // ② 先广播「没有轮在跑了」，再删登记——订阅者靠这一帧收线。
+  turn.endStatus = status;
   turn.done = true;
   await step("publish-inactive", () => {
     publish(ctx, conversationId, { kind: "activity", active: false });

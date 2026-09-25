@@ -816,7 +816,7 @@ describe("交权（优雅关闭）", () => {
 
   it("空闲时关闭秒退", async () => {
     const { runtime } = setup();
-    await expect(runtime.shutdown({ graceMs: 1000 })).resolves.toEqual({ aborted: 0, suspended: 0, settled: true, pending: 0 });
+    await expect(runtime.shutdown({ graceMs: 1000 })).resolves.toEqual({ finished: 0, aborted: 0, suspended: 0, settled: true, pending: 0 });
   });
 });
 

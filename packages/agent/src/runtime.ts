@@ -51,6 +51,10 @@ const LOG_SCOPE = "agent:runtime";
 const DEFAULT_MEMORY_WINDOW: Duration = "5m";
 /** [交权](../../../docs/terms.md)宽限期：正在干活的轮，等多久还没收尾就不等了。 */
 const DEFAULT_SHUTDOWN_GRACE_MS = 15_000;
+/** [等待窗口](../../../docs/terms.md)缺省值：不等，立刻分流（等人的挂起、其余中止）。 */
+const DEFAULT_SHUTDOWN_FINISH_WINDOW_MS = 0;
+/** 等待窗口期间多久检查一次「有没有轮转入等人」，以便把它立刻挂起而不是占到窗口结束。 */
+const SHUTDOWN_FINISH_POLL_MS = 500;
 const DEFAULT_QUEUE_MAX = 10;
 /**
  * 跟着别的副本看直播时，没收到货就最多等这么久，然后回头问一次归属还在不在。
@@ -111,7 +115,16 @@ export interface AgentRuntimeOptions {
     /** 收到 `reportPresence` 时：`"extend"`（缺省）把窗口往后推一整个窗口；`"ignore"` 不理。 */
     onPresence?: "extend" | "ignore";
   };
-  shutdown?: { graceMs?: number };
+  shutdown?: {
+    /** [交权](../../../docs/terms.md)宽限期：中止之后等收尾的上限。缺省 15 秒。 */
+    graceMs?: number;
+    /**
+     * [等待窗口](../../../docs/terms.md)：干活的轮先自然跑完，最多等这么久再中止。缺省 `0` = 不等、立刻
+     * 分流（等人的挂起、其余中止）——本地开发用 `node --watch` 热重载也发 SIGTERM，
+     * 缺省值必须是「不等」，不然改一行代码就要卡住等几十秒。
+     */
+    finishWindowMs?: number;
+  };
 }
 
 export interface SubscribeOptions {
@@ -125,8 +138,10 @@ export interface SubscribeOptions {
 export interface ShutdownResult {
   /** 这次关闭中止了几个轮（含还在[起轮装配](../../../docs/terms.md)里的）。 */
   aborted: number;
-  /** 这次关闭[挂起](../../../docs/terms.md)了几个轮——关闭那一刻它们正在等人，挂起是无损的，人回来在任意节点接着干。 */
+  /** 这次关闭[挂起](../../../docs/terms.md)了几个轮——关闭那一刻或等待窗口期间它们在等人，挂起是无损的，人回来在任意节点接着干。 */
   suspended: number;
+  /** [等待窗口](../../../docs/terms.md)内正常完成（`completed`）的轮数；被用户停止、跑失败的不算。`finishWindowMs` 不传或为 `0` 时恒为 `0`。 */
+  finished: number;
   /** 是否全部收尾完毕。`false` = 撞了宽限期上限，还有轮没等到。 */
   settled: boolean;
   /** 撞超时时还剩几个没收尾。 */
@@ -166,7 +181,7 @@ export interface AgentRuntime {
   /** 启动扫描：给[孤儿轮](../../../docs/terms.md)补「已停止」收尾。只在进程启动、开始服务之前跑一次。 */
   recover(): Promise<RecoveryResult>;
   /** [交权](../../../docs/terms.md)：停掉在跑的轮并等它们收尾。**不退进程**——那是宿主的事。 */
-  shutdown(opts?: { graceMs?: number }): Promise<ShutdownResult>;
+  shutdown(opts?: { finishWindowMs?: number; graceMs?: number }): Promise<ShutdownResult>;
   /** 进程是否正在[优雅关闭](../../../docs/terms.md)（接入层据此转 503）。 */
   isShuttingDown(): boolean;
   /**
@@ -598,42 +613,81 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     },
 
     /**
-     * [交权](../../../docs/terms.md)。四步的顺序都是硬要求：
+     * [交权](../../../docs/terms.md)。五步的顺序都是硬要求：
      *
      * 1. **先置关闭闸门**，否则收尾期间[自动出队](../../../docs/terms.md)会源源不断起新轮，
      *    这个函数永远等不完。
      * 2. 快照当前全部活跃轮 + 各自的「收尾了」promise。
-     * 3. **正在等人的挂起，其余的中止。**
-     *    - 等人的：[挂起](../../../docs/terms.md)是无损的——那次调用原样留在账本里，人回来在
-     *      任意节点接着干。中止它反而会把人的待答项结成「拒绝」，白等一场。
-     *    - 其余的：中止，理由是 `ABORT_REASON_SHUTDOWN`——经 core 透传进收尾 metadata，界面
-     *      据此显示「服务重启，这一轮已中断」而不是「已停止」。
+     * 3. **等待窗口**（`finishWindowMs > 0` 才有）：等人的轮立刻[挂起](../../../docs/terms.md)——挂起是
+     *    无损的，那次调用原样留在账本里，人回来在任意节点接着干；干活的轮不动它，让它自然收尾。
+     *    窗口期间每 `SHUTDOWN_FINISH_POLL_MS` 再看一遍，中途转入等人的轮也挂起，不占到窗口结束；
+     *    全部收尾就提前结束窗口。
+     * 4. **窗口到点还没收尾的：等人的挂起，其余中止。** 中止理由是 `ABORT_REASON_SHUTDOWN`——
+     *    经 core 透传进收尾 metadata，界面据此显示「服务重启，这一轮已中断」而不是「已停止」。
+     *    `finishWindowMs` 缺省 `0` 时窗口长度是 0，这一步就是发生的唯一一步。
      *    **两种都不清队列**：服务重启不该吞掉用户排的消息。
-     * 4. 等齐或撞宽限期。撞了不抛错也不强制清理登记：那些轮成了[孤儿轮](../../../docs/terms.md)，
+     * 5. 等齐或撞宽限期。撞了不抛错也不强制清理登记：那些轮成了[孤儿轮](../../../docs/terms.md)，
      *    交给下次启动的 `recover()`——两道防线在这里接上。
      */
     async shutdown(opts) {
       const graceMs = opts?.graceMs ?? options.shutdown?.graceMs ?? DEFAULT_SHUTDOWN_GRACE_MS;
+      const finishWindowMs = opts?.finishWindowMs ?? options.shutdown?.finishWindowMs ?? DEFAULT_SHUTDOWN_FINISH_WINDOW_MS;
       shuttingDown = true;
 
       const snapshot = registry.snapshot();
       if (snapshot.length === 0) {
         logger.debug(LOG_SCOPE, "shutdown: no active turns", {});
-        return { aborted: 0, suspended: 0, settled: true, pending: 0 };
+        return { aborted: 0, suspended: 0, finished: 0, settled: true, pending: 0 };
       }
-      logger.info(LOG_SCOPE, "shutdown: settling active turns", { count: snapshot.length, graceMs });
+      logger.info(LOG_SCOPE, "shutdown: settling active turns", { count: snapshot.length, finishWindowMs, graceMs });
 
       const settledPromises = snapshot.map((turn) => turn.settled);
       let aborted = 0;
       let suspended = 0;
-      for (const turn of snapshot) {
-        if (turn.pendingReviews.size + turn.pendingQuestions.size > 0) {
-          human.suspendTurn(turn, "handover");
-          suspended += 1;
-        } else {
-          await abortTurn(turn, ABORT_REASON_SHUTDOWN);
-          aborted += 1;
+
+      // 等人的轮立刻挂起；`suspendedTurns` 用来去重，同一轮不会被挂起、计数两次。
+      const suspendedTurns = new Set<ActiveTurn>();
+      const suspendIfWaiting = (turn: ActiveTurn): boolean => {
+        if (suspendedTurns.has(turn)) {return true;}
+        if (turn.pendingReviews.size + turn.pendingQuestions.size === 0) {return false;}
+        human.suspendTurn(turn, "handover");
+        suspendedTurns.add(turn);
+        suspended += 1;
+        return true;
+      };
+
+      if (finishWindowMs > 0) {
+        for (const turn of snapshot) {suspendIfWaiting(turn);}
+
+        const deadline = Date.now() + finishWindowMs;
+        let busy = snapshot.filter((turn) => !turn.done && !suspendedTurns.has(turn));
+        // 只建一次：每轮询一次就建一个会给每个在跑的轮多挂一个回调，一直留到它收尾。
+        // 挂起的轮也会收尾，所以「全部收尾」同样能提前结束窗口。
+        const allSettled = Promise.all(busy.map((turn) => turn.settled));
+        while (busy.length > 0) {
+          const remaining = deadline - Date.now();
+          if (remaining <= 0) {break;}
+          let tickTimer: ReturnType<typeof setTimeout> | undefined;
+          await Promise.race([
+            allSettled,
+            new Promise<void>((resolve) => {
+              tickTimer = setTimeout(resolve, Math.min(SHUTDOWN_FINISH_POLL_MS, remaining));
+            }),
+          ]);
+          if (tickTimer !== undefined) {clearTimeout(tickTimer);}
+          busy = busy.filter((turn) => !turn.done);
+          for (const turn of busy) {suspendIfWaiting(turn);}
+          busy = busy.filter((turn) => !suspendedTurns.has(turn));
         }
+      }
+
+      const finished = finishWindowMs > 0 ? snapshot.filter((turn) => turn.endStatus === "completed").length : 0;
+      if (finished > 0) {logger.info(LOG_SCOPE, "shutdown: turns finished naturally during the finish window", { finished });}
+
+      for (const turn of snapshot) {
+        if (turn.done || suspendIfWaiting(turn)) {continue;}
+        await abortTurn(turn, ABORT_REASON_SHUTDOWN);
+        aborted += 1;
       }
 
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -649,11 +703,11 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
 
       const pending = registry.size;
       if (timedOut) {
-        logger.error(LOG_SCOPE, "shutdown: timed out waiting for turns to settle", { aborted, suspended, pending });
-        return { aborted, suspended, settled: false, pending };
+        logger.error(LOG_SCOPE, "shutdown: timed out waiting for turns to settle", { aborted, suspended, finished, pending });
+        return { aborted, suspended, finished, settled: false, pending };
       }
-      logger.info(LOG_SCOPE, "shutdown: all turns settled", { aborted, suspended });
-      return { aborted, suspended, settled: true, pending: 0 };
+      logger.info(LOG_SCOPE, "shutdown: all turns settled", { aborted, suspended, finished });
+      return { aborted, suspended, finished, settled: true, pending: 0 };
     },
 
     isShuttingDown() {

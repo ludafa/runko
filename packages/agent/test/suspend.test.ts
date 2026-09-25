@@ -45,6 +45,21 @@ function toolCallsStep(calls: { toolCallId: string; toolName: string; input: unk
   };
 }
 
+/** 同 `toolCallsStep`，但把第一个 chunk 的到达往后拖 `delayMs`——用来控制「这一轮什么时候转入等人」相对 `shutdown()` 调用的时间点。 */
+function toolCallsStepDelayed(calls: { toolCallId: string; toolName: string; input: unknown }[], delayMs: number) {
+  return {
+    stream: simulateReadableStream({
+      chunks: [
+        { type: "stream-start" as const, warnings: [] },
+        ...calls.map((call) => ({ type: "tool-call" as const, toolCallId: call.toolCallId, toolName: call.toolName, input: JSON.stringify(call.input) })),
+        { type: "finish" as const, finishReason: { unified: "tool-calls" as const, raw: undefined }, usage },
+      ],
+      initialDelayInMs: delayMs,
+      chunkDelayInMs: null,
+    }),
+  };
+}
+
 function textStep(text: string) {
   return {
     stream: simulateReadableStream({
@@ -264,10 +279,56 @@ describe("交权", () => {
     });
 
     const result = await runtime.shutdown({ graceMs: 2_000 });
-    expect(result).toEqual({ aborted: 0, suspended: 1, settled: true, pending: 0 });
+    expect(result).toEqual({ finished: 0, aborted: 0, suspended: 1, settled: true, pending: 0 });
     expect(settled[0]?.status).toBe("suspended");
     expect((await lastLedgerMessage("c8"))?.metadata).toMatchObject({ status: "suspended", suspended: { reason: "handover" } });
     expect(await persistence.decisions.listPending("c8")).toHaveLength(1);
+  });
+
+  it("`finishWindowMs` 配了也一样：立即挂起，不占等待窗口（docs/host/node/tech/cluster-console.md §5 步骤 3）", async () => {
+    const model = new MockLanguageModelV4({ doStream: [toolCallsStep([{ toolCallId: "call_1", toolName: "danger", input: { cmd: "x" } }]), textStep("不该走到")] });
+    // 窗口开得很长：关闭那一刻它一定还在等人。
+    const { runtime, persistence, settled, lastLedgerMessage } = setup({ model, windowMs: 60_000 });
+
+    await runtime.enqueue("c10", { text: "第一条" });
+    await vi.waitFor(async () => {
+      expect(await persistence.decisions.listPending("c10")).toHaveLength(1);
+    });
+
+    const start = Date.now();
+    const result = await runtime.shutdown({ finishWindowMs: 5_000, graceMs: 3_000 });
+    const elapsed = Date.now() - start;
+
+    expect(result).toEqual({ finished: 0, aborted: 0, suspended: 1, settled: true, pending: 0 });
+    // 没有等满 5 秒的等待窗口——挂起发生在窗口开始之前那一步（`finishWindowMs>0` 时的前置循环），
+    // 不是靠窗口到点才被分流。
+    expect(elapsed).toBeLessThan(1_000);
+    expect(settled[0]?.status).toBe("suspended");
+    expect((await lastLedgerMessage("c10"))?.metadata).toMatchObject({ status: "suspended", suspended: { reason: "handover" } });
+    expect(await persistence.decisions.listPending("c10")).toHaveLength(1);
+  });
+
+  it("窗口期间才转入等人：在窗口结束之前就被挂起，不用等满 `finishWindowMs`（docs/host/node/tech/cluster-console.md §5 步骤 3）", async () => {
+    // 工具调用请求（进而触发一次人审）延后 100ms 到达：关闭那一刻这一轮还在**干活**，
+    // 没有任何等人项，`shutdown()` 的轮询要在窗口期间才逮到它转入等人。
+    const model = new MockLanguageModelV4({
+      doStream: [toolCallsStepDelayed([{ toolCallId: "call_1", toolName: "danger", input: { cmd: "x" } }], 100), textStep("不该走到")],
+    });
+    const { runtime, persistence, settled, lastLedgerMessage } = setup({ model, windowMs: 60_000 });
+
+    const start = Date.now();
+    await runtime.enqueue("c11", { text: "第一条" });
+    // `enqueue` 一回来这一轮还没真的跑到工具调用那一步——`finishWindowMs` 给得很宽（5 秒），
+    // 用来证明它不是靠等满窗口才收尾的。
+    const result = await runtime.shutdown({ finishWindowMs: 5_000, graceMs: 3_000 });
+    const elapsed = Date.now() - start;
+
+    expect(result).toEqual({ finished: 0, aborted: 0, suspended: 1, settled: true, pending: 0 });
+    expect(elapsed).toBeGreaterThanOrEqual(90); // 至少等到那次延迟的工具调用真的发生
+    expect(elapsed).toBeLessThan(2_000); // 远早于 5 秒的窗口——是轮询逮到的，不是窗口到点
+    expect(settled[0]?.status).toBe("suspended");
+    expect((await lastLedgerMessage("c11"))?.metadata).toMatchObject({ status: "suspended", suspended: { reason: "handover" } });
+    expect(await persistence.decisions.listPending("c11")).toHaveLength(1);
   });
 
   it("对照：用户点停止仍然把等人项结成拒绝，并写进裁决表", async () => {

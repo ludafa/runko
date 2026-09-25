@@ -14,7 +14,7 @@ import type { RunkoChunk } from "@runko/core";
 import type { HumanDecision, JsonValue, Settlement } from "@runko/core";
 
 import type { Grant, Takeover } from "../arbitration.js";
-import type { TurnInput, TurnPhase } from "../types.js";
+import type { TurnInput, TurnPhase, TurnStatus } from "../types.js";
 import type { SuspendReason } from "./reasons.js";
 
 /**
@@ -122,6 +122,8 @@ export interface ActiveTurn {
   resume?: { callId: string; settlement: Settlement };
   turnNumber: number;
   done: boolean;
+  /** 这一轮是怎么结束的；`done` 置上的同时写入。交权据此只把 `completed` 算作「自然跑完」。 */
+  endStatus?: TurnStatus;
   /** 收尾完成——[优雅关闭](../../../../docs/terms.md)等的就是它。 */
   settled: Promise<void>;
   markSettled: () => void;
