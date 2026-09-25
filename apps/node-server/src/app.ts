@@ -6,8 +6,14 @@ import { cors } from 'hono/cors';
 import { db } from './db/instance.js';
 import { requireAuth } from './middleware/auth.js';
 import { authApp } from './routes/auth.js';
-import { chatApp, chatRuntime, toWireFrame } from './routes/chat.js';
+import {
+  chatApp,
+  chatRuntime,
+  nodeOffline,
+  toWireFrame,
+} from './routes/chat.js';
 import { createChatWsApp } from './routes/chat-ws.js';
+import { consoleApp } from './routes/console.js';
 import { exampleApp } from './routes/example.js';
 import { pushApp } from './routes/push.js';
 
@@ -37,6 +43,12 @@ app.use(
   }),
 );
 
+/**
+ * [节点下线](../../../docs/terms.md)闸门：挂在一切路由之前，WebSocket 升级与 `/health` 也在它后面。
+ * 下线中只放行别的节点转发来的请求，其余 503，nginx 换节点重试（docs/host/node/tech/cluster-console.md §4.1）。
+ */
+app.use('*', nodeOffline.gate);
+
 // Mount routes
 /**
  * 健康检查。**不鉴权、不碰数据库**：docker 的 healthcheck 与 nginx 用它判断这个副本起没起来，
@@ -53,11 +65,13 @@ app.route(
     authMiddleware: requireAuth,
     upgradeWebSocket,
     toWire: toWireFrame,
+    offlineSignal: nodeOffline.signal,
   }),
 );
 app.route('/', exampleApp);
 app.route('/', chatApp);
 app.route('/', pushApp);
+app.route('/', consoleApp);
 
 // OpenAPI spec + Swagger UI
 app.doc31('/doc', {

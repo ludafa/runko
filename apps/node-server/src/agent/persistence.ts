@@ -9,7 +9,11 @@
  * 读它们（会话列表的两个计数，见 `runko-tables.ts`），其余一律走接口。
  */
 import type { Arbitration, Persistence } from '@runko/agent';
-import { kyselyPersistence, leaseArbitration } from '@runko/persist-kysely';
+import {
+  DEFAULT_TAKEOVER_MS,
+  kyselyPersistence,
+  leaseArbitration,
+} from '@runko/persist-kysely';
 
 import type { Db } from '../db/instance.js';
 import { flavor } from '../db/instance.js';
@@ -23,7 +27,10 @@ export function createChatPersistence(db: Db): Persistence {
  * 很常见，那会把心跳配成 0（每毫秒两条查询），或者把接管阈值配成 0 让构造直接抛——
  * 报错还指着一个用户根本没设过的数字。
  */
-function readMs(name: string, env: NodeJS.ProcessEnv): number | undefined {
+export function readMs(
+  name: string,
+  env: NodeJS.ProcessEnv,
+): number | undefined {
   const raw = env[name]?.trim();
   if (raw === undefined || raw === '') {
     return undefined;
@@ -62,4 +69,15 @@ export function createChatArbitration(
     ...(heartbeatMs !== undefined ? { heartbeatMs } : {}),
     ...(takeoverMs !== undefined ? { takeoverMs } : {}),
   });
+}
+
+/**
+ * 与 `createChatArbitration` 用的同一个接管阈值：显式配了 `RUNKO_TAKEOVER_MS` 就用那个，
+ * 没配就退到框架缺省值。[集群控制台](../../../../docs/terms.md)判「疑似失联」要用同一个
+ * 数字——两处各算各的，会出现控制台说「正常」而接管其实已经发生（或反过来）的分裂。
+ */
+export function resolveTakeoverMs(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  return readMs('RUNKO_TAKEOVER_MS', env) ?? DEFAULT_TAKEOVER_MS;
 }

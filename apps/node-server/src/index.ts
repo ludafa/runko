@@ -5,7 +5,7 @@ import { db, flavor } from './db/instance.js';
 import { migrateDatabase } from './db/migrate.js';
 import { logger } from './logger.js';
 import { logPushStartup } from './push/vapid.js';
-import { chatRuntime, chatStream } from './routes/chat.js';
+import { chatRuntime, chatStream, nodeOffline } from './routes/chat.js';
 
 const LOG_SCOPE = 'server';
 
@@ -51,6 +51,16 @@ const port = Number(process.env.SERVER_PORT ?? 3000);
  */
 const SHUTDOWN_TIMEOUT_MS = Number(process.env.SHUTDOWN_TIMEOUT_MS ?? 15_000);
 
+/**
+ * 中止之前先让干活的轮自然跑完，最多等这么久（docs/host/node/tech/cluster-console.md §3.1）。
+ *
+ * **缺省 0 = 立刻中止**：本地 `node --watch` 热重载也发 SIGTERM，改一行代码等 90 秒不可接受。
+ * 只有集群 compose 配成 90 秒——那里的 SIGTERM 来自运维容器的 `docker stop -t 120`，
+ * 90 + 15（`SHUTDOWN_TIMEOUT_MS`）要留在 120 秒之内。
+ */
+const SHUTDOWN_FINISH_WINDOW_MS =
+  Number(process.env.SHUTDOWN_FINISH_WINDOW_MS) || 0;
+
 const server = serve({ fetch: app.fetch, port }, (info) => {
   console.log(`Server running at http://localhost:${info.port}`);
   console.log(`Swagger UI at http://localhost:${info.port}/reference`);
@@ -80,12 +90,28 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
 
   logger.info(LOG_SCOPE, 'shutdown requested', {
     signal,
+    finishWindowMs: SHUTDOWN_FINISH_WINDOW_MS,
     timeoutMs: SHUTDOWN_TIMEOUT_MS,
   });
 
+  // [节点下线](../../../docs/terms.md)：先关闸门，再等轮收尾。反过来的话，等轮的这段时间里
+  // nginx 还在往这里派新请求。
+  nodeOffline.goOffline();
+  // 直播什么时候断，看有没有别的节点能接着播：
+  // - 配了 Redis 广播：哪个节点都能播这一轮，现在就断，浏览器重连到别的节点，收尾帧从那边收；
+  // - 没配（单进程，或靠转发的多副本）：只有本节点能播。先断的话浏览器重连被闸门挡回，
+  //   收尾帧就发不出去，违反上面「先让轮收尾」那条——所以等轮收尾之后再断。
+  if (chatStream.broadcasts) {
+    nodeOffline.disconnectStreams();
+  }
+
   const result = await chatRuntime.shutdown({
+    finishWindowMs: SHUTDOWN_FINISH_WINDOW_MS,
     graceMs: SHUTDOWN_TIMEOUT_MS,
   });
+
+  // 还连着的只剩「没有轮在跑」的订阅，断开它们，`server.close()` 才等得到头。
+  nodeOffline.disconnectStreams();
 
   // 轮都收完了再收 Redis 连接：反过来的话，最后几帧广播不出去。
   await chatStream.close().catch((error: unknown) => {
@@ -97,6 +123,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   server.close(() => {
     logger.info(LOG_SCOPE, 'shutdown complete', {
       signal,
+      finishedTurns: result.finished,
       abortedTurns: result.aborted,
       // `false` = 撞了宽限期上限，那几个轮成了孤儿轮，下次启动由 `runtime.recover()` 补收尾。
       allTurnsSettled: result.settled,

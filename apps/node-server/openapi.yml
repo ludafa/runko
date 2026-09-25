@@ -390,6 +390,106 @@ components:
           examples: *a1
       required:
         - endpoint
+    ConsoleOverview:
+      type: object
+      properties:
+        controllable:
+          type: boolean
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConsoleNode"
+        conversations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConsoleConversation"
+        now:
+          type: number
+        opsError:
+          type: string
+      required:
+        - controllable
+        - nodes
+        - conversations
+        - now
+    ConsoleNode:
+      type: object
+      properties:
+        id:
+          type: string
+        index:
+          type:
+            - integer
+            - "null"
+        url:
+          type:
+            - string
+            - "null"
+        state:
+          type: string
+          enum:
+            - online
+            - going_offline
+            - offline
+            - unknown
+        dockerState:
+          type:
+            - string
+            - "null"
+        offlineDeadline:
+          type:
+            - number
+            - "null"
+      required:
+        - id
+        - index
+        - url
+        - state
+        - dockerState
+        - offlineDeadline
+    ConsoleConversation:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        ownerEmail:
+          type: string
+        holder:
+          type: string
+        heartbeatAt:
+          type: number
+        stale:
+          type: boolean
+      required:
+        - id
+        - title
+        - ownerEmail
+        - holder
+        - heartbeatAt
+        - stale
+    ConsoleOfflineAck:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          enum:
+            - true
+        offlineDeadline:
+          type: number
+      required:
+        - ok
+        - offlineDeadline
+    ConsoleOnlineAck:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          enum:
+            - true
+      required:
+        - ok
   parameters: {}
 paths:
   /api/notes:
@@ -624,6 +724,14 @@ paths:
             (docs/logic/orchestration/tech/graceful-shutdown.md §3.3) — no new
             turn is accepted during shutdown. Retryable: resend once the new
             process is up"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "504":
+          description: Forwarded to the holder, but it did not answer in time — the
+            message may or may not have been accepted. Check the conversation
+            before resending
           content:
             application/json:
               schema:
@@ -1115,6 +1223,111 @@ paths:
                 $ref: "#/components/schemas/ApiError"
         "503":
           description: Push disabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/console/overview:
+    get:
+      tags:
+        - Console
+      summary: 集群控制台：节点列表 + 每个节点下正在跑的会话（技术方案 §8）
+      responses:
+        "200":
+          description: Overview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsoleOverview"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/console/nodes/{id}/offline:
+    post:
+      tags:
+        - Console
+      summary: 让一个节点下线：转给运维容器，它后台跑 `docker stop -t 120`（技术方案 §8）
+      parameters:
+        - schema:
+            type: string
+            examples: &a5
+              - a1b2c3d4e5f6
+          required: true
+          name: id
+          in: path
+      responses:
+        "202":
+          description: Offline requested
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsoleOfflineAck"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Unknown node id（运维容器的节点列表里没有它）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: 这台服务端没有配置运维容器（单进程跑法），节点没法被控制
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "502":
+          description: 运维容器打不通，或返回了预期之外的内容
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/console/nodes/{id}/online:
+    post:
+      tags:
+        - Console
+      summary: 让一个已下线的节点重新上线：转给运维容器，它跑 `docker start`（功能手册 §3.4）
+      parameters:
+        - schema:
+            type: string
+            examples: *a5
+          required: true
+          name: id
+          in: path
+      responses:
+        "202":
+          description: Online requested
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsoleOnlineAck"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Unknown node id（运维容器的节点列表里没有它）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: 这台服务端没有配置运维容器（单进程跑法），节点没法被控制
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "502":
+          description: 运维容器打不通，或返回了预期之外的内容
           content:
             application/json:
               schema:

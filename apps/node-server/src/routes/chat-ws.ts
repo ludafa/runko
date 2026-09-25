@@ -38,8 +38,16 @@ export interface ChatWsOptions {
   upgradeWebSocket: UpgradeWebSocket;
   /** 框架的 `Frame` → wire 帧；**与 SSE 那条是同一个函数**。 */
   toWire: (frame: Frame) => ChatReplayFrame;
+  /**
+   * [节点下线](../../../../docs/terms.md)信号：触发时以 1012（服务重启）关掉本节点上的连接，
+   * 前端据此重连到别的节点（docs/host/node/tech/cluster-console.md §4.2）。
+   */
+  offlineSignal?: AbortSignal;
   logger?: Logger;
 }
+
+/** WebSocket 标准关闭码「服务重启」：前端对非 1000 的关闭一律退避重连。 */
+const CLOSE_SERVICE_RESTART = 1012;
 
 /** 解析 `?after=<seq>`：认不出来就当没带（从头回放）。 */
 function parseAfter(raw: string | undefined): number | undefined {
@@ -78,21 +86,34 @@ export function createChatWsApp(opts: ChatWsOptions): Hono<ChatEnv> {
             ws.close(4004, 'not found');
             return;
           }
+          const offline = opts.offlineSignal;
+          const signal =
+            offline === undefined ?
+              abort.signal
+            : AbortSignal.any([abort.signal, offline]);
           try {
             for await (const frame of opts.runtime.subscribe(conversationId, {
               ...(after !== undefined ? { after } : {}),
-              signal: abort.signal,
+              signal,
             })) {
-              if (abort.signal.aborted) {
+              if (signal.aborted) {
                 break;
               }
               ws.send(JSON.stringify(opts.toWire(frame)));
+            }
+            if (offline?.aborted === true && !abort.signal.aborted) {
+              ws.close(CLOSE_SERVICE_RESTART, 'node going offline');
+              return;
             }
             // 生成器结束 = 这一轮完了，与 SSE 那条「关流」同一个语义。
             ws.close(1000, 'stream ended');
           } catch (error) {
             if (abort.signal.aborted) {
               return; // 人自己走的，不是错误
+            }
+            if (offline?.aborted === true) {
+              ws.close(CLOSE_SERVICE_RESTART, 'node going offline');
+              return;
             }
             log.warn(LOG_SCOPE, 'live tail failed', {
               conversationId,

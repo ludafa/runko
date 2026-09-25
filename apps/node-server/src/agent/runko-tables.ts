@@ -12,6 +12,58 @@
 import type { Db } from '../db/instance.js';
 
 /**
+ * 一条正在跑的[租约](../../../../docs/terms.md)：会话 + 谁持有 + 持有者多久前续过约。
+ * [集群控制台](../../../../docs/terms.md)靠它把会话挂到节点下面（`routes/console.ts`）。
+ */
+export interface ActiveLeaseRow {
+  conversationId: string;
+  title: string;
+  ownerEmail: string;
+  /** 持有者的可达地址，与租约表的 `holder` 原样一致。 */
+  holder: string;
+  heartbeatAt: number;
+}
+
+/**
+ * 全部「此刻正在跑」的租约（`lease_token` 非空），带上会话标题与持有人邮箱。
+ *
+ * **这是本应用第二处直接读框架表**（第一处是 `countPendingDecisions`）：接口是按会话
+ * 问的，集群控制台要一次性列出全部会话的持有情况，按会话轮询就是 N 次往返；这里
+ * 只原样读 `holder`/`heartbeat_at` 两列，不涉及接口层的语义翻译，所以是安全的
+ * （docs/host/node/tech/cluster-console.md §2）。
+ */
+export async function listActiveLeases(db: Db): Promise<ActiveLeaseRow[]> {
+  const rows = await db
+    .selectFrom('agent_leases')
+    .innerJoin(
+      'conversations',
+      'conversations.id',
+      'agent_leases.conversation_id',
+    )
+    .innerJoin('user', 'user.id', 'conversations.user_id')
+    .select([
+      'agent_leases.conversation_id as conversationId',
+      'agent_leases.holder as holder',
+      'agent_leases.heartbeat_at as heartbeatAt',
+      'conversations.title as title',
+      'user.email as ownerEmail',
+    ])
+    .where('agent_leases.lease_token', 'is not', null)
+    .execute();
+
+  const leases: ActiveLeaseRow[] = [];
+  for (const row of rows) {
+    // `holder` 理论上不该为空：租约表的不变量是「`lease_token` 非空则 `holder` 也非空」。
+    // 这里只是防御性地跳过，不让一条不该出现的行把整个查询炸掉。
+    if (row.holder === null) {
+      continue;
+    }
+    leases.push({ ...row, holder: row.holder });
+  }
+  return leases;
+}
+
+/**
  * 每个会话还有几张卡片在等人答（审批或提问）。
  *
  * [内存窗口](../../../../docs/terms.md)里等着的与已[挂起](../../../../docs/terms.md)的都算——

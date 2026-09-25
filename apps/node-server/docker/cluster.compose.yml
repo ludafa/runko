@@ -26,6 +26,20 @@ x-node-env: &node-env
   #   CLUSTER_CLIENT_URL=http://localhost:5273 pnpm cluster:up
   CLIENT_URL: ${CLUSTER_CLIENT_URL:-http://localhost:${CLUSTER_LB_PORT:-3940}}
   RUNKO_PEER_TOKEN: cluster-peer-token
+  # [节点下线](../../../../docs/terms.md)：控制台经运维容器发的 SIGTERM 到了之后，
+  # 节点要「先等干活的轮跑完，再中止」（docs/host/node/tech/cluster-console.md §3.1/§5）。
+  # 90 + 15 = 105 秒，比运维容器 `docker stop -t 120`（下面 `ops` 服务）留 15 秒
+  # 给断连接、进程退出。
+  #
+  # **本地 `pnpm dev` 不配这两个**（缺省 0 / 15000，见 `index.ts`）：`node --watch`
+  # 热重载也发 SIGTERM，改一行代码等 90 秒不可接受，只有这里的集群档才配非零值。
+  SHUTDOWN_FINISH_WINDOW_MS: ${CLUSTER_OFFLINE_FINISH_WINDOW_MS:-90000}
+  SHUTDOWN_TIMEOUT_MS: ${CLUSTER_OFFLINE_GRACE_MS:-15000}
+  # 运维容器的地址与内部令牌：控制台 API 转发「下线/上线」请求要用（cluster-console.md §8）。
+  # 令牌与下面 `ops` 服务的 `RUNKO_OPS_TOKEN` 必须是同一个值——风格同上面的
+  # `RUNKO_PEER_TOKEN`，demo 项目写死够用。
+  RUNKO_OPS_URL: http://ops:3950
+  RUNKO_OPS_TOKEN: cluster-ops-token-not-for-production
   # 时间轴压扁：缺省值下（5 秒 / 60 秒）一个场景要等一分钟。
   # 接管阈值必须 ≥ 3 倍心跳，否则副本启动时就抛。
   RUNKO_HEARTBEAT_MS: ${CLUSTER_HEARTBEAT_MS:-1000}
@@ -48,6 +62,21 @@ x-node-env: &node-env
   DEEPSEEK_API_BASE_URL: ${DEEPSEEK_API_BASE_URL:-}
   DEEPSEEK_API_TOKEN: ${DEEPSEEK_API_TOKEN:-}
   RUNKO_MODEL: ${RUNKO_MODEL:-}
+
+  # ─── 云沙盒（可选）──────────────────────────────────────────────────────
+  # 同样从仓库根 `.env` 按名单透。服务端按 key 在不在决定新建会话能选哪几档沙盒：
+  # `E2B_API_KEY` 有值才出现 E2B，`VERCEL_TOKEN` 有值才出现 Vercel，全空只剩本地。
+  # 云沙盒会把仓库 clone 进去，所以 `GITHUB_REPO` / `GITHUB_PAT` 也要一起透。
+  #
+  # **故意不透 `SANDBOX_PROVIDER`**：那是单进程开发的默认档，集群里让用户在弹窗里选。
+  E2B_API_KEY: ${E2B_API_KEY:-}
+  E2B_TEMPLATE: ${E2B_TEMPLATE:-}
+  VERCEL_TOKEN: ${VERCEL_TOKEN:-}
+  VERCEL_TEAM_ID: ${VERCEL_TEAM_ID:-}
+  VERCEL_PROJECT_ID: ${VERCEL_PROJECT_ID:-}
+  GITHUB_REPO: ${GITHUB_REPO:-}
+  GITHUB_PAT: ${GITHUB_PAT:-}
+  SANDBOX_IDLE_TIMEOUT_MS: ${SANDBOX_IDLE_TIMEOUT_MS:-}
 
 services:
   postgres:
@@ -128,6 +157,48 @@ services:
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
+
+  # [运维容器](../../../../docs/terms.md)：集群控制台经它操作 Docker——列节点、
+  # `docker stop -t 120`（下线）、`docker start`（上线），见
+  # docs/host/node/tech/cluster-console.md §7。同一个镜像、换一个入口，不需要
+  # `x-node-env` 那一整套（数据库、模型、沙盒都不归它管，只要自己这几个变量）。
+  ops:
+    image: runko-cluster/node-server:dev
+    pull_policy: never
+    init: true
+    networks: [cluster]
+    environment:
+      # 与上面 `x-node-env` 里的 `RUNKO_OPS_TOKEN` 必须是同一个值：节点拿它敲门，
+      # 运维容器拿它验门。
+      RUNKO_OPS_TOKEN: cluster-ops-token-not-for-production
+      # 与下面 `node` 服务的服务名对应——运维容器靠「项目 + 服务」两个 label 把容器
+      # 列表锁定在「这一套集群里的 node 副本」，见 §7.2 的 filters。
+      # **项目名故意不配**：运维容器启动时问 Docker 自己属于哪个项目。端到端测试用
+      # `-p runko-cluster-e2e` 另起一套，写死的话会去停开发者手上那套集群的节点。
+      RUNKO_OPS_SERVICE: node
+      # 强杀期限（秒）。缺省 120；端到端测试把三个时长一起压扁（这个、上面的
+      # `CLUSTER_OFFLINE_FINISH_WINDOW_MS` 与 `CLUSTER_OFFLINE_GRACE_MS`），不然一个场景要等两分钟。
+      RUNKO_OPS_STOP_TIMEOUT_S: ${CLUSTER_OFFLINE_KILL_S:-120}
+    command: ["node", "dist/ops/index.js"]
+    # **必须 root**：镜像缺省 `USER node`，而宿主机的 `docker.sock` 只给 root（或 docker 组）
+    # 读写，非 root 一连就 `EACCES`、运维容器起不来。不用「加进 docker 组」的写法：那个组的
+    # gid 每台机器都不一样（Docker Desktop 上 socket 甚至是 root:root），写不死。
+    # 这不额外放大权限——挂了 `docker.sock` 本来就等于整台机器的管理员（§7.4）。
+    user: root
+    # **不写 ports**：挂了 `docker.sock` 的容器等于整台机器的管理员（§7.4），只在
+    # 集群内网里让节点够得着，绝不对宿主机开口子。
+    volumes: ["/var/run/docker.sock:/var/run/docker.sock"]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3950/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 30
 
   lb:
     image: nginx:1.27-alpine

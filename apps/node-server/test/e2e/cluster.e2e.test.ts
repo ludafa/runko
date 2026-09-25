@@ -79,6 +79,10 @@ const CLUSTER_ENV = {
   DEEPSEEK_API_BASE_URL: '',
   DEEPSEEK_API_TOKEN: '',
   RUNKO_MODEL: '',
+  // 同理只认[本地沙盒](../../../../docs/terms.md)：云沙盒的 key 一旦有值，建会话不点名
+  // provider 时默认档就变成云沙盒，一轮要去外部开机器。
+  E2B_API_KEY: '',
+  VERCEL_TOKEN: '',
 };
 
 const LB_URL = `http://127.0.0.1:${String(PORTS.lb)}`;
@@ -820,7 +824,7 @@ describe.skipIf(!RUN)(
       await waitHealthy(node(2));
     }, 300_000);
 
-    it('§4.2 持有者被 kill -9：接管阈值之前先 503，之后别的副本接手，崩掉那一轮补上「已停止」', async () => {
+    it('§4.2 持有者被 kill -9：接管阈值之前先 504，之后别的副本接手，崩掉那一轮补上「已停止」', async () => {
       const id = await createConversation(node(1));
       expect(mode(await send(node(1), id, textFor('跑一半', 20_000)))).toBe(
         'started',
@@ -830,14 +834,16 @@ describe.skipIf(!RUN)(
       step('4.2', '1 号在跑，kill -9 掉它', { conversationId: id });
       await docker(['kill', '-s', 'SIGKILL', node(1).container]);
 
-      // 租约还没过期：2 号抢不到，转给 1 号又连不上 → 503，而且很快（不是挂着）。
+      // 租约还没过期：2 号抢不到，转给 1 号。`docker kill` 之后它的 IP 从网络里消失，连接既不被拒也没人应，
+      // 只能等满转发超时 → 504（是死是冻分不出来，请求送没送到未知，见 `forward.ts` 的 `RESULT_UNKNOWN_STATUS`）。
+      // 用时要在一次超时附近，不能翻倍（翻倍说明被自动重发了）。
       const early = await send(node(2), id, '太早了');
       step('4.2', '租约未过期时往 2 号发', {
         conversationId: id,
         status: early.status,
         ms: early.ms,
       });
-      expect(early.status).toBe(503);
+      expect(early.status).toBe(504);
       expect(early.retryAfter).toBe('1');
       expect(early.ms).toBeLessThan(FORWARD_TIMEOUT_MS * 2 - 500);
 
@@ -863,7 +869,7 @@ describe.skipIf(!RUN)(
       await waitHealthy(node(1));
     }, 300_000);
 
-    it('§4.3 持有者被冻住：转发在超时附近回 503；接管之后它醒来，账本一行不多', async () => {
+    it('§4.3 持有者被冻住：转发在超时附近回 504；接管之后它醒来，账本一行不多', async () => {
       const id = await createConversation(node(1));
       expect(mode(await send(node(1), id, textFor('冻住我', 24_000)))).toBe(
         'started',
@@ -886,7 +892,7 @@ describe.skipIf(!RUN)(
         status: drop.status,
         ms: drop.ms,
       });
-      expect(drop.status).toBe(503);
+      expect(drop.status).toBe(504);
       expect(field(drop.body, 'holder')).toBe(node(1).holder);
       expect(drop.ms).toBeGreaterThanOrEqual(FORWARD_TIMEOUT_MS - 200);
       // 上限必须小于**两倍**超时：回 421 时 Fetch 标准客户端会自动重发一遍，用时正好翻倍。

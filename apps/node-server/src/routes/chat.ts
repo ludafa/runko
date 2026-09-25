@@ -49,6 +49,7 @@ import { createChatStream } from '../agent/stream.js';
 import { db as defaultDb } from '../db/instance.js';
 import { logger as defaultLogger } from '../logger.js';
 import { requireAuth } from '../middleware/auth.js';
+import { createNodeOffline } from '../offline.js';
 import { createChatNotifier } from '../push/notifier.js';
 import { clearPresent, markPresent } from '../push/presence.js';
 import { ErrorSchema } from '../schemas/api.js';
@@ -85,6 +86,7 @@ import type { Forwarder } from './forward.js';
 import {
   createForwarder,
   resolveNodeIdentity,
+  RESULT_UNKNOWN_STATUS,
   RETRY_AFTER_SECONDS,
   RETRY_LATER_STATUS,
 } from './forward.js';
@@ -126,6 +128,11 @@ export interface ChatRouteDeps {
    * 只在持有者内存里。见 docs/host/node/tech/cluster-lab.md §5。
    */
   forwardStream?: boolean;
+  /**
+   * [节点下线](../../../../docs/terms.md)信号：触发时断开本节点上的 SSE 直播，让浏览器重连到
+   * 别的节点（docs/host/node/tech/cluster-console.md §4.2）。不传 = 永不因下线断开。
+   */
+  offlineSignal?: AbortSignal;
   sandboxManager: SandboxManager;
   resolveModel: () => LanguageModel;
   /**
@@ -709,6 +716,11 @@ export function createChatApp(deps: ChatRouteDeps) {
         description:
           'The server is shutting down (docs/logic/orchestration/tech/graceful-shutdown.md §3.3) — no new turn is accepted during shutdown. Retryable: resend once the new process is up',
       },
+      504: {
+        content: { 'application/json': { schema: ErrorSchema } },
+        description:
+          'Forwarded to the holder, but it did not answer in time — the message may or may not have been accepted. Check the conversation before resending',
+      },
     },
   });
 
@@ -784,6 +796,10 @@ export function createChatApp(deps: ChatRouteDeps) {
         !forwarder.isForwarded(c)
       ) {
         const upstream = await forwarder.forward(c, outcome.holder);
+        // 结果未知就照实说：回 503 的话 nginx 会把这条消息换节点再发一遍。
+        if (upstream.status === RESULT_UNKNOWN_STATUS) {
+          return c.json({ error: outcome.message }, RESULT_UNKNOWN_STATUS);
+        }
         const ack = StartTurnAckSchema.safeParse(await upstream.json());
         if (ack.success) {
           return c.json(ack.data, 202);
@@ -974,10 +990,21 @@ export function createChatApp(deps: ChatRouteDeps) {
       stream.onAbort(() => {
         abort.abort();
       });
+      // 节点下线时结束这条流：前端见「轮还在跑、流却断了」会退避重连，经 nginx 落到别的节点。
+      // **别的节点转发来的流不断**：转发说明直播只有本节点能播（没配 Redis 广播），断了
+      // 那边重连还是转回这里、又被立刻断掉，这一轮剩下的实时帧就全看不到了。
+      const offlineSignal =
+        deps.forwarder?.isForwarded(c) === true ?
+          undefined
+        : deps.offlineSignal;
+      const signal =
+        offlineSignal === undefined ?
+          abort.signal
+        : AbortSignal.any([abort.signal, offlineSignal]);
 
       for await (const frame of deps.runtime.subscribe(id, {
         ...(after !== undefined ? { after } : {}),
-        signal: abort.signal,
+        signal,
       })) {
         const wire = toWireFrame(frame);
         await stream.writeSSE({
@@ -1335,12 +1362,16 @@ export const chatRuntime = createChatRuntime({
 
 const defaultForwarder = createForwarder(defaultNode, defaultLogger);
 
+/** [节点下线](../../../../docs/terms.md)的闸门与信号；`app.ts` 挂闸门，`index.ts` 在 SIGTERM 时触发。 */
+export const nodeOffline = createNodeOffline(defaultNode);
+
 export const chatApp = createChatApp({
   db: defaultDb,
   runtime: chatRuntime,
   forwarder: defaultForwarder,
   // 广播到了每个副本，直播流就不必再转给持有者。
   forwardStream: !chatStream.broadcasts,
+  offlineSignal: nodeOffline.signal,
   decisions: createChatPersistence(defaultDb).decisions,
   sandboxManager: defaultSandboxManager,
   resolveModel,
