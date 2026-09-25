@@ -56,7 +56,7 @@ related: ["host/node/tech/multi-replica.md", "host/node/plans/multi-replica.md",
 | `RUNKO_PEER_TOKEN` | 空 | 副本之间互相转发时用的内部令牌。不配就不校验，只适合本机联调 |
 | `RUNKO_HEARTBEAT_MS` | `5000` | [租约心跳](../../../terms.md)间隔 |
 | `RUNKO_TAKEOVER_MS` | `60000` | [接管阈值](../../../terms.md)。必须 ≥ 3 倍心跳，否则启动就报错 |
-| `RUNKO_FORWARD_TIMEOUT_MS` | `10000` | 转发给持有者时，最多等多久对方开始回话。等不到就回 503 让客户端重试 |
+| `RUNKO_FORWARD_TIMEOUT_MS` | `10000` | 转发给持有者时，最多等多久对方开始回话。等不到就回 504（结果未知）|
 | `RUNKO_LOG_LEVEL` | `info` | 日志详细程度：`debug` / `info` / `warn` / `error` / `silent`。起轮收尾、转发、每个请求都会记，见 §6.4 |
 
 在你自己的服务里，对应的是装配处的两行：
@@ -88,13 +88,13 @@ createAgentRuntime({
 |---|---|---|
 | 请求打到了非持有者 | 什么都感觉不到（被转发了） | 多一跳网络 |
 | 持有者进程崩溃 | 那一轮一直转圈；**过了接管阈值后**再发消息能正常起轮，崩溃那一轮显示「已停止」 | 最多一个接管阈值（缺省 60 秒） |
-| 持有者被冻住或卡死（没死，只是不响应） | 发往其他副本的请求**在转发超时后收到 503**，稍后重试即可；接管后恢复正常 | 转发超时（缺省 10 秒）+ 接管阈值 |
-| 持有者只是很慢（比如库卡了超过转发超时） | 同样收到 503。**这时请求可能其实已经被处理了**，重试发消息可能多出一条 | 转发超时 |
+| 持有者被冻住或卡死（没死，只是不响应） | 发往其他副本的请求**在转发超时后收到 504**（请求可能已经送到了，重发前先看看对话里有没有）；接管后恢复正常 | 转发超时（缺省 10 秒）+ 接管阈值 |
+| 持有者只是很慢（比如库卡了超过转发超时） | 同样收到 504。**这时请求可能其实已经被处理了**，重试发消息可能多出一条 | 转发超时 |
 | 持有者和数据库断开 | 那一轮被中断；接管后能继续 | 约「接管阈值 − 一拍心跳」时自己停手 |
 | 数据库短暂卡了一两秒 | 什么都感觉不到，这一轮照常跑完 | — |
 | 被误判出局的老持有者活过来 | 什么都感觉不到。它想写的东西**一律写不进账本** | — |
 
-「稍后再试」一律是 **503 + `Retry-After` 响应头**，body 里的 `reason` 说明原因（`holder_unreachable` / `held_by_other` / `shutting_down`）。
+「稍后再试」都带 **`Retry-After` 响应头**，body 里的 `reason` 说明原因（`holder_unreachable` / `held_by_other` / `shutting_down`）。状态码分两种：**503** 表示请求肯定没被处理（持有者连接被拒、服务正在关闭），直接重发即可；**504** 表示转发出去了但等不到回话，**请求可能已经被处理**，重发消息之前先看看对话里有没有。
 **不用 421**：按 Fetch 标准，浏览器和 Node 的 `fetch` 收到 421 会**自动把请求再发一遍**，等待翻倍，发消息的请求还会被悄悄重发。
 
 > **想让用户早点知道，别把接管阈值调小。** 调小会让一次普通的卡顿被当成死亡。应该在界面上提示「这一轮所在的节点失联了，正在等待接管」。
@@ -168,8 +168,8 @@ pnpm --filter @runko-chat/node-server test:lab
 ```
 2026-09-13T10:48:15.283Z  test        STEP   S7            C 起轮了，冻住 replica-c  conversationId=23fb4f09-…
 2026-09-13T10:48:15.405Z  replica-a   INFO   forward       forwarding to holder  method=GET path=/api/chat/conversations/23fb4f09-…/stream holder=http://replica-c:3910
-2026-09-13T10:48:17.418Z  replica-a   WARN   forward       holder unreachable, answering 503  holder=http://replica-c:3910 cause="no response headers within 2000ms" elapsedMs=2013
-2026-09-13T10:48:17.420Z  replica-a   INFO   http          GET /api/chat/conversations/23fb4f09-…/stream → 503  ms=2021
+2026-09-13T10:48:17.418Z  replica-a   WARN   forward       holder unreachable  status=504  holder=http://replica-c:3910 cause="no response headers within 2000ms" elapsedMs=2013
+2026-09-13T10:48:17.420Z  replica-a   INFO   http          GET /api/chat/conversations/23fb4f09-…/stream → 504  ms=2021
 2026-09-13T10:48:21.443Z  replica-a   WARN   agent:queue   took over from a stale holder, settled its turn as interrupted  previousHolder=http://replica-c:3910 seq=2
 ```
 

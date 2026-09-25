@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createForwarder,
   resolveNodeIdentity,
+  RETRY_AFTER_SECONDS,
 } from '../../src/routes/forward.js';
 import { silentLogger } from '../helpers/silent-logger.js';
 
@@ -144,7 +145,7 @@ describe('转发', () => {
     });
   });
 
-  it('**持有者活着但不开口 → 也是 503**（冻住的进程会把连接建起来然后干等）', async () => {
+  it('**持有者活着但不开口 → 504**（冻住的进程会把连接建起来然后干等；请求可能已送达，不能回 nginx 会重发的 503）', async () => {
     const response = await forwardOnce({
       forwardTimeoutMs: 20,
       holderFetch: (_input, init) =>
@@ -155,7 +156,8 @@ describe('转发', () => {
         }),
     });
 
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(504);
+    expect(response.headers.get('retry-after')).toBe(RETRY_AFTER_SECONDS);
   });
 });
 

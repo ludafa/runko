@@ -33,7 +33,7 @@ import {
   postAnswer,
   postApproval,
   readLedger,
-  retryWhile503,
+  retryWhileHolderUnreachable,
   sendMessage,
   waitForApprovalCallId,
   waitForSuspended,
@@ -134,7 +134,7 @@ describe(`挂起与恢复 · 两个真进程 · ${db.label}`, () => {
     await killReplica(a);
 
     // 答复打到 B：没有持有者 → B 自己答 → 写裁决表 → 推一把 → 恢复。
-    const answered = await retryWhile503(
+    const answered = await retryWhileHolderUnreachable(
       () => postApproval(b, cookie, id, callId, 'allow'),
       15_000,
     );
@@ -185,7 +185,7 @@ describe(`挂起与恢复 · 两个真进程 · ${db.label}`, () => {
 
     await killReplica(a);
 
-    const answered = await retryWhile503(
+    const answered = await retryWhileHolderUnreachable(
       () => postAnswer(b, cookie, id, callId, '要，继续'),
       15_000,
     );

@@ -9,7 +9,7 @@
  * **不需要任何外部服务**。配了 `DATABASE_URL` 时改用真 Postgres（`helpers/env.ts` 的
  * `selectDb`），CI 用得上。
  *
- * 接管要等多久由租约说了算，所以等待一律用轮询（`retryWhile503` / `waitFor`），不写死时长。
+ * 接管要等多久由租约说了算，所以等待一律用轮询（`retryWhileHolderUnreachable` / `waitFor`），不写死时长。
  */
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -32,7 +32,7 @@ import {
   getActivity,
   parseStartTurnAck,
   readLedger,
-  retryWhile503,
+  retryWhileHolderUnreachable,
   sendMessage,
   waitUntilInactive,
 } from './helpers/chat-client.js';
@@ -214,7 +214,7 @@ describe('多副本：两个真进程共用一个库', () => {
       await killReplica(a);
 
       // 接管前 B 抢不到（撞上「转发目标够不着」的 503）；接管阈值过去之后才行。
-      const takeover = await retryWhile503(
+      const takeover = await retryWhileHolderUnreachable(
         () => sendMessage(b, cookie, id, '我来接手'),
         TAKEOVER_POLL_BUDGET_MS,
       );
@@ -286,7 +286,7 @@ describe('多副本：两个真进程共用一个库', () => {
         TAKEOVER_POLL_BUDGET_MS,
         'B 的租约过期、谁都可以接管',
       );
-      const takeover = await retryWhile503(
+      const takeover = await retryWhileHolderUnreachable(
         () => sendMessage(c, cookie, id, '我接管了'),
         TAKEOVER_POLL_BUDGET_MS,
       );

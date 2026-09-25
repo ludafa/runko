@@ -601,7 +601,7 @@ describe.skipIf(!RUN)('多副本验证环境：三个容器 + 真 Postgres + 真
     ]);
   }, 90_000);
 
-  it('S5 持有者 kill -9、别的副本先接手：先 503，过接管阈值后起轮，崩溃那一轮补上「已停止」', async () => {
+  it('S5 持有者 kill -9、别的副本先接手：先 504，过接管阈值后起轮，崩溃那一轮补上「已停止」', async () => {
     const id = await createConversation(A);
     await send(A, id, longText('跑一半'));
     await waitActive(A, id);
@@ -609,14 +609,15 @@ describe.skipIf(!RUN)('多副本验证环境：三个容器 + 真 Postgres + 真
     step('S5', 'A 起轮了，kill -9 replica-a', { conversationId: id });
     await compose('kill', '-s', 'SIGKILL', A.service);
 
-    // 租约还没过期：B 抢不到，转给 A 又连不上 → 503，而且很快（不是挂着）。
+    // 租约还没过期：B 抢不到，转给 A。容器被 kill 后 IP 消失，连接没人应，等满转发超时 → 504
+    // （是死是冻分不出来，见 `forward.ts` 的 `RESULT_UNKNOWN_STATUS`）。用时不能翻倍。
     const early = await send(B, id, '太早了');
     step('S5', '租约未过期时往 B 发', {
       conversationId: id,
       status: early.status,
       ms: early.ms,
     });
-    expect(early.status).toBe(503);
+    expect(early.status).toBe(504);
     expect(early.retryAfter).toBe('1');
     expect(early.ms).toBeLessThan(FORWARD_TIMEOUT_MS * 2 - 500);
 
@@ -662,7 +663,7 @@ describe.skipIf(!RUN)('多副本验证环境：三个容器 + 真 Postgres + 真
     expect(await leaseHolder(id)).toBeNull();
   }, 180_000);
 
-  it('S7 持有者被冻住：转发在超时附近回 503；接管后老持有者解冻，账本一行不多（核心）', async () => {
+  it('S7 持有者被冻住：转发在超时附近回 504；接管后老持有者解冻，账本一行不多（核心）', async () => {
     const id = await createConversation(C);
     await send(C, id, longText('冻住我'));
     await waitActive(C, id);
@@ -680,7 +681,7 @@ describe.skipIf(!RUN)('多副本验证环境：三个容器 + 真 Postgres + 真
       status: stream.status,
       ms: stream.ms,
     });
-    expect(stream.status).toBe(503);
+    expect(stream.status).toBe(504);
     expect(field(stream.body, 'holder')).toBe(C.holder);
     expect(stream.ms).toBeGreaterThanOrEqual(FORWARD_TIMEOUT_MS - 200);
     // 上限必须小于**两倍**超时：回 421 时 Fetch 标准客户端会自动重发一遍，用时正好翻倍。

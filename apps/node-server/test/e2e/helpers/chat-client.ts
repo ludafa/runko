@@ -190,21 +190,23 @@ export async function postAnswer(
 }
 
 /**
- * 持有者刚死 / 刚被冻住时，请求会先撞上「转发目标够不着」的 503（`Retry-After`）——这是
- * 设计好的正常路径，不是错误（见 `routes/forward.ts` 的 `RETRY_LATER_STATUS`）。按秒级
- * 间隔重试，直到状态不再是 503，或者等到 `maxWaitMs` 放弃。
+ * 持有者刚死或被冻住时，请求会先撞上「持有者够不着」：连接被拒回 503，等超时回 504
+ * （见 `routes/forward.ts` 的 `RETRY_LATER_STATUS` / `RESULT_UNKNOWN_STATUS`），都带 `Retry-After`。
+ * 这是设计好的正常路径，不是错误。504 时请求可能已经送到了，所以只在「对方确实已经死了、
+ * 等接管」的用例里用这个函数。按秒级
+ * 间隔重试，直到状态不再是 503/504，或者等到 `maxWaitMs` 放弃。
  *
  * 用轮询而不是「先死等接管阈值、再试一次」：接管阈值哪天被接上环境变量、变快了，
  * 用这个函数的用例会自动跟着变快，不需要跟着改等待时长（见 `helpers/env.ts` 的说明）。
  */
-export async function retryWhile503(
+export async function retryWhileHolderUnreachable(
   attempt: () => Promise<Response>,
   maxWaitMs: number,
 ): Promise<Response> {
   const deadline = Date.now() + maxWaitMs;
   for (;;) {
     const res = await attempt();
-    if (res.status !== 503) {
+    if (res.status !== 503 && res.status !== 504) {
       return res;
     }
     if (Date.now() > deadline) {

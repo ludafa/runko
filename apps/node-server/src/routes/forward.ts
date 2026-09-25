@@ -48,6 +48,15 @@ export const PEER_TOKEN_HEADER = 'x-runko-peer-token';
  * 出来的：同一个请求 curl 2 秒拿到结果，Node `fetch` 要 4 秒。503 不会被自动重发。
  */
 export const RETRY_LATER_STATUS = 503;
+/**
+ * 等持有者开口超时了回 **504**，不是 503。连不上（没送达）和等超时（送达了、结果未知）要分开：
+ * nginx 见 503 会把 POST 换节点重发（`docker/cluster.nginx.conf`），这对「对方根本没收到」是
+ * 安全的；对「对方可能已经收下了」就是把同一条消息发两遍。504 不在 nginx 的重试名单里。
+ *
+ * 容器整个被杀掉（`docker kill`）也会走到 504：它的 IP 从网络里消失，连接不被拒、也没人应，
+ * 在这里看起来跟「冻住」一模一样。分不出来就按「结果未知」回。
+ */
+export const RESULT_UNKNOWN_STATUS = 504;
 /** 建议客户端多久之后重试（秒）。持有者刚死时要等到接管阈值才有人接手，重试间隔短一点也只是多问几次。 */
 export const RETRY_AFTER_SECONDS = '1';
 
@@ -64,6 +73,21 @@ export interface NodeIdentity {
   peerToken?: string;
   /** 转发时等对方开口的上限，缺省 `DEFAULT_FORWARD_TIMEOUT_MS`。**只管响应头，不管响应体**。 */
   forwardTimeoutMs?: number;
+}
+
+/**
+ * 带着转发标记的请求可不可信：令牌对得上才算；没配副本间令牌（本机联调）时只认标记。
+ * 转发中间件的 `reject` 与[节点下线](../../../../docs/terms.md)闸门共用这一条口径。
+ */
+export function isTrustedForward(
+  forwarded: string | undefined,
+  token: string | undefined,
+  expected: string | undefined,
+): boolean {
+  if (forwarded === undefined) {
+    return false;
+  }
+  return expected === undefined || expected === '' || token === expected;
 }
 
 export interface Forwarder {
@@ -95,14 +119,15 @@ export function createForwarder(
     },
 
     reject(c: Context): Response | undefined {
-      const token = node?.peerToken;
-      if (token === undefined || token === '') {
-        return undefined;
-      }
-      if (c.req.header(FORWARDED_HEADER) === undefined) {
-        return undefined;
-      }
-      if (c.req.header(PEER_TOKEN_HEADER) === token) {
+      const forwarded = c.req.header(FORWARDED_HEADER);
+      if (
+        forwarded === undefined ||
+        isTrustedForward(
+          forwarded,
+          c.req.header(PEER_TOKEN_HEADER),
+          node?.peerToken,
+        )
+      ) {
         return undefined;
       }
       logger.warn(
@@ -160,7 +185,7 @@ export function createForwarder(
       //
       // **持有者也可能活着但不响应**（长时间 GC、虚机被挂起、被冻住）。那时 TCP 握手由它的
       // 内核完成、连接照样建立，`fetch` 不抛，只是一直等——等到 Node 内置 HTTP 客户端默认的
-      // 300 秒响应头超时。所以要自己设一个「等对方开口」的上限，超时同样回 503。
+      // 300 秒响应头超时。所以要自己设一个「等对方开口」的上限，超时回 504（为什么不是 503 见 `RESULT_UNKNOWN_STATUS`）。
       //
       // 计时器**拿到响应头就撤**（`finally`）：`fetch` 在响应头到达时就返回，响应体仍是一条流。
       // 它只管「对方开没开口」，不管「说了多久」——否则 SSE 这种一连几分钟的流会被拦腰切断。
@@ -189,13 +214,17 @@ export function createForwarder(
         if (c.req.raw.signal.aborted) {
           throw error;
         } // 客户端自己走的，不是持有者的问题
-        // 连不上与等超时是同一件事：「持有者这会儿够不着，结果未知，稍后重试」。
-        logger.warn(LOG_SCOPE, 'holder unreachable, answering 503', {
+        // 两种都是「持有者这会儿够不着，稍后重试」；但等超时时请求可能已经送到了，
+        // 结果未知，所以状态码不同（见 `RESULT_UNKNOWN_STATUS`）。
+        const timedOut = timeout.signal.aborted;
+        const status = timedOut ? RESULT_UNKNOWN_STATUS : RETRY_LATER_STATUS;
+        logger.warn(LOG_SCOPE, 'holder unreachable', {
+          status,
           method: c.req.method,
           path: c.req.path,
           holder,
           cause:
-            timeout.signal.aborted ?
+            timedOut ?
               `no response headers within ${String(forwardTimeoutMs)}ms`
             : error instanceof Error ? error.message
             : String(error),
@@ -208,7 +237,7 @@ export function createForwarder(
             message: `Could not reach the holder ${holder}; it may have just died or stopped responding. Retry shortly.`,
           }),
           {
-            status: RETRY_LATER_STATUS,
+            status,
             headers: {
               'content-type': 'application/json',
               'retry-after': RETRY_AFTER_SECONDS,
