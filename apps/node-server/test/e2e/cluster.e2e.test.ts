@@ -1123,6 +1123,12 @@ describe.skipIf(!RUN)(
 
     it('§4.5 副本数 1 → 5：缩到一个照样跑；扩回来的新副本转得动、也接得了管', async () => {
       step('4.5', '缩到 1 个副本');
+      // 先把 2–5 号删掉再缩：compose 缩容时留下哪一个不固定，下面认定留下的是 1 号。
+      await docker([
+        'rm',
+        '-f',
+        ...[2, 3, 4, 5].map((index) => node(index).container),
+      ]);
       await scaleTo(1);
       await discover([1]);
       await waitHealthy(node(1));

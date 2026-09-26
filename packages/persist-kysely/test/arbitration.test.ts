@@ -277,10 +277,13 @@ function handoverSetupFor(
   flavor: Flavor,
   opts: { withPersistence: boolean },
 ): HandoverConformanceSetup {
-  const base = setupFor(db, flavor);
+  // 这组用例用不到「让持有者死掉」，时间轴不用压扁：40ms/200ms 那档在 pglite（和测试同一个线程）
+  // 上一卡事件循环，活着的持有者就会被当成已死。
+  const traits = traitsOf(flavor);
+  const timings = { heartbeatMs: 1_000, takeoverMs: 5_000 };
   return {
-    arbitration: base.arbitration,
-    other: base.other,
+    arbitration: leaseArbitration(db, { flavor: traits, holder: "node-a", ...timings }),
+    other: leaseArbitration(db, { flavor: traits, holder: "node-b", ...timings }),
     self: "node-a",
     otherNode: "node-b",
     ...(opts.withPersistence ? { persistence: kyselyPersistence(db, { flavor }) } : {}),
