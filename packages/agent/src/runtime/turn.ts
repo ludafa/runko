@@ -256,7 +256,6 @@ export async function driveTurn(ctx: RuntimeContext, turn: ActiveTurn): Promise<
       status: "failed",
       error: { code: "provider_error", message: describeError(error) },
     };
-    publish({ kind: "chunk", chunk: { type: "message-metadata", messageMetadata: metadata } });
     // **用户那句话必须落账本**：`enqueue` 早就回了 `mode:'started'`、宿主已经告诉用户
     // 「发出去了」，装配失败不该让它凭空消失（刷新页面后什么都没有）。这跟同文件
     // `finishAborted` 的立场一致——「用户确实发出了它」。收尾标记同理，见
@@ -271,6 +270,9 @@ export async function driveTurn(ctx: RuntimeContext, turn: ActiveTurn): Promise<
         error: describeError(persistError),
       });
     }
+    // 收尾帧排在用户消息与收尾标记的成品消息帧之后（单一账本 · 技术方案 §6.1）：
+    // 前端一收到它就当这一轮结束了。落库失败也照发，用户不该干等。
+    publish({ kind: "chunk", chunk: { type: "message-metadata", messageMetadata: metadata } });
     return { status: "crashed" };
   } finally {
     turn.grant.signal.removeEventListener("abort", onOwnershipLost);
