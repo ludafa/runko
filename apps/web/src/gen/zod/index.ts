@@ -6,6 +6,7 @@ export { chatChunkEnvelopeSchema } from './chatChunkEnvelopeSchema.ts';
 export { chatConfigSchema } from './chatConfigSchema.ts';
 export { chatMessageFrameSchema } from './chatMessageFrameSchema.ts';
 export { chatQueueFrameSchema } from './chatQueueFrameSchema.ts';
+export { chatReconnectFrameSchema } from './chatReconnectFrameSchema.ts';
 export { chatTurnStateFrameSchema } from './chatTurnStateFrameSchema.ts';
 export { consoleConversationSchema } from './consoleConversationSchema.ts';
 export { consoleNodeSchema } from './consoleNodeSchema.ts';

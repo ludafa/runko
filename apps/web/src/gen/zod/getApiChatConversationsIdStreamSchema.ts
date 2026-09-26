@@ -7,6 +7,7 @@ import { apiErrorSchema } from './apiErrorSchema.ts';
 import { chatChunkEnvelopeSchema } from './chatChunkEnvelopeSchema.ts';
 import { chatMessageFrameSchema } from './chatMessageFrameSchema.ts';
 import { chatQueueFrameSchema } from './chatQueueFrameSchema.ts';
+import { chatReconnectFrameSchema } from './chatReconnectFrameSchema.ts';
 import { chatTurnStateFrameSchema } from './chatTurnStateFrameSchema.ts';
 import { z } from 'zod/v4';
 
@@ -28,6 +29,7 @@ export const getApiChatConversationsIdStream200Schema = z.union([
   z.lazy(() => chatMessageFrameSchema),
   z.lazy(() => chatQueueFrameSchema),
   z.lazy(() => chatTurnStateFrameSchema),
+  z.lazy(() => chatReconnectFrameSchema),
 ]);
 
 /**

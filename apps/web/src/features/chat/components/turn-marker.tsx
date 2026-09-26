@@ -3,9 +3,9 @@
  * 一轮**结束**的信号（`message-metadata` 的 `turn`/`status`），没有一轮**开始**的信号，
  * 所以这里只画收尾、不画「第 N 轮」的分隔线。
  *
- * `code: 'aborted'` 是这四种 code 里唯一**不是故障**的一种（docs/logic/orchestration/tech/turn-abort.md
+ * `code: 'aborted'` 是这几种 code 里唯一**不是故障**的一种（docs/logic/orchestration/tech/turn-abort.md
  * §4.3）：用户自己按了[停止](../../../../../../docs/terms.md)。它因此走中性呈现、也不显示
- * core 那句英文 `message`（那是给日志看的），其余三种照旧 destructive。
+ * core 那句英文 `message`（那是给日志看的），其余几种照旧 destructive。
  */
 import type { RunkoError } from '@runko/core';
 import { CircleStopIcon } from 'lucide-react';
@@ -17,19 +17,22 @@ const KNOWN_ERROR_TITLE: Record<RunkoError['code'], string> = {
   context_overflow: '上下文超限',
   provider_error: '模型服务出错',
   aborted: '已停止',
+  internal_error: '系统异常',
 };
 
 /**
- * `apps/node-server` 的 `ABORT_REASON_SHUTDOWN` 的**手写镜像**（本仓库既有的镜像纪律，
- * 同 `schema.ts`）——服务端[优雅关闭](../../../../../../docs/terms.md)时中止一轮用的就是这句
- * 话，它经 core 透传成 `RunkoError.message`（docs/logic/orchestration/tech/graceful-shutdown.md §4）。
+ * `@runko/agent` 的 `ABORT_REASON_SHUTDOWN`（`packages/agent/src/runtime/reasons.ts`）的
+ * **手写镜像**（本仓库既有的镜像纪律，同 `schema.ts`）——服务端
+ * [优雅关闭](../../../../../../docs/terms.md)时中止一轮用的就是这句话，它经 core 透传成
+ * `RunkoError.message`（docs/logic/orchestration/tech/graceful-shutdown.md §4）。
  *
  * 为什么靠文案而不是靠一个专门的 `code`：「服务要关闭了」是宿主的运维概念，不该塞进
  * `@runko/core` 的类型联合（理由见 docs/logic/orchestration/tech/graceful-shutdown.md §2）。**改这个常量要
- * 同时改服务端那份**，否则服务重启会被显示成「用户按了停止」。
+ * 同时改 `@runko/agent` 那份**，否则服务重启会被显示成「用户按了停止」——两边对不齐时，
+ * 一条直接从 `@runko/agent` 导入 `ABORT_REASON_SHUTDOWN` 比对的防漂移测试会先红。
  */
 const SHUTDOWN_ABORT_MESSAGE =
-  'The server shut down while this turn was running.';
+  'Server is shutting down; this turn was interrupted.';
 
 /**
  * [挂起](../../../../../../docs/terms.md)：等人等太久，这一轮落盘退出了，人回来还能接着跑。
@@ -85,7 +88,12 @@ export function TurnFailedBar({ error }: { error: RunkoError }) {
   return (
     <Alert variant="destructive" className="mb-2" data-testid="turn-failed-bar">
       <AlertTitle>{KNOWN_ERROR_TITLE[error.code]}</AlertTitle>
-      <AlertDescription>{error.message}</AlertDescription>
+      <AlertDescription>
+        {/* 系统异常的细节只进服务端日志，这里只说用户能做什么。 */}
+        {error.code === 'internal_error' ?
+          '服务端出了问题，这一轮没能完成，请重新发送。'
+        : error.message}
+      </AlertDescription>
     </Alert>
   );
 }

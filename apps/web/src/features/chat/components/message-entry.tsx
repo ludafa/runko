@@ -9,7 +9,10 @@
  *
  * 还有一种「只报轮结束」的占位消息（`materialize.ts` 的 `MessageLedger` 产出，
  * `parts: []`、只有 `metadata`——一轮在任何 step 跑起来之前就失败的少见情况），它自然
- * 就只渲染出那个尾部标记，没有气泡。
+ * 就只渲染出那个尾部标记，没有气泡。[已交权](../../../../../../docs/terms.md)时（模型
+ * 输出段被交权）账本里那条只有 `step-start` 部件、`metadata.status === 'handed-over'`
+ * 的占位消息更进一步——它连尾部标记都不画（§6.1：不是中断，不该有任何标记），于是
+ * `partNodes`/`turnEndNode` 一起落空，整条消息（连气泡本身）都不渲染。
  *
  * **工具部件的分发**（docs/logic/orchestration/tech/single-ledger.md §6）：受控调用处于
  * `approval-requested` 时渲染 `ApprovalCard`，而不是通用的 `ToolCallCard`；`ask-user`
@@ -122,120 +125,136 @@ export function MessageEntry({
     );
   }
 
+  const partNodes = message.parts.map((part, index) => {
+    const key = `${message.id}-${String(index)}`;
+    switch (part.type) {
+      case 'text':
+        return (
+          // Streamdown 渲染（可能还在流式产出的）markdown——它能容忍没写完的
+          // 语法，比如打了一半的 **粗体** 或没闭合的代码围栏，所以正好适合增量
+          // 的文本部件。`MessageResponse` 是 ai-elements 对 Streamdown 的包装。
+          <MessageResponse key={key}>{part.text}</MessageResponse>
+        );
+      case 'reasoning':
+        return (
+          <ReasoningBlock
+            key={key}
+            text={part.text}
+            streaming={part.state === 'streaming'}
+          />
+        );
+      case 'data-file-change':
+        return <FileChangeBadges key={key} changes={part.data.changes} />;
+      case 'data-plan-update':
+        return <PlanChecklist key={key} items={part.data.items} />;
+      case 'data-error':
+        return <ErrorBar key={key} message={part.data.message} />;
+      case 'step-start':
+        return null;
+      default: {
+        // file/source-*/dynamic-tool/custom——runko 从不产生这几种（见 @runko/core 的 state.ts 里 RunkoUIMessage 的注释）
+        if (!isRunkoToolPart(part)) {
+          return null;
+        }
+
+        // `data-tool-timing` 从不单独渲染成卡片：上面没有它的 `case`，会掉到
+        // 这里被 `isRunkoToolPart` 拒掉。它只按 `toolCallId` 并进对应那次工具
+        // 调用自己的卡片里（见 `timeline.ts` 的注释）。
+        const timing = findToolTiming(message, part.toolCallId);
+
+        if (toolPartName(part) === ASK_USER_TOOL_NAME) {
+          if (
+            part.state === 'input-available' ||
+            part.state === 'output-available'
+          ) {
+            const questionPart: QuestionPart = part;
+            return (
+              <QuestionCard
+                key={key}
+                part={questionPart}
+                submitting={submittingCallIds.has(part.toolCallId)}
+                // 只有**还在等**的那一档（`input-available`）才叠加轮结束的判定：
+                // `output-available` 是已回答，而卡片里 `expired` 的优先级高于
+                // `answered`，叠上去会把一条已经答完的问题画成「已失效」。
+                expired={
+                  locallyExpiredCallIds.has(part.toolCallId) ||
+                  (part.state === 'input-available' &&
+                    staleByTurnEnd(part.toolCallId))
+                }
+                onAnswer={(answer) => {
+                  onSubmitAnswer(part.toolCallId, answer);
+                }}
+              />
+            );
+          }
+          return <ToolCallCard key={key} part={part} timing={timing} />;
+        }
+
+        if (part.state === 'approval-requested') {
+          const approvalPart: PendingApprovalPart = part;
+          return (
+            <ApprovalCard
+              key={key}
+              part={approvalPart}
+              submitting={submittingCallIds.has(part.toolCallId)}
+              // `approval-requested` 本身就是「还在等人」，所以直接叠加：轮结束了
+              // 就没人会来处理它了（服务端的等人项早已被结掉）。挂起在等的除外，见 `staleByTurnEnd`。
+              expired={
+                locallyExpiredCallIds.has(part.toolCallId) ||
+                staleByTurnEnd(part.toolCallId)
+              }
+              onDecide={(behavior) => {
+                onSubmitApproval(part.toolCallId, behavior);
+              }}
+            />
+          );
+        }
+
+        return <ToolCallCard key={key} part={part} timing={timing} />;
+      }
+    }
+  });
+
+  const turnEndNode =
+    message.metadata?.status === undefined ? null
+    : message.metadata.status === 'completed' ?
+      <TurnStatsButton
+        usage={message.metadata.usage ?? {}}
+        durationMs={message.metadata.durationMs}
+        toolDurationMs={message.metadata.toolDurationMs}
+        conversationId={conversationId}
+        turn={message.metadata.turn}
+      />
+    : message.metadata.status === 'suspended' ?
+      // [挂起](../../../../../../docs/terms.md)不是失败，也没有 error——不单独判一下的话
+      // 这一轮的尾部会是一片空白。恢复那一轮改写了这条消息之后，它就不再在等了。
+      <TurnSuspendedBar
+        waiting={
+          message.metadata.suspended?.callIds.some((callId) =>
+            waitingCallIds.has(callId),
+          ) ?? false
+        }
+      />
+    : message.metadata.status === 'handed-over' ?
+      // [已交权](../../../../../../docs/terms.md)不是中断，也不是失败——这一轮由接手节点接着
+      // 跑，不渲染任何收尾标记（docs/logic/orchestration/tech/handover.md §6.1）。
+      null
+    : message.metadata.error !== undefined ?
+      <TurnFailedBar error={message.metadata.error} />
+    : null;
+
+  // 一条纯粹的占位消息（比如[已交权](../../../../../../docs/terms.md)时那条只有
+  // `step-start` 部件、没有任何收尾标记要画的 assistant 消息）什么都渲染不出来——
+  // 不画出一个空气泡。
+  if (partNodes.every((node) => node === null) && turnEndNode === null) {
+    return null;
+  }
+
   return (
     <Message from="assistant">
       <MessageContent>
-        {message.parts.map((part, index) => {
-          const key = `${message.id}-${String(index)}`;
-          switch (part.type) {
-            case 'text':
-              return (
-                // Streamdown 渲染（可能还在流式产出的）markdown——它能容忍没写完的
-                // 语法，比如打了一半的 **粗体** 或没闭合的代码围栏，所以正好适合增量
-                // 的文本部件。`MessageResponse` 是 ai-elements 对 Streamdown 的包装。
-                <MessageResponse key={key}>{part.text}</MessageResponse>
-              );
-            case 'reasoning':
-              return (
-                <ReasoningBlock
-                  key={key}
-                  text={part.text}
-                  streaming={part.state === 'streaming'}
-                />
-              );
-            case 'data-file-change':
-              return <FileChangeBadges key={key} changes={part.data.changes} />;
-            case 'data-plan-update':
-              return <PlanChecklist key={key} items={part.data.items} />;
-            case 'data-error':
-              return <ErrorBar key={key} message={part.data.message} />;
-            case 'step-start':
-              return null;
-            default: {
-              // file/source-*/dynamic-tool/custom——runko 从不产生这几种（见 @runko/core 的 state.ts 里 RunkoUIMessage 的注释）
-              if (!isRunkoToolPart(part)) {
-                return null;
-              }
-
-              // `data-tool-timing` 从不单独渲染成卡片：上面没有它的 `case`，会掉到
-              // 这里被 `isRunkoToolPart` 拒掉。它只按 `toolCallId` 并进对应那次工具
-              // 调用自己的卡片里（见 `timeline.ts` 的注释）。
-              const timing = findToolTiming(message, part.toolCallId);
-
-              if (toolPartName(part) === ASK_USER_TOOL_NAME) {
-                if (
-                  part.state === 'input-available' ||
-                  part.state === 'output-available'
-                ) {
-                  const questionPart: QuestionPart = part;
-                  return (
-                    <QuestionCard
-                      key={key}
-                      part={questionPart}
-                      submitting={submittingCallIds.has(part.toolCallId)}
-                      // 只有**还在等**的那一档（`input-available`）才叠加轮结束的判定：
-                      // `output-available` 是已回答，而卡片里 `expired` 的优先级高于
-                      // `answered`，叠上去会把一条已经答完的问题画成「已失效」。
-                      expired={
-                        locallyExpiredCallIds.has(part.toolCallId) ||
-                        (part.state === 'input-available' &&
-                          staleByTurnEnd(part.toolCallId))
-                      }
-                      onAnswer={(answer) => {
-                        onSubmitAnswer(part.toolCallId, answer);
-                      }}
-                    />
-                  );
-                }
-                return <ToolCallCard key={key} part={part} timing={timing} />;
-              }
-
-              if (part.state === 'approval-requested') {
-                const approvalPart: PendingApprovalPart = part;
-                return (
-                  <ApprovalCard
-                    key={key}
-                    part={approvalPart}
-                    submitting={submittingCallIds.has(part.toolCallId)}
-                    // `approval-requested` 本身就是「还在等人」，所以直接叠加：轮结束了
-                    // 就没人会来处理它了（服务端的等人项早已被结掉）。挂起在等的除外，见 `staleByTurnEnd`。
-                    expired={
-                      locallyExpiredCallIds.has(part.toolCallId) ||
-                      staleByTurnEnd(part.toolCallId)
-                    }
-                    onDecide={(behavior) => {
-                      onSubmitApproval(part.toolCallId, behavior);
-                    }}
-                  />
-                );
-              }
-
-              return <ToolCallCard key={key} part={part} timing={timing} />;
-            }
-          }
-        })}
-        {message.metadata?.status !== undefined &&
-          (message.metadata.status === 'completed' ?
-            <TurnStatsButton
-              usage={message.metadata.usage ?? {}}
-              durationMs={message.metadata.durationMs}
-              toolDurationMs={message.metadata.toolDurationMs}
-              conversationId={conversationId}
-              turn={message.metadata.turn}
-            />
-          : message.metadata.status === 'suspended' ?
-            // [挂起](../../../../../../docs/terms.md)不是失败，也没有 error——不单独判一下的话
-            // 这一轮的尾部会是一片空白。恢复那一轮改写了这条消息之后，它就不再在等了。
-            <TurnSuspendedBar
-              waiting={
-                message.metadata.suspended?.callIds.some((callId) =>
-                  waitingCallIds.has(callId),
-                ) ?? false
-              }
-            />
-          : message.metadata.error !== undefined && (
-              <TurnFailedBar error={message.metadata.error} />
-            ))}
+        {partNodes}
+        {turnEndNode}
       </MessageContent>
     </Message>
   );

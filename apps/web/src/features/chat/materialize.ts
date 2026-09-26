@@ -174,11 +174,33 @@ export class MessageLedger {
   /** `order` 的成员集（O(1) 判重）——`order` 会长到几百条，每次占位都线性扫一遍不划算。 */
   private readonly ordered = new Set<string>();
   private readonly byId = new Map<string, RunkoUIMessage>();
+  /** 已经以 `MessageFrame`（带 seq 的成品消息）落地过的 id——`replaceDraft()` 据此分辨「真丢得起的草稿」与「绝不能丢的成品」，见该方法注释。 */
+  private readonly landedMessageIds = new Set<string>();
+  /**
+   * 每条消息最近一次以 `MessageFrame` 落地时的 `pipeGeneration`。`consume()` 据此认出「成品已经到了、
+   * 这条管道吐出来的却是它之前的草稿」：服务端先广播成品、再发收尾帧
+   * （docs/logic/orchestration/tech/single-ledger.md §6.1），管道里还没投递完的旧 chunk 会晚于成品到达
+   * `consume()`，照常 `upsert()` 就会把成品盖回草稿——交权时那就是被扔掉的半步又冒出来。
+   */
+  private readonly landedAtGeneration = new Map<string, number>();
   private openController:
     ReadableStreamDefaultController<RunkoChunk> | undefined;
-  /** 打开的那条流是恢复那一轮的种子流（`openResumedMessage` 的注释）。它没有自己的 `finish`，要靠收尾 metadata 关。 */
-  private resumedMessageOpen = false;
   private steerBuilder: SteerMessageBuilder | undefined;
+  /**
+   * 每开一条 `readUIMessageStream()` 管道（`applyChunk` 的 `start` 分支、
+   * `openResumedMessage`）就 +1、发给那条管道当代号。`replaceDraft()` 丢草稿时把
+   * 当时打开着的那个代号记进 `discardedPipeGeneration`——即使 `closeOpenMessage()`
+   * 已经调过 `controller.close()`，`ReadableStream` 在那之前已经 `enqueue()` 过的
+   * chunk 仍会照常投递给 `consume()` 的 `for await`（这是 stream 的标准行为，
+   * `close()` 只挡新 chunk，不清空已排队的）。没有这道代号闸门，那些迟到的 chunk
+   * 会在 `replaceDraft()` 之后把同一条消息重新 `upsert()` 回时间线末尾——被丢弃的
+   * 半截回答死灰复燃。
+   */
+  private pipeGeneration = 0;
+  /** 当前打开着的管道代号——`undefined` = 没有打开的管道。与 `openController` 成对。 */
+  private openPipeGeneration: number | undefined;
+  /** `replaceDraft()` 丢弃时记下的管道代号；这个代号的 `consume()` 之后一律忽略。 */
+  private discardedPipeGeneration: number | undefined;
   /** 看到非插话的 `start` 就**同步**记下，绝不从 `consume()`（异步）的 `upsert()` 反推。见文件头最后一节。 */
   private lastAssistantId: string | undefined;
   /** 等着并给 `lastAssistantId` 那条消息的独立 metadata——在 `snapshot()` 里懒合并，绝不直接写进 `byId`。见文件头最后一节。 */
@@ -201,6 +223,8 @@ export class MessageLedger {
   /** 按 wire 顺序喂一帧进来。回放帧与直播帧一视同仁——它们都只是 `ChatReplayFrame`。 */
   applyFrame(frame: LedgerFrame): void {
     if (isMessageFrame(frame)) {
+      this.landedMessageIds.add(frame.message.id);
+      this.landedAtGeneration.set(frame.message.id, this.pipeGeneration);
       this.upsert(frame.message);
       if (frame.message.role === 'user') {
         this.onUserMessage?.();
@@ -208,6 +232,51 @@ export class MessageLedger {
       return;
     }
     this.applyChunk(frame.chunk);
+  }
+
+  /**
+   * [交权](../../../../../docs/terms.md)（docs/logic/orchestration/tech/handover.md §6.1、§8）时的「整体替换草稿」：
+   * 丢掉所有**只由 chunk 物化出来、还没有以 `MessageFrame`（带 seq 的成品消息）落地过**
+   * 的消息，顺带关掉打开着的那条流、清空 steer 构建器与 `lastAssistantId`（它们要么指向
+   * 刚被丢掉的消息，要么本就该在这种「另起炉灶」的时刻清零）。
+   *
+   * 目的：模型输出段被交权时，旧节点流出来的半段字（连同那条只有 `step-start`、metadata
+   * 为 `handed-over` 的占位消息）要被接手节点重新生成的内容替换，不能与新内容并存。
+   * **已经以 `MessageFrame` 落地过的成品消息绝不会被这个方法丢掉**——不管它来自初始回放
+   * 还是更早一次重连的回放。
+   *
+   * 调用方（`use-chat-messages.ts`）只在确认这一轮是「模型输出段被交权」（`handedOver`
+   * 悬空调用为空）时才调用它：工具段被交权时账本末尾那次悬空调用是真实状态、要留给
+   * 接手节点结清，不能被当成草稿丢掉。
+   *
+   * **顺带关闭当前管道的后续投递**：`closeOpenMessage()` 只是让 `ReadableStream`
+   * 不再接受新 chunk，管道里已经 `enqueue()` 过的那些还是会异步投给 `consume()`。
+   * 这里先把当时打开着的管道代号记进 `discardedPipeGeneration`，`consume()` 收到
+   * 属于这个代号的消息一律忽略——否则那些迟到的 chunk 会在这个方法返回之后，把刚
+   * 丢弃的草稿重新 `upsert()` 回时间线末尾。见 `pipeGeneration` 字段注释。
+   */
+  replaceDraft(): void {
+    if (this.openPipeGeneration !== undefined) {
+      this.discardedPipeGeneration = this.openPipeGeneration;
+    }
+    this.closeOpenMessage();
+    this.steerBuilder = undefined;
+    this.lastAssistantId = undefined;
+    let changed = false;
+    for (let index = this.order.length - 1; index >= 0; index -= 1) {
+      const id = this.order[index];
+      if (id === undefined || this.landedMessageIds.has(id)) {
+        continue;
+      }
+      this.order.splice(index, 1);
+      this.ordered.delete(id);
+      this.byId.delete(id);
+      this.pendingMetadata.delete(id);
+      changed = true;
+    }
+    if (changed) {
+      this.notifyChange();
+    }
   }
 
   private applyChunk(chunk: RunkoChunk): void {
@@ -233,12 +302,18 @@ export class MessageLedger {
           // `start` chunk 已经带着 messageId，而它是**同步**到达的。
           this.ensureOrder(chunk.messageId);
         }
+        this.pipeGeneration += 1;
+        const generation = this.pipeGeneration;
+        this.openPipeGeneration = generation;
         const stream = new ReadableStream<RunkoChunk>({
           start: (controller) => {
             this.openController = controller;
           },
         });
-        void this.consume(readUIMessageStream<RunkoUIMessage>({ stream }));
+        void this.consume(
+          readUIMessageStream<RunkoUIMessage>({ stream }),
+          generation,
+        );
       }
     }
 
@@ -261,9 +336,13 @@ export class MessageLedger {
       if (!this.openResumedMessage(chunk)) {
         return;
       }
-    } else if (this.resumedMessageOpen && chunk.type === 'message-metadata') {
-      // 种子流没有自己的 `finish`，收尾 metadata 一到就关掉它，再走独立 metadata 那条路：
-      // 并到这条消息上、触发一次 `onTurnEnd`。
+    } else if (chunk.type === 'message-metadata') {
+      // `message-metadata` 只有一个出处（core 的 `finalizeTurn`），恒是收尾信号——不管此刻
+      // 打开的是恢复那一轮的种子流（`openResumedMessage`，没有自己的 `finish`），还是
+      // [交权](../../../../../docs/terms.md)在模型输出中途掐断的那一步的流（core 的
+      // `runOneStep` 这种情形下直接抛出，不再 yield `finish-step`/`finish`，同样没有自己
+      // 的 `finish`）：两种都没等到 `finish` 就直接来了收尾 metadata，一律关流、并到这条
+      // 消息上、触发一次 `onTurnEnd`。
       this.closeOpenMessage();
       this.applyStandaloneMetadata(chunk.messageMetadata);
       return;
@@ -279,7 +358,7 @@ export class MessageLedger {
   private closeOpenMessage(): void {
     this.openController?.close();
     this.openController = undefined;
-    this.resumedMessageOpen = false;
+    this.openPipeGeneration = undefined;
   }
 
   /**
@@ -304,7 +383,9 @@ export class MessageLedger {
     // 收尾 metadata 要并给这条消息：恢复那一轮如果只结清了一个、还有别的在等，
     // core 会把新的 `suspended` 写回它。
     this.lastAssistantId = target.id;
-    this.resumedMessageOpen = true;
+    this.pipeGeneration += 1;
+    const generation = this.pipeGeneration;
+    this.openPipeGeneration = generation;
     const stream = new ReadableStream<RunkoChunk>({
       start: (controller) => {
         this.openController = controller;
@@ -315,6 +396,7 @@ export class MessageLedger {
         message: structuredClone(target),
         stream,
       }),
+      generation,
     );
     return true;
   }
@@ -340,8 +422,20 @@ export class MessageLedger {
 
   private async consume(
     iterable: AsyncIterable<RunkoUIMessage>,
+    generation: number,
   ): Promise<void> {
     for await (const message of iterable) {
+      if (generation === this.discardedPipeGeneration) {
+        // 这条消息来自一条已被 `replaceDraft()` 丢弃的旧管道——`close()` 之前就
+        // 排队好的 chunk，见 `pipeGeneration` 字段注释。忽略，不重新 upsert。
+        continue;
+      }
+      // 这条管道开起来之后，同一条消息的成品已经落地了：成品为准，草稿不再覆盖它。
+      // 管道开在成品之后（恢复那一轮拿成品当种子接着写）的不受影响。
+      const landedAt = this.landedAtGeneration.get(message.id);
+      if (landedAt !== undefined && landedAt >= generation) {
+        continue;
+      }
       this.upsert(message);
     }
   }

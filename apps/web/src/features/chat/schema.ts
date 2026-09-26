@@ -142,12 +142,25 @@ export const turnStateFrameSchema = z.object({ turnActive: z.boolean() });
 export type TurnStateFrame = z.infer<typeof turnStateFrameSchema>;
 
 /**
- * 这个应用能收到的 wire 帧只有四种：`ChunkEnvelope`、`MessageFrame`、`QueueFrame`、
- * `TurnStateFrame`。靠**结构**区分（对象实际带的是 `chunk`/`message`/`queue`/
- * `turnActive` 里的哪一个），没有共享的字面量判别字段——`apps/node-server` 自己的
- * `chatReplayFrameSchema` 用的是同一套纪律。
+ * `{ reconnect: true }` —— [请重连帧](../../../../../docs/terms.md)（`apps/node-server` 的
+ * `reconnectFrameSchema` 的手写镜像，docs/logic/orchestration/tech/handover.md §8）：这份对话已经
+ * [交权](../../../../../docs/terms.md)给别的节点，旧节点在直播流上发的最后一帧，随后主动关掉
+ * 这条连接（SSE 直接结束响应体；WebSocket 用关闭码 1012，见 `ws.ts`）。
  *
- * 顺序无关紧要：zod v4 里 object schema 缺失的 `z.any()` 字段算校验失败，所以四支
+ * **没有 `seq`**——与 `QueueFrame`/`TurnStateFrame` 同一姿态：它是连接层面的信号，不是
+ * [账本](../../../../../docs/terms.md)事件，不落盘、不参与 `after=` 续传。
+ */
+export const reconnectFrameSchema = z.object({ reconnect: z.literal(true) });
+
+export type ReconnectFrame = z.infer<typeof reconnectFrameSchema>;
+
+/**
+ * 这个应用能收到的 wire 帧只有五种：`ChunkEnvelope`、`MessageFrame`、`QueueFrame`、
+ * `TurnStateFrame`、`ReconnectFrame`。靠**结构**区分（对象实际带的是 `chunk`/`message`/
+ * `queue`/`turnActive`/`reconnect` 里的哪一个），没有共享的字面量判别字段——
+ * `apps/node-server` 自己的 `chatReplayFrameSchema` 用的是同一套纪律。
+ *
+ * 顺序无关紧要：zod v4 里 object schema 缺失的 `z.any()` 字段算校验失败，所以五支
  * 互不吞并（服务端同一份注释）。
  */
 export const chatReplayFrameSchema = z.union([
@@ -155,12 +168,13 @@ export const chatReplayFrameSchema = z.union([
   messageFrameSchema,
   queueFrameSchema,
   turnStateFrameSchema,
+  reconnectFrameSchema,
 ]);
 
 export type ChatReplayFrame =
-  ChunkEnvelope | MessageFrame | QueueFrame | TurnStateFrame;
+  ChunkEnvelope | MessageFrame | QueueFrame | TurnStateFrame | ReconnectFrame;
 
-/** 会进[账本](../../../../../docs/terms.md)物化的两支——`QueueFrame` 与 `TurnStateFrame` 都是状态快照、不属于账本，由 `use-chat-messages.ts` 在喂给 `MessageLedger` 之前就分流掉。 */
+/** 会进[账本](../../../../../docs/terms.md)物化的两支——其余三支都是状态/连接快照、不属于账本，由 `use-chat-messages.ts` 在喂给 `MessageLedger` 之前就分流掉。 */
 export type LedgerFrame = ChunkEnvelope | MessageFrame;
 
 /** 参数取最宽的 `ChatReplayFrame`（而不是 `LedgerFrame`）——同一个判别在两处都要用：`MessageLedger` 里对已分流的账本帧，和还没分流的原始 wire 帧上。传 `LedgerFrame` 时 false 分支照样收窄到 `ChunkEnvelope`。 */
@@ -178,14 +192,25 @@ export function isTurnStateFrame(
   return 'turnActive' in frame;
 }
 
+export function isReconnectFrame(
+  frame: ChatReplayFrame,
+): frame is ReconnectFrame {
+  return 'reconnect' in frame;
+}
+
 /**
- * 一个帧的 `seq`——`QueueFrame` 与 `TurnStateFrame` **恒无 seq**（都是状态快照，不是
- * [账本](../../../../../docs/terms.md)事件，所以不落盘、不参与 `after=` 续传；
- * docs/logic/orchestration/tech/steer-and-queue.md §4.3、docs/ingress/tech/chat-webapp.md §5.1），于是与 ephemeral
- * chunk 在去重/续传簿记上走同一条「没有 seq」的路径。
+ * 一个帧的 `seq`——`QueueFrame`、`TurnStateFrame`、`ReconnectFrame` **恒无 seq**（都是
+ * 状态/连接快照，不是[账本](../../../../../docs/terms.md)事件，所以不落盘、不参与
+ * `after=` 续传；docs/logic/orchestration/tech/steer-and-queue.md §4.3、
+ * docs/ingress/tech/chat-webapp.md §5.1、docs/logic/orchestration/tech/handover.md §8），于是与
+ * ephemeral chunk 在去重/续传簿记上走同一条「没有 seq」的路径。
  */
 export function frameSeq(frame: ChatReplayFrame): number | undefined {
-  if (isQueueFrame(frame) || isTurnStateFrame(frame)) {
+  if (
+    isQueueFrame(frame) ||
+    isTurnStateFrame(frame) ||
+    isReconnectFrame(frame)
+  ) {
     return undefined;
   }
   return frame.seq;

@@ -14,6 +14,10 @@ export type {
 } from './types/ChatConfig.ts';
 export type { ChatMessageFrame } from './types/ChatMessageFrame.ts';
 export type { ChatQueueFrame } from './types/ChatQueueFrame.ts';
+export type {
+  ChatReconnectFrame,
+  ChatReconnectFrameReconnectEnumKey,
+} from './types/ChatReconnectFrame.ts';
 export type { ChatTurnStateFrame } from './types/ChatTurnStateFrame.ts';
 export type { ConsoleConversation } from './types/ConsoleConversation.ts';
 export type {
@@ -287,6 +291,7 @@ export { approvalAckOkEnum } from './types/ApprovalAck.ts';
 export { chatConfigDefaultProviderEnum } from './types/ChatConfig.ts';
 export { chatConfigModelEnum } from './types/ChatConfig.ts';
 export { chatConfigProvidersEnum } from './types/ChatConfig.ts';
+export { chatReconnectFrameReconnectEnum } from './types/ChatReconnectFrame.ts';
 export { consoleNodeStateEnum } from './types/ConsoleNode.ts';
 export { consoleOfflineAckOkEnum } from './types/ConsoleOfflineAck.ts';
 export { consoleOnlineAckOkEnum } from './types/ConsoleOnlineAck.ts';
@@ -306,6 +311,7 @@ export { chatChunkEnvelopeSchema } from './zod/chatChunkEnvelopeSchema.ts';
 export { chatConfigSchema } from './zod/chatConfigSchema.ts';
 export { chatMessageFrameSchema } from './zod/chatMessageFrameSchema.ts';
 export { chatQueueFrameSchema } from './zod/chatQueueFrameSchema.ts';
+export { chatReconnectFrameSchema } from './zod/chatReconnectFrameSchema.ts';
 export { chatTurnStateFrameSchema } from './zod/chatTurnStateFrameSchema.ts';
 export { consoleConversationSchema } from './zod/consoleConversationSchema.ts';
 export { consoleNodeSchema } from './zod/consoleNodeSchema.ts';
