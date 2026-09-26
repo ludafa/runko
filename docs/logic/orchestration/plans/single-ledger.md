@@ -133,3 +133,16 @@ P13-5-1..6 六单串行交付完毕，改动累积工作区（本会话不 commi
 - **进程重启掉 `activeTurns`**：纯内存，服务重启中途轮被静默丢弃；已落盘的行留着，下次 `GET .../stream` 回放到崩溃点为止。v1 的既定取舍。
 - **进度非严格实时交错**：`ctx.update()` 进度缓冲后重放，不与执行严格实时交错（沿用 P13-1 取舍）。
 - **跨轮 reasoning 不回传**：服务商协议行为，账本完整保存、界面回放不受影响。
+
+## 8. 收尾顺序与落库失败（2026-09-26）
+
+方案见[技术方案 §6.1](../tech/single-ledger.md)。起因：收尾帧先于成品消息广播，前端以为这一轮结束了、服务端还在写库；写库失败时只打日志，用户看到「完成了」、刷新后回复没了。和[排队的「出队不放手」](./steer-and-queue.md)同批施工。
+
+| 阶段 | 目标 | 涉及文件 | 产出 | 状态 |
+|---|---|---|---|---|
+| L1 | core 错误码加 `internal_error`（系统异常） | `packages/core/src/events.ts`、`state.ts` | 类型 + schema | ✅ |
+| L2 | 收尾帧扣到 `finalize` 之后再发；`finalize` 报告写没写全，没写全改发 `failed` + `internal_error`，并尽量补失败标记 | `packages/agent/src/runtime/turn.ts` | 实现 | ✅ 偏差：补失败标记之前先发帧，且归属已丢时不补——集群端到端 lab S8（持有者与库网络分区）测出，补标记要读库，库连不上时会把收尾卡住 |
+| L3 | 单测：成品消息帧一定排在收尾帧之前；写库出错 / 被拒 / 归属丢了都改发系统异常、不发「完成了」；失败标记也写不进时不抛、收尾照常跑完 | `packages/agent/test/` | 用例 | ✅ `settle-order.test.ts` 5 条（含「归属丢了、库又卡住」） |
+| L4 | 前端认 `internal_error`：标题「系统异常」，不显示英文细节 | `apps/web/src/features/chat/components/turn-marker.tsx` | 实现 + 用例 | ✅ 另加：成品先到时，管道里还没吐完的旧草稿不再盖回成品（`materialize.ts` 的 `landedAtGeneration`，改了顺序之后才会出现的竞态） |
+| L5 | 全量测试 + 集群端到端 | — | 结果回填 | ✅ core 521、agent 241、node-server 542、web 396；集群端到端 cluster 9/9（新增 §4.9）、cluster-handover 3/3、cluster-console 5/5、lab 9/9 |
+

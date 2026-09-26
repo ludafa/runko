@@ -13,7 +13,7 @@ related: ["host/node/features/cluster-console.md", "host/node/plans/cluster-cons
 > 术语见 [术语表](../../../terms.md)。要做什么见[功能手册](../features/cluster-console.md)；拆单见[施工](../plans/cluster-console.md)。
 > 建在[集群实验环境 · 技术](./cluster-lab.md)与[优雅关闭 · 技术](../../../logic/orchestration/tech/graceful-shutdown.md)之上。
 >
-> **⚠️ 本文的「等待窗口」与「闸门放行转发来的请求」是过渡方案**（2026-09-25）：以[交权与任务迁移 · 技术方案](../../../logic/orchestration/tech/handover.md)为准——节点下线时几百毫秒内把对话交给别的节点，模型输出重来、工具留在旧节点跑完。逐项处置（保留哪些、去掉哪些）见那份文档 §3.3。运维容器、控制台、`docker stop -t 120` 不受影响。
+> 节点下线时做的事是[交权](../../../terms.md)，见[交权与任务迁移 · 技术方案](../../../logic/orchestration/tech/handover.md)。
 
 ## 1. 长什么样
 
@@ -76,6 +76,8 @@ erDiagram
 
 ## 3. 下线的全过程
 
+节点收到 SIGTERM 之后做的事就是[交权](../../../terms.md)，设计在[交权与任务迁移 · 技术方案](../../../logic/orchestration/tech/handover.md)；本节只写集群实验环境里它长什么样。
+
 ```mermaid
 sequenceDiagram
   autonumber
@@ -84,6 +86,7 @@ sequenceDiagram
   participant O as 运维容器
   participant D as Docker
   participant N2 as 节点 2（被下线的）
+  participant N3 as 节点 3（接手的）
   participant X as nginx
   U->>N1: POST /api/console/nodes/{id}/offline
   N1->>O: POST /nodes/{id}/offline（带内部令牌）
@@ -91,14 +94,17 @@ sequenceDiagram
   O-->>N1: 202 已开始
   N1-->>U: 202
   D->>N2: SIGTERM
-  Note over N2: 进入下线：闸门关上
-  N2->>N2: 断开直播连接（WS 1012 / SSE 结束；集群配了 Redis）
-  N2->>N2: 等人的轮立刻挂起
+  Note over N2: 闸门关上：浏览器来的一律 503（转发来的放到交接完成为止）
+  N2->>N2: 登记表里标成下线中，挑接手节点（问一句「接不接」）
+  N2->>N2: 各轮按阶段收尾：模型输出扔掉半步、工具留下接着跑、等人的挂起
+  N2->>N3: 预留给 N3，出站「请接手」
+  N3->>N3: 接着跑（或等工具结果）
+  N2-->>U: 直播流上发请重连帧、收线（浏览器立刻重连到 N3）
   X->>N2: 新请求
   N2-->>X: 503
   X->>N1: 换一个节点重试（浏览器无感）
-  Note over N2: 干活的轮继续跑，最多 90 秒
-  N2->>N2: 90 秒还没完的轮中止，再等最多 15 秒收尾
+  Note over N2: 还在跑的命令跑完 → 结果写库 → 通知 N3
+  Note over N2: 交接完成：转发来的也 503
   N2->>N2: 关 Redis、关 HTTP 服务、exit(0)
   D-->>O: stop 返回（容器已退出）
   Note over D,N2: 若 120 秒时进程还在：SIGKILL
@@ -109,80 +115,51 @@ sequenceDiagram
 | 常量 | 值 | 在哪配 | 含义 |
 |---|---|---|---|
 | 强杀期限 | 120 秒 | 运维容器 `RUNKO_OPS_STOP_TIMEOUT_S` | `docker stop -t` 的参数 |
-| 让轮跑完 | 90 秒 | 节点 `SHUTDOWN_FINISH_WINDOW_MS=90000` | 在这之内跑完的轮算正常结束 |
-| 收尾宽限 | 15 秒 | 节点 `SHUTDOWN_TIMEOUT_MS=15000`（已有） | 中止之后等轮把账本收干净 |
+| 工具最长执行时间 | 90 秒 | 节点 `RUNKO_TOOL_TIMEOUT_MS=90000` | 平时与下线时一样生效；下线时旧节点最多等这么久 |
+| 交出去的上限 | 15 秒 | 节点 `SHUTDOWN_TIMEOUT_MS=15000` | 等各轮交出去；交权本身几百毫秒就完成，它只防装配卡住 |
 
-90 + 15 = 105 秒，比 120 秒留 15 秒给关连接、进程退出。
-
-**`SHUTDOWN_FINISH_WINDOW_MS` 缺省是 0**，也就是现在的行为（收到 SIGTERM 立刻中止）。只有集群 compose 里配 90 秒。原因：本地 `node --watch` 热重载也发 SIGTERM，改一行代码等 90 秒是不能接受的。
+强杀期限 ≥ 工具上限 + 30 秒（[交权 · 技术方案 §13](../../../logic/orchestration/tech/handover.md)）：留 30 秒给写结果、关连接。本地 `pnpm dev` 不配工具上限就用框架缺省 2 分钟，热重载时手上没有长命令的话几百毫秒就退。
 
 ## 4. 节点这边：收到 SIGTERM 之后
 
-改动全在 `index.ts` 的 `shutdown()` 与一个新的「下线闸门」模块里，顺序是硬的：
+`index.ts` 的 `shutdown()`，顺序是硬的：
 
-1. **先关闸门**（`offline.ts`，新）。之后的请求按第 4.1 节分流。
-2. **断开全部直播连接**（第 4.2 节）——**只在配了 Redis 广播时**。没配时（单进程、靠转发的多副本）只有本节点能播这一轮，先断的话浏览器重连被闸门挡回，被中止那一轮的收尾帧就送不出去；所以挪到第 3 步之后再断。
-3. **`chatRuntime.shutdown({ finishWindowMs, graceMs })`**：让轮跑完，到点中止（第 5 节）。
-4. 断开剩下的直播连接（此时已经没有轮在跑），关 Redis 连接、`server.close()`、`process.exit(0)`（已有）。
-
-所以 `offline.ts` 给的是两个方法：`goOffline()` 只关闸门，`disconnectStreams()` 只断直播。
+1. **先关闸门**（`offline.ts`）：浏览器来的一律 503——真集群里入站随 SIGTERM 一起关（负载均衡与 service mesh 都不再送请求进来），闸门在验证环境里模拟同样的效果。别的节点**转发**来的请求放到交接完成为止（见 4.1）。
+2. **`chatRuntime.shutdown()`**：交权。直播流由框架自己收——与交接无关的订阅一开始就收到请重连帧，交出去的对话在「请接手」答复之后收到；还在跑的工具在本节点上跑完、结果写库。它返回时本节点已经没活了。
+3. 闸门改成转发来的也挡；收 Redis 连接；先断空闲连接、再 `server.close()`。还没断的连接（SIGTERM 之前接下、还在处理的请求，比如在建云沙盒；或替别的节点转发的长连接）最多再等 60 秒，到点硬断、`process.exit(0)`。再收到一次信号就立刻 `exit(1)`。
 
 ### 4.1 闸门：谁挡、谁放
 
 | 请求 | 下线中怎么处理 | 为什么 |
 |---|---|---|
 | 浏览器经 nginx 来的任何请求（含 WebSocket 升级） | **503 + `Retry-After: 1`** | nginx 见 503 换节点重试（第 6 节），浏览器无感 |
-| 别的节点**转发**过来的请求（带转发标记且令牌对） | **照常处理** | 那一轮还在本节点上跑，停止、答审批这类请求**只有本节点能做**，挡了就没人能做 |
+| 别的节点**转发**过来的请求、节点间的「请接手」 | **交接完成前放行，之后 503** | 交接完成之前（通常几十毫秒）对话还在本节点手上，别的节点会把停止、发消息、答卡片转到这里，挡了就丢；被下线的节点答「请接手」只会是拒绝（它看自己在下线就答否） |
 | `GET /health` | 503 | 让 `docker ps` 里一眼看出它不健康了 |
-
-转发进来的「发消息」请求会被框架自己拒掉（入队在关闭期间一律回 `shutting_down`，已有行为），发起方节点把 503 原样带回去——这就是功能手册里「下线期间给这个会话发新消息会被拒」的来由。
 
 闸门做成顶层 `app.use('*')`，挂在所有路由**之前**。WebSocket 的升级请求也是先走一遍 Hono 的中间件链（`@hono/node-ws` 的 `upgradeWebSocket` 本身就是一个路由处理器），所以同一个闸门就能挡住，不用在 HTTP 服务器那层另写。
 
-### 4.2 断开直播连接
+### 4.2 直播连接：请重连帧
 
-直播连接是长连接，**闸门挡不住已经连上的**。不断开的话，浏览器会一直连在这个节点上，直到进程退出那一刻被硬断。
+直播连接是长连接，**闸门挡不住已经连上的**。框架在这份对话交接完成后，在这条连接上发一帧[请重连帧](../../../terms.md)再收线（只发给本进程的订阅者，不经 Redis 广播）：
 
-做法：一个进程级的 `AbortController`（「本节点要下线了」），WebSocket 与 SSE 两个处理器各自把它和自己的「连接断了」信号合并（`AbortSignal.any`）传给 `runtime.subscribe`：
+- **SSE**：`event: reconnect`，数据 `{"reconnect":true}`，然后流结束。
+- **WebSocket**：发 `{"reconnect":true}`，然后以 1012（「服务重启」）关闭。
 
-- **WebSocket**：信号触发时 `ws.close(1012, 'node going offline')`。1012 是标准里的「服务重启」。前端对非 1000 的关闭一律按退避重连（`use-chat-messages.ts` 已有），重连请求经 nginx 落到别的节点。
-- **SSE**：信号触发时 `subscribe` 结束，流关闭。前端见「轮还在跑流却断了」同样按退避重连（已有）。
-- **别的节点转发来的 SSE 不断**。有转发说明没配 Redis、直播只有本节点能播；断了的话那边重连还是转回这里，又被立刻断掉，整个等待窗口里都看不到实时帧。
+前端收到它不走退避，立刻重连（连不上就每 250 毫秒再试，最多 10 秒），经 nginx 落到别的节点，拿到回放与接手节点的进行中草稿。模型输出段被交权时，前端把旧节点流出来的半截字整体替换掉。
 
-重连之后能不能接着看直播：能。集群配了 Redis，直播帧是广播给每个节点的（[集群实验环境 · 技术 §2](./cluster-lab.md)），这一轮虽然还在被下线的节点上跑，别的节点照样收得到它的帧。
+## 5. 框架：交权
 
-## 5. 框架：`shutdown` 学会「先等，再中止」
+见[交权与任务迁移 · 技术方案](../../../logic/orchestration/tech/handover.md) §5–§10。node-server 接入的三件事：
 
-现有的 `runtime.shutdown()` 一上来就中止所有干活的轮。[交权](../../../terms.md)的定义本来是「正在干活就跑完当前这一轮再放手，超过宽限期才降级成中断」——这次把它补齐。
-
-```ts
-runtime.shutdown({
-  finishWindowMs: 90_000, // 新增，缺省 0：先让干活的轮自然跑完，最多等这么久
-  graceMs: 15_000, // 已有：中止之后等收尾的上限
-});
-```
-
-流程（顺序是硬的，1、2、4、5 步与现在一样）：
-
-1. **置关闭闸门**：之后入队、自动出队一律拒（已有）。
-2. 快照活跃轮。
-3. **新增 · 等待窗口**（`finishWindowMs > 0` 时）：
-   - 等人的轮**立刻[挂起](../../../terms.md)**（与现在一样）；
-   - 干活的轮不动它，等它自己收尾；
-   - 窗口期间每 500 毫秒再看一遍：**中途转入等人的轮也挂起**（一轮跑着跑着碰上审批，不能让它占着节点等到窗口结束）；
-   - 全部收尾就提前结束窗口。
-4. 窗口到点还没收尾的：按现在的规则再分一次——等人的挂起，其余用 `ABORT_REASON_SHUTDOWN` 中止。
-5. 再等最多 `graceMs`。撞上限的成了[孤儿轮](../../../terms.md)，交给下次启动的崩溃恢复（已有）。
-
-`ShutdownResult` 加一个 `finished`：窗口内正常完成（`completed`）的轮数。窗口期间被用户停止、跑失败的轮不算。启动日志里能直接看出「这次下线有几轮是正常结束的」。
-
-**改动是纯新增的**（多一个可选参数、结果多一个字段，不传就是老行为），`@runko/agent` 记 minor。
+- `createChatRuntime` 传 `handover`：节点地址（`RUNKO_NODE_URL`，也是租约的 `holder`）、[发布序号](../../../terms.md)（`RUNKO_RELEASE_SEQ`）、[节点登记表](../../../terms.md)（`@runko/persist-kysely` 的 `nodeRegistry`，表 `agent_nodes`）、出站「请接手」（`routes/takeover.ts`）。
+- `POST /internal/takeover`：节点间端点，带副本间令牌，不走用户鉴权；本节点在下线时答 `accepted: false`。
+- 开始监听之后调 `chatRuntime.start()`：登记节点、开心跳与[定时回捞](../../../terms.md)，并扫一遍[待接手](../../../terms.md)的对话。
 
 ## 6. nginx：见 503 换节点
 
 ```nginx
 proxy_next_upstream error timeout http_503 non_idempotent;
-proxy_next_upstream_tries 3;
+proxy_next_upstream_tries 6;
 ```
 
 - `http_503`：被下线节点回的 503 → 换下一个节点。
@@ -192,13 +169,13 @@ proxy_next_upstream_tries 3;
   - 转发时**等持有者开口超时**：请求可能已经被收下了，结果未知。这种回 **504**（`forward.ts` 的 `RESULT_UNKNOWN_STATUS`），不在重试名单里。回 503 的话，一条消息会被发两到三遍。
   - 持有者的容器被整个杀掉（`docker kill`）时也是 504：它的 IP 从网络里消失，连接不被拒、也没人应，跟「冻住」分不出来。这时重试本来也没用——接管之前，换哪个节点都要转给这个死掉的持有者。
   - nginx 缺省会把请求体缓冲下来（`proxy_request_buffering on`），所以重试时有完整的请求体可发。
-- `error`：节点彻底退出后、Docker 内部域名还没刷新的那几秒（`resolver valid=5s`），连接会被拒，也换下一个。
+- `error`：节点彻底退出后、Docker 内部域名还没刷新的那几秒（`resolver valid=2s`），连接会被拒或连不上，也换下一个。连接超时配成 500 毫秒（`proxy_connect_timeout`）：挑中刚退出那个节点的旧地址时，TCP 握手没人应，要等满这个时长才换——它直接加在交权之后浏览器重连的用时上。
 
 **多个地址的变量写法也会重试**：`proxy_pass $upstream` 走 resolver，域名解析出多个地址时 nginx 把它们当成一组轮流用，`proxy_next_upstream` 对这一组生效。这条在施工时实测确认（见施工 O6）。
 
 **代价**：
 - 应用自己的 503（「持有者连不上」，见 `forward.ts` 的 `RETRY_LATER_STATUS`）也会被 nginx 重试。请求没送到过，重试无害，只是多问几次。
-- 节点在「收下 POST、还没回响应」时被强杀（SIGKILL、崩溃），nginx 会把这条 POST 当 `error` 重发给别的节点。正常下线会走完等待窗口再自己退出，碰不上；只有被强杀才会。
+- 节点在「收下 POST、还没回响应」时被强杀（SIGKILL、崩溃），nginx 会把这条 POST 当 `error` 重发给别的节点。正常下线交权之后才退，碰不上；只有被强杀才会。
 
 ## 7. 运维容器
 
@@ -303,7 +280,7 @@ Docker 自己没有「正在 stop」这个状态——stop 期间容器照样是
 
 ## 10. 已知限制
 
-- **下线前就排在队列里的消息，这一轮跑完后不会自动接着跑**：被下线的节点关着闸门，不会再出队；别的节点也不知道要来接。要等用户再发一条消息（或刷新触发推进）才会在别的节点上出队。这是[优雅关闭](../../../logic/orchestration/tech/graceful-shutdown.md)已有的行为（「不清队列」），这次不改。
+- **控制台只列 `node` 这个服务的容器**：端到端测试里模拟发布用的 `node-next`（新版本副本）不出现在控制台上。
 - **运维容器重启会丢「下线中」状态**（7.3）。
 - **控制台能看到所有人的会话标题**：demo 项目不设管理员的代价。
 - **nginx 会把应用自己的 503 也重试**；节点被强杀时，正在处理的 POST 可能被重发（第 6 节）。
