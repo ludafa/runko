@@ -127,9 +127,50 @@ export interface QueueStore {
   requeueFront(conversationId: string, item: QueuedInput): Promise<QueuedInput[]>;
 }
 
+/**
+ * 一次调用在别处跑完之后带回来的结果——与 core 的 `CallOutcome` 同形（`output` 被收窄成
+ * `JsonValue`：要落库，得是 JSON）。
+ */
+export type TailOutcome = { kind: "output"; output: JsonValue } | { kind: "error"; errorText: string };
+
+/**
+ * 一条[工具收尾](../../../docs/terms.md)记录：[交权](../../../docs/terms.md)那一刻还在跑、留在旧节点上跑完的
+ * 那次调用。旧节点跑完把结果写进来，接手的一方读出来结清账本里那次悬空调用。
+ */
+export interface ToolTailRecord {
+  conversationId: string;
+  toolCallId: string;
+  toolName: string;
+  /** 在哪个节点上收尾（节点地址，同 `Grant.holder` 的值空间）。 */
+  runner: string;
+  startedAt: number;
+  /** 过了这个时刻还没有结果，持有者就把它记成「结果未知」。 */
+  deadline: number;
+  /** 缺席 = 还在跑。**只在缺席时写得进**——迟到的结果写不进去。 */
+  outcome?: TailOutcome;
+  settledAt?: number;
+  /** 持有者要求停止（用户按了停止）。旧节点定时查它，查到就杀掉工具。 */
+  stopRequested: boolean;
+}
+
+export interface ToolTailStore {
+  /** 登记一条（交权时，在放手之前）。同 `(conversationId, toolCallId)` 重复登记应当幂等。 */
+  begin(record: Omit<ToolTailRecord, "outcome" | "settledAt" | "stopRequested">): Promise<WriteResult>;
+  /** 写结果。`false` = 没有这一行，或者已经有结果了（迟到的结果、或已被记成「未知」）。 */
+  complete(conversationId: string, toolCallId: string, outcome: TailOutcome, settledAt: number): Promise<boolean>;
+  get(conversationId: string, toolCallId: string): Promise<ToolTailRecord | undefined>;
+  /** 记一个停止请求。`false` = 没有这一行，或者已经有结果了。 */
+  requestStop(conversationId: string, toolCallId: string): Promise<boolean>;
+}
+
 /** 三个 Store 合起来就是「持久化」这一样宿主能力。 */
 export interface Persistence {
   ledger: LedgerStore;
   decisions: DecisionStore;
   queue: QueueStore;
+  /**
+   * [工具收尾](../../../docs/terms.md)记录。**可选**：没有它时，[交权](../../../docs/terms.md)那一刻正在跑工具的
+   * 那一轮只能中止（工具被切断），其余阶段照常交出。
+   */
+  tails?: ToolTailStore;
 }

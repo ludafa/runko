@@ -6,7 +6,7 @@
 import { randomUUID } from "node:crypto";
 import type { RunkoChunk, RunkoUIMessage, SessionOptions, SessionState, TurnResult } from "@runko/core";
 
-import type { DrivenSession, SessionFactory } from "../../src/index.js";
+import type { DrivenSession, DrivenTurnOptions, SessionFactory } from "../../src/index.js";
 
 export interface FakeSession extends DrivenSession {
   /** `stream()` 被调用（这一轮真正开跑）时 resolve，带上喂给模型的文本。 */
@@ -19,6 +19,10 @@ export interface FakeSession extends DrivenSession {
   /** 让 `stream()` 抛出——模拟「生成器自己炸了」那条路。 */
   fail(error: Error): void;
   readonly signal: AbortSignal | undefined;
+  /** 框架给的[交权](../../../../docs/terms.md)信号（core 的 `TurnOptions.handover`）。 */
+  readonly handover: AbortSignal | undefined;
+  /** 这一轮是不是经 `continueTurn` 开的（接着跑）。 */
+  readonly continued: boolean;
 }
 
 const EMPTY_RESULT: TurnResult = { finalResponse: "", usage: {} };
@@ -36,6 +40,8 @@ export function createFakeSession(options: SessionOptions = {}): FakeSession {
   let result: TurnResult = EMPTY_RESULT;
   let active = false;
   let signal: AbortSignal | undefined;
+  let handover: AbortSignal | undefined;
+  let continued = false;
 
   let wake: () => void = () => undefined;
   let waiter = new Promise<void>((resolve) => {
@@ -54,13 +60,25 @@ export function createFakeSession(options: SessionOptions = {}): FakeSession {
     markStarted = resolve;
   });
 
-  async function* stream(input: string, opts?: { signal?: AbortSignal }): AsyncGenerator<RunkoChunk, TurnResult> {
-    active = true;
-    signal = opts?.signal;
-    turn += 1;
+  // 两个入口直接返回同一个生成器，不用 `yield*` 转一手——转手会多一次异步跳转，
+  // 测试里「emit 之后马上订阅」的时序就对不上了。
+  function stream(input: string, opts?: DrivenTurnOptions): AsyncGenerator<RunkoChunk, TurnResult> {
     // core 自己也是这么干的：`stream()` 一进门就同步把这条 user 消息 push 进账本，
     // 所以框架的 `slice(priorMessageCount + 1)` 才跳得过它。
     messages.push({ id: randomUUID(), role: "user", parts: [{ type: "text", text: input }] });
+    return run(input, opts);
+  }
+
+  function continueTurn(opts?: DrivenTurnOptions): AsyncGenerator<RunkoChunk, TurnResult> {
+    continued = true;
+    return run("", opts);
+  }
+
+  async function* run(input: string, opts?: DrivenTurnOptions): AsyncGenerator<RunkoChunk, TurnResult> {
+    active = true;
+    signal = opts?.signal;
+    handover = opts?.handover;
+    turn += 1;
     markStarted(input);
     try {
       for (;;) {
@@ -83,7 +101,14 @@ export function createFakeSession(options: SessionOptions = {}): FakeSession {
     get signal() {
       return signal;
     },
+    get handover() {
+      return handover;
+    },
+    get continued() {
+      return continued;
+    },
     stream,
+    continueTurn,
     toJSON(): SessionState {
       return { id, turn, messages: [...messages], createdAt };
     },
@@ -147,7 +172,7 @@ export function createFakeSessionFactory(): { factory: SessionFactory; sessions:
 const claimed = new WeakSet<FakeSession>();
 
 /** 一条最小的收尾帧——`status` 决定这一轮算怎么结束的。 */
-export function endTurnChunk(turn: number, status: "completed" | "failed" | "interrupted" = "completed"): RunkoChunk {
+export function endTurnChunk(turn: number, status: "completed" | "failed" | "interrupted" | "handed-over" = "completed"): RunkoChunk {
   return { type: "message-metadata", messageMetadata: { turn, usage: {}, status } };
 }
 

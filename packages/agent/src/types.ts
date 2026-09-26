@@ -50,7 +50,14 @@ export type Frame =
   /** [待发队列](../../../docs/terms.md)快照。每条订阅必发一帧，之后变一次发一次。 */
   | { kind: "queue"; queue: QueuedInput[] }
   /** [轮状态快照](../../../docs/terms.md)：这个会话此刻有没有轮在跑，**服务端的权威答案**。 */
-  | { kind: "activity"; active: boolean; holder?: string };
+  | { kind: "activity"; active: boolean; holder?: string }
+  /**
+   * [请重连帧](../../../docs/terms.md)：本节点在[节点下线](../../../docs/terms.md)，这份对话已经交给别的节点（或本节点
+   * 就要退出了）。它是这条订阅的**最后一帧**，接入层收到它就发给客户端、关掉连接，客户端立刻重连（不走退避）。
+   *
+   * **只发给本进程的订阅者，从不经流分发广播**——广播出去的话，别的节点上的订阅者也会跟着断。
+   */
+  | { kind: "reconnect" };
 
 /** 一轮在框架内部的两个阶段（同 chat 应用原先的 `TurnPhase`）。 */
 export type TurnPhase = "preparing" | "running";
@@ -75,10 +82,10 @@ export interface ConversationActivity {
  * 这个干净边界上主动收尾、释放归属，人回来之后由**新的一轮**接着跑。它与 `interrupted`
  * 的区别是**主动且可恢复**——宿主别把它当成失败处理（别重试、别标红）。
  *
- * **目前没有产出方**：core 的 `finalizeTurn` 至今只产出前三值，K3 落地才会真写出来。
- * 先进联合是为了让宿主提前把分支占好，见 core `state.ts` 上的同款说明。
+ * `handed-over` = [已交权](../../../docs/terms.md)：节点要下线，这一轮停在一个干净的位置交给别的节点接着跑
+ * （docs/logic/orchestration/tech/handover.md §6）。也不是失败——别重试、别标红、别发「完成了」的通知。
  */
-export type TurnStatus = "completed" | "failed" | "interrupted" | "suspended" | "crashed";
+export type TurnStatus = "completed" | "failed" | "interrupted" | "suspended" | "handed-over" | "crashed";
 
 /** `enqueue` 的结果——四种去向，`rejected` 带原因。 */
 export type EnqueueResult =

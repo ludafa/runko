@@ -23,18 +23,21 @@ export * from "./persistence.js";
 export * from "./stream.js";
 export * from "./arbitration.js";
 export * from "./prepare.js";
+export * from "./nodes.js";
+export * from "./nodes.js";
 
 // 内置的平凡实现
 export * from "./builtin/memory-persistence.js";
 export * from "./builtin/in-process-stream.js";
 export * from "./builtin/in-process-arbitration.js";
+export * from "./builtin/memory-node-registry.js";
 
 // 宿主可能要接的几个小东西
 export * from "./logger.js";
 export type { RuntimeHooks, QueueConfig, SteerPolicy } from "./runtime/context.js";
 export type { AskUserOutcome } from "./runtime/registry.js";
 export type { ApprovalPendingEvent, QuestionPendingEvent, SubmittedDecision } from "./runtime/human.js";
-export type { DrivenSession, SessionFactory } from "./runtime/session-factory.js";
+export type { DrivenSession, DrivenTurnOptions, SessionFactory } from "./runtime/session-factory.js";
 /** 默认工厂——宿主要在它之上再包一层（而不是整个换掉）时用得上。 */
 export { defaultSessionFactory } from "./runtime/session-factory.js";
 export { ASK_USER_TIMEOUT_MESSAGE } from "./runtime/ask-user.js";

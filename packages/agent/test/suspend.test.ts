@@ -21,6 +21,7 @@ import { z } from "zod";
 
 import { createAgentRuntime, memoryPersistence } from "../src/index.js";
 import type { Persistence } from "../src/index.js";
+import { sharedArbitration } from "./helpers/shared-arbitration.js";
 
 type RuntimeOptions = Parameters<typeof createAgentRuntime>[0];
 type SettledEvent = Parameters<NonNullable<NonNullable<RuntimeOptions["hooks"]>["onTurnSettled"]>>[0];
@@ -90,6 +91,7 @@ interface Setup {
   onApproval?: ApprovalPolicy;
   persistence?: Persistence;
   queue?: RuntimeOptions["queue"];
+  arbitration?: RuntimeOptions["arbitration"];
 }
 
 function setup(opts: Setup) {
@@ -106,6 +108,7 @@ function setup(opts: Setup) {
       onApprovalPending: (event) => approvalsPending.push(event),
     },
     ...(opts.queue !== undefined ? { queue: opts.queue } : {}),
+    ...(opts.arbitration !== undefined ? { arbitration: opts.arbitration } : {}),
   });
   const lastLedgerMessage = async (conversationId: string) => {
     const entries = await persistence.ledger.read(conversationId);
@@ -279,56 +282,45 @@ describe("交权", () => {
     });
 
     const result = await runtime.shutdown({ graceMs: 2_000 });
-    expect(result).toEqual({ finished: 0, aborted: 0, suspended: 1, settled: true, pending: 0 });
+    expect(result).toMatchObject({ handedOver: 0, aborted: 0, suspended: 1, settled: true, pending: 0 });
     expect(settled[0]?.status).toBe("suspended");
     expect((await lastLedgerMessage("c8"))?.metadata).toMatchObject({ status: "suspended", suspended: { reason: "handover" } });
     expect(await persistence.decisions.listPending("c8")).toHaveLength(1);
   });
 
-  it("`finishWindowMs` 配了也一样：立即挂起，不占等待窗口（docs/host/node/tech/cluster-console.md §5 步骤 3）", async () => {
-    const model = new MockLanguageModelV4({ doStream: [toolCallsStep([{ toolCallId: "call_1", toolName: "danger", input: { cmd: "x" } }]), textStep("不该走到")] });
-    // 窗口开得很长：关闭那一刻它一定还在等人。
-    const { runtime, persistence, settled, lastLedgerMessage } = setup({ model, windowMs: 60_000 });
-
-    await runtime.enqueue("c10", { text: "第一条" });
-    await vi.waitFor(async () => {
-      expect(await persistence.decisions.listPending("c10")).toHaveLength(1);
+  it("关闭那一刻模型正在输出：不挂起，交权——这半步扔掉，裁决表里什么都没有", async () => {
+    // 工具调用请求延后 300ms 到达：关闭那一刻这一轮还在**等模型输出**，没有任何等人项。
+    const model = new MockLanguageModelV4({
+      doStream: [toolCallsStepDelayed([{ toolCallId: "call_1", toolName: "danger", input: { cmd: "x" } }], 300), textStep("不该走到")],
     });
+    // 交得出去要能留下跨进程的待接手标记：用一张「多节点共用」的租约表，而不是进程内仲裁。
+    const { runtime, persistence, settled, lastLedgerMessage } = setup({ model, windowMs: 60_000, arbitration: sharedArbitration().forNode("A") });
 
-    const start = Date.now();
-    const result = await runtime.shutdown({ finishWindowMs: 5_000, graceMs: 3_000 });
-    const elapsed = Date.now() - start;
+    await runtime.enqueue("c11", { text: "第一条" });
+    // 等模型真的开始被调用（装配阶段交权是另一条路：什么都不写、输入放回队首）。
+    await vi.waitFor(() => {
+      expect(model.doStreamCalls).toHaveLength(1);
+    });
+    const result = await runtime.shutdown({ graceMs: 3_000 });
 
-    expect(result).toEqual({ finished: 0, aborted: 0, suspended: 1, settled: true, pending: 0 });
-    // 没有等满 5 秒的等待窗口——挂起发生在窗口开始之前那一步（`finishWindowMs>0` 时的前置循环），
-    // 不是靠窗口到点才被分流。
-    expect(elapsed).toBeLessThan(1_000);
-    expect(settled[0]?.status).toBe("suspended");
-    expect((await lastLedgerMessage("c10"))?.metadata).toMatchObject({ status: "suspended", suspended: { reason: "handover" } });
-    expect(await persistence.decisions.listPending("c10")).toHaveLength(1);
+    expect(result).toMatchObject({ handedOver: 1, suspended: 0, aborted: 0, settled: true, pending: 0 });
+    expect(settled[0]?.status).toBe("handed-over");
+    expect((await lastLedgerMessage("c11"))?.metadata).toMatchObject({ status: "handed-over", handedOver: { callIds: [] } });
+    expect(await persistence.decisions.listPending("c11")).toHaveLength(0);
   });
 
-  it("窗口期间才转入等人：在窗口结束之前就被挂起，不用等满 `finishWindowMs`（docs/host/node/tech/cluster-console.md §5 步骤 3）", async () => {
-    // 工具调用请求（进而触发一次人审）延后 100ms 到达：关闭那一刻这一轮还在**干活**，
-    // 没有任何等人项，`shutdown()` 的轮询要在窗口期间才逮到它转入等人。
-    const model = new MockLanguageModelV4({
-      doStream: [toolCallsStepDelayed([{ toolCallId: "call_1", toolName: "danger", input: { cmd: "x" } }], 100), textStep("不该走到")],
-    });
-    const { runtime, persistence, settled, lastLedgerMessage } = setup({ model, windowMs: 60_000 });
+  it("关闭那一刻还在装配：账本一个字不写，输入放回待发队列最前面", async () => {
+    const model = new MockLanguageModelV4({ doStream: [textStep("不该走到")] });
+    const { runtime, persistence, settled } = setup({ model, windowMs: 60_000, arbitration: sharedArbitration().forNode("A") });
 
-    const start = Date.now();
-    await runtime.enqueue("c11", { text: "第一条" });
-    // `enqueue` 一回来这一轮还没真的跑到工具调用那一步——`finishWindowMs` 给得很宽（5 秒），
-    // 用来证明它不是靠等满窗口才收尾的。
-    const result = await runtime.shutdown({ finishWindowMs: 5_000, graceMs: 3_000 });
-    const elapsed = Date.now() - start;
+    await runtime.enqueue("c12", { text: "第一条" });
+    const result = await runtime.shutdown({ graceMs: 3_000 });
 
-    expect(result).toEqual({ finished: 0, aborted: 0, suspended: 1, settled: true, pending: 0 });
-    expect(elapsed).toBeGreaterThanOrEqual(90); // 至少等到那次延迟的工具调用真的发生
-    expect(elapsed).toBeLessThan(2_000); // 远早于 5 秒的窗口——是轮询逮到的，不是窗口到点
-    expect(settled[0]?.status).toBe("suspended");
-    expect((await lastLedgerMessage("c11"))?.metadata).toMatchObject({ status: "suspended", suspended: { reason: "handover" } });
-    expect(await persistence.decisions.listPending("c11")).toHaveLength(1);
+    expect(result).toMatchObject({ handedOver: 1, settled: true });
+    expect(settled[0]?.status).toBe("handed-over");
+    expect(await persistence.ledger.read("c12")).toHaveLength(0);
+    expect((await persistence.queue.list("c12")).map((item) => item.input.text)).toEqual(["第一条"]);
+    expect(model.doStreamCalls).toHaveLength(0);
   });
 
   it("对照：用户点停止仍然把等人项结成拒绝，并写进裁决表", async () => {

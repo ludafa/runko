@@ -37,10 +37,15 @@ export interface PrepareTurnContext {
   input: TurnInput;
   /** 有它 = 这是一轮恢复，要结清的是 `callId` 那次调用。宿主一般不需要区别对待，照常装配即可。 */
   resume?: { callId: string };
+  /**
+   * 有它 = 这是一轮**接着跑**：上一轮[交权](../../../docs/terms.md)了，这一轮不追加用户消息、直接接着调模型。
+   * `input.text` 是空串。宿主一般不需要区别对待。
+   */
+  continuation?: true;
   /** 这一轮的轮号（1-based，从账本推的）。 */
   turnNumber: number;
   /**
-   * 这一轮的中止信号。**装配期间被[停止](../../../docs/terms.md)时它就会 abort**——
+   * 这一轮的中止信号。**装配期间被[停止](../../../docs/terms.md)或[交权](../../../docs/terms.md)时它就会 abort**——
    * 宿主可以把它透进自己那些远程调用（取沙盒、扫 skill），别再白跑。
    */
   signal: AbortSignal;

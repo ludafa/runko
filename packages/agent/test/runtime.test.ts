@@ -14,6 +14,7 @@ import { ABORT_REASON_HOLDER_LOST } from "../src/runtime/reasons.js";
 import { buildResumeState } from "../src/runtime/turn.js";
 import type { FakeSession } from "./helpers/fake-session.js";
 import { assistantMessage, createFakeSessionFactory, endTurnChunk } from "./helpers/fake-session.js";
+import { sharedArbitration } from "./helpers/shared-arbitration.js";
 
 /** 模型字段永远不会被假 session 用到——只是 `AgentDefinition` 要求它有个值。 */
 const agent: AgentDefinition = { model: "test/model" };
@@ -784,9 +785,56 @@ describe("人在回路", () => {
 });
 
 describe("交权（优雅关闭）", () => {
-  it("停掉在跑的轮、等它们收尾，关闭期间新的 enqueue 一律被拒", async () => {
-    const { runtime, sessions } = setup();
+  it("给在跑的轮发交权信号（不是中止）、等它收尾；关闭期间来的消息排进队列交给接手的一方", async () => {
+    const { runtime, sessions, persistence } = setup({ arbitration: sharedArbitration().forNode("A") });
     await runtime.enqueue("conv-18", { text: "hello" });
+    const session = await sessions.next();
+    await session.started;
+
+    const shutdown = runtime.shutdown({ graceMs: 2000 });
+    await vi.waitFor(() => {
+      expect(session.handover?.aborted).toBe(true);
+    });
+    expect(session.signal?.aborted).toBe(false);
+    expect(runtime.isShuttingDown()).toBe(true);
+    expect((await runtime.enqueue("conv-18", { text: "later" })).mode).toBe("queued");
+    expect((await persistence.queue.list("conv-18")).map((item) => item.input.text)).toEqual(["later"]);
+
+    session.emit(endTurnChunk(1, "handed-over"));
+    session.finish();
+    await expect(shutdown).resolves.toMatchObject({ handedOver: 1, aborted: 0, settled: true, pending: 0, transferred: 1 });
+  });
+
+  it("session 不理交权信号：宽限期到了退回中止；还收不了尾就如实报告", async () => {
+    const { runtime, sessions } = setup({ arbitration: sharedArbitration().forNode("A") });
+    await runtime.enqueue("conv-19", { text: "hello" });
+    const session = await sessions.next();
+    await session.started;
+
+    // 假 session 不理交权信号，也不理中止：两个宽限期过去都收不了尾。
+    const result = await runtime.shutdown({ graceMs: 20 });
+    expect(session.signal?.aborted).toBe(true);
+    expect(result).toMatchObject({ handedOver: 0, aborted: 1, settled: false, pending: 1 });
+
+    session.finish(); // 收拾干净，别让这一轮挂在测试进程里
+  });
+
+  it("空闲时关闭秒退", async () => {
+    const { runtime } = setup();
+    await expect(runtime.shutdown({ graceMs: 1000 })).resolves.toMatchObject({
+      handedOver: 0,
+      aborted: 0,
+      suspended: 0,
+      transferred: 0,
+      tails: 0,
+      settled: true,
+      pending: 0,
+    });
+  });
+
+  it("单进程（进程内仲裁、挑不到接手节点）：交出去的对话重启后没人找得到，照旧中止", async () => {
+    const { runtime, sessions } = setup();
+    await runtime.enqueue("conv-18c", { text: "hello" });
     const session = await sessions.next();
     await session.started;
 
@@ -794,29 +842,26 @@ describe("交权（优雅关闭）", () => {
     await vi.waitFor(() => {
       expect(session.signal?.aborted).toBe(true);
     });
-    expect(runtime.isShuttingDown()).toBe(true);
-    expect((await runtime.enqueue("conv-18", { text: "nope" })).mode).toBe("rejected");
-
+    expect(session.handover?.aborted).toBe(false);
     session.emit(endTurnChunk(1, "interrupted"));
     session.finish();
-    await expect(shutdown).resolves.toMatchObject({ aborted: 1, settled: true, pending: 0 });
+    await expect(shutdown).resolves.toMatchObject({ aborted: 1, handedOver: 0 });
   });
 
-  it("撞了宽限期就如实报告，不假装干净收尾", async () => {
-    const { runtime, sessions } = setup();
-    await runtime.enqueue("conv-19", { text: "hello" });
+  it("没有工具收尾记录的持久化：交不出去，退回中止", async () => {
+    const { tails: _tails, ...withoutTails } = memoryPersistence();
+    const { runtime, sessions } = setup({ persistence: withoutTails });
+    await runtime.enqueue("conv-18b", { text: "hello" });
     const session = await sessions.next();
     await session.started;
 
-    const result = await runtime.shutdown({ graceMs: 20 });
-    expect(result).toMatchObject({ aborted: 1, settled: false, pending: 1 });
-
-    session.finish(); // 收拾干净，别让这一轮挂在测试进程里
-  });
-
-  it("空闲时关闭秒退", async () => {
-    const { runtime } = setup();
-    await expect(runtime.shutdown({ graceMs: 1000 })).resolves.toEqual({ finished: 0, aborted: 0, suspended: 0, settled: true, pending: 0 });
+    const shutdown = runtime.shutdown({ graceMs: 2000 });
+    await vi.waitFor(() => {
+      expect(session.signal?.aborted).toBe(true);
+    });
+    session.emit(endTurnChunk(1, "interrupted"));
+    session.finish();
+    await expect(shutdown).resolves.toMatchObject({ aborted: 1, handedOver: 0, settled: true });
   });
 });
 
@@ -1363,8 +1408,8 @@ describe("起轮被拒时的 holder", () => {
     expect(outcome).toMatchObject({ message: expect.stringContaining("http://10.1.2.3:3910") });
   });
 
-  it("关闭中被拒时不带 holder——那条路跟归属无关", async () => {
-    const { runtime } = setup();
+  it("关闭中被拒时不带 holder——那条路跟归属无关（队列关着，只能拒）", async () => {
+    const { runtime } = setup({ queue: { enabled: false } });
     await runtime.shutdown({ graceMs: 0 });
 
     const outcome = await runtime.enqueue("conv-down", { text: "hello" });

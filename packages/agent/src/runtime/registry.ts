@@ -10,7 +10,7 @@
  * **实例级、不是模块级**：一个进程里可以有多个 `AgentRuntime`（多租户、测试并跑），
  * 模块级的 Map 会让它们互相踩。
  */
-import type { RunkoChunk } from "@runko/core";
+import type { CallOutcome, HandedOverCall, RunkoChunk } from "@runko/core";
 import type { HumanDecision, JsonValue, Settlement } from "@runko/core";
 
 import type { Grant, Takeover } from "../arbitration.js";
@@ -119,7 +119,21 @@ export interface ActiveTurn {
    * 没有它就是普通轮。恢复轮不追加用户消息、调的是 `session.settleAndRun`、收尾从被改写的那条
    * 开始落盘——见[挂起与恢复 · 技术方案](../../../../docs/logic/orchestration/tech/suspend-resume.md) §5.8。
    */
-  resume?: { callId: string; settlement: Settlement };
+  resume?: { callId: string; settlement: Settlement; also?: { callId: string; outcome: CallOutcome }[] };
+  /**
+   * 这是一轮**接着跑**：上一轮在模型输出段或两步之间[交权](../../../../docs/terms.md)了，账本末尾是用户消息或
+   * 工具结果，这一轮不追加任何消息、直接调模型（core 的 `continueTurn`）。
+   */
+  continuation?: true;
+  /**
+   * 恢复时**结清之后就停**：那次调用是[工具收尾](../../../../docs/terms.md)，用户在它跑的时候按了停止。
+   * 结果照样写进账本（工具确实跑过），但不再调模型。
+   */
+  stopAfterSettle?: true;
+  /** [交权](../../../../docs/terms.md)信号——与 `abortController`（中止）分开，交给 core 的 `TurnOptions.handover`。 */
+  handoverController: AbortController;
+  /** 交权那一刻还在跑的调用（core 交回来的）。收尾时登记成[工具收尾](../../../../docs/terms.md)。 */
+  handedOverCalls: HandedOverCall[];
   turnNumber: number;
   done: boolean;
   /** 这一轮是怎么结束的；`done` 置上的同时写入。交权据此只把 `completed` 算作「自然跑完」。 */
@@ -180,6 +194,7 @@ export function createActiveTurn(opts: {
   takeover?: Takeover;
 }): ActiveTurn {
   const abortController = new AbortController();
+  const handoverController = new AbortController();
   let markSettled = (): void => undefined;
   const settled = new Promise<void>((resolve) => {
     markSettled = resolve;
@@ -202,6 +217,8 @@ export function createActiveTurn(opts: {
     input: opts.input,
     ...(opts.takeover !== undefined ? { takeover: opts.takeover } : {}),
     turnNumber: opts.turnNumber,
+    handoverController,
+    handedOverCalls: [],
     done: false,
     settled,
     markSettled,

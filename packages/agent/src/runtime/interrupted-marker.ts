@@ -83,6 +83,20 @@ export async function pendingCallIdsAtLedgerEnd(persistence: Persistence, conver
   return pendingCallIds(await readLedgerEnd(persistence, conversationId));
 }
 
+/**
+ * 账本末尾说明这份对话**还没说完**：上一轮[交权](../../../../docs/terms.md)时停在模型输出段或两步之间，
+ * 接手的一方要接着调模型（`continueTurn`）。判据是末尾那条的收尾状态为 `handed-over`、而且没有悬空调用
+ * （有的话走恢复，不是这里）。core 在第一步就交权时也会补一条带这个状态的占位，所以只认它就够了。
+ *
+ * **不拿「末尾是用户消息」当判据**：持有者写完用户消息就崩了也是这个样子，那种情况归崩溃恢复补「已停止」。
+ */
+export function needsContinuation(tail: RunkoUIMessage[]): boolean {
+  const last = tail[tail.length - 1];
+  if (last === undefined) {return false;}
+  if (pendingCallIds(tail).length > 0) {return false;}
+  return last.metadata?.status === "handed-over";
+}
+
 /** 账本的最后一条（空账本是空数组）。两次打库：取最大 seq、读它。 */
 export async function readLedgerEnd(persistence: Persistence, conversationId: string): Promise<RunkoUIMessage[]> {
   const maxSeq = await persistence.ledger.maxSeq(conversationId);
