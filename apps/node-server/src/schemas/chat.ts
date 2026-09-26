@@ -124,6 +124,16 @@ export const turnStateFrameSchema = z
 export type TurnStateFrame = z.infer<typeof turnStateFrameSchema>;
 
 /**
+ * [请重连帧](../../../../docs/terms.md)：本节点在下线，这份对话已经交给别的节点。它是这条流的**最后一帧**，
+ * 客户端收到就立刻重连（不走退避），落到新的持有者上（docs/logic/orchestration/tech/handover.md §8）。
+ */
+export const reconnectFrameSchema = z
+  .object({ reconnect: z.literal(true) })
+  .openapi('ChatReconnectFrame');
+
+export type ReconnectFrame = z.infer<typeof reconnectFrameSchema>;
+
+/**
  * 四种帧的并集。**没有共同的判别字段**，靠「带了 `chunk` / `message` / `queue` /
  * `turnActive` 里的哪一个」区分——四个键不会同时出现在一帧上，结构上就够分。
  *
@@ -135,10 +145,11 @@ export const chatReplayFrameSchema = z.union([
   messageFrameSchema,
   queueFrameSchema,
   turnStateFrameSchema,
+  reconnectFrameSchema,
 ]);
 
 export type ChatReplayFrame =
-  ChunkEnvelope | MessageFrame | QueueFrame | TurnStateFrame;
+  ChunkEnvelope | MessageFrame | QueueFrame | TurnStateFrame | ReconnectFrame;
 
 /**
  * `GET .../messages` 的响应（**不是裸数组**）：这个会话的全部行，按 seq 排序。

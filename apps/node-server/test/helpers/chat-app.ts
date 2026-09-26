@@ -44,11 +44,6 @@ export interface BuildChatAppOptions {
   notifier?: ChatNotifier;
   /** 塞一对假的 `stream()`/`toJSON()`，整条轮编排链路零模型跑完。 */
   sessionFactory?: SessionFactory;
-  /**
-   * [节点下线](../../../../docs/terms.md)信号：触发时断开本节点上的 SSE 直播
-   * （`routes/chat.ts` 的 `stream` 路由）。不传 = 永不因下线断开，与生产装配一致。
-   */
-  offlineSignal?: AbortSignal;
   /** 应用层转发；传了才会认转发标记（`x-runko-forwarded`）。 */
   forwarder?: Forwarder;
 }
@@ -77,9 +72,6 @@ export function buildChatApp(opts: BuildChatAppOptions) {
       opts.authMiddleware ?? fakeAuthMiddleware(opts.userId ?? 'user-1'),
     ...(opts.telemetryStore !== undefined ?
       { telemetryStore: opts.telemetryStore }
-    : {}),
-    ...(opts.offlineSignal !== undefined ?
-      { offlineSignal: opts.offlineSignal }
     : {}),
     ...(opts.forwarder !== undefined ? { forwarder: opts.forwarder } : {}),
   });

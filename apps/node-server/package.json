@@ -27,6 +27,7 @@
     "cluster:ps": "docker compose -f docker/cluster.compose.yml ps",
     "test:cluster": "RUNKO_TEST_CLUSTER=1 vitest run test/e2e/cluster.e2e.test.ts",
     "test:cluster-console": "RUNKO_TEST_CLUSTER=1 vitest run test/e2e/cluster-console.e2e.test.ts",
+    "test:cluster-handover": "RUNKO_TEST_CLUSTER=1 vitest run test/e2e/cluster-handover.e2e.test.ts",
     "build:dist": "tsc -p tsconfig.build.json"
   },
   "dependencies": {

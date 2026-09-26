@@ -10,6 +10,7 @@ import {
   chatApp,
   chatRuntime,
   nodeOffline,
+  takeoverApp,
   toWireFrame,
 } from './routes/chat.js';
 import { createChatWsApp } from './routes/chat-ws.js';
@@ -44,10 +45,13 @@ app.use(
 );
 
 /**
- * [节点下线](../../../docs/terms.md)闸门：挂在一切路由之前，WebSocket 升级与 `/health` 也在它后面。
- * 下线中只放行别的节点转发来的请求，其余 503，nginx 换节点重试（docs/host/node/tech/cluster-console.md §4.1）。
+ * [节点下线](../../../docs/terms.md)闸门：挂在一切路由之前，WebSocket 升级、`/health` 与节点间的「请接手」
+ * 都在它后面。下线中一律 503，nginx 换节点重试（docs/logic/orchestration/tech/handover.md §3.3）。
  */
 app.use('*', nodeOffline.gate);
+
+// 节点间端点：带副本间令牌，不走用户鉴权（`routes/takeover.ts`）。
+app.route('/', takeoverApp);
 
 // Mount routes
 /**
@@ -65,7 +69,6 @@ app.route(
     authMiddleware: requireAuth,
     upgradeWebSocket,
     toWire: toWireFrame,
-    offlineSignal: nodeOffline.signal,
   }),
 );
 app.route('/', exampleApp);

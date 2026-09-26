@@ -38,15 +38,13 @@ export interface ChatWsOptions {
   upgradeWebSocket: UpgradeWebSocket;
   /** 框架的 `Frame` → wire 帧；**与 SSE 那条是同一个函数**。 */
   toWire: (frame: Frame) => ChatReplayFrame;
-  /**
-   * [节点下线](../../../../docs/terms.md)信号：触发时以 1012（服务重启）关掉本节点上的连接，
-   * 前端据此重连到别的节点（docs/host/node/tech/cluster-console.md §4.2）。
-   */
-  offlineSignal?: AbortSignal;
   logger?: Logger;
 }
 
-/** WebSocket 标准关闭码「服务重启」：前端对非 1000 的关闭一律退避重连。 */
+/**
+ * WebSocket 标准关闭码「服务重启」。[请重连帧](../../../../docs/terms.md)之后用它关：本节点在下线、
+ * 这份对话已经交出去了，前端立刻重连（docs/logic/orchestration/tech/handover.md §8）。
+ */
 const CLOSE_SERVICE_RESTART = 1012;
 
 /** 解析 `?after=<seq>`：认不出来就当没带（从头回放）。 */
@@ -86,12 +84,9 @@ export function createChatWsApp(opts: ChatWsOptions): Hono<ChatEnv> {
             ws.close(4004, 'not found');
             return;
           }
-          const offline = opts.offlineSignal;
-          const signal =
-            offline === undefined ?
-              abort.signal
-            : AbortSignal.any([abort.signal, offline]);
+          const signal = abort.signal;
           try {
+            let reconnect = false;
             for await (const frame of opts.runtime.subscribe(conversationId, {
               ...(after !== undefined ? { after } : {}),
               signal,
@@ -100,8 +95,11 @@ export function createChatWsApp(opts: ChatWsOptions): Hono<ChatEnv> {
                 break;
               }
               ws.send(JSON.stringify(opts.toWire(frame)));
+              if (frame.kind === 'reconnect') {
+                reconnect = true;
+              }
             }
-            if (offline?.aborted === true && !abort.signal.aborted) {
+            if (reconnect) {
               ws.close(CLOSE_SERVICE_RESTART, 'node going offline');
               return;
             }
@@ -110,10 +108,6 @@ export function createChatWsApp(opts: ChatWsOptions): Hono<ChatEnv> {
           } catch (error) {
             if (abort.signal.aborted) {
               return; // 人自己走的，不是错误
-            }
-            if (offline?.aborted === true) {
-              ws.close(CLOSE_SERVICE_RESTART, 'node going offline');
-              return;
             }
             log.warn(LOG_SCOPE, 'live tail failed', {
               conversationId,

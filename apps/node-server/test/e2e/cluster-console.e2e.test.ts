@@ -68,19 +68,19 @@ const FORWARD_TIMEOUT_MS = 2_000;
 /** 演示模型复述每小段的间隔；一轮多久由消息长度决定，见 `textFor`。 */
 const CHUNK_DELAY_MS = 400;
 
-/** 「正常下线」那组：节点自己在 kill 期限之前退出。 */
-const NORMAL_FINISH_WINDOW_MS = 8_000;
+/** 「正常下线」那组：节点[交权](../../../../docs/terms.md)之后自己在 kill 期限之前退出。 */
 const NORMAL_GRACE_MS = 3_000;
-const NORMAL_KILL_S = 15;
+const NORMAL_KILL_S = 30;
 
-/** 「强杀」那组：等待窗口远大于 kill，节点来不及自己退出，只能被 SIGKILL。 */
-const KILL_FINISH_WINDOW_MS = 60_000;
+/** 「强杀」那组：命令比 kill 期限长，节点来不及跑完它，只能被 SIGKILL。 */
 const KILL_GRACE_MS = 3_000;
 const KILL_KILL_S = 8;
+/** 强杀那组的工具上限：压短，好让「结果未知」的截止时间（上限 + 30 秒）在测试时长之内。 */
+const KILL_TOOL_TIMEOUT_MS = 15_000;
 
-/** 与 `packages/agent/src/runtime/reasons.ts` 的 `ABORT_REASON_SHUTDOWN` 同一份文案。 */
-const ABORT_REASON_SHUTDOWN =
-  'Server is shutting down; this turn was interrupted.';
+/** 与 `packages/agent/src/runtime/handover.ts` 的 `TAIL_UNKNOWN_MESSAGE` 开头一致。 */
+const TAIL_UNKNOWN_PREFIX =
+  'The server that was running this tool went offline';
 
 // ─── docker ────────────────────────────────────────────────────────────────
 
@@ -652,7 +652,6 @@ describe.skipIf(!RUN)(
         CLUSTER_TAKEOVER_MS: String(TAKEOVER_MS),
         CLUSTER_FORWARD_TIMEOUT_MS: String(FORWARD_TIMEOUT_MS),
         CLUSTER_CHUNK_DELAY_MS: String(CHUNK_DELAY_MS),
-        CLUSTER_OFFLINE_FINISH_WINDOW_MS: String(NORMAL_FINISH_WINDOW_MS),
         CLUSTER_OFFLINE_GRACE_MS: String(NORMAL_GRACE_MS),
         CLUSTER_OFFLINE_KILL_S: String(NORMAL_KILL_S),
         // 这套用例只认演示模型与本地沙盒，见 `cluster.e2e.test.ts` 同款注释：显式清空，
@@ -673,7 +672,6 @@ describe.skipIf(!RUN)(
         'cluster-console',
         'building image and starting 3 nodes + ops + lb',
         {
-          finishWindowMs: NORMAL_FINISH_WINDOW_MS,
           graceMs: NORMAL_GRACE_MS,
           killS: NORMAL_KILL_S,
         },
@@ -692,11 +690,11 @@ describe.skipIf(!RUN)(
       await compose('down', '-v', '--remove-orphans').catch(() => undefined);
     }, 5 * 60_000);
 
-    it('场景 1（含场景 6）：节点 A 上一轮短于等待窗口 的；下线后正常跑完；下线期间经 lb 的请求全部成功，直连它拿 503、经 lb 拿 2xx；A 在 window+grace 内退出', async () => {
+    it('场景 1（含场景 6）：节点 A 上正在跑一轮；下线后交给别的节点接着跑完、不中断；下线期间经 lb 的请求全部成功，直连它拿 503、经 lb 拿 2xx；A 很快自己退出', async () => {
       const conversationId = await createConversation(node(1).url);
-      step('S1', '在节点 1 上起一轮（短于等待窗口）', { conversationId });
+      step('S1', '在节点 1 上起一轮', { conversationId });
       expect(
-        mode(await send(node(1).url, conversationId, textFor('跑完', 4_000))),
+        mode(await send(node(1).url, conversationId, textFor('跑完', 6_000))),
       ).toBe('started');
       await waitActive(LB_URL, conversationId);
 
@@ -750,20 +748,23 @@ describe.skipIf(!RUN)(
       expect(burstStatuses.length).toBeGreaterThan(0);
       expect(burstStatuses.every((status) => status < 500)).toBe(true);
 
-      // 这一轮正常跑完，不是被中止。
-      await waitIdle(LB_URL, conversationId);
+      // 这一轮交给别的节点接着跑完，不是被中止：账本是「用户 → 已交权 → 完成」。
+      await waitFor(
+        async () =>
+          (await ledger(LB_URL, conversationId)).at(-1)?.status === 'completed',
+        60_000,
+        '接手节点跑完这一轮',
+      );
       const rows = await ledger(LB_URL, conversationId);
       expect(shape(rows)).toEqual([
         ['user', '跑完'],
+        ['assistant', 'handed-over'],
         ['assistant', 'completed'],
       ]);
       expectCleanSeqs(rows);
 
-      // A 在 窗口 + grace 内自己退出，退出码 0。
-      await waitExited(
-        node(1).container,
-        NORMAL_FINISH_WINDOW_MS + NORMAL_GRACE_MS + 8_000,
-      );
+      // A 手上没有命令在跑：交出去就退出，远早于 kill 期限。
+      await waitExited(node(1).container, NORMAL_GRACE_MS + 8_000);
       const exitInfo = await containerExitInfo(node(1).container);
       step('S1', 'A 已退出', exitInfo);
       expect(exitInfo.exitCode).toBe(0);
@@ -771,13 +772,20 @@ describe.skipIf(!RUN)(
       await waitNodeState(1, 'offline');
     }, 120_000);
 
-    it('场景 2：节点 B 上一轮长于等待窗口 的；下线后到等待窗口结束时刻被中止（ABORT_REASON_SHUTDOWN），B 在 kill 期限前自己退出', async () => {
+    it('场景 2：节点 B 上正在跑一条命令；下线后对话马上交出去，命令在 B 上跑完、结果照常出现，B 跑完命令才退出', async () => {
       const conversationId = await createConversation(node(2).url);
-      step('S2', '在节点 2 上起一轮（长于等待窗口）', { conversationId });
+      step('S2', '在节点 2 上跑一条 8 秒的命令', { conversationId });
       expect(
-        mode(await send(node(2).url, conversationId, textFor('中止', 14_000))),
+        mode(
+          await send(
+            node(2).url,
+            conversationId,
+            'run: sleep 8 && echo s2-command-done',
+          ),
+        ),
       ).toBe('started');
       await waitActive(LB_URL, conversationId);
+      await sleep(1_500); // 命令真的跑起来了
 
       const before = await overview(LB_URL);
       const nodeB = findNode(before, 2);
@@ -792,26 +800,34 @@ describe.skipIf(!RUN)(
       expect(ack.status).toBe(202);
 
       await waitExited(node(2).container, NORMAL_KILL_S * 1_000 + 5_000);
-      const exitedAt = Date.now();
+      const elapsedMs = Date.now() - offlineCalledAt;
       const exitInfo = await containerExitInfo(node(2).container);
-      const elapsedMs = exitedAt - offlineCalledAt;
       step('S2', 'B 已退出', { ...exitInfo, elapsedMs });
-      // 自己在 kill 期限（15s）之前退出，不是被强杀——这是它跟场景 3 的分野。
+      // 自己退出（不是被强杀），而且是等命令跑完才退的。
       expect(exitInfo.exitCode).toBe(0);
+      expect(elapsedMs).toBeGreaterThanOrEqual(4_000);
       expect(elapsedMs).toBeLessThan(NORMAL_KILL_S * 1_000);
-      // 到 等待窗口（8s）才中止，不是一收到下线信号就立刻中止。
-      expect(elapsedMs).toBeGreaterThanOrEqual(NORMAL_FINISH_WINDOW_MS - 1_000);
 
-      const rows = await ledger(LB_URL, conversationId);
-      expect(shape(rows)).toEqual([
-        ['user', '中止'],
-        ['assistant', 'interrupted'],
-      ]);
-      expect(rows[1]?.reason).toBe(ABORT_REASON_SHUTDOWN);
-      expectCleanSeqs(rows);
+      await waitFor(
+        async () =>
+          (await ledger(LB_URL, conversationId)).at(-1)?.status === 'completed',
+        60_000,
+        '接手节点结清命令、接着跑完',
+      );
+      const reply = await request(
+        `${LB_URL}/api/chat/conversations/${conversationId}/messages`,
+      );
+      const raw = JSON.stringify(reply.body);
+      expect(raw).toContain('s2-command-done');
+      expect(
+        (await ledger(LB_URL, conversationId)).filter(
+          (row) => row.status === 'interrupted',
+        ),
+      ).toEqual([]);
+      expectCleanSeqs(await ledger(LB_URL, conversationId));
 
       await waitNodeState(2, 'offline');
-    }, 60_000);
+    }, 90_000);
 
     it('场景 4：重新上线场景 1 里下线的节点；它重新健康、overview 变 online，新会话能落到它上面', async () => {
       const before = await overview(LB_URL);
@@ -882,7 +898,7 @@ describe.skipIf(!RUN)(
       // 1012：标准里的「服务重启」（docs/host/node/tech/cluster-console.md §4.2）。
       expect(first.closeCode).toBe(1012);
 
-      // 经 lb 重连，带上游标：这一轮还在跑（等待窗口 8s > 这一轮 4s），应该能接着看到收尾。
+      // 经 lb 重连，带上游标：这一轮已经交给别的节点接着跑，应该能接着看到收尾。
       const second = watch(LB_URL, conversationId, cursor);
       try {
         await waitIdle(LB_URL, conversationId);
@@ -890,6 +906,7 @@ describe.skipIf(!RUN)(
         const rows = await ledger(LB_URL, conversationId);
         expect(shape(rows)).toEqual([
           ['user', '直连ws'],
+          ['assistant', 'handed-over'],
           ['assistant', 'completed'],
         ]);
         const last = rows.at(-1);
@@ -904,16 +921,13 @@ describe.skipIf(!RUN)(
         second.close();
       }
 
-      await waitExited(
-        node(1).container,
-        NORMAL_FINISH_WINDOW_MS + NORMAL_GRACE_MS + 8_000,
-      );
+      await waitExited(node(1).container, NORMAL_KILL_S * 1_000);
       expect((await containerExitInfo(node(1).container)).exitCode).toBe(0);
     }, 60_000);
   },
 );
 
-describe.skipIf(!RUN)('集群控制台：强杀（等待窗口远大于 kill）', () => {
+describe.skipIf(!RUN)('集群控制台：强杀（命令比 kill 期限长）', () => {
   beforeAll(async () => {
     activeEnv = {
       CLUSTER_LB_PORT: String(PORTS.lb),
@@ -923,7 +937,7 @@ describe.skipIf(!RUN)('集群控制台：强杀（等待窗口远大于 kill）'
       CLUSTER_TAKEOVER_MS: String(TAKEOVER_MS),
       CLUSTER_FORWARD_TIMEOUT_MS: String(FORWARD_TIMEOUT_MS),
       CLUSTER_CHUNK_DELAY_MS: String(CHUNK_DELAY_MS),
-      CLUSTER_OFFLINE_FINISH_WINDOW_MS: String(KILL_FINISH_WINDOW_MS),
+      CLUSTER_TOOL_TIMEOUT_MS: String(KILL_TOOL_TIMEOUT_MS),
       CLUSTER_OFFLINE_GRACE_MS: String(KILL_GRACE_MS),
       CLUSTER_OFFLINE_KILL_S: String(KILL_KILL_S),
       DEEPSEEK_API_BASE_URL: '',
@@ -939,7 +953,7 @@ describe.skipIf(!RUN)('集群控制台：强杀（等待窗口远大于 kill）'
     );
     await compose('down', '-v', '--remove-orphans');
     step('cluster-console-kill', 'starting 2 nodes + ops + lb', {
-      finishWindowMs: KILL_FINISH_WINDOW_MS,
+      toolTimeoutMs: KILL_TOOL_TIMEOUT_MS,
       graceMs: KILL_GRACE_MS,
       killS: KILL_KILL_S,
     });
@@ -957,13 +971,20 @@ describe.skipIf(!RUN)('集群控制台：强杀（等待窗口远大于 kill）'
     await compose('down', '-v', '--remove-orphans').catch(() => undefined);
   }, 5 * 60_000);
 
-  it('场景 3：等待窗口远大于 kill；节点 C 上一轮长的；下线后到 kill 期限被 SIGKILL（137），时长约等于 kill 期限', async () => {
+  it('场景 3：节点 C 上一条命令比 kill 期限长；下线后到 kill 期限被 SIGKILL（137）；那条命令在接手节点上被记成「结果未知」，这一轮照样收尾', async () => {
     const conversationId = await createConversation(node(1).url);
-    step('S3', '在节点 1 上起一轮（远长于 kill）', { conversationId });
+    step('S3', '在节点 1 上跑一条比 kill 期限长的命令', { conversationId });
     expect(
-      mode(await send(node(1).url, conversationId, textFor('强杀', 30_000))),
+      mode(
+        await send(
+          node(1).url,
+          conversationId,
+          'run: sleep 12 && echo never-finishes',
+        ),
+      ),
     ).toBe('started');
     await waitActive(LB_URL, conversationId);
+    await sleep(1_500);
 
     const before = await overview(LB_URL);
     const nodeC = findNode(before, 1);
@@ -992,9 +1013,24 @@ describe.skipIf(!RUN)('集群控制台：强杀（等待窗口远大于 kill）'
     const exitInfo = await containerExitInfo(node(1).container);
     const elapsedMs = exitedAt - offlineCalledAt;
     step('S3', 'C 已退出', { ...exitInfo, elapsedMs });
-    // 137 = 128 + 9（SIGKILL）：它没能力在等待窗口结束前自己收尾，只能被强杀。
+    // 137 = 128 + 9（SIGKILL）：命令还没跑完，它等不到自己退出就被强杀。
     expect(exitInfo.exitCode).toBe(137);
     expect(elapsedMs).toBeGreaterThanOrEqual(KILL_KILL_S * 1_000 - 1_500);
     expect(elapsedMs).toBeLessThan(KILL_KILL_S * 1_000 + 6_000);
-  }, 60_000);
+
+    // 截止时间（工具上限 + 30 秒）一过，接手节点的定时回捞把它记成「结果未知」交给模型，这一轮照样收尾。
+    await waitFor(
+      async () =>
+        (await ledger(LB_URL, conversationId)).at(-1)?.status === 'completed',
+      KILL_TOOL_TIMEOUT_MS + 30_000 + 30_000,
+      '结果未知之后接着跑完',
+    );
+    const reply = await request(
+      `${LB_URL}/api/chat/conversations/${conversationId}/messages`,
+    );
+    const raw = JSON.stringify(reply.body);
+    expect(raw).toContain(TAIL_UNKNOWN_PREFIX);
+    // 命令没跑完：工具结果里没有它的输出（用户那条消息里当然有这个词，所以只看工具结果）。
+    expect(raw).not.toContain('never-finishes\\n');
+  }, 150_000);
 });
