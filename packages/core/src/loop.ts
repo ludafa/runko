@@ -72,7 +72,7 @@ import { DEFAULT_DENY_MESSAGE, noArbiterDenyReason } from "./approval.js";
 import type { OnceApprovalMemory } from "./approval.js";
 import type { TurnResult } from "./session.js";
 import { pendingCallIds, resolveResumeTarget } from "./suspend.js";
-import type { ResumeTarget, Settlement } from "./suspend.js";
+import type { CallOutcome, ResumeTarget, Settlement } from "./suspend.js";
 
 /**
  * `catch` 子句里从 `unknown` 安全窄化出可读消息——同款受控例外见
@@ -217,10 +217,12 @@ function finalizeTurn(opts: {
   /** 本轮涉及的消息从这里开始切片（`toolDurationMs` 只统计它们的 timing 部件）。普通轮是入口时的长度；恢复轮往前多一条——被改写的那条上一轮的消息。 */
   turnMessagesStart: number;
   usage: Usage;
-  status: "completed" | "failed" | "interrupted" | "suspended";
+  status: "completed" | "failed" | "interrupted" | "suspended" | "handed-over";
   error?: RunkoError;
   /** `status: "suspended"` 时带上：哪几次调用还悬着、为什么挂起（见 state.ts 的 `RunkoMessageMetadata.suspended`）。 */
   suspended?: { callIds: string[]; reason?: string };
+  /** `status: "handed-over"` 时带上：哪几次调用还在别处跑（见 state.ts 的 `RunkoMessageMetadata.handedOver`）。 */
+  handedOver?: { callIds: string[] };
 }): RunkoChunk {
   const durationMs = Date.now() - opts.turnStartedAt;
   const toolDurationMs = toolExecutionWallMs(opts.messages.slice(opts.turnMessagesStart), opts.turnStartedAt);
@@ -229,6 +231,7 @@ function finalizeTurn(opts: {
     ...base,
     ...(opts.error === undefined ? {} : { error: opts.error }),
     ...(opts.suspended === undefined ? {} : { suspended: opts.suspended }),
+    ...(opts.handedOver === undefined ? {} : { handedOver: opts.handedOver }),
   };
   const target = opts.lastAssistantMessage ?? appendPlaceholderAssistantMessage(opts.messages);
   target.metadata = target.metadata === undefined ? metadata : { ...withoutSuspended(target.metadata), ...metadata };
@@ -237,11 +240,11 @@ function finalizeTurn(opts: {
 
 /**
  * 恢复轮在第一次调模型之前就收尾时，收尾 metadata 并在上一轮那条消息上（悬空调用只能在最后一条，
- * 不能另起一条）。上一轮挂起时写的 `suspended` 这时得去掉：新状态不是挂起的话，留着就自相矛盾；
- * 是挂起的话，新的那份会覆盖它。
+ * 不能另起一条）。上一轮挂起或交权时写的 `suspended` / `handedOver` 这时得去掉：新状态不是那一种的话，
+ * 留着就自相矛盾；是的话，新的那份会覆盖它。
  */
 function withoutSuspended(metadata: RunkoMessageMetadata): RunkoMessageMetadata {
-  const { suspended: _previous, ...rest } = metadata;
+  const { suspended: _previous, handedOver: _handedOver, ...rest } = metadata;
   return rest;
 }
 
@@ -449,12 +452,12 @@ function completeToolTiming(message: RunkoUIMessage, toolCallId: string): RunkoC
  *   个错误——与串行路径"错误冒泡中断 turn"同语义，不留未观察的 rejection。
  */
 async function* mergeSettleStreams(
-  streams: AsyncGenerator<RunkoChunk, SuspendedCall | undefined>[],
-): AsyncGenerator<RunkoChunk, (SuspendedCall | undefined)[]> {
+  streams: AsyncGenerator<RunkoChunk, SettleOutcome>[],
+): AsyncGenerator<RunkoChunk, SettleOutcome[]> {
   const queue: RunkoChunk[] = [];
   // 按**入参下标**写回，不用 push——并行结算的完成顺序是不确定的，而挂起 callId 的顺序
   // 要跟模型发出调用的顺序一致（它会进账本 metadata，顺序飘会让同一份历史产出不同的记录）。
-  const outcomes: (SuspendedCall | undefined)[] = Array.from({ length: streams.length });
+  const outcomes: SettleOutcome[] = Array.from({ length: streams.length });
   let running = streams.length;
   let failure: { error: unknown } | undefined;
   let wake: (() => void) | undefined;
@@ -495,6 +498,107 @@ async function* mergeSettleStreams(
   return outcomes;
 }
 
+// ---- 工具最长执行时间与交权（docs/logic/orchestration/tech/handover.md §6.2、§6.3） ----
+
+/**
+ * 撞上最长执行时间之后，再给工具多少时间自己收手。工具不理 `abortSignal` 的话，到点就不等了——
+ * 它可能还在后台跑，但这一轮（以及交权时的旧节点）不能被它无限期拖住。
+ */
+const TOOL_TIMEOUT_GRACE_MS = 2_000;
+
+function formatDuration(ms: number): string {
+  if (ms % 60_000 === 0) {return `${String(ms / 60_000)}m`;}
+  if (ms % 1_000 === 0) {return `${String(ms / 1_000)}s`;}
+  return `${String(ms)}ms`;
+}
+
+function toolTimeoutMessage(toolName: string, timeoutMs: number): string {
+  return (
+    `Tool "${toolName}" exceeded the maximum execution time (${formatDuration(timeoutMs)}) and was stopped. ` +
+    "If this task needs longer, start it in the background, return right away, and check on it later."
+  );
+}
+
+/**
+ * `executeToolCall` 加一个时间上限：到点先 abort 工具，再等一小会儿；它还不回来就直接给一个超时结果。
+ * 上限对平时与交权一样生效——没有它，交权时「最多等一个工具上限」就没有依据。
+ */
+async function executeWithTimeLimit(opts: Parameters<typeof executeToolCall>[0], timeoutMs: number | undefined): Promise<ToolCallResult> {
+  if (timeoutMs === undefined) {return await executeToolCall(opts);}
+  const limit = new AbortController();
+  let giveUpTimer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutTimer = setTimeout(() => {
+    limit.abort(new Error(toolTimeoutMessage(opts.toolName, timeoutMs)));
+  }, timeoutMs);
+  const timedOut: ToolCallResult = { status: "failed", output: toolTimeoutMessage(opts.toolName, timeoutMs), derived: { changes: [] } };
+  const giveUp = new Promise<ToolCallResult>((resolve) => {
+    limit.signal.addEventListener("abort", () => {
+      giveUpTimer = setTimeout(() => {
+        resolve(timedOut);
+      }, TOOL_TIMEOUT_GRACE_MS);
+    });
+  });
+  try {
+    const result = await Promise.race([executeToolCall({ ...opts, abortSignal: AbortSignal.any([opts.abortSignal, limit.signal]) }), giveUp]);
+    // 超时 abort 之后工具自己回来的：真跑完了（`completed`）就用真结果——改写成「已终止」会让模型把有副作用的
+    // 命令再跑一遍；失败的（多半是一句「被中止了」）不如直接说清是超时。
+    if (!limit.signal.aborted || result.status === "completed") {return result;}
+    return { ...timedOut, derived: result.derived };
+  } finally {
+    clearTimeout(timeoutTimer);
+    if (giveUpTimer !== undefined) {clearTimeout(giveUpTimer);}
+  }
+}
+
+/**
+ * 交权信号此刻到了没有。写成函数而不是直接读 `signal.aborted`：同一个函数里前面判过一次之后，
+ * TypeScript 会把这个字段收窄成常量，看不出它在 `await` 之后可能已经变了。
+ */
+function handedOverNow(handover: AbortSignal | undefined): boolean {
+  return handover?.aborted === true;
+}
+
+/**
+ * `execution` 结束之前交权信号就到了吗。到了就不再等它（见 `HandedOverCall`）。
+ * 这一轮已经被中止（用户按了停止）的不算：按停止收尾，别交给接手的一方再跑一遍。
+ */
+async function settlesAfterHandover(execution: Promise<ToolCallResult>, handover: AbortSignal, stop: AbortSignal): Promise<boolean> {
+  if (stop.aborted) {return false;}
+  if (handover.aborted) {return true;}
+  let onAbort: () => void = () => undefined;
+  const handedOver = new Promise<boolean>((resolve) => {
+    onAbort = () => {
+      resolve(!stop.aborted);
+    };
+    handover.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([execution.then(() => false), handedOver]);
+  } finally {
+    handover.removeEventListener("abort", onAbort);
+  }
+}
+
+/** 工具在交权之后跑完的结果 → 接手一方用来结清那次调用的东西。 */
+function toCallOutcome(result: ToolCallResult): CallOutcome {
+  if (result.status === "completed") {return { kind: "output", output: result.output };}
+  if (result.status === "failed") {return { kind: "error", errorText: toErrorText(result.output) };}
+  return {
+    kind: "error",
+    errorText:
+      "The tool asked to wait for a person after this conversation moved to another server, so it could not finish. " +
+      "Make the call again if it is still needed.",
+  };
+}
+
+/** 模型输出段被交权掐断——`runTurn` 的 catch 据此把这半步扔掉，而不是记成失败。 */
+class HandoverDuringModelOutput extends Error {
+  constructor() {
+    super("Model output was cut off by a handover.");
+    this.name = "HandoverDuringModelOutput";
+  }
+}
+
 // ---- 单个工具调用的结算（审批→执行→部件/chunk 编码，见文件头"审批：三值 + 阻塞前显式产出"） ----
 
 /**
@@ -509,9 +613,27 @@ async function* mergeSettleStreams(
  * 两层的选择不同，因为要解决的问题不同。）
  */
 interface SuspendedCall {
+  kind: "suspended";
   callId: string;
   reason: string | undefined;
 }
+
+/**
+ * [交权](../../../docs/terms.md)时还在跑的一次调用：工具**不停**，这一轮也不再等它，调用方拿着
+ * `outcome` 继续持有它（[工具收尾](../../../docs/terms.md)）。账本里它是一次悬空调用，结果到了由
+ * 接手的一方用 `settleAndRun(callId, outcome)` 结清。
+ *
+ * 要停掉它，就 abort 这一轮的 `signal`——工具拿到的 `abortSignal` 正是它。
+ */
+export interface HandedOverCall {
+  callId: string;
+  toolName: string;
+  /** 工具跑完、失败、或撞上最长执行时间时 resolve。**从不 reject**。 */
+  outcome: Promise<CallOutcome>;
+}
+
+/** 一次调用结算之后，除了「正常有结果」之外的两种结局。`undefined` = 正常结算完了。 */
+type SettleOutcome = SuspendedCall | { kind: "handed-over"; call: HandedOverCall } | undefined;
 
 interface PendingToolCall {
   toolCallId: string;
@@ -536,6 +658,10 @@ interface SettleToolCallOptions {
   getSkill: ((name: string) => SkillHandle) | undefined;
   /** telemetry 集成透传（`SessionTelemetry`）——`settleExecution` 在真实执行前后补发 onToolExecutionStart/End，见 `notifyToolExecution*` 注释。 */
   telemetry: SessionTelemetry | undefined;
+  /** [交权](../../../docs/terms.md)信号。见 `HandedOverCall`。 */
+  handover: AbortSignal | undefined;
+  /** 单次工具执行的上限（毫秒）；`undefined` = 不限。 */
+  toolTimeoutMs: number | undefined;
 }
 
 // ---- 工具执行遥测（补发）：runko 的 loop 自己结算工具，AI SDK 没有机会触发
@@ -620,24 +746,41 @@ async function* settleExecution(
   tool: Tool,
   input: JsonValue,
   approval: { id: string; approved: true } | undefined,
-): AsyncGenerator<RunkoChunk, SuspendedCall | undefined> {
+): AsyncGenerator<RunkoChunk, SettleOutcome> {
   const { call, assistantMessage } = opts;
   yield markToolExecutionStart(assistantMessage, call.toolCallId);
   const executionStartedAt = Date.now();
   notifyToolExecutionStart(opts, input);
   const progressChunks: string[] = [];
-  const result = await executeToolCall({
-    tool,
-    toolName: call.toolName,
-    callId: call.toolCallId,
-    input,
-    session: opts.session,
-    fs: opts.fs,
-    abortSignal: opts.abortSignal,
-    onProgress: (partial) => progressChunks.push(partial),
-    derivedData: opts.derivedData,
-    getSkill: opts.getSkill,
-  });
+  const execution = executeWithTimeLimit(
+    {
+      tool,
+      toolName: call.toolName,
+      callId: call.toolCallId,
+      input,
+      session: opts.session,
+      fs: opts.fs,
+      abortSignal: opts.abortSignal,
+      onProgress: (partial) => progressChunks.push(partial),
+      derivedData: opts.derivedData,
+      getSkill: opts.getSkill,
+    },
+    // 等人的工具（`Tool.waitsForPerson`）自己管等多久，不套工具最长执行时间。
+    tool.waitsForPerson === true ? undefined : opts.toolTimeoutMs,
+  );
+
+  // [交权](../../../docs/terms.md)：工具**不停**，这一轮也不再等它——部件停在 `input-available`（或
+  // `approval-responded`），timing 只有 executionStartedAt，与挂起同形。结果交给调用方继续持有。
+  // 等人的工具不交出去：宿主会让它以挂起收尾（它不是「在跑」，是「在等人」）。
+  // 已经被中止（用户按了停止）的也不交出去：按停止收尾，别让接手的一方再跑一遍。
+  if (
+    opts.handover !== undefined &&
+    tool.waitsForPerson !== true &&
+    (await settlesAfterHandover(execution, opts.handover, opts.abortSignal))
+  ) {
+    return { kind: "handed-over", call: { callId: call.toolCallId, toolName: call.toolName, outcome: execution.then(toCallOutcome) } };
+  }
+  const result = await execution;
 
   // transient `data-tool-progress`：只出流,绝不 push 进 assistantMessage.parts
   // （docs/logic/orchestration/tech/single-ledger.md §4.1 发现 A）。`ctx.update()` 是同步回调，生成器不能从回调内部
@@ -664,7 +807,7 @@ async function* settleExecution(
   // **已发生的事实**，跟这次调用有没有结果无关。
   if (result.status === "suspended") {
     yield* emitDerivedData(opts, result.derived);
-    return { callId: call.toolCallId, reason: result.reason };
+    return { kind: "suspended", callId: call.toolCallId, reason: result.reason };
   }
 
   if (result.status === "completed") {
@@ -691,9 +834,15 @@ async function* settleExecution(
  * 返回非 `undefined` = 这次调用要求[挂起](../../../docs/terms.md)本轮。两个来源：人审通道答了
  * `suspend`，或者工具自己调了 `ctx.suspend()`。
  */
-async function* settleToolCall(opts: SettleToolCallOptions): AsyncGenerator<RunkoChunk, SuspendedCall | undefined> {
+async function* settleToolCall(opts: SettleToolCallOptions): AsyncGenerator<RunkoChunk, SettleOutcome> {
   const { call, assistantMessage } = opts;
   const tool = opts.tools[call.toolName];
+
+  // 已经交权了：这次调用还没开始，就别开始了——接手的一方会让模型看到它没跑，需要的话再发一次。
+  if (handedOverNow(opts.handover)) {
+    yield* skipNotRun(opts, HANDED_OVER_NOT_RUN_MESSAGE);
+    return undefined;
+  }
 
   if (tool === undefined) {
     const errorText = `Unknown tool "${call.toolName}" — it is not registered in this session's tool set. Only call tools that were offered.`;
@@ -760,7 +909,7 @@ async function* settleToolCall(opts: SettleToolCallOptions): AsyncGenerator<Runk
   // 于是人几小时后回来点「允许」时，账本里那次调用早就是拒绝态了，审批闸门形同虚设。
   // 完整推演见 docs/logic/orchestration/tech/suspend-resume.md §2。
   if (decision.behavior === "suspend") {
-    return { callId: call.toolCallId, reason: decision.reason };
+    return { kind: "suspended", callId: call.toolCallId, reason: decision.reason };
   }
 
   if (decision.behavior === "deny") {
@@ -791,7 +940,7 @@ async function* settleHumanDenial(opts: SettleToolCallOptions, input: JsonValue,
  * 人审**批准**之后：部件改成 `approval-responded`（approved: true）、发响应 chunk、执行。
  * 当场裁决与恢复轮的 `approval / allow` 共用。返回值同 `settleExecution`（执行时工具可能又挂起）。
  */
-async function* settleHumanApproval(opts: SettleToolCallOptions, tool: Tool, input: JsonValue): AsyncGenerator<RunkoChunk, SuspendedCall | undefined> {
+async function* settleHumanApproval(opts: SettleToolCallOptions, tool: Tool, input: JsonValue): AsyncGenerator<RunkoChunk, SettleOutcome> {
   const { call, assistantMessage } = opts;
   assistantMessage.parts[call.partIndex] = approvalRespondedPart(call.toolName, call.toolCallId, input, call.toolCallId, true);
   yield { type: "tool-approval-response", approvalId: call.toolCallId, approved: true };
@@ -820,10 +969,30 @@ function* closeNeverRunCalls(message: RunkoUIMessage, cause: string): Generator<
  * 不留成悬空调用——那样恢复时既没有裁决表的行可读，也分不清它是在等人还是被跳过了。
  */
 async function* skipBehindSuspended(opts: SettleToolCallOptions, blockedBy: PendingToolCall): AsyncGenerator<RunkoChunk, void> {
-  const { call, assistantMessage } = opts;
-  const errorText =
+  yield* skipNotRun(
+    opts,
     `Not run: the earlier call "${blockedBy.toolName}" (${blockedBy.toolCallId}) in this step is waiting for a person, ` +
-    "and calls in one step run in the order you wrote them. If you still need this call once that one has a result, make it again.";
+      "and calls in one step run in the order you wrote them. If you still need this call once that one has a result, make it again.",
+  );
+}
+
+/** 交权之后还没开始的调用给模型的那句话。 */
+const HANDED_OVER_NOT_RUN_MESSAGE =
+  "Not run: this conversation moved to another server before the call started, so it was never carried out. " +
+  "If you still need it, make the call again.";
+
+/** 串行批里排在一个交权时还在跑的调用后面的调用：同样不执行（理由同 `skipBehindSuspended`）。 */
+function handedOverBlockMessage(blockedBy: PendingToolCall): string {
+  return (
+    `Not run: the earlier call "${blockedBy.toolName}" (${blockedBy.toolCallId}) in this step was still running when this ` +
+    "conversation moved to another server, and calls in one step run in the order you wrote them. " +
+    "If you still need this call once that one has a result, make it again."
+  );
+}
+
+/** 给一次没执行的调用一个错误结果。不留成悬空调用——那样恢复时分不清它在等什么。 */
+async function* skipNotRun(opts: SettleToolCallOptions, errorText: string): AsyncGenerator<RunkoChunk, void> {
+  const { call, assistantMessage } = opts;
   assistantMessage.parts[call.partIndex] = outputErrorPart(call.toolName, call.toolCallId, call.input, errorText);
   yield { type: "tool-output-error", toolCallId: call.toolCallId, errorText };
   yield completeToolTiming(assistantMessage, call.toolCallId);
@@ -849,7 +1018,7 @@ async function* settleResumedCall(
   base: Omit<SettleToolCallOptions, "call" | "assistantMessage">,
   target: ResumeTarget,
   settlement: Settlement,
-): AsyncGenerator<RunkoChunk, SuspendedCall | undefined> {
+): AsyncGenerator<RunkoChunk, SettleOutcome> {
   const { message, partIndex, part } = target;
   const toolName = getToolName(part);
   const toolCallId = part.toolCallId;
@@ -894,9 +1063,18 @@ async function* settleResumedCall(
     return yield* settleHumanApproval(opts, tool, reparsed.data);
   }
 
-  // settlement.kind === "output"。审批过后才挂起的那种，保留审批痕迹。
+  // 审批过后才挂起（或交权）的那种，保留审批痕迹。
   const approval: { id: string; approved: true } | undefined =
     part.state === "approval-responded" && part.approval.approved === true ? { id: part.approval.id, approved: true } : undefined;
+
+  if (settlement.kind === "error") {
+    message.parts[partIndex] = outputErrorPart(toolName, toolCallId, input, settlement.errorText, approval);
+    yield { type: "tool-output-error", toolCallId, errorText: settlement.errorText };
+    yield completeToolTiming(message, toolCallId);
+    return undefined;
+  }
+
+  // settlement.kind === "output"。
   let output = settlement.output;
   if (tool?.outputSchema !== undefined) {
     const parsedOutput = tool.outputSchema.safeParse(output);
@@ -926,6 +1104,8 @@ export interface StepOutcome {
    * `suspended` 收尾，**不进下一步**——那些调用还没有结果，拿这份历史去调模型是错的。
    */
   suspended?: { callIds: string[]; reason?: string };
+  /** 本步有调用在[交权](../../../docs/terms.md)时还在跑才有。`runTurn` 见到它就以 `handed-over` 收尾。 */
+  handedOver?: HandedOverCall[];
 }
 
 /**
@@ -961,6 +1141,8 @@ interface RunOneStepOptions {
   derivedData: DerivedDataCollector;
   getSkill: ((name: string) => SkillHandle) | undefined;
   telemetry: SessionTelemetry | undefined;
+  handover: AbortSignal | undefined;
+  toolTimeoutMs: number | undefined;
 }
 
 /**
@@ -979,7 +1161,8 @@ async function* runOneStep(opts: RunOneStepOptions): AsyncGenerator<RunkoChunk, 
     instructions: opts.system,
     messages: requestMessages,
     tools: convertTools(opts.tools),
-    abortSignal: opts.abortSignal,
+    // 交权只掐模型流，不碰工具（工具拿的是 `opts.abortSignal`）。
+    abortSignal: opts.handover === undefined ? opts.abortSignal : AbortSignal.any([opts.abortSignal, opts.handover]),
     maxOutputTokens: opts.maxOutputTokens,
     // functionId 恒注入（见 SessionTelemetry 注释）：没注册任何集成时这里是
     // 纯元数据、零开销；注入了集成，事件就自带 "<sessionId>#<turn>" 关联键。
@@ -1068,6 +1251,9 @@ async function* runOneStep(opts: RunOneStepOptions): AsyncGenerator<RunkoChunk, 
     }
   }
 
+  // 交权掐断的流未必以抛错收场（有的实现只是提前结束）。这一步的输出不完整，不能当成一步交出去。
+  if (handedOverNow(opts.handover) && !opts.abortSignal.aborted) {throw new HandoverDuringModelOutput();}
+
   yield { type: "finish-step" };
   const finalStep = await result.finalStep;
 
@@ -1084,6 +1270,8 @@ async function* runOneStep(opts: RunOneStepOptions): AsyncGenerator<RunkoChunk, 
     derivedData: opts.derivedData,
     getSkill: opts.getSkill,
     telemetry: opts.telemetry,
+    handover: opts.handover,
+    toolTimeoutMs: opts.toolTimeoutMs,
   });
 
   // 全只读批并行结算（2026-07-16 定案）：同一 step 的多个 tool call 是模型在
@@ -1094,7 +1282,7 @@ async function* runOneStep(opts: RunOneStepOptions): AsyncGenerator<RunkoChunk, 
   // → 并行。混入任何非只读调用则**整批**退回串行：模型偶发的"同批隐含顺序
   // 依赖"坏批次（如先 write-file 再 bash cat 同一文件）只可能涉及写操作，
   // 串行按书写顺序执行把它兜住。
-  const settled: (SuspendedCall | undefined)[] = [];
+  const settled: SettleOutcome[] = [];
   if (pending.length > 1 && pending.every((call) => opts.tools[call.toolName]?.readOnly === true)) {
     settled.push(...(yield* mergeSettleStreams(pending.map((call) => settleToolCall(settleOptsFor(call))))));
   } else {
@@ -1102,16 +1290,17 @@ async function* runOneStep(opts: RunOneStepOptions): AsyncGenerator<RunkoChunk, 
     // 否则它们会先于被挂起的那个跑完，人几小时后批准时，被批准的那个反而最后才执行
     // （docs/logic/orchestration/tech/suspend-resume.md §3.3）。它们各得一个「没有执行」的结果，
     // 账本里不留悬空调用；模型恢复之后看得到，需要的话会再发一次。
-    let blockedBy: PendingToolCall | undefined;
+    let blockedBy: { call: PendingToolCall; kind: "suspended" | "handed-over" } | undefined;
     for (const call of pending) {
       if (blockedBy !== undefined) {
-        yield* skipBehindSuspended(settleOptsFor(call), blockedBy);
+        if (blockedBy.kind === "suspended") {yield* skipBehindSuspended(settleOptsFor(call), blockedBy.call);}
+        else {yield* skipNotRun(settleOptsFor(call), handedOverBlockMessage(blockedBy.call));}
         settled.push(undefined);
         continue;
       }
       const outcome = yield* settleToolCall(settleOptsFor(call));
       settled.push(outcome);
-      if (outcome !== undefined) {blockedBy = call;}
+      if (outcome !== undefined) {blockedBy = { call, kind: outcome.kind };}
     }
   }
 
@@ -1119,19 +1308,17 @@ async function* runOneStep(opts: RunOneStepOptions): AsyncGenerator<RunkoChunk, 
 
   // 汇总挂起：只要有**任何一个**调用要求挂起，本轮就挂起。callIds 按模型发出调用的顺序，
   // reason 取第一个给了理由的（多个同时挂起时它们通常同源，都是同一个内存窗口到点）。
-  const suspendedCalls = settled.filter((outcome): outcome is SuspendedCall => outcome !== undefined);
-  if (suspendedCalls.length === 0) {
-    return { finishReason: finalStep.finishReason, usage: finalStep.usage, assistantMessage };
-  }
+  const suspendedCalls = settled.filter((outcome): outcome is SuspendedCall => outcome?.kind === "suspended");
+  const handedOver = settled.flatMap((outcome) => (outcome?.kind === "handed-over" ? [outcome.call] : []));
   const reason = suspendedCalls.find((entry) => entry.reason !== undefined)?.reason;
   return {
     finishReason: finalStep.finishReason,
     usage: finalStep.usage,
     assistantMessage,
-    suspended: {
-      callIds: suspendedCalls.map((entry) => entry.callId),
-      ...(reason === undefined ? {} : { reason }),
-    },
+    ...(suspendedCalls.length === 0
+      ? {}
+      : { suspended: { callIds: suspendedCalls.map((entry) => entry.callId), ...(reason === undefined ? {} : { reason }) } }),
+    ...(handedOver.length === 0 ? {} : { handedOver }),
   };
 }
 
@@ -1164,6 +1351,43 @@ export interface RunTurnOptions {
    * 不传就是普通轮。设计见挂起与恢复 · 技术方案 §5。
    */
   resume?: { callId: string; settlement: Settlement };
+  /**
+   * 恢复轮里**同时**结清的另外几次调用——只收「执行过了」的结果（`output` / `error`），不执行任何东西。
+   * 一步里有好几个工具在[交权](../../../docs/terms.md)时还在跑，它们要全部有结果后在同一轮里一起结清，
+   * 否则结清一个、剩下的还悬着，这一轮只能以挂起收尾（docs/logic/orchestration/tech/handover.md §6.2）。
+   */
+  resumeAlso?: { callId: string; outcome: CallOutcome }[];
+  /**
+   * [交权](../../../docs/terms.md)信号（与中止分开）：模型输出段收到它 → 掐断、这半步整个扔掉；工具段
+   * 收到它 → 工具不停，这一轮带着悬空调用以 `handed-over` 收尾，调用方继续持有工具（`TurnResult.handedOver`）。
+   * 设计见 docs/logic/orchestration/tech/handover.md §6。
+   */
+  handover?: AbortSignal;
+  /** 单次工具执行的上限（毫秒）。不传 = 不限。 */
+  toolTimeoutMs?: number;
+}
+
+/**
+ * 交权收尾要落在**账本的最后一条**上：接手的一方只看最后一条的收尾状态来判断要不要接着跑。上一步之后要是
+ * 已经注入了插话（用户消息排在上一步那条 assistant 后面），就不能并到上一步那条上，而要另起一条占位。
+ */
+function lastIfAssistant(messages: RunkoUIMessage[], lastAssistant: RunkoUIMessage | undefined): RunkoUIMessage | undefined {
+  return lastAssistant !== undefined && messages[messages.length - 1] === lastAssistant ? lastAssistant : undefined;
+}
+
+/** 以 `handed-over` 收尾的这一轮留下的东西。 */
+function handedOverResult(
+  finalResponse: string,
+  usage: Usage,
+  running: HandedOverCall[],
+  suspended: { callIds: string[]; reason?: string } | undefined,
+): TurnResult {
+  return {
+    finalResponse,
+    usage,
+    handedOver: { callIds: running.map((call) => call.callId), running },
+    ...(suspended === undefined ? {} : { suspended }),
+  };
 }
 
 export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<RunkoChunk, TurnResult> {
@@ -1174,6 +1398,7 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<RunkoChunk,
   // 恢复轮往前多算一条：被改写的那条上一轮的消息，恢复时执行的工具 timing 在它里面。
   const turnMessagesStart = resumeTarget === undefined ? opts.messages.length : opts.messages.length - 1;
   const abortSignal = opts.signal ?? new AbortController().signal;
+  const handover = opts.handover;
   let finalResponse = "";
   let usage: Usage = {};
   let contextCalibration = 1;
@@ -1183,6 +1408,24 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<RunkoChunk,
   // 模型要等看到结果才上场。所以模型在这一步里想改参数也无从改起：执行的就是账本里那条。
   if (resumeTarget !== undefined && opts.resume !== undefined) {
     lastAssistantMessage = resumeTarget.message;
+    const settleBase = {
+      tools: opts.tools,
+      session: opts.session,
+      fs: opts.fs,
+      abortSignal,
+      onApproval: opts.onApproval,
+      onReview: opts.onReview,
+      onceMemory: opts.onceMemory,
+      derivedData: opts.derivedData,
+      getSkill: opts.getSkill,
+      telemetry: opts.telemetry,
+      handover,
+      toolTimeoutMs: opts.toolTimeoutMs,
+    };
+    // 同时结清的那几次（纯数据，不执行，所以不会再挂起或交权）先落，主那一次放最后。
+    for (const also of opts.resumeAlso ?? []) {
+      yield* settleResumedCall(settleBase, resolveResumeTarget(opts.messages, also.callId, also.outcome), also.outcome);
+    }
     const resuspended = yield* settleResumedCall(
       {
         tools: opts.tools,
@@ -1195,16 +1438,31 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<RunkoChunk,
         derivedData: opts.derivedData,
         getSkill: opts.getSkill,
         telemetry: opts.telemetry,
+        handover,
+        toolTimeoutMs: opts.toolTimeoutMs,
       },
       resumeTarget,
       opts.resume.settlement,
     );
+    // 结清时执行的那个工具在交权那一刻还在跑：同工具段交权，带着它收尾。
+    if (resuspended?.kind === "handed-over") {
+      const callIds = [resuspended.call.callId];
+      yield finalizeTurn({
+        messages: opts.messages,
+        lastAssistantMessage,
+        turn: opts.session.turn, turnStartedAt, turnMessagesStart,
+        usage,
+        status: "handed-over",
+        handedOver: { callIds },
+      });
+      return handedOverResult(finalResponse, usage, [resuspended.call], undefined);
+    }
     // 结清之后这条消息里还有悬空调用（一步里有多个同时挂起，或者刚结清的这个执行时又挂起了）：
     // **不能调模型**——还有不配对的 tool_use，provider 会 400。直接以 suspended 收尾，人答下一个
     // 再开一轮（技术方案 §5.2）。理由沿用：这次又挂起了就用这次的，否则沿用上一轮挂起时记下的。
     const remaining = pendingCallIds([resumeTarget.message]);
     if (remaining.length > 0) {
-      const reason = resuspended?.reason ?? resumeTarget.message.metadata?.suspended?.reason;
+      const reason = (resuspended?.kind === "suspended" ? resuspended.reason : undefined) ?? resumeTarget.message.metadata?.suspended?.reason;
       const suspended = { callIds: remaining, ...(reason === undefined ? {} : { reason }) };
       yield finalizeTurn({
         messages: opts.messages,
@@ -1236,6 +1494,13 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<RunkoChunk,
       };
       yield finalizeTurn({ messages: opts.messages, lastAssistantMessage, turn: opts.session.turn, turnStartedAt, turnMessagesStart, usage, status: statusForError(error), error });
       return { finalResponse, usage };
+    }
+
+    // Checkpoint H（交权）：两步之间是干净边界，直接以 `handed-over` 收尾，接手的一方从账本接着调模型。
+    // **不 drain steer**：没交给模型的插话留给宿主转进待发队列（取出来就没了）。
+    if (handedOverNow(handover)) {
+      yield finalizeTurn({ messages: opts.messages, lastAssistantMessage: lastIfAssistant(opts.messages, lastAssistantMessage), turn: opts.session.turn, turnStartedAt, turnMessagesStart, usage, status: "handed-over", handedOver: { callIds: [] } });
+      return handedOverResult(finalResponse, usage, [], undefined);
     }
 
     // Checkpoint A：先 drain steer 队列再估算上下文，保证注入的消息计入预算。
@@ -1278,6 +1543,8 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<RunkoChunk,
         derivedData: opts.derivedData,
         getSkill: opts.getSkill,
         telemetry: opts.telemetry,
+        handover,
+        toolTimeoutMs: opts.toolTimeoutMs,
       });
       let next = await stepGen.next();
       while (!next.done) {
@@ -1286,6 +1553,20 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<RunkoChunk,
       }
       stepOutcome = next.value;
     } catch (error) {
+      // 模型输出段被交权掐断：**这半步整个扔掉**（docs/logic/orchestration/tech/handover.md §6.1）。账本回到
+      // 这一步开始之前，接手的一方看到的历史与掐断之前一字不差，直接接着调模型。
+      if (handedOverNow(handover) && !abortSignal.aborted) {
+        opts.messages.length = ledgerLengthBeforeStep;
+        yield finalizeTurn({
+          messages: opts.messages,
+          lastAssistantMessage: lastIfAssistant(opts.messages, lastAssistantMessage),
+          turn: opts.session.turn, turnStartedAt, turnMessagesStart,
+          usage,
+          status: "handed-over",
+          handedOver: { callIds: [] },
+        });
+        return handedOverResult(finalResponse, usage, [], undefined);
+      }
       const runkoError: RunkoError = abortSignal.aborted
         ? // 这条路上 `error` 通常是 AI SDK 自己抛的 `AbortError`（"This operation was
           // aborted"）——宿主给了理由就优先用它，回落才是那句第三方措辞。
@@ -1331,6 +1612,21 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<RunkoChunk,
     usage = mergeUsage(usage, stepOutcome.usage);
     const stepText = collectMessageText(stepOutcome.assistantMessage);
     if (stepText !== "") {finalResponse = stepText;}
+
+    // Checkpoint T（交权时工具还在跑）：本步有调用留在别处跑完，这一轮带着悬空调用收尾——同挂起，
+    // 没有结果的调用不能拿去调模型。同一步里还有在等人的调用时一并报上。
+    if (stepOutcome.handedOver !== undefined) {
+      yield finalizeTurn({
+        messages: opts.messages,
+        lastAssistantMessage,
+        turn: opts.session.turn, turnStartedAt, turnMessagesStart,
+        usage,
+        status: "handed-over",
+        handedOver: { callIds: stepOutcome.handedOver.map((call) => call.callId) },
+        ...(stepOutcome.suspended === undefined ? {} : { suspended: stepOutcome.suspended }),
+      });
+      return handedOverResult(finalResponse, usage, stepOutcome.handedOver, stepOutcome.suspended);
+    }
 
     // Checkpoint S（挂起，docs/logic/orchestration/tech/suspend-resume.md）：本步有调用停在
     // 「等人」上，本轮就此收尾——**必须拦在这里**。挂起时 finishReason 恒为 "tool-calls"，

@@ -211,20 +211,27 @@ function describeStatus(status: NonNullable<RunkoMessageMetadata["status"]>): st
       return "interrupted";
     case "suspended":
       return "suspended";
+    case "handed-over":
+      return "handed-over";
     default:
       return assertNever(status);
   }
 }
 
 describe("RunkoMessageMetadata.status", () => {
-  it("covers completed/failed/interrupted/suspended exhaustively", () => {
+  it("covers completed/failed/interrupted/suspended/handed-over exhaustively", () => {
     const statuses: NonNullable<RunkoMessageMetadata["status"]>[] = [
       "completed",
       "failed",
       "interrupted",
       "suspended",
+      "handed-over",
     ];
-    expect(statuses.map(describeStatus)).toEqual(["completed", "failed", "interrupted", "suspended"]);
+    expect(statuses.map(describeStatus)).toEqual(["completed", "failed", "interrupted", "suspended", "handed-over"]);
+  });
+
+  it("schema 也认 handed-over 与 handedOver 字段", () => {
+    expect(runkoMessageMetadataSchema.safeParse({ status: "handed-over", handedOver: { callIds: ["c1"] } }).success).toBe(true);
   });
 
   it("schema 也认 suspended（类型与 zod 两处不能漂）", () => {
@@ -233,7 +240,7 @@ describe("RunkoMessageMetadata.status", () => {
   });
 });
 
-/** 穷尽 `RunkoError.code` 的四个错误码。 */
+/** 穷尽 `RunkoError.code` 的五个错误码。 */
 function describeErrorCode(code: RunkoError["code"]): string {
   switch (code) {
     case "max_turns":
@@ -244,15 +251,17 @@ function describeErrorCode(code: RunkoError["code"]): string {
       return "provider_error";
     case "aborted":
       return "aborted";
+    case "internal_error":
+      return "internal_error";
     default:
       return assertNever(code);
   }
 }
 
 describe("RunkoError.code", () => {
-  it("only allows the four defined error codes", () => {
-    const codes: RunkoError["code"][] = ["max_turns", "context_overflow", "provider_error", "aborted"];
-    expect(codes.map(describeErrorCode)).toEqual(["max_turns", "context_overflow", "provider_error", "aborted"]);
+  it("only allows the five defined error codes", () => {
+    const codes: RunkoError["code"][] = ["max_turns", "context_overflow", "provider_error", "aborted", "internal_error"];
+    expect(codes.map(describeErrorCode)).toEqual(["max_turns", "context_overflow", "provider_error", "aborted", "internal_error"]);
   });
 });
 

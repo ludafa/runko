@@ -334,5 +334,13 @@ export interface Tool {
    * tool use 契约允许并行）；缺省视为有副作用，整批退回串行。
    */
   readOnly?: boolean;
+  /**
+   * 这个工具在 `execute` 里**等一个人**（典型是 `ask-user`），等多久由它自己（或宿主的人在回路桥）说了算。
+   *
+   * 于是它有两处与普通工具不同：不受 `SessionOptions.toolTimeoutMs` 约束——否则人还没来得及答，调用就被判
+   * 「超时已终止」；[交权](../../../docs/terms.md)时也**不**被当成还在跑的工具交出去——宿主会让它以挂起收尾
+   * （`ctx.suspend()`），人回来之后在任意节点接着答。
+   */
+  waitsForPerson?: boolean;
   execute(input: JsonValue, ctx: ToolContext): Promise<ToolReturn> | ToolReturn;
 }

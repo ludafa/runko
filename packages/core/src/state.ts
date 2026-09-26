@@ -30,16 +30,20 @@ const usageMetadataSchema = z.object({
 });
 
 const runkoErrorMetadataSchema = z.object({
-  code: z.enum(["max_turns", "context_overflow", "provider_error", "aborted"]),
+  code: z.enum(["max_turns", "context_overflow", "provider_error", "aborted", "internal_error"]),
   message: z.string(),
 });
 
 /**
  * `status: 'completed' | 'failed' | 'interrupted' | 'suspended'`——`'interrupted'`
  * 对应 `RunkoError.code === 'aborted'`（signal abort，宿主主动中断，不是模型/工具
- * 出错），其余三个 `RunkoError.code`（max_turns/context_overflow/
- * provider_error）都归 `'failed'`——四态错误码折叠进三态 status 的映射见
+ * 出错），其余几个 `RunkoError.code`（max_turns/context_overflow/
+ * provider_error/internal_error）都归 `'failed'`——四态错误码折叠进三态 status 的映射见
  * `loop.ts` 的 `statusForError()`。
+ *
+ * `'handed-over'` 是[已交权](../../../docs/terms.md)：节点要下线，这一轮停在一个干净的位置交给
+ * 别的节点接着跑（docs/logic/orchestration/tech/handover.md §6）。界面把它与接手那一轮连起来显示，
+ * **不显示成中断**。
  *
  * `'suspended'` 是**挂起**（docs/logic/orchestration/tech/suspend-resume.md）的收尾态：
  * 一轮停在「正在等人」这个干净边界上、主动落盘并释放归属，人回来之后由
@@ -52,7 +56,7 @@ const runkoErrorMetadataSchema = z.object({
 export interface RunkoMessageMetadata {
   turn?: number;
   usage?: Usage;
-  status?: "completed" | "failed" | "interrupted" | "suspended";
+  status?: "completed" | "failed" | "interrupted" | "suspended" | "handed-over";
   /** 全 turn 墙钟耗时（`runTurn` 入口到收尾，含每一步模型往返与工具执行）——`loop.ts` 的 `finalizeTurn` 统一落点写入，成功/失败/中断皆有。 */
   durationMs?: number;
   /**
@@ -75,17 +79,25 @@ export interface RunkoMessageMetadata {
    * 同 `RunkoError.message` 对待中止理由的姿态。
    */
   suspended?: { callIds: string[]; reason?: string };
+  /**
+   * `status === 'handed-over'` 时才有：[交权](../../../docs/terms.md)那一刻还在跑、留在旧节点上
+   * 跑完的调用（[工具收尾](../../../docs/terms.md)）。模型输出段被交权时为空数组——那半步已经扔掉了。
+   *
+   * 这些调用在账本里是悬空的，由接手的一方拿到结果后用 `settleAndRun` 结清。
+   */
+  handedOver?: { callIds: string[] };
 }
 
 export const runkoMessageMetadataSchema: z.ZodType<RunkoMessageMetadata> = z.object({
   turn: z.number().optional(),
   usage: usageMetadataSchema.optional(),
-  status: z.enum(["completed", "failed", "interrupted", "suspended"]).optional(),
+  status: z.enum(["completed", "failed", "interrupted", "suspended", "handed-over"]).optional(),
   durationMs: z.number().optional(),
   toolDurationMs: z.number().optional(),
   error: runkoErrorMetadataSchema.optional(),
   steered: z.boolean().optional(),
   suspended: z.object({ callIds: z.array(z.string()), reason: z.string().optional() }).optional(),
+  handedOver: z.object({ callIds: z.array(z.string()) }).optional(),
 });
 
 // ============================================================================

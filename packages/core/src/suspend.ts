@@ -81,8 +81,8 @@ export function requestSuspend(request: SuspendRequest, reason?: string): never 
  * | 部件停在 | 接受 |
  * |---|---|
  * | `approval-requested`（人审通道答了 suspend） | `approval` |
- * | `input-available`（工具调了 `ctx.suspend()`） | `output` |
- * | `approval-responded`（审批通过后执行时又挂起） | `output` |
+ * | `input-available`（工具调了 `ctx.suspend()`，或交权时还在跑） | `output` / `error` |
+ * | `approval-responded`（审批通过后执行时又挂起，或交权时还在跑） | `output` / `error` |
  *
  * **叫 `output` 不叫 `answer`**：`ctx.suspend()` 谁都能调，它等的是「这次调用的输出」，
  * `ask-user` 的答案只是其中一种。
@@ -90,7 +90,17 @@ export function requestSuspend(request: SuspendRequest, reason?: string): never 
 export type Settlement =
   | { kind: "approval"; behavior: "allow" }
   | { kind: "approval"; behavior: "deny"; message?: string }
-  | { kind: "output"; output: ToolReturn };
+  | { kind: "output"; output: ToolReturn }
+  /**
+   * 这次调用**执行过但失败了**，`errorText` 交给模型。部件写成 `output-error`。
+   *
+   * 它来自[工具收尾](../../../docs/terms.md)：工具在交权之后留在旧节点上跑完，结果可能是失败
+   * （或者旧节点没按时写回，只能记成「结果未知」）。接受它的部件状态与 `output` 相同。
+   */
+  | { kind: "error"; errorText: string };
+
+/** 一次调用在别处跑完之后带回来的结果——`Settlement` 里「执行过」的那两种。 */
+export type CallOutcome = Extract<Settlement, { kind: "output" | "error" }>;
 
 export type RunkoResumeErrorCode =
   /** `stream()` 时最后一条消息里还有悬空调用——这时只能 `settleAndRun`。 */
@@ -205,14 +215,14 @@ export function resolveResumeTarget(messages: RunkoUIMessage[], callId: string, 
       if (settlement.kind !== "approval") {throw mismatch("approval");}
       break;
     case "input-available":
-      if (settlement.kind !== "output") {throw mismatch("output");}
+      if (settlement.kind !== "output" && settlement.kind !== "error") {throw mismatch("output");}
       break;
     case "approval-responded":
       // 审批通过之后、执行时工具又调了 `ctx.suspend()`。被拒绝的不会停在这里（deny 分支紧接着就写 output-denied）。
       if (part.approval.approved !== true) {
         throw new RunkoResumeError("not_pending", `Tool call ${callId} was denied; there is nothing to resume.`);
       }
-      if (settlement.kind !== "output") {throw mismatch("output");}
+      if (settlement.kind !== "output" && settlement.kind !== "error") {throw mismatch("output");}
       break;
     default:
       throw new RunkoResumeError("not_pending", `Tool call ${callId} already has a result (state "${part.state}").`);

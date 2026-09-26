@@ -65,7 +65,7 @@ import type { z } from "zod";
 import type { AgentDefinition, BuiltinToolName } from "./agent.js";
 import { createOnceApprovalMemory } from "./approval.js";
 import { runTurn } from "./loop.js";
-import type { RunTurnOptions, SessionTelemetry } from "./loop.js";
+import type { HandedOverCall, RunTurnOptions, SessionTelemetry } from "./loop.js";
 import { createDerivedDataCollector } from "./runtime.js";
 import type { DerivedDataCollector } from "./runtime.js";
 import type { Skill } from "./skill.js";
@@ -74,7 +74,7 @@ import { sessionStateSchema, validateSessionMessages } from "./state.js";
 import type { RunkoChunk, RunkoMessageMetadata, RunkoUIMessage, SessionState } from "./state.js";
 import { generateStructuredOutput } from "./structured.js";
 import { assertNoPendingCalls, resolveResumeTarget, RunkoResumeError } from "./suspend.js";
-import type { Settlement } from "./suspend.js";
+import type { CallOutcome, Settlement } from "./suspend.js";
 import { createBashTool } from "./tools/builtin/bash.js";
 import { createLoadSkillTool } from "./tools/builtin/load-skill.js";
 import { createPlanStore, createUpdatePlanTool } from "./tools/builtin/update-plan.js";
@@ -106,6 +106,21 @@ export type Input = string | InputBlock[];
 
 export interface TurnOptions {
   signal?: AbortSignal;
+  /**
+   * [交权](../../../docs/terms.md)信号，与 `signal`（中止）分开：模型正在输出 → 掐断、这半步扔掉；
+   * 工具正在跑 → **工具不停**，这一轮带着悬空调用以 `handed-over` 收尾，工具交给调用方继续持有
+   * （`TurnResult.handedOver.running`）。设计见 docs/logic/orchestration/tech/handover.md §6。
+   */
+  handover?: AbortSignal;
+}
+
+/** `settleAndRun` 的选项：在 `TurnOptions` 之上，可以顺带结清同一条消息里别的几次「执行过了」的调用。 */
+export interface SettleOptions extends TurnOptions {
+  /**
+   * 同一轮里一起结清的另外几次调用（只收 `output` / `error`）。[交权](../../../docs/terms.md)时一步里好几个工具都在跑，
+   * 它们要全部有结果后一起结清——一次只结清一个的话，剩下的还悬着，这一轮只能以挂起收尾。
+   */
+  alsoSettle?: { callId: string; outcome: CallOutcome }[];
 }
 
 /**
@@ -123,6 +138,12 @@ export interface TurnResult {
    * `settleAndRun` 结清，之后这个会话才能开普通轮。
    */
   suspended?: { callIds: string[]; reason?: string };
+  /**
+   * 这一轮以[已交权](../../../docs/terms.md)收尾时才有。`running` 是交权那一刻还在跑的调用：
+   * 它们在账本里是悬空的，结果到了用 `settleAndRun` 结清；为空说明是在模型输出段或两步之间交出的，
+   * 接手的一方用 `continueTurn` 接着跑。
+   */
+  handedOver?: { callIds: string[]; running: HandedOverCall[] };
 }
 
 /**
@@ -201,6 +222,12 @@ export interface SessionOptions {
    * 不注入 = 无事件（loop 只留 functionId 元数据，零开销）。
    */
   telemetry?: SessionTelemetry;
+  /**
+   * 单次工具执行的上限（毫秒）。到点先 abort 工具，再等两秒，还不回来就给模型一个「超时已终止」的
+   * 结果。不传 = 不限。[交权](../../../docs/terms.md)时旧节点最多等这么久，所以宿主应当配上它
+   * （docs/logic/orchestration/tech/handover.md §6.3）。
+   */
+  toolTimeoutMs?: number;
 }
 
 /**
@@ -234,7 +261,14 @@ export interface Session {
    * **它原地改写那条消息**（id 不变）。所以要落盘的是「开轮时的最后一条 + 本轮新增的」，
    * 前者以新 seq、同 id 追加，读账本时按 id 折叠——见挂起与恢复 · 技术方案 §5.4。
    */
-  settleAndRun(callId: string, settlement: Settlement, opts?: TurnOptions): AsyncGenerator<RunkoChunk, TurnResult>;
+  settleAndRun(callId: string, settlement: Settlement, opts?: SettleOptions): AsyncGenerator<RunkoChunk, TurnResult>;
+  /**
+   * 接着跑：**不追加任何消息**，从账本当前的样子直接进入 step 循环。
+   *
+   * 用在[交权](../../../docs/terms.md)之后——上一轮在模型输出段或两步之间交出，账本末尾是用户消息或
+   * 工具结果，接手的一方从这里接着调模型。账本末尾还有悬空调用时抛 `RunkoResumeError`（先 `settleAndRun`）。
+   */
+  continueTurn(opts?: TurnOptions): AsyncGenerator<RunkoChunk, TurnResult>;
   /**
    * 软 steer（STEER-1，docs/logic/engine/tech/core-sdk.md §4.2）：turn 进行中调用则把 `input` 排队、在
    * 下一个 step checkpoint 注入为一条 user 消息（不打断进行中的模型流式输出
@@ -581,6 +615,7 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
   async function* runSessionTurn(
     open: () => RunTurnOptions["resume"],
     turnOpts: TurnOptions,
+    resumeAlso?: RunTurnOptions["resumeAlso"],
   ): AsyncGenerator<RunkoChunk, TurnResult> {
     turnActive = true;
     try {
@@ -636,6 +671,9 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
         drainSteers: () => pendingSteers.splice(0, pendingSteers.length),
         telemetry: opts.telemetry,
         resume,
+        ...(resumeAlso !== undefined && resumeAlso.length > 0 ? { resumeAlso } : {}),
+        ...(turnOpts.handover !== undefined ? { handover: turnOpts.handover } : {}),
+        ...(opts.toolTimeoutMs !== undefined ? { toolTimeoutMs: opts.toolTimeoutMs } : {}),
       });
 
       /**
@@ -680,12 +718,25 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
     }, turnOpts);
   }
 
-  function settleAndRun(callId: string, settlement: Settlement, turnOpts: TurnOptions = {}): AsyncGenerator<RunkoChunk, TurnResult> {
+  function settleAndRun(callId: string, settlement: Settlement, turnOpts: SettleOptions = {}): AsyncGenerator<RunkoChunk, TurnResult> {
+    const also = turnOpts.alsoSettle ?? [];
+    return runSessionTurn(
+      () => {
+        // 只校验、不动账本：真正的改写在 `runTurn` 的恢复开场里。这里先查一遍，是为了用错时
+        // 在 `turn += 1` 之前就抛。
+        resolveResumeTarget(messages, callId, settlement);
+        for (const entry of also) {resolveResumeTarget(messages, entry.callId, entry.outcome);}
+        return { callId, settlement };
+      },
+      turnOpts,
+      also,
+    );
+  }
+
+  function continueTurn(turnOpts: TurnOptions = {}): AsyncGenerator<RunkoChunk, TurnResult> {
     return runSessionTurn(() => {
-      // 只校验、不动账本：真正的改写在 `runTurn` 的恢复开场里。这里先查一遍，是为了用错时
-      // 在 `turn += 1` 之前就抛。
-      resolveResumeTarget(messages, callId, settlement);
-      return { callId, settlement };
+      assertNoPendingCalls(messages);
+      return undefined;
     }, turnOpts);
   }
 
@@ -745,5 +796,5 @@ export function createSession(agent: AgentDefinition, opts: SessionOptions = {})
     return state;
   }
 
-  return { id, fs, readState, derivedData, send, stream, settleAndRun, steer, toJSON };
+  return { id, fs, readState, derivedData, send, stream, settleAndRun, continueTurn, steer, toJSON };
 }

@@ -33,6 +33,8 @@ export interface ToolDefinition<In extends z.ZodType<JsonValue>, Out extends Too
   approval?: ApprovalPolicy;
   /** 见 `Tool.readOnly`（types.ts）：纯读声明，整批全 readOnly 时 loop 并行结算。 */
   readOnly?: boolean;
+  /** 见 `Tool.waitsForPerson`（types.ts）：在 `execute` 里等人，不受工具最长执行时间约束、交权时不交出去。 */
+  waitsForPerson?: boolean;
   execute(input: z.infer<In>, ctx: ToolContext): Promise<Out> | Out;
 }
 
@@ -46,6 +48,7 @@ export function defineTool<In extends z.ZodType<JsonValue>, Out extends ToolRetu
     outputSchema: def.outputSchema,
     approval: def.approval,
     readOnly: def.readOnly,
+    ...(def.waitsForPerson === true ? { waitsForPerson: true } : {}),
     execute: def.execute,
   };
 }
