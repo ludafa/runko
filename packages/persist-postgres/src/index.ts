@@ -14,7 +14,7 @@
  * ```
  *
  * **已经在用 Kysely 了？** 别用这个包——直接装 `@runko/persist-kysely`，把你自己的
- * 实例给它，runko 的四张表和你的表就在同一个实例、同一套迁移之下。
+ * 实例给它，runko 的七张表和你的表就在同一个实例、同一套迁移之下。
  */
 import type { Arbitration, NodeRegistry, Persistence } from "@runko/agent";
 import type { LeaseArbitrationOptions, NodeRegistryOptions, RunkoDatabase } from "@runko/persist-kysely";
@@ -104,6 +104,7 @@ export type PostgresNodeRegistryOptions = Omit<NodeRegistryOptions, "flavor">;
  *   arbitration: postgresArbitration(pool, { holder: process.env.RUNKO_NODE_URL }),
  *   handover: {
  *     node: process.env.RUNKO_NODE_URL,
+ *     releaseSeq: Number(process.env.RUNKO_RELEASE_SEQ), // 发布序号：每次发布递增，回滚也递增
  *     nodes: postgresNodeRegistry(pool),
  *     requestTakeover: (node, conversationIds) => askPeerToTakeOver(node, conversationIds),
  *   },

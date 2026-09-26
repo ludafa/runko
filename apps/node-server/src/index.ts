@@ -20,7 +20,7 @@ if (flavor === 'sqlite') {
 // 那些地方一行日志都不该打。
 logPushStartup(logger);
 
-// [崩溃恢复](../../../docs/terms.md)（docs/logic/orchestration/tech/agent-runtime.md §4.3）：
+// 启动时扫[孤儿轮](../../../docs/terms.md)（docs/logic/orchestration/tech/graceful-shutdown.md §5）：
 // 上次进程若是被强杀的（`kill -9`/OOM/断电），那些[孤儿轮](../../../docs/terms.md)在账本里
 // 从没收尾。判据是[起轮标记](../../../docs/terms.md)——库里还留着标记 = 那一轮没人管了。
 //
@@ -51,7 +51,7 @@ const SHUTDOWN_TIMEOUT_MS = Number(process.env.SHUTDOWN_TIMEOUT_MS ?? 15_000);
 /**
  * `server.close()` 之后最多再等多久才硬退。这段时间留给 SIGTERM 之前就接下、还在处理的请求——比如建一个云沙盒要
  * 十几秒到一分钟，中途断掉的话 nginx 会把这个 POST 重发给别的副本、再建一个沙盒。到点还没退（多半是替别的节点
- * 转发的长连接）就硬断、退出（docs/logic/orchestration/tech/handover.md §5 的退出条件）。
+ * 转发的长连接）就硬断、退出（docs/host/node/tech/cluster-console.md §4）。
  */
 const FORCE_EXIT_AFTER_MS = 60_000;
 
@@ -71,12 +71,16 @@ const server = serve({ fetch: app.fetch, port }, (info) => {
 injectWebSocket(server);
 
 /**
- * 收到 SIGTERM：[节点下线](../../../docs/terms.md)，顺序是硬要求（docs/logic/orchestration/tech/handover.md §5）：
+ * 收到 SIGTERM：[节点下线](../../../docs/terms.md)，顺序是硬要求（docs/host/node/tech/cluster-console.md §4）：
  *
  * 1. **先关闸门**：浏览器来的一律 503，转发来的放到交接完成为止（真集群里是负载均衡 / mesh 在做这件事，见 `offline.ts`）。
  * 2. **交权**（`chatRuntime.shutdown()`）：每份对话几百毫秒内交给别的副本；本节点上的直播收到请重连帧后收线；
  *    还在跑的工具留在本节点上跑完、结果写库。它返回时本节点已经没活了。
- * 3. 收 Redis 连接（最后几帧要广播出去）、关 HTTP 服务、退出。
+ * 3. **交接完成**（`finishHandover()`）：闸门改成转发来的也挡。
+ * 4. 收 Redis 连接（最后几帧要广播出去）。先断空闲连接，再 `server.close()`。
+ *    还没断的连接最多再等 60 秒，到点硬断、退出。
+ *
+ * 再收到一次信号就立刻 `exit(1)`。
  */
 async function shutdown(signal: NodeJS.Signals): Promise<void> {
   if (chatRuntime.isShuttingDown()) {
@@ -127,7 +131,8 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
       transferred: result.transferred,
       delegated: result.delegated,
       toolTails: result.tails,
-      // `false` = 撞了宽限期上限，那几个轮成了孤儿轮，下次启动由 `runtime.recover()` 补收尾。
+      // `false` = 退回中止之后仍没收尾，那几个轮成了孤儿轮。多副本时由别的节点接管后补收尾；
+      // 单进程时下次启动由 `runtime.recover()` 补。
       allTurnsSettled: result.settled,
       pendingTurns: result.pending,
     });

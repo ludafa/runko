@@ -1,8 +1,7 @@
 /**
- * chat 应用的 `@runko/agent` 装配——**取代了原先的 `turn-launcher.ts` + `turn-runner/`
- * 那九个文件**。
+ * chat 应用的 `@runko/agent` 装配。
  *
- * 现在这里只剩下真正属于 chat 应用的东西：
+ * 这里只放真正属于 chat 应用的东西：
  *
  * - **[起轮装配](../../../../docs/terms.md)那一段**（`prepareTurn`）：取沙盒 → 续期 →
  *   回写 E2B [重连令牌](../../../../docs/terms.md) → 扫 skill 并刷新[清单](../../../../docs/terms.md)

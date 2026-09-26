@@ -74,8 +74,8 @@ export function buildResumeState(conversationId: string, entries: readonly Ledge
   // **滤掉 parts 为空的行**。ai 的 `validateUIMessages()` 拒绝空 parts，而这一步的结果
   // 每一轮都要过它一次——账本里只要有一条这样的行，这个会话就**永远起不了新轮**。
   //
-  // 本包不再产出这种行（收尾标记改成了 `[{ type: "step-start" }]`），但 0.0.x 早期版本
-  // 写下的存量行还在别人库里躺着，滤掉它们才能让那些会话自愈。丢掉也不损失什么：
+  // 本包写的收尾标记都带一个 `step-start` 部件，自己不产出这种行。但库里可能已经有别处写下的
+  // 这种行，滤掉它们，那些会话才能自愈。丢掉也不损失什么：
   // 空 parts 的那条只承载 metadata，模型上下文里本来就看不到它。
   const messages = foldById(entries).filter((message) => message.parts.length > 0);
   const turn = entries.reduce((max, entry) => Math.max(max, entry.message.metadata?.turn ?? 0), 0);
@@ -129,7 +129,7 @@ const INTERNAL_ERROR_MESSAGE = "Internal error; this turn could not be completed
  * 驱动一轮。**从不 reject**（见文件头）。
  *
  * 注意它不负责收尾登记（`registry.delete`、`grant.release`、出队起下一轮）——那些在
- * `queue.ts` 的 `startTurn` 里，顺序是硬要求。
+ * `queue.ts` 的 `runToCompletion` 里，顺序是硬要求。
  */
 export async function driveTurn(ctx: RuntimeContext, turn: ActiveTurn): Promise<DriveResult> {
   const { conversationId } = turn;
@@ -160,7 +160,7 @@ export async function driveTurn(ctx: RuntimeContext, turn: ActiveTurn): Promise<
     const resume = buildResumeState(conversationId, entries);
     const priorMessageCount = resume.messages.length;
     // 三个停止检查点**只对普通轮生效**。恢复轮不走「停止就补一条用户消息 + 已停止」的捷径——
-    // 那会把收尾标记追加在悬空调用后面，永久弄坏这个会话（技术方案 §5.9）。它必须走到 core，
+    // 那会把收尾标记追加在悬空调用后面，永久弄坏这个会话（挂起与恢复 · 技术方案 §5.9）。它必须走到 core，
     // 在那里把停止当成「拒绝」来结清那次调用（`openTurnStream`）。
     const stopBeforeCore = (): boolean => turn.aborted && turn.resume === undefined;
     // [交权](../../../../docs/terms.md)落在装配阶段：中止装配、**什么都不写**，普通轮的输入放回待发队列最前面，
@@ -238,7 +238,7 @@ export async function driveTurn(ctx: RuntimeContext, turn: ActiveTurn): Promise<
     }
     // 恢复轮与接着跑的那一轮装配失败：**账本一个字不写**——不写用户消息（人没说话），也不写收尾标记
     // （恢复轮会补在悬空调用后面；接着跑的会盖掉交权标记，那半轮就再也接不上了）。下一次推一把时重来；
-    // 收尾第⑤步也不会立刻重试，免得沙盒持续不可用时变成热循环（技术方案 §5.8）。
+    // 收尾第⑤步也不会立刻重试，免得沙盒持续不可用时变成热循环（挂起与恢复 · 技术方案 §5.8）。
     if (turn.resume !== undefined || turn.continuation === true) {
       ctx.logger.error(LOG_SCOPE, "resume or continuation turn assembly failed; the ledger is left as it was", {
         conversationId,
@@ -341,7 +341,7 @@ async function appendSettleMessage(
   publish: (frame: Frame) => void,
   metadata: RunkoMessageMetadata,
 ): Promise<void> {
-  // 账本末尾有悬空调用时**不写**：标记会把它埋进历史中间，此后每次调模型都 400（技术方案 §5.9）。
+  // 账本末尾有悬空调用时**不写**：标记会把它埋进历史中间，此后每次调模型都 400（挂起与恢复 · 技术方案 §5.9）。
   // 走到这里通常是一次没做完的恢复轮——这个会话本来就还在挂起。
   if (await ledgerEndsWithPendingCalls(ctx.persistence, turn.conversationId)) {
     ctx.logger.info(LOG_SCOPE, "conversation is suspended; not appending a settle marker after a pending call", {
@@ -418,7 +418,7 @@ interface ConsumeOptions {
 /**
  * 开这一轮的流：普通轮 `stream(text)`，恢复轮 `settleAndRun(callId, settlement)`。
  *
- * **停止键在恢复轮里等于「拒绝」**（技术方案 §5.8）：人点了允许、恢复轮还在装配时他又点了停止，
+ * **停止键在恢复轮里等于「拒绝」**（挂起与恢复 · 技术方案 §5.8）：人点了允许、恢复轮还在装配时他又点了停止，
  * 那就不执行，改用拒绝结清。这跟内存窗口内点停止的结果一致。开轮之后再点停止，由 core 用中止
  * 信号处理（跟普通轮一样）。
  */
@@ -575,7 +575,7 @@ async function finalize(
   }
 
   const newMessages = messagesToPersist(turn, state.messages, opts);
-  // core 按先进先出注入插话，数一下进了账本的有几条，剩下的由收尾时转进待发队列（挂起时）。
+  // core 按先进先出注入插话，数一下进了账本的有几条，剩下的在收尾时转进待发队列（见 `queue.ts` 的 `shouldRequeueSteers`）。
   turn.steersDelivered = newMessages.filter((message) => message.role === "user" && message.metadata?.steered === true).length;
   const written: Frame[] = [];
   let outcome: FinalizeOutcome = "complete";
@@ -662,7 +662,7 @@ async function finishUnsaved(
  *
  * - 普通轮：跳过开轮时 core 自己 push 的那条用户消息（`appendUserMessage` 已经写过了）。
  * - 恢复轮：**从开轮时的最后一条开始**——core 原地改写了它（结清那次悬空调用），它以新 seq、
- *   同 id 追加，读账本时按 id 折叠（技术方案 §5.4）。它要是一个字没变（恢复在结清之前就失败了），
+ *   同 id 追加，读账本时按 id 折叠（挂起与恢复 · 技术方案 §5.4）。它要是一个字没变（恢复在结清之前就失败了），
  *   就别再写一遍。
  */
 function messagesToPersist(

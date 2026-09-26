@@ -1,5 +1,5 @@
 /**
- * 一轮的收尾标记（docs/logic/orchestration/tech/single-ledger.md §5/§6）。wire 上只有
+ * 一轮的收尾标记（单一账本技术方案 docs/logic/orchestration/tech/single-ledger.md §6.1）。wire 上只有
  * 一轮**结束**的信号（`message-metadata` 的 `turn`/`status`），没有一轮**开始**的信号，
  * 所以这里只画收尾、不画「第 N 轮」的分隔线。
  *

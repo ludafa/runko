@@ -762,7 +762,9 @@ describe.skipIf(!RUN)(
       }
     }, 300_000);
 
-    it('§4.9 排队的下一轮：持有者不放手、接着跑，非持有者上的同一条直播连接一路看完整个队列', async () => {
+    // 设计见 docs/logic/orchestration/tech/single-ledger.md §6.1 与
+    // docs/logic/orchestration/tech/steer-and-queue.md §8.3。
+    it('排队的下一轮：持有者不放手、接着跑，非持有者上的同一条直播连接一路看完整个队列', async () => {
       const id = await createConversation(node(1));
       expect(mode(await send(node(1), id, textFor('第一件', 6_000)))).toBe(
         'started',
@@ -775,7 +777,7 @@ describe.skipIf(!RUN)(
         expect(mode(await send(node(2), id, textFor('第二件', 4_000)))).toBe(
           'queued',
         );
-        step('4.9', '1 号在跑、2 号收的排队消息、3 号上连着直播', {
+        step('queue', '1 号在跑、2 号收的排队消息、3 号上连着直播', {
           conversationId: id,
         });
 
@@ -806,7 +808,7 @@ describe.skipIf(!RUN)(
         const inactive = watcher.frames.filter(
           (frame) => field(frame, 'turnActive') === false,
         );
-        step('4.9', '3 号那条连接看到的收尾', {
+        step('queue', '3 号那条连接看到的收尾', {
           conversationId: id,
           endings: endings.join(','),
           inactive: inactive.length,

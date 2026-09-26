@@ -46,7 +46,8 @@ app.use(
 
 /**
  * [节点下线](../../../docs/terms.md)闸门：挂在一切路由之前，WebSocket 升级、`/health` 与节点间的「请接手」
- * 都在它后面。下线中一律 503，nginx 换节点重试（docs/logic/orchestration/tech/handover.md §3.3）。
+ * 都在它后面。节点下线后，浏览器来的请求回 503，nginx 换节点重试。别的节点转发来的请求（含「请接手」）
+ * 放行到交接完成，之后也回 503（docs/host/node/tech/cluster-console.md §4.1）。
  */
 app.use('*', nodeOffline.gate);
 

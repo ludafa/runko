@@ -20,7 +20,7 @@ import type { SessionFactory } from "./session-factory.js";
  * 宿主的观测/通知挂钩。**全部可选、全部只报告不影响这一轮**：抛错就地吞掉记一行。
  *
  * 为什么这些不做成框架能力：遥测与推送是**可选外围**，运行内核不该长出对它们的
- * 认识——同 chat 应用原先 `onTurnSettled`/`onMilestone` 的分工，只是搬进了框架。
+ * 认识。框架只在该报的时刻调挂钩，接不接遥测、发不发推送由宿主决定。
  */
 export interface RuntimeHooks {
   onTurnStart?: (event: { conversationId: string; turn: number; input: TurnInput }) => void;

@@ -81,8 +81,8 @@ export async function migrate(db: Db): Promise<void> {
     ensureIndex(db, LEASES_COLLECTION, { heartbeatAt: 1, leaseToken: 1 }, {
       name: "agent_leases_heartbeat_token",
     }),
-    // **只为 `listSweepCandidates` 建**（[定时回捞](../../../docs/terms.md)的输入之一：
-    // 打了[待接手](../../../docs/terms.md)标记的那些会话）。等值查询，不像 `heartbeatAt`
+    // **只为 `listSweepCandidates` 建**。[定时回捞](../../../docs/terms.md)只看这一个字段：
+    // 打了[待接手](../../../docs/terms.md)标记的会话。等值查询，不像 `heartbeatAt`
     // 那样有 `$ne` 的坑，键序无所谓。
     ensureIndex(db, LEASES_COLLECTION, { awaitingTakeover: 1 }, {
       name: "agent_leases_awaiting_takeover",

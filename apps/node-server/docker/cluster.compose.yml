@@ -164,7 +164,7 @@ services:
   # **一次「发布」的新版本副本**：同一个镜像，[发布序号](../../../../docs/terms.md)更大。只在 `release`
   # 这个 profile 下出现，平时不起。网络别名也叫 `node`，nginx 把流量一起分给它们：
   #
-  #   CLUSTER_NEXT_REPLICAS=3 docker compose -f docker/cluster.compose.yml --profile release up -d --wait node-next
+  #   docker compose -f docker/cluster.compose.yml --profile release up -d --wait --no-recreate --scale node-next=3 node-next
   #
   # 再逐个 `docker stop` 老副本，就是一次先启再停的滚动发布（docs/logic/orchestration/features/handover.md §5）。
   node-next:

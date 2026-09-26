@@ -52,7 +52,7 @@ function remoteArbitration(holder: string): Arbitration {
 
 /**
  * 一个**永远报「我自己持有」**的假仲裁：`release()` 刻意不清账，于是 `inspect` 在这一轮
- * 收尾之后仍然说有人持有。它模拟的是收尾窗口——`settleTurn` 先删登记表、再释放归属，
+ * 收尾之后仍然说有人持有。它模拟的是收尾窗口——`runToCompletion` 最后放手时先删登记表、再释放归属，
  * 中间那一小段（以及释放失败时的更长一段）两边都查得到「有人持有」却没有任何东西在跑。
  */
 function selfHoldingArbitration(holder: string): Arbitration {
