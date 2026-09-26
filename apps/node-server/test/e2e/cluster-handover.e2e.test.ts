@@ -9,7 +9,7 @@
  * | C | 单副本先停再启：一个存活副本都没有 | 待接手：新进程起来后接着跑完 |
  *
  * §5 第 6 条（接手节点在答应之前挂掉、预留过期后被定时回捞接走）在容器里造不出确定的时序，
- * 由 `@runko/agent` 的单测与仲裁一致性套件钉住（见施工文档 H7 的验收记录）。
+ * 由 `@runko/agent` 的单测与仲裁一致性套件钉住（见 docs/logic/orchestration/plans/handover.md 的「验证方案」）。
  *
  * **门禁**：`RUNKO_TEST_CLUSTER=1` 才跑（`pnpm test:cluster-handover`）。自带起停，独立项目名与端口。
  * 日志在 `apps/node-server/logs/cluster-handover-<时间>/`。

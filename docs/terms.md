@@ -16,12 +16,14 @@
 | **step（步）** | — | 一轮内部，agent 每调一次模型算一步。一轮可能有很多步（每调一次工具通常就多一步）。 |
 | **conversation（会话/对话）** | session（指聊天会话时，2026-07-17 退役） | 一段持续的多轮对话，跨轮累积记忆。对应 chat 应用里的一个聊天窗口；存储为 `conversations` 表、事件账本 `conversation_events`。改名动机：解开 "session" 三重超载——该词此后专指 better-auth 登录态（`session` 表）与 SDK 的 agent 会话（`SessionState`/`agent_session_*` 列）。 |
 | **steer（中途插话）** | 软 steer、soft steer | agent 正在跑一轮的过程中，用户又发了一条消息，把它插进当前这一轮（而不是等它结束再开新一轮）。真实注入点是下一个 step 边界。在 chat 应用里这是**要显式选择**的路径（默认是排队，见下）。 |
-| **排队（queue）** | 待发队列 | agent 正在跑一轮时，用户发的消息**不进当前这一轮**，而是存进会话的待发队列；这一轮收尾后由服务端自动取队首、起下一轮。与 steer 相对，是 chat 应用运行中发消息的**默认**路径。队列的模型与读写归框架（`@runko/agent` 的 `QueueStore`），**策略归构建者**（排不排队、上限几条、要不要插话是配置）；chat 应用的落地仍是 `conversations.queued_messages_json` 那一列（不是[账本](#三数据存哪怎么传)——排队消息是「尚未发生的意图」，不是已发生的事件）。 |
+| **排队（queue）** | — | agent 正在跑一轮时，用户发的消息**不进当前这一轮**，而是存进会话的[待发队列](#一agent-运行的基本单位)；这一轮收尾后由服务端自动取队首、起下一轮。与 steer 相对，是 chat 应用运行中发消息的**默认**路径。队列的模型与读写归框架（`@runko/agent` 的 `QueueStore`），**策略归构建者**（排不排队、上限几条、要不要插话是配置）；chat 应用的落地仍是 `conversations.queued_messages_json` 那一列（不是[账本](#三数据存哪怎么传)——排队消息是「尚未发生的意图」，不是已发生的事件）。 |
+| **待发队列（pending queue）** | — | 排队的消息存放的地方：每个会话一条，按先来后到排，有上限（缺省 10 条）。「排队」是把消息放进去这个动作，「待发队列」是那个队列本身。一轮收尾时队列不空，持有者带着同一个归属直接[出队](#一agent-运行的基本单位)接着跑，直到排空（docs/logic/orchestration/tech/steer-and-queue.md §8.3）。代码里是 `QueueStore`、`QueuedInput`。 |
 | **出队（dequeue）** | — | 一轮收尾后服务端自动取出待发队列队首、以它起下一轮的动作。出队即从队列移除；起轮失败则该条留在队列，等下一次轮收尾再试。 |
 | **起轮装配（turn launch）** | — | 从「服务端收到一条要起新一轮的消息」到「这一轮真正开始产出内容」之间那段准备工作：取沙盒 → 续期 → 从账本重建 `SessionState` → 建 agent 会话 → 交给 turn runner 驱动。落地为 `apps/node-server/src/agent/turn-launcher.ts` 的 `launchTurn`。它整段跑在 `POST .../messages` 的请求生命周期里，用户在界面上的等待有相当一部分花在这里，故单独打点（见 docs/ingress/tech/telemetry.md §2.4）。 |
 | **轮状态快照（turn-state frame）** | — | [直播流](#三数据存哪怎么传)上的一种状态快照帧（`{ turnActive: boolean }`）：每条 `GET .../stream` 在回放之后、进入直播之前必发一帧，内容是**服务端**对「这个会话此刻有没有[轮](#一agent-运行的基本单位)在跑」的权威答案。与[待发队列](#一agent-运行的基本单位)快照帧同构——没有 `seq`、不落库、不进[账本](#三数据存哪怎么传)。它取代了前端早先那个猜测（「回放最后一帧是不是 chunk」），因为崩溃残留会让那个猜法长期失准且永不自愈。见 docs/ingress/tech/chat-webapp.md §5.1。 |
 | **起轮占位（turn reservation）** | — | [起轮装配](#一agent-运行的基本单位)一进门就在服务端那张「进行中的轮」表里占下的位子：从装配的第一行代码起这一轮就算**存在**，于是它可以被[停止](#一agent-运行的基本单位)、同会话后来的消息也会走[排队](#一agent-运行的基本单位)而不是再起一轮。装配跑完则原地升级成真正在跑的那一轮，装配失败或装配期间被停止则撤销。落地为 `apps/node-server/src/agent/turn-runner/` 的 `reservation.ts`（`reserveTurn`/`releaseTurn`）与 `registry.ts`（`ActiveTurn.phase`）。 |
-| **停止（stop / abort）** | 硬打断（interrupt）、取消（cancel）、中止 | 用户在一轮进行中主动叫停它：当前轮不再进入下一个 [step](#一agent-运行的基本单位)、待发队列一并清空，已产出的内容全部留在账本里。落地为 `AbortController` → core `TurnOptions.signal`，收尾状态是 `status: 'interrupted'` + `RunkoError.code: 'aborted'`（这两个是代码标识符，行文一律说「停止」/「已停止」）。与 steer 的分别：steer 是「往这一轮里加话」，停止是「让这一轮结束」。见 docs/logic/orchestration/features/turn-abort.md。 |
+| **停止（stop / abort）** | 硬打断（interrupt）、取消（cancel） | 用户在一轮进行中主动叫停它：当前轮不再进入下一个 [step](#一agent-运行的基本单位)、待发队列一并清空，已产出的内容全部留在账本里。落地为 `AbortController` → core `TurnOptions.signal`，收尾状态是 `status: 'interrupted'` + `RunkoError.code: 'aborted'`（这两个是代码标识符，行文一律说「停止」/「已停止」）。与 steer 的分别：steer 是「往这一轮里加话」，停止是「让这一轮结束」。见 docs/logic/orchestration/features/turn-abort.md。 |
+| **中止（system abort）** | — | **系统**打断一轮，不是用户叫停：节点下线时这一轮交不出去（没有[工具收尾](#十三架构分层)记录、挑不到接手节点又没有跨进程的[待接手](#十三架构分层)标记、或者不理交权信号撞了宽限期），只能就地结束。收尾状态与[停止](#一agent-运行的基本单位)一样是 `status: 'interrupted'` + `code: 'aborted'`，区别在 `message`：理由是 `ABORT_REASON_SHUTDOWN`，界面据此显示「服务重启，这一轮已中断」而不是「已停止」。 |
 
 ## 二、两种「消息」格式（AI SDK 的概念）
 
@@ -175,7 +177,7 @@
 | **多副本验证环境（lab）** | — | `apps/node-server/docker/` 下的一套 docker-compose：一个 Postgres + 三个 chat 应用副本 + 一个 nginx。用 `docker kill`（崩溃）、`docker pause`（冻住）、`docker network disconnect`（断网）故意制造故障，验证租约版[归属仲裁机制](#十三架构分层)与[应用层转发](#十三架构分层)在真跨容器下的行为。见 [多副本部署 · 功能](./host/node/features/multi-replica.md)。 |
 | **集群实验环境（cluster lab）** | — | `apps/node-server/docker/cluster.compose.yml` 那一套：nginx 统一入口 + 1–5 个 chat 应用副本（`--scale` 调）+ Postgres + Redis，HTTP 与 WebSocket 同一个端口。与[多副本验证环境](#十验证与示例脚本)并存：那套侧重故障注入，这套侧重副本数可变与 Redis 广播。见 [集群实验环境 · 功能](./host/node/features/cluster-lab.md)。 |
 | **集群控制台（cluster console）** | — | chat 前端里的 `/console` 页面：列出[集群实验环境](#十验证与示例脚本)里每个节点的状态、每个会话此刻在哪个节点上跑，并能让某个节点[下线](#十验证与示例脚本)或重新上线。登录即可用，没有管理员概念（demo 项目）。见 [集群控制台 · 功能](./host/node/features/cluster-console.md)。 |
-| **节点下线（node offline）** | 排空节点、drain（**别用**：drain 已被 [conversation-drained](#十三架构分层) 占了）；下线中（2026-09-25 并入本词） | 让一个副本平稳退出集群。唯一的触发是 `SIGTERM`：从这一刻起节点**不再接任何新请求**（负载均衡与别的节点转发来的都进不来；docker 验证环境里由闸门模拟，浏览器来的回 503 让 nginx 换节点），已有连接与出站保留，然后按[交权](#十三架构分层)把手上每份对话交出去、把[工具收尾](#十三架构分层)跑完再退出；到点还没退就被强杀。[节点登记表](#十三架构分层)里这个状态记作 `leaving`。见 docs/logic/orchestration/tech/handover.md 与 [集群控制台 · 技术](./host/node/tech/cluster-console.md)。 |
+| **节点下线（node offline）** | 排空节点、drain（**别用**：drain 已被 [conversation-drained](#十三架构分层) 占了）；下线中（2026-09-25 并入本词；控制台界面上的状态文字「下线中」是界面文案，保留） | 让一个副本平稳退出集群。唯一的触发是 `SIGTERM`：从这一刻起节点**不再接任何新请求**（负载均衡与 service mesh 不再送请求进来；docker 验证环境里由闸门模拟：浏览器来的回 503 让 nginx 换节点，别的节点转发来的放到交接完成为止），已有连接与出站保留，然后按[交权](#十三架构分层)把手上每份对话交出去、把[工具收尾](#十三架构分层)跑完再退出；到点还没退就被强杀。[节点登记表](#十三架构分层)里这个状态记作 `leaving`。见 docs/logic/orchestration/tech/handover.md 与 [集群控制台 · 技术](./host/node/tech/cluster-console.md)。 |
 | **运维容器（ops）** | — | [集群实验环境](#十验证与示例脚本)里专门替[集群控制台](#十验证与示例脚本)操作 Docker 的那个容器：挂着 `docker.sock`，能列出节点容器、`docker stop -t 120`（下线）、`docker start`（重新上线）。它等于拿到整台机器的管理员权限，所以**只在集群内网里监听**、不对外开端口，而且要带内部令牌才肯干活。 |
 | **gate（配置闸门）** | — | 示例脚本在发起任何模型调用/网络请求之前，按序检查所需环境变量/凭证；任一未配置就打印指引并干净退出或 return（exit 0），全程不创建沙盒、不发起模型调用、不产生副作用。 |
 | **演示模型（demo model）** | 回声模型 | chat 应用没配模型 key 时用的替身模型，不联网、不花钱。用户消息里写 `run: <命令>` 它就调 bash，写 `ask: <问题>` 它就调 ask-user，别的话原样复述一遍。目的是零配置也能把审批、提问、挂起、排队这些交互走一遍，不是冒充真 AI。见 docs/ingress/features/unified-demo.md。 |
@@ -249,8 +251,9 @@
 | **工具收尾（tool tail）** | — | [交权](#十三架构分层)时正在跑的工具，留在旧节点上靠出站跑完，结果写进库里的收尾记录，由接手节点结清那次调用再接着跑。旧节点此时**不持有**这份对话：账本末尾那个悬空调用本身就挡住了任何人起普通轮。有截止时间，过了由持有者记成「结果未知」。 |
 | **已交权（handed over）** | — | 一轮的一种收尾状态：这一轮因为[交权](#十三架构分层)停在一个干净的位置，由接手节点开新的一轮接着跑。界面上它与接手那一轮连起来显示成一轮，**不显示成中断**。 |
 | **请重连帧（reconnect frame）** | — | 下线节点在一份对话交接完成后，在已有直播流上发的最后一帧，随后主动关掉连接。浏览器收到它就立刻重连（不走退避），落到新的持有者上。 |
+| **快速重连（fast reconnect）** | 秒级重连 | 浏览器收到[请重连帧](#十三架构分层)（或 WebSocket 以 1012 关闭）之后的重连方式：不走 1、2、4、8、16 秒的退避，每 250 毫秒重试一次，最多试 10 秒，期间界面不提示；新连接收到第一帧就结束。真正的断线仍然走退避。重连（快速重连与断线退避都算）时会丢掉手上的半截回复，发新消息开新一轮时不丢。见 docs/logic/orchestration/tech/handover.md §8。 |
 | **待接手（awaiting takeover）** | — | 下线节点一个存活节点都挑不到时（单副本先停再启）给对话打的标记。新进程启动后先开始监听，再扫一遍待接手的对话逐个推一把。 |
-| **定时回捞（periodic sweep）** | — | 每个节点定时找「没人持有、也没有有效[交接预留](#十三架构分层)，但有活没干完」的对话推一把（待发队列不空、答了没恢复、工具收尾有结果没结清）。它是[指定交接](#十三架构分层)的**兜底**，不跟它抢。 |
+| **定时回捞（periodic sweep）** | — | 每个节点定时找「没人持有、也没有有效[交接预留](#十三架构分层)，而且打了[待接手](#十三架构分层)标记」的对话推一把。**只认这个标记**，不看待发队列空不空——在等人答的对话按设计会一直排着消息、永远推不动，算进来会占满每次回捞的名额；需要推的队列由框架自己打标记（docs/logic/orchestration/tech/handover.md §10.3）。它是[指定交接](#十三架构分层)的**兜底**，不跟它抢。 |
 | **conversation-drained** | drain session、session-drained（**禁用**，会造成 "session" 第四重超载） | 框架释放归属时发出的一个**诚实的断言**：「我认为这个会话排空了——**我放手的时候**队列是空的，你那边如果有，可以继续。」它不声称「队列一定是空的」。配套「入队方也负责推进」兜底，这套在 `enqueue` 内部实现一次，构建者不需要知道有竞态。 |
 | **跨执行的状态** | — | 一样东西「会不会跨多次执行存续」。它是切模块的**第二条判据**——只决定「需不需要有人管生命周期」，**不决定它属于哪个模块**（那由「被谁用」决定）。模型无状态、沙盒有状态，但两者都是执行引擎的外部依赖。 |
 | **agent 构建者** | — | 拿 runko 建产品的**开发者**（人）。他做产品决策（排不排队、审批挂多久、快照留几天）、写[接入](#十三架构分层)代码、把[宿主](#十三架构分层)配起来。 |

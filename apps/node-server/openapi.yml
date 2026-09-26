@@ -730,10 +730,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
         "503":
-          description: "The server is shutting down
-            (docs/logic/orchestration/tech/graceful-shutdown.md §3.3) — no new
-            turn is accepted during shutdown. Retryable: resend once the new
-            process is up"
+          description: Nothing was done; safe to resend. Either the node is going offline
+            and the message could not be queued (queueing is disabled — with
+            queueing on, messages sent during handover are queued and answered
+            202, docs/logic/orchestration/tech/handover.md §10.2), or the holder
+            of this conversation could not be reached (see `Retry-After`)
           content:
             application/json:
               schema:

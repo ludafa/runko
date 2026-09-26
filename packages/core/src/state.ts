@@ -1,5 +1,5 @@
 /**
- * SessionState（P13-5-2，docs/logic/orchestration/tech/single-ledger.md §5 单-2）：会话恢复用
+ * SessionState（单一账本 · 技术方案 docs/logic/orchestration/tech/single-ledger.md）：会话恢复用
  * 的可序列化快照。`messages` 从 AI SDK 的 `ModelMessage[]` 换成 `RunkoUIMessage[]`
  * ——"UIMessage 单账本"：loop 的工作状态与 session 的存档是同一份数据，每次调
  * 模型前用官方 `convertToModelMessages()` 现场推导 `ModelMessage[]`，不再单独
@@ -35,10 +35,10 @@ const runkoErrorMetadataSchema = z.object({
 });
 
 /**
- * `status: 'completed' | 'failed' | 'interrupted' | 'suspended'`——`'interrupted'`
+ * `status: 'completed' | 'failed' | 'interrupted' | 'suspended' | 'handed-over'`——`'interrupted'`
  * 对应 `RunkoError.code === 'aborted'`（signal abort，宿主主动中断，不是模型/工具
  * 出错），其余几个 `RunkoError.code`（max_turns/context_overflow/
- * provider_error/internal_error）都归 `'failed'`——四态错误码折叠进三态 status 的映射见
+ * provider_error/internal_error）都归 `'failed'`——错误码到 status 的映射见
  * `loop.ts` 的 `statusForError()`。
  *
  * `'handed-over'` 是[已交权](../../../docs/terms.md)：节点要下线，这一轮停在一个干净的位置交给

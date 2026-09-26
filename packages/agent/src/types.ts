@@ -59,7 +59,7 @@ export type Frame =
    */
   | { kind: "reconnect" };
 
-/** 一轮在框架内部的两个阶段（同 chat 应用原先的 `TurnPhase`）。 */
+/** 一轮在框架内部的两个阶段：装配中、在跑。 */
 export type TurnPhase = "preparing" | "running";
 
 /** `getActivity` 的答案——多节点时[接入层](../../../docs/terms.md)据 `holder` 决定要不要转发。 */
@@ -75,7 +75,7 @@ export interface ConversationActivity {
 }
 
 /**
- * 一轮是怎么结束的。前四值原样来自 core 的收尾 metadata（`RunkoMessageMetadata.status`）；
+ * 一轮是怎么结束的。前五值原样来自 core 的收尾 metadata（`RunkoMessageMetadata.status`）；
  * `crashed` 是本层加的——驱动器自己抛了，压根没有 `TurnResult` 可报。
  *
  * `suspended` = [挂起](../../../docs/architecture/tech/agent-kernel.md)：停在「正在等人」
@@ -97,7 +97,7 @@ export type EnqueueResult =
       reason: EnqueueRejection;
       message: string;
       /**
-       * 归属此刻在谁手上——**只有 `held_by_other` 才有值**，其余四种拒绝原因不带。
+       * 归属此刻在谁手上——**只有 `held_by_other` 才有值**，其余几种拒绝原因不带。
        *
        * 它跟 `message` 里那句话是同一个事实，但**接入层要的是这一个**：转发是照着地址走的，
        * 从一句给人看的英文里抠 holder 是把文案当协议用，改一次文案就断一次转发。
@@ -106,11 +106,12 @@ export type EnqueueResult =
     };
 
 /**
- * 拒绝的四种原因，**处置各不相同**，所以必须分开报（[归属仲裁机制 §5](../../../docs/logic/arbitration/tech/arbitration-impl.md)）：
+ * 拒绝的五种原因，**处置各不相同**，所以必须分开报（[归属仲裁机制 §5](../../../docs/logic/arbitration/tech/arbitration-impl.md)）：
  *
  * - `queue_full`：队列满了 → 409，绝不静默丢弃。
  * - `busy`：已有轮在跑，而这个 runtime 关掉了排队 → 409。
- * - `shutting_down`：进程正在[优雅关闭](../../../docs/terms.md) → 503，可重试。
+ * - `shutting_down`：本节点在[节点下线](../../../docs/terms.md)，而队列关着（或起轮那一瞬间刚好撞上关闭）→ 503，可重试。
+ *   队列开着时，下线期间的消息照常入队、交给接手节点，不走这一支。
  * - `held_by_other`：归属在别的节点手上 → **转给 `holder`**，不是报错。
  * - `error`：装配失败（凭据、沙盒、建 session）→ 500。
  */

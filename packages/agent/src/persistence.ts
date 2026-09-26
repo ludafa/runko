@@ -163,14 +163,14 @@ export interface ToolTailStore {
   requestStop(conversationId: string, toolCallId: string): Promise<boolean>;
 }
 
-/** 三个 Store 合起来就是「持久化」这一样宿主能力。 */
+/** 三个必选的 Store 加一个可选的 `tails`，合起来就是「持久化」这一样宿主能力。 */
 export interface Persistence {
   ledger: LedgerStore;
   decisions: DecisionStore;
   queue: QueueStore;
   /**
-   * [工具收尾](../../../docs/terms.md)记录。**可选**：没有它时，[交权](../../../docs/terms.md)那一刻正在跑工具的
-   * 那一轮只能中止（工具被切断），其余阶段照常交出。
+   * [工具收尾](../../../docs/terms.md)记录。**可选**：没有它时，[节点下线](../../../docs/terms.md)不[交权](../../../docs/terms.md)，
+   * 所有在干活的轮一律[中止](../../../docs/terms.md)；在等人的轮照常挂起。
    */
   tails?: ToolTailStore;
 }

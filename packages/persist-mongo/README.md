@@ -26,7 +26,7 @@ const runtime = createAgentRuntime({ agent, prepareTurn, persistence: mongoPersi
 ## 它不是薄壳
 
 SQLite / PostgreSQL / MySQL 那三个包底下共用 `@runko/persist-kysely`。Kysely 是 SQL
-查询构建器，Mongo 用不上，所以**这个包直接实现三个领域接口**。
+查询构建器，Mongo 用不上，所以**这个包直接实现持久化接口**（三个必需的，外加可选的 `tails`）。
 
 ## 它顺带证明了什么
 
@@ -34,8 +34,8 @@ SQLite / PostgreSQL / MySQL 那三个包底下共用 `@runko/persist-kysely`。K
 
 | 准则 | 结论 |
 | --- | --- |
-| 不假设事务能跨接口 | ✅ 需要原子的只有 `dequeue`，Mongo 的 `findOneAndDelete` 原生原子 |
-| 不要求 CAS | ✅ 一次都没用上（租约版仲裁用 CAS，但那是**另一个接口**） |
+| 不假设事务能跨接口 | ✅ 需要原子的是 `dequeue` 与工具收尾的 `complete`，都是单文档操作，Mongo 原生原子 |
+| 不要求 CAS | ✅ 只有工具收尾用到一次条件写（`outcome` 为空才写得进），单文档就够。租约版仲裁的 CAS 属于**另一个接口** |
 | 不支持跨会话查询 | ✅ 每个查询都以 `conversationId` 打头，正好是索引前缀 |
 
 三条全成立——接口**没有漏掉关系型假设**。
@@ -54,7 +54,7 @@ Mongo 的 `findOneAndDelete({...}, {sort})` **是数据库直接给的**。
 集合名固定，不提供前缀开关——**要隔离请用另一个 database**，那在 Mongo 里是一等公民，
 比集合名前缀干净得多。
 
-`migrate()` 只建索引（Mongo 的集合是隐式创建的）。但它**不是可选的**：账本与裁决表的
+`migrate()` 只建索引（Mongo 的集合是隐式创建的）。但它**不是可选的**：账本、裁决表与工具收尾的
 幂等写入靠唯一索引兜底，没有它并发写会写出两行。
 
 **它不存你的东西。** runko 只认一个不透明的 `conversationId`，会话叫什么、属于谁，
@@ -75,6 +75,7 @@ createAgentRuntime({
   // 不装的话交权时挑不到接手节点，对话一律标成待接手。
   handover: {
     node: process.env.RUNKO_NODE_URL, // 与上面的 holder 相同
+    releaseSeq: Number(process.env.RUNKO_RELEASE_SEQ), // 发布序号：每次发布递增，回滚也递增
     nodes: mongoNodeRegistry(db),
     // 请对方节点执行 runtime.takeOver(ids)——HTTP、RPC 都行，由你来写
     requestTakeover: (node, conversationIds) => askPeerToTakeOver(node, conversationIds),
@@ -123,12 +124,12 @@ RUNKO_TEST_MONGO_URL=mongodb://127.0.0.1:27018 pnpm --filter @runko/persist-mong
 ```
 
 跟其余三个持久化包**跑同一套一致性用例**，租约版另跑[仲裁一致性套件](../conformance/README.md)的
-四组（通用 / 多节点 / 超时接管 / 报 takeover）。不给连接串时整档跳过并说明原因——
+八组（通用 / 多节点 / 超时接管 / 报 takeover / 同名重启 / 交接预留与待接手 / 节点登记表 / 工具收尾）。不给连接串时整档跳过并说明原因——
 Mongo 没有 pglite 那样的进程内替身（`mongodb-memory-server` 是下载一个真 mongod 来跑）。
 
 ## 不是只有这一条路
 
-**你的数据模型跟这三个集合对不上？那就自己实现那三个接口**——那是[头等路径，不是降级方案](../../docs/host/contract/features/persistence.md)。
+**你的数据模型跟这四个集合对不上？那就自己实现持久化接口**（三个必需的，外加可选的 `tails`）——那是[头等路径，不是降级方案](../../docs/host/contract/features/persistence.md)。
 一共十来个方法。自己实现的话，装上 [`@runko/conformance`](../conformance/README.md) 自测：
 
 ```ts

@@ -278,10 +278,10 @@ function toQueueDto(queue: readonly QueuedInput[]): QueuedMessage[] {
 }
 
 /**
- * 框架的 `Frame` → 本应用的 wire 帧。四种帧一一对应，只有队列那种要翻译一下形状。
+ * 框架的 `Frame` → 本应用的 wire 帧。五种帧一一对应，只有队列那种要翻译一下形状。
  *
- * [进行中草稿](../../../../docs/terms.md)搬进内存之后，`chunk` 帧**一律没有 `seq`**
- * ——它们只直播、不落库、不参与 `after=` 续传，与从前的 ephemeral chunk 走同一条路。
+ * [进行中草稿](../../../../docs/terms.md)在内存里，所以 `chunk` 帧**一律没有 `seq`**：
+ * 它们只直播、不落库、不参与 `after=` 续传。
  */
 /** 框架的 `Frame` → wire 帧。**导出**是因为 WebSocket 那条通道要用同一个函数（见 `chat-ws.ts`）。 */
 export function toWireFrame(frame: Frame): ChatReplayFrame {
@@ -299,7 +299,7 @@ export function toWireFrame(frame: Frame): ChatReplayFrame {
   }
 }
 
-/** The SSE `event:` name for a wire frame — structural, not a shared literal field: the four frame kinds are told apart by which of `chunk`/`queue`/`turnActive`/`message` they actually carry (`schemas/chat.ts`'s own doc comment). */
+/** The SSE `event:` name for a wire frame — structural, not a shared literal field: the five frame kinds are told apart by which of `chunk`/`queue`/`reconnect`/`turnActive`/`message` they actually carry (`schemas/chat.ts`'s own doc comment). */
 function frameEventName(
   frame: ChatReplayFrame,
 ): 'chunk' | 'message' | 'queue' | 'turn-state' | 'reconnect' {
@@ -720,7 +720,7 @@ export function createChatApp(deps: ChatRouteDeps) {
       503: {
         content: { 'application/json': { schema: ErrorSchema } },
         description:
-          'The server is shutting down (docs/logic/orchestration/tech/graceful-shutdown.md §3.3) — no new turn is accepted during shutdown. Retryable: resend once the new process is up',
+          'Nothing was done; safe to resend. Either the node is going offline and the message could not be queued (queueing is disabled — with queueing on, messages sent during handover are queued and answered 202, docs/logic/orchestration/tech/handover.md §10.2), or the holder of this conversation could not be reached (see `Retry-After`)',
       },
       504: {
         content: { 'application/json': { schema: ErrorSchema } },
@@ -779,7 +779,8 @@ export function createChatApp(deps: ChatRouteDeps) {
 
     // 四种拒绝的处置各不相同（`@runko/agent` 的 `EnqueueRejection`）。
     if (outcome.reason === 'shutting_down') {
-      // 进程正在[优雅关闭](docs/terms.md)——一个明确、可恢复的拒绝：刷新重发即可。
+      // 节点在[交权](docs/terms.md)，而队列关着、排不进去，只能拒。回 503，客户端重发即可。
+      // 队列开着时，下线期间的消息照常排队（docs/logic/orchestration/tech/handover.md §10.2）。
       // 不能报 409（那是「你已经有一轮在跑」，会误导）。
       return c.json({ error: '服务正在重启，请稍后重试' }, 503);
     }
@@ -1305,8 +1306,9 @@ export function createChatApp(deps: ChatRouteDeps) {
  * 生产装配。三样东西在这里成型：沙盒管理器、`@runko/agent` 运行时（`createChatRuntime`）、
  * 以及路由自己那几个可选外围（推送、遥测）。
  *
- * `chatRuntime` 单独导出，是因为 `index.ts` 还要用它两次：启动时 `recover()` 扫
- * [孤儿轮](../../../../docs/terms.md)，收到 SIGTERM 时 `shutdown()` [交权](../../../../docs/terms.md)。
+ * `chatRuntime` 单独导出，是因为 `index.ts` 还要用它：启动时 `recover()` 扫
+ * [孤儿轮](../../../../docs/terms.md)；开始监听后 `start()` 登记节点、扫[待接手](../../../../docs/terms.md)；
+ * 收到 SIGTERM 时 `shutdown()` [交权](../../../../docs/terms.md)。
  */
 const defaultSandboxManager = createSandboxManager({
   vercel: createVercelProvider(),
@@ -1390,7 +1392,10 @@ export const takeoverApp = createTakeoverApp({
 
 const defaultForwarder = createForwarder(defaultNode, defaultLogger);
 
-/** [节点下线](../../../../docs/terms.md)的闸门与信号；`app.ts` 挂闸门，`index.ts` 在 SIGTERM 时触发。 */
+/**
+ * [节点下线](../../../../docs/terms.md)的闸门。`app.ts` 挂上它；`index.ts` 在 SIGTERM 时关闸门，
+ * 交接完成后再挡转发来的请求。
+ */
 export const nodeOffline = createNodeOffline(defaultNode);
 
 export const chatApp = createChatApp({

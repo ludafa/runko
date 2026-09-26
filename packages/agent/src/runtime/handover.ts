@@ -18,7 +18,7 @@ import type { ActiveTurn } from "./registry.js";
 
 const LOG_SCOPE = "agent:handover";
 
-/** 旧节点多久查一次「持有者要求停止」。入站已关，停止只能这样传过去（技术方案 §9）。 */
+/** 旧节点多久查一次「持有者要求停止」。入站已关，停止只能这样传过去（交权 · 技术方案 §9）。 */
 const TAIL_STOP_POLL_MS = 1_000;
 /** 工具收尾的截止时间 = 开始时刻 + 工具上限 + 这点余量（给写库、通知留的时间）。 */
 const TAIL_DEADLINE_MARGIN_MS = 30_000;
@@ -31,7 +31,7 @@ const MAX_CANDIDATES_PROBED = 3;
 /** 要等的宿主钩子（`onToolTailFinished`、`onHandOff`）最多等多久。 */
 const HOST_HOOK_TIMEOUT_MS = 10_000;
 
-/** 旧节点在截止时间前没写回结果时，交给模型的那句话（技术方案 §9 第二行）。 */
+/** 旧节点在截止时间前没写回结果时，交给模型的那句话（交权 · 技术方案 §9 第二行）。 */
 export const TAIL_UNKNOWN_MESSAGE =
   "The server that was running this tool went offline before it reported a result, so whether the command finished " +
   "(and what it changed) is unknown. Check the current state before running it again.";
@@ -39,7 +39,7 @@ export const TAIL_UNKNOWN_MESSAGE =
 /** 工具收尾期间用户按了停止：结果写成这句，恢复那一轮结清之后就停。 */
 export const TAIL_STOPPED_MESSAGE = "Stopped by the user while this tool was still running.";
 
-/** 交权相关的配置与这次下线的状态。没配交权的 runtime 也有它（`node` 取仲裁的持有者名），只是挑不到接手节点。 */
+/** 交权相关的配置与这次下线的状态。没配交权的 runtime 也有它（`node` 缺省为 `"local"`），只是挑不到接手节点。 */
 export interface HandoverContext {
   /** 本节点地址（同租约里的 `holder`）。 */
   node: string;
@@ -80,7 +80,7 @@ export async function requestTakeover(ctx: RuntimeContext, node: string, convers
 }
 
 /**
- * 挑接手节点（技术方案 §7.2、§7.3）：从登记表按「序号更大 → 同序号」拿候选，逐个问一句「你现在接不接」，
+ * 挑接手节点（交权 · 技术方案 §7.2、§7.3）：从登记表按「序号更大 → 同序号」拿候选，逐个问一句「你现在接不接」，
  * 第一个答应的就是它。**接不接由对方看自己内存里的状态决定**——登记表有时差，同批下线的节点可能还显示正常。
  */
 export async function pickTakeoverTarget(ctx: RuntimeContext): Promise<string | undefined> {

@@ -1,5 +1,5 @@
 /**
- * chat 功能的核心交付物（docs/ingress/tech/chat-webapp.md §2.2b）：把一轮的**执行**
+ * chat 功能的核心交付物（chat-webapp 技术方案 docs/ingress/tech/chat-webapp.md §5）：把一轮的**执行**
  * 与**连接**解耦。
  *
  * `sendMessage` 只做两件事——发 `POST .../messages`（服务端就此起一轮，与任何一次
@@ -15,29 +15,28 @@
  *
  * 1. **挂载时的初值**（会话详情的 `turnInProgress`，服务端读[起轮标记](../../../../../docs/terms.md)
  *    那一列给出）：只用来撑到 tail 连上的那几十毫秒。
- * 2. **`MessageLedger` 的 `onTurnEnd`**（docs/logic/orchestration/tech/single-ledger.md §5 单-3 那条收尾
- *    `message-metadata`）：一轮真正结束的那一刻翻假。
+ * 2. **`MessageLedger` 的 `onTurnEnd`**（收尾 `message-metadata`，见单一账本技术方案
+ *    docs/logic/orchestration/tech/single-ledger.md §6.1）：按收尾状态校正。
+ *    [已交权](../../../../../docs/terms.md)或[待发队列](../../../../../docs/terms.md)
+ *    还有货时保持「在跑」，否则翻假。
  * 3. **[轮状态快照](../../../../../docs/terms.md)**（`applyTurnState`，
  *    docs/ingress/tech/chat-webapp.md §5.1）：**服务端的权威答案**，每条 tail 连上必发一帧。
  *
- * 第 3 条补的是前两条都盖不住的那个洞：一轮**崩溃**时（进程重启、`driveTurn` 的
- * catch 分支）收尾 metadata 永远不会到，而崩溃残留的 `kind = 'chunk'` 行又永不 GC，
- * 于是第 1 条那个初值此后**每次**打开这个会话都说「有轮在跑」，且永不自愈。后果是
- * 用户发的消息一律走[排队](../../../../../docs/terms.md)、没有下面那套乐观回显、而且
- * 永远等不到[出队](../../../../../docs/terms.md)（没有轮会收尾去触发它）；按
- * [停止](../../../../../docs/terms.md)也只会拿到 409。有了第 3 条，**任何**前端与服务端
+ * 第 3 条兜的是前两条盖不住的情形：一轮**崩溃**时（进程被强杀等），收尾 metadata
+ * 永远不会到，第 2 条等不来。前端若一直以为「有轮在跑」，用户发的消息会一律走
+ * [排队](../../../../../docs/terms.md)、没有乐观回显，也等不到[出队](../../../../../docs/terms.md)；
+ * 按[停止](../../../../../docs/terms.md)只会拿到 409。有了第 3 条，**任何**前端与服务端
  * 的分叉都会被下一次 tail 连接纠正。
  *
  * ---- 乐观用户回显（只是个短命占位） ----
  *
- * 起一轮的那条用户消息在 wire 上有真实位置：`apps/node-server` 的
- * `turn-runner/drive.ts` 里，`driveTurn` 会合成它并作为这一轮的**第一个**
- * `MessageFrame` 广播出去，严格早于这一轮产出的任何别的东西（见 `schemas/chat.ts`
- * 的文件头）。
+ * 起一轮的那条用户消息在 wire 上有真实位置：`@runko/agent` 的 `driveTurn`
+ * （`packages/agent/src/runtime/turn.ts`）会把它作为这一轮的**第一个** `MessageFrame`
+ * 广播出去，早于这一轮产出的任何别的东西。
  *
  * 所以 `pendingUserEchoes` 只是个**短命**占位，盖住「`sendMessage` 发出 `POST`」到
  * 「那条真实 `MessageFrame` 经 tail 到达」之间的那一小段空窗。它只在 `sendMessage`
- * 的「起新一轮」分支产生，插话分支不产生——插话会立刻拿到一条真实物化出来的条目。
+ * 的「起新一轮」分支产生。插话另有一条标着「待注入」的回显，见 `sendMessage` 插话分支的注释。
  *
  * 每条回显锚在它发出时的 `messages.length` 上（`timeline.ts` 的 `buildRenderEntries`
  * 据此把它插回发出时的位置），并在 `MessageLedger` 报出一条 `role === 'user'` 的
@@ -96,7 +95,7 @@ export interface UseChatMessagesResult {
   pendingUserEchoes: PendingUserEcho[];
   status: ChatTurnStatus;
   error: string | undefined;
-  /** 从 `sendMessage` 起、到这一轮第一帧到达为止恒为 true——docs/ingress/tech/chat-webapp.md §2.3 那个「沙盒恢复中…」的闸门。 */
+  /** 从 `sendMessage` 起、到这一轮第一帧到达为止恒为 true——chat-webapp 技术方案 docs/ingress/tech/chat-webapp.md §8 那个「沙盒恢复中…」的闸门。 */
   awaitingFirstEvent: boolean;
   /**
    * 服务端持有的[待发队列](../../../../../docs/terms.md)（docs/logic/orchestration/tech/steer-and-queue.md）
@@ -143,7 +142,7 @@ export interface UseChatMessagesResult {
    * 的卡片，让对应部件画成「已失效」而不是「等待中」。
    */
   locallyExpiredCallIds: ReadonlySet<string>;
-  /** 裁决一条挂起的工具调用审批（docs/logic/orchestration/tech/single-ledger.md §6）。结果不从这次调用自己的返回值来，而是等 tail 上对应部件那条 `tool-approval-response` chunk（「不做乐观翻转」）。 */
+  /** 裁决一条挂起的工具调用审批（单一账本技术方案 docs/logic/orchestration/tech/single-ledger.md §5）。结果不从这次调用自己的返回值来，而是等 tail 上对应部件那条 `tool-approval-response` chunk（「不做乐观翻转」）。 */
   submitApproval: (
     callId: string,
     behavior: 'allow' | 'allow-session' | 'deny',
@@ -270,8 +269,8 @@ export function useChatMessages(
    * 路都会）置真，`startTail()` 里在接新连接的帧之前消费并复位。
    *
    * 只在**重连**时置真——`sendMessage`/`followResumedTurn`/挂起排队那几处主动
-   * `openTail()` 不走这里：那些是**上一轮已经收尾之后**为一轮全新的对话开连接，
-   * 上一轮没来得及落地的草稿本来就不会再被更新，丢了就是真丢，不能碰。
+   * `openTail()` 不走这里：那些是**上一轮已经收尾之后**为一轮全新的对话开连接。
+   * 上一轮若有没落地的消息（落库失败时会有），它们不会再被更新，丢了就是真丢，不能碰。
    *
    * 覆盖两种情形：① `onTurnEnd` 已经确认过「模型输出段被交权」（那次已经立刻丢过一次，
    * 这里防的是请重连帧到达前，这条连接自己先意外断线重连的窄窗口）；② 那条
@@ -282,7 +281,7 @@ export function useChatMessages(
    */
   const discardDraftOnNextReconnectRef = useRef(false);
 
-  // 只有带 seq（已落盘）的帧才做去重簿记（docs/logic/orchestration/tech/single-ledger.md §5 单-3）。
+  // 只有带 seq（已落盘）的帧才做去重簿记（单一账本技术方案 docs/logic/orchestration/tech/single-ledger.md §4）。
   // 一次性的 `ChunkEnvelope` 没有 `seq` 可以拿来去重，也不需要——它不会像落盘帧那样
   // 被回放/重连重复投递一次。
   const seenSeqs = useRef(
@@ -360,20 +359,21 @@ export function useChatMessages(
       (metadata) => {
         reconnectAttemptRef.current = 0;
         // 这一轮真的停住了（或自己收尾了）——「正在停」的中间态到此结束。放在下面
-        // 那个「队列非空则保持 streaming」的提前 return 之前，两条路都要复位。
+        // 两个提前 return（已交权、队列非空）之前，三条路都要复位。
         setStopping(false);
 
         // [已交权](../../../../../docs/terms.md)：这一轮没结束，别的节点接着跑——不报错、
         // 不落回 idle，保持 `streaming`，等新节点的帧接上（docs/logic/orchestration/tech/handover.md §6）。
-        // `handedOver.callIds` 为空 = 模型输出段被交权，那半段字要被接手节点重新生成的
-        // 内容整体替换，这里立刻丢掉（`materialize.ts` `replaceDraft` 的注释）；非空 = 工具段
-        // 被交权，账本末尾那次悬空调用是真实状态，留给接手节点结清，不能当草稿丢。
+        // `handedOver.callIds` 为空 = 模型输出段被交权；非空 = 工具段被交权，账本末尾
+        // 那次悬空调用是真实状态，留给接手节点结清，不能当草稿丢。
         if (metadata.status === 'handed-over') {
           if ((metadata.handedOver?.callIds.length ?? 0) === 0) {
-            // 立刻丢一次——这里就是「草稿变成成品」的分界点，减少请重连帧到达之前
-            // 那几十到几百毫秒里界面停留在半截字上的时间。就算这条连接在这之后、
-            // 请重连帧到达之前意外断线，下一次真正重连时 `startTail()` 也会兜底
-            // 再丢一次（见 `discardDraftOnNextReconnectRef` 的注释）。
+            // 半截字这时通常已经没了：「已交权」的成品消息帧排在收尾帧之前到，
+            // 按同一个 id 把它换成了不含半步的成品（单一账本技术方案
+            // docs/logic/orchestration/tech/single-ledger.md §6.1）。这里是补一刀：
+            // 清掉还没落地的草稿，挡住管道里迟到的 chunk（`materialize.ts`
+            // `replaceDraft` 的注释）。请重连帧之前若意外断线，下一次真正重连时
+            // `startTail()` 还会再丢一次（见 `discardDraftOnNextReconnectRef` 的注释）。
             ledgerRef.current?.replaceDraft();
           }
           turnInProgressRef.current = true;
@@ -384,12 +384,16 @@ export function useChatMessages(
 
         setError(errorFromTurnEnd(metadata));
 
-        // [待发队列](../../../../../docs/terms.md)非空 = 服务端**必然**会自动
-        // [出队](../../../../../docs/terms.md)起下一轮（docs/logic/orchestration/tech/steer-and-queue.md §5.1，
-        // 上一轮成功或失败都会走这一步）。所以这里不落回 idle：保持 `streaming` +
-        // `turnInProgressRef`，让 tail 的既有退避重连去接住那一轮——否则用户会看到
-        // 「转完 → 静止 → 又开始转」的闪烁，甚至以为排队的消息没发出去。
-        // 起轮真失败时消息留在队列里，重连退避耗尽后安静停下，刷新即恢复。
+        // [待发队列](../../../../../docs/terms.md)非空时，服务端通常不放手，直接
+        // [出队](../../../../../docs/terms.md)、在**同一条流**上起下一轮，两轮之间不发
+        // `turnActive:false`（中途插话与排队技术方案
+        // docs/logic/orchestration/tech/steer-and-queue.md §8.3）。所以这里不落回 idle：
+        // 保持 `streaming` + `turnInProgressRef`，下一轮的帧会直接从这条流上到。
+        // 否则用户会看到「转完 → 静止 → 又开始转」的闪烁。
+        //
+        // 少数情况服务端会放手、关流（比如这一轮是恢复轮、本节点在下线），这时靠
+        // tail 的退避重连兜底接住下一轮。下一轮起轮失败，会以一条失败收尾结束，
+        // 那条排队消息也随之消费掉。
         //
         // [挂起](../../../../../docs/terms.md)的那一轮除外：服务端这时不出队，要等人把卡片答完
         // （docs/ingress/tech/chat-webapp.md §6.2 ⑤）。
@@ -538,11 +542,9 @@ export function useChatMessages(
       }, delay);
     }
 
-    // 这条连接是否已经收到过第一帧——收到就说明这次（重）连成功了，结束[快速重连]
-    // (../../../../../docs/terms.md)窗口，回到「只有真断线才 250ms 重试」的姿态。
-    // 不然窗口只在到期时才清（见 `fastReconnectDeadlineRef` 的注释）：一次成功的
-    // 重连并不会替我们把它关掉，窗口剩下的时间里，哪怕是完全正常的收线/断线也会被
-    // 当成快速重连、每 250ms 重试一次。
+    // 这条连接一收到第一帧，就说明这次（重）连成功了，马上结束[快速重连]
+    // (../../../../../docs/terms.md)窗口。否则窗口剩下的时间里，一次正常的断线也会
+    // 被当成快速重连、每 250ms 重试一次。真断线应当走指数退避。
     let receivedFirstFrame = false;
     function handleFrame(frame: ChatReplayFrame): void {
       if (!receivedFirstFrame) {
@@ -709,8 +711,9 @@ export function useChatMessages(
       postChatMessage(conversationId, trimmed, intent)
         .then(() => {
           // 这一轮此刻已经在服务端跑起来了，与这次请求无关——（重）开 tail 去观察它。
-          // 上一条 tail（如果有）到这里必然已经结束（上面那个判断由
-          // `turnInProgressRef` 把着），所以不会和**上一轮**那条还活着的连接抢。
+          // 上一条 tail 可能还没关：收尾帧先到，`activity:false` 后到。`startTail()`
+          // 会先掐掉它。上一轮的成品消息帧排在收尾帧之前（单一账本技术方案
+          // docs/logic/orchestration/tech/single-ledger.md §6.1），掐掉不会丢内容。
           openTail();
         })
         .catch((postError: unknown) => {
@@ -847,7 +850,7 @@ export function useChatMessages(
 
   /**
    * `POST .../approvals/:callId` / `.../questions/:callId`
-   * （docs/logic/orchestration/tech/single-ledger.md §6）：下面的 `submitApproval` 与
+   * （单一账本技术方案 docs/logic/orchestration/tech/single-ledger.md §5）：下面的 `submitApproval` 与
    * `submitAnswer` 都收口到这里。
    *
    * 流程是：把 `callId` 标成「提交中」→ 发请求 → 失败时分两档处理。`404` 说明服务端

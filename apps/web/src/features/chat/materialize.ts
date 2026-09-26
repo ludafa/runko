@@ -28,16 +28,20 @@
  *
  * ## 三、轮尾的 `message-metadata` chunk 落地时**没有打开的消息**
  *
- * 它总是在最后一个 step 的 `finish` **之后**才来——与服务端落库的姿态一致：metadata 挂在
- * 前一条**已经建完**的消息上，不在某条消息自己的 chunk 序列里。
+ * 一般情况下，它在最后一个 step 的 `finish` **之后**到，也在本轮成品消息帧之后到（单一账本
+ * 技术方案 docs/logic/orchestration/tech/single-ledger.md §6.1）。metadata 挂在前一条**已经建完**
+ * 的消息上，不在某条消息自己的 chunk 序列里。
+ *
+ * 例外有两种：恢复那一轮的种子流，以及交权时被掐断的那一步。它们都没有 `finish`，收尾
+ * metadata 会在流还开着时到——`applyChunk` 先关流，再走同一条并入的路。
  *
  * `MessageLedger` 把它并到最近见过的那条 assistant 消息上；那种「一轮还没跑完任何 step 就失败」
  * 的少见情形下，造一条空的占位 assistant 消息来承接。`onTurnEnd` 也在这一刻触发，每轮恰好一次。
  *
  * ## 四、`MessageFrame` 里 role 是 user 时触发 `onUserMessage`
  *
- * 今天它只可能是起轮那条合成的用户消息（`@runko/agent` 的 `driveTurn` 广播的）。为什么用它、
- * 而不是插话那条 user 消息的 chunk 序列，来撤掉乐观回显，见 `UserMessageListener` 的注释。
+ * 它有两个来源：起轮那条用户消息，以及轮收尾时广播的插话消息成品帧。为什么用它、而不是
+ * 插话那条 user 消息的 chunk 序列，来撤掉乐观回显，见 `UserMessageListener` 的注释。
  *
  * ## ⚠️ 「最近见过的 assistant 消息」**不等于**「最近物化出来的」
  *
@@ -156,16 +160,17 @@ function resumedToolCallId(chunk: RunkoChunk): string | undefined {
 export type MessageLedgerListener = (messages: RunkoUIMessage[]) => void;
 export type TurnEndListener = (metadata: RunkoMessageMetadata) => void;
 /**
- * 在一条 `role === 'user'` 的 `MessageFrame` 落地时触发。今天它**只可能**是起轮那条合成的
- * 用户消息（`@runko/agent` 的 `driveTurn` 把它作为本轮第一帧广播出来）。
+ * 在一条 `role === 'user'` 的 `MessageFrame` 落地时触发。这样的帧有两个来源：
  *
- * 插话注入的 user 消息**不会**走到这里：它是以 `ChunkEnvelope` 序列到达的（真正的
- * `start` / `text-*` / `finish`，经 `applySteerChunk` + `upsert` 物化）。它**之后**也会以
- * `MessageFrame` 形态出现一次——那一轮结束后它的 `kind = 'message'` 行被回放时——那时
- * `upsert` 按 id 去重，对 `byId` 是空操作，但这个监听器仍会为它触发一次。
+ * - 起轮那条用户消息：`@runko/agent` 的 `driveTurn` 把它作为本轮第一帧广播。
+ * - 插话注入的 user 消息的成品帧：轮收尾时 `finalize()` 把本轮新消息逐条广播，排在收尾帧
+ *   之前（单一账本技术方案 docs/logic/orchestration/tech/single-ledger.md §6.1）。
  *
- * `use-chat-messages.ts` 靠它在真实消息落地的一瞬撤掉乐观回显。上面那次重复触发在那边也无害：
- * 对一个已经空了的回显队列再撤一次，什么也不会发生。
+ * 插话消息的 chunk 序列（`start` / `text-*` / `finish`，经 `applySteerChunk` 物化）**不**触发它。
+ * 成品帧到时按 id `upsert`，换成成品对象。
+ *
+ * `use-chat-messages.ts` 靠它按先进先出撤掉乐观回显：起轮的回显靠第一种，插话的「待注入」
+ * 回显靠第二种。
  */
 export type UserMessageListener = () => void;
 
@@ -240,10 +245,13 @@ export class MessageLedger {
    * 的消息，顺带关掉打开着的那条流、清空 steer 构建器与 `lastAssistantId`（它们要么指向
    * 刚被丢掉的消息，要么本就该在这种「另起炉灶」的时刻清零）。
    *
-   * 目的：模型输出段被交权时，旧节点流出来的半段字（连同那条只有 `step-start`、metadata
-   * 为 `handed-over` 的占位消息）要被接手节点重新生成的内容替换，不能与新内容并存。
-   * **已经以 `MessageFrame` 落地过的成品消息绝不会被这个方法丢掉**——不管它来自初始回放
-   * 还是更早一次重连的回放。
+   * 目的：模型输出段被交权时，旧节点流出来的半段字要被接手节点重新生成的内容替换，
+   * 不能与新内容并存。**已经以 `MessageFrame` 落地过的成品消息绝不会被这个方法丢掉**
+   * ——不管它来自实时广播、初始回放还是更早一次重连的回放。
+   *
+   * 「已交权」那条只有 `step-start` 的占位消息先于收尾帧以成品落地（单一账本技术方案
+   * docs/logic/orchestration/tech/single-ledger.md §6.1），所以会留下，由
+   * `message-entry.tsx` 负责不渲染它。
    *
    * 调用方（`use-chat-messages.ts`）只在确认这一轮是「模型输出段被交权」（`handedOver`
    * 悬空调用为空）时才调用它：工具段被交权时账本末尾那次悬空调用是真实状态、要留给
@@ -476,8 +484,8 @@ export class MessageLedger {
    * 行、后是新轮的 message 行」的历史回放下来，同步那批会先把 `order` 占满，异步物化
    * 的旧轮消息只能排到**末尾**——界面上就是旧轮跑到新轮下面去了（用户实测）。
    *
-   * 崩溃的轮以前总是账本里的最后一轮（崩溃即终止），所以这个洞一直没机会暴露；现在
-   * 崩溃轮之后还能继续对话（docs/logic/orchestration/tech/graceful-shutdown.md），它就浮出来了。
+   * 崩溃轮之后还能继续对话（优雅关闭技术方案 docs/logic/orchestration/tech/graceful-shutdown.md），
+   * 所以崩溃轮不一定是账本里的最后一轮，这种回放顺序真会出现。
    */
   private ensureOrder(id: string): void {
     if (this.ordered.has(id)) {

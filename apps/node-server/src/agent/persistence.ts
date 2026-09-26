@@ -2,10 +2,10 @@
  * 框架要的四样宿主能力，全部交给官方包 `@runko/persist-kysely`：[账本](../../../../docs/terms.md)、
  * [裁决表](../../../../docs/terms.md)、[待发队列](../../../../docs/terms.md)、[归属仲裁机制](../../../../docs/terms.md)。
  *
- * **它吃的就是本应用那个 Kysely 实例**——框架的四张表与本应用的表在同一个库、同一个连接里，
+ * **它吃的就是本应用那个 Kysely 实例**——框架的表与本应用的表在同一个库、同一个连接里，
  * 建表也在同一条命令里（`db/migrate.ts`）。这正是「宿主自己有库，框架的表跟着进去」的样子。
  *
- * 想知道这四张表长什么样，看 `@runko/persist-kysely` 的 `schema.sql`。本应用只在两处直接
+ * 想知道框架的表长什么样，看 `@runko/persist-kysely` 的 `schema.sql`。本应用只在两处直接
  * 读它们（会话列表的两个计数，见 `runko-tables.ts`），其余一律走接口。
  */
 import type { Arbitration, NodeRegistry, Persistence } from '@runko/agent';

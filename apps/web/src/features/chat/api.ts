@@ -62,7 +62,7 @@ async function requestJson(input: string, init: RequestInit): Promise<unknown> {
   return response.json() as Promise<unknown>;
 }
 
-/** 节点下线闸门回 503 时不带 `Retry-After`，或带一个不合法的值——退回等 1 秒。 */
+/** 503 没带 `Retry-After`、或值不合法时，退回等 1 秒。 */
 const DEFAULT_RETRY_AFTER_SECONDS = 1;
 /** 见 `requestJsonWithRetry` 的注释：503 最多重发这么多次。 */
 const MAX_503_RETRIES = 3;
@@ -100,10 +100,12 @@ function delay(
 }
 
 /**
- * 给[节点下线](../../../../../docs/terms.md)那道 503 窗口用的重试版 `requestJson`：
- * 发消息、[停止](../../../../../docs/terms.md)、提交审批/提问答复这几个请求可能
- * 在极短的时间里撞上一个正在关闭的节点——服务端约定回 503 时请求一定没被处理，
- * 按 `Retry-After`（秒，缺省 1）等一下重发是安全的，最多重发 `MAX_503_RETRIES` 次。
+ * 遇到 503 会自动重发的 `requestJson`，给发消息、[停止](../../../../../docs/terms.md)、
+ * 提交审批/提问答复这几个请求用。
+ *
+ * 服务端回 503 的几种情形：节点在[节点下线](../../../../../docs/terms.md)、转发时够不着
+ * 持有者、归属刚换了手又转不过去。服务端约定：回 503 时请求一定没被处理。所以按 `Retry-After`
+ * （秒，缺省 1）等一下重发是安全的，最多重发 `MAX_503_RETRIES` 次（共 4 次请求）。
  *
  * **504（网关超时）不在此列**：那表示请求已经发出、结果未知，重发可能让它被执行
  * 两次，照旧只抛错、不重试；其余状态码也一律照旧。

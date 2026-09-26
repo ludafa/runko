@@ -5,8 +5,8 @@
  * docs/host/node/tech/cluster-console.md §6 的 nginx 重试——拆成六个场景，见各 `it` 的注释。
  *
  * **跟 `cluster.e2e.test.ts` 的分工**：那一份测的是[集群实验环境](../../../../docs/terms.md)本身
- * （租约仲裁、直播广播），不碰下线；这一份专测控制台——运维容器、下线闸门、`shutdown` 的
- * `finishWindowMs` 窗口、nginx 的 `proxy_next_upstream`。两份文件都基于同一个 `docker/cluster.compose.yml`，
+ * （租约仲裁、直播广播），不碰下线；这一份专测控制台——运维容器、下线闸门、[交权](../../../../docs/terms.md)、
+ * nginx 的 `proxy_next_upstream`。两份文件都基于同一个 `docker/cluster.compose.yml`，
  * 起停方式、`request`/`send`/`ledger` 这类 HTTP 小工具照抄同款写法（同一个作者、同一份约定），
  * 独立成一个文件不共享是照抄 `cluster.e2e.test.ts` 自己的选择——它也没有拆共享 helper。
  *
@@ -20,11 +20,11 @@
  * `cluster.e2e.test.ts` 自己那套（`runko-cluster-e2e`，3960/55463/56389）——三套可以同时在跑。
  * 每个 `describe` 各自 `afterAll` 一律 `down -v`。
  *
- * **两组场景、两次起停**：下线的时间预算（让轮跑完的窗口 `finishWindowMs`、收尾宽限 `graceMs`、
- * 强杀期限）都是启动时通过环境变量焊死进容器的，改不了就得重开一套集群。「正常下线」那组
- * （场景 1/2/4/5/6）用 `window=8s / grace=3s / kill=15s`（`window+grace < kill`，节点自己来得及
- * 退出）；「强杀」那组（场景 3）单独开一套 `window=60s`（远大于 kill）、`kill=8s`，逼它非被
- * SIGKILL 不可。
+ * **两组场景、两次起停**：下线的时间预算（工具上限 `RUNKO_TOOL_TIMEOUT_MS`、交出去的上限 `graceMs`、
+ * 强杀期限）都是启动时通过环境变量写进容器的，改不了就得重开一套集群。「正常下线」那组
+ * （场景 1/2/4/5/6）用 `grace=3s / kill=30s`，工具上限用 compose 缺省值。场景 2 的命令只跑 8 秒，
+ * 节点跑完它就自己退出。「强杀」那组（场景 3）单独开一套 `tool=15s / kill=8s`：命令比强杀期限长，
+ * 逼它被 SIGKILL。
  *
  * **日志留在本地**：`apps/node-server/logs/cluster-console-<时间>/`（`cluster-console-latest`
  * 指向最近一次）。
@@ -641,7 +641,7 @@ const frameSeqs = (frames: readonly Json[]): number[] =>
 // ─── 用例 ──────────────────────────────────────────────────────────────────
 
 describe.skipIf(!RUN)(
-  '集群控制台：正常下线（跑完 / 中止 / 上线 / WS / nginx 重试）',
+  '集群控制台：正常下线（交权接着跑 / 命令跑完再退 / 上线 / WS / nginx 重试）',
   () => {
     beforeAll(async () => {
       activeEnv = {
@@ -713,7 +713,7 @@ describe.skipIf(!RUN)(
       expect(ack.status).toBe(202);
       expect(ack.offlineDeadline).toBeDefined();
 
-      // 立刻看一眼：节点已经是「下线中」，带着强杀倒计时（§3.3 的 0 秒那一行）。
+      // 立刻看一眼：节点已经在下线（控制台显示「下线中」），带着强杀倒计时（§3.3 的 0 秒那一行）。
       const during = await overview(LB_URL);
       const goingOffline = findNode(during, 1);
       expect(goingOffline.state).toBe('going_offline');

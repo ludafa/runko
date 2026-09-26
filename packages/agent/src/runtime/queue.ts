@@ -137,7 +137,7 @@ async function backOut(ctx: RuntimeContext, turn: ActiveTurn): Promise<void> {
 /**
  * 这一轮以[挂起](../../../../docs/terms.md)收尾时，还没注入的插话只活在它的内存里，一收尾就没了——而用户
  * 已经被告知「插进去了」。挂起之后又不能把它们追加进账本（悬空调用后面接用户消息会 400），所以转进
- * 待发队列：人答完、恢复那一轮收尾后，它们作为普通消息发出（技术方案 §4.3）。
+ * 待发队列：人答完、恢复那一轮收尾后，它们作为普通消息发出（挂起与恢复 · 技术方案 §4.3）。
  *
  * 不受队列上限约束：这是把一条已经接下的消息换个地方放，不是新的入队请求。
  */
@@ -284,7 +284,7 @@ async function runToCompletion(ctx: RuntimeContext, turn: ActiveTurn): Promise<v
     await step("release-grant", () => turn.grant.release());
   }
   // 节点在下线、这一轮没交权但队列里还有货：打[待接手](../../../../docs/terms.md)标记、记进这次要交出去的名单——
-  // 否则那几条消息留在库里没人推（技术方案 §3.2 的 G2）。**必须在 `markSettled` 之前**：`shutdown` 等的就是它，
+  // 否则那几条消息留在库里，没人推。**必须在 `markSettled` 之前**：`shutdown` 等的就是它，
   // 等到之后马上就复制名单去请接手，晚一步就漏了。
   if (ctx.isShuttingDown() && status !== "handed-over") {
     await step("hand-off-queue", async () => {
@@ -301,11 +301,11 @@ async function runToCompletion(ctx: RuntimeContext, turn: ActiveTurn): Promise<v
   // ⑤ 交棒：看这个会话接下来该干什么。同样兜一层——要碰持久化，抛错不该反噬到已经收好的这一轮。
   //    - 普通轮正常收尾（completed / failed / interrupted）：账本末尾不可能有悬空调用，直接出队。
   //    - 挂起了、或者这是一轮恢复：末尾可能还悬着，走 `advance`——有已经答过的就接着恢复，
-  //      一个都没答就原地不动；**绝不出队普通消息**（技术方案 §4.3、§5.7）。
+  //      一个都没答就原地不动；**绝不出队普通消息**（挂起与恢复 · 技术方案 §4.3、§5.7）。
   //    - 这一轮是恢复、而它要结清的那个调用**还悬着**：**不立刻再试**。那说明这次恢复没做成——
   //      装配失败、生成器抛了、或者改写后的那条没写进账本。立刻再试就是热循环，而最后一种情况下
   //      工具已经执行过了，再试一次就**再执行一次**，一直循环下去。答案还在裁决表里，下一次有人
-  //      推一把（比如用户又发了一条）时重来（技术方案 §5.8）。
+  //      推一把（比如用户又发了一条）时重来（挂起与恢复 · 技术方案 §5.8）。
   // 节点在下线：不出队（队列里的货上面已经交出去了）。
   if (ctx.isShuttingDown()) {return;}
   // 接着跑的那一轮装配失败了：账本没动，还需要接着跑。不立刻再试（沙盒持续不可用时就是热循环），
@@ -336,7 +336,7 @@ async function runToCompletion(ctx: RuntimeContext, turn: ActiveTurn): Promise<v
 
 /**
  * 这一轮收尾时能不能带着归属接着跑队列里的下一条。不能的几种都有别的路要走：挂起或恢复轮
- * （账本末尾可能有悬空调用，走 `advance`）、交权（归属要预留给接手节点）、下线中（队列交出去）、
+ * （账本末尾可能有悬空调用，走 `advance`）、交权（归属要预留给接手节点）、节点下线（队列交出去）、
  * 接着跑的那一轮装配失败（交给定时回捞，免得热循环）、归属已经丢了（不再是持有者）。
  */
 function canChainNextTurn(ctx: RuntimeContext, turn: ActiveTurn, status: TurnStatus): boolean {
@@ -415,7 +415,7 @@ async function settleDisplacedTurn(ctx: RuntimeContext, turn: ActiveTurn): Promi
 
 /**
  * **推一把**：这个会话接下来该干什么。它是「收尾之后」「人答了之后」「挂起中来了消息」三处的
- * 共同入口（技术方案 §5.7）：
+ * 共同入口（挂起与恢复 · 技术方案 §5.7）：
  *
  * 1. 本进程已经有轮在跑 → 不管，它收尾时会再推一把；
  * 2. 账本末尾有悬空调用 → 有已经答过的就开一轮恢复（`resume: false` 时连这个也不做）；
@@ -508,7 +508,7 @@ export async function startResume(
   const acquired = await ctx.arbitration.acquire(conversationId, {
     seedSeq: () => ctx.persistence.ledger.maxSeq(conversationId),
   });
-  // 抢不到就算了：占着的那一轮收尾时会自己推一把，读到这份答案（技术方案 §5.7「为什么不会漏」）。
+  // 抢不到就算了：占着的那一轮收尾时会自己推一把，读到这份答案（挂起与恢复 · 技术方案 §5.7「为什么不会漏」）。
   if (!acquired.ok) {return "busy";}
 
   ctx.registry.lastHolder = acquired.grant.holder;
@@ -584,7 +584,7 @@ async function findAnsweredCall(
   const ledgerTail = await readLedgerEnd(ctx.persistence, conversationId);
   const pending = pendingCallIds(ledgerTail);
   if (pending.length === 0) {return "not_suspended";}
-  // [工具收尾](../../../../docs/terms.md)先查，而且**全部有结果才开恢复轮、在同一轮里一起结清**（技术方案 §6.2）：
+  // [工具收尾](../../../../docs/terms.md)先查，而且**全部有结果才开恢复轮、在同一轮里一起结清**（交权 · 技术方案 §6.2）：
   // 一次只结清一个的话，剩下的还悬着，这一轮只能以挂起收尾——用户会收到一条「在等你」的通知，其实没有东西要他答。
   // 审批通过之后、执行到一半被交权的调用，裁决表里也有一行「允许」——拿那一行去恢复会把工具再执行一遍，所以先查收尾。
   const handedOver = new Set(ledgerTail.at(-1)?.metadata?.handedOver?.callIds ?? []);
@@ -622,7 +622,7 @@ async function findAnsweredCall(
     const settlement = settlementFromRecord(record);
     // 裁决表里的答案与账本里那个部件对不上（比如自定义工具在审批通过之后又调了
     // `ctx.suspend()`——它没有自己的那一行）：这一条 agent 层恢复不了，跳过，免得每推一把
-    // 就起一轮必败的恢复（技术方案 §12 的已知限制）。
+    // 就起一轮必败的恢复（挂起与恢复 · 技术方案 §12 的已知限制）。
     if (!canResume(ledgerTail, callId, settlement)) {
       if (opts.quiet !== true) {
         ctx.logger.warn(LOG_SCOPE, "answered call cannot be resumed from its decision record; skipping", { conversationId, callId });
@@ -635,7 +635,7 @@ async function findAnsweredCall(
 }
 
 /**
- * **放手之后再看一眼裁决表**（技术方案 §5.7「为什么不会漏」）。
+ * **放手之后再看一眼裁决表**（挂起与恢复 · 技术方案 §5.7「为什么不会漏」）。
  *
  * 「不会漏」靠的是两边成对：写答案的一方「先写、再抢归属」，占着归属的一方「先放、再查答案」。
  * 因为某个会话在等人而撤回的那两条路（起普通轮时发现有悬空调用、开恢复轮时发现还没人答），
@@ -679,7 +679,7 @@ function canResume(tail: RunkoUIMessage[], callId: string, settlement: Settlemen
 
 /**
  * 人答了一个**已经不在本进程内存里**的等人项（挂起了，或者在别的副本上等着）：把答案写进裁决表
- * 那一行，然后推一把（技术方案 §5.7）。
+ * 那一行，然后推一把（挂起与恢复 · 技术方案 §5.7）。
  *
  * `false` = 接入层转 404，分四种：没有这一行；种类对不上（拿提问的答案去答审批）；**那次调用不在
  * 账本末尾悬着**；已经答过了。
@@ -710,7 +710,7 @@ export async function answerSuspended(
   const settled = await ctx.persistence.decisions.settle(conversationId, callId, settlement);
   if (!settled) {return false;}
   // 节点在下线：推不动（`advance` 直接返回），答案却已经落库——打[待接手](../../../../docs/terms.md)标记，
-  // 接手节点或定时回捞会接上（技术方案 §3.2 的 G3）。
+  // 接手节点或定时回捞会接上。否则答案落了库，却没人起恢复轮。
   if (ctx.isShuttingDown()) {
     await markAwaitingTakeover(ctx, conversationId);
     ctx.handover.handedOff.add(conversationId);
@@ -739,8 +739,7 @@ async function nudge(ctx: RuntimeContext, conversationId: string, callId: string
  * **失败不吞消息**：起轮失败就 `requeueFront` 放回队首并记一行，**不重试、不设定时器**
  * ——靠「下一次有轮收尾」自然重试，避免沙盒持续不可用时后台无限重试烧钱。
  *
- * 两个例外**不放回**：会话已被停止过（用户按的就是停止，放回等于没停）、进程正在关闭
- * 时压根没出队。
+ * 起轮没成的一律放回队首。节点下线时开头就返回，根本不出队。
  */
 export async function startNextQueued(ctx: RuntimeContext, conversationId: string): Promise<void> {
   if (ctx.isShuttingDown()) {return;}
@@ -789,7 +788,7 @@ export async function startNextQueued(ctx: RuntimeContext, conversationId: strin
 }
 
 /**
- * **一个函数管三种情况**（[技术方案 §6.1](../../../../docs/logic/orchestration/tech/agent-runtime.md)
+ * **一个函数管三种情况**（[轮编排运行时 · 技术方案 §6.1](../../../../docs/logic/orchestration/tech/agent-runtime.md)
  * 的判定表）：空闲就起新轮、忙就排队或插话、装配中一律排队。
  */
 export async function enqueue(
@@ -824,7 +823,7 @@ export async function enqueue(
     return await enqueueOnly(ctx, conversationId, input);
   }
   if (outcome.reason === "awaiting_human") {
-    // 挂起中来的新消息排队，等人答完再跑（技术方案 §9.3）。队列关着就只能拒——报 `busy`
+    // 挂起中来的新消息排队，等人答完再跑（挂起与恢复 · 技术方案 §9.3）。队列关着就只能拒——报 `busy`
     // 语义最近（会话不空闲），文案说清是在等人，不是「有轮在跑」。
     if (!ctx.queue.enabled) {
       return {

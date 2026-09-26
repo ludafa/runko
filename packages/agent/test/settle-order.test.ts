@@ -147,6 +147,36 @@ describe("收尾顺序：先存好，再说完成", () => {
     });
   }
 
+  it("装配失败：用户消息与失败标记的成品消息帧，排在失败的收尾帧之前", async () => {
+    let failAssembly: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      failAssembly = resolve;
+    });
+    const { runtime } = setup({
+      prepareTurn: async () => {
+        await gate;
+        throw new Error("sandbox unavailable");
+      },
+    });
+    await runtime.enqueue("order-assembly", { text: "hello" });
+    const sub = collect(runtime, "order-assembly");
+    await vi.waitFor(() => {
+      expect(sub.frames.some((frame) => frame.kind === "activity" && frame.active)).toBe(true);
+    });
+
+    failAssembly();
+    await sub.done;
+
+    const user = sub.frames.findIndex((frame) => frame.kind === "message" && frame.message.role === "user");
+    const marker = sub.frames.findIndex(
+      (frame) => frame.kind === "message" && frame.message.role === "assistant" && frame.message.metadata?.status === "failed",
+    );
+    const done = sub.frames.findIndex((frame) => metadataOf(frame)?.status === "failed");
+    expect(user).toBeGreaterThanOrEqual(0);
+    expect(marker).toBeGreaterThan(user);
+    expect(done).toBeGreaterThan(marker);
+  });
+
   it("连失败标记也写不进去：不抛，收尾照常跑完，下一条消息还能起轮", async () => {
     const { runtime, sessions } = setup({ persistence: faultyPersistence("throw", { markers: true }) });
     await runtime.enqueue("order-locked", { text: "hello" });

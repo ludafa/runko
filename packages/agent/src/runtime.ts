@@ -58,9 +58,9 @@ const DEFAULT_MEMORY_WINDOW: Duration = "5m";
  * 这个上限只防装配卡住之类的意外。
  */
 const DEFAULT_SHUTDOWN_GRACE_MS = 15_000;
-/** 单次工具执行的上限。平时与交权时一样生效，交权时旧节点最多等这么久（技术方案 §6.3）。 */
+/** 单次工具执行的上限。平时与交权时一样生效，交权时旧节点最多等这么久（交权 · 技术方案 §6.3）。 */
 const DEFAULT_TOOL_TIMEOUT: Duration = "2m";
-/** [交接预留](../../../docs/terms.md)的有效期：覆盖一次「请接手」的往返加重试（技术方案 §7.4）。 */
+/** [交接预留](../../../docs/terms.md)的有效期：覆盖一次「请接手」的往返加重试（交权 · 技术方案 §7.4）。 */
 const DEFAULT_RESERVATION_TTL: Duration = "10s";
 /** [节点登记表](../../../docs/terms.md)的心跳间隔。 */
 const DEFAULT_NODE_HEARTBEAT: Duration = "5s";
@@ -143,8 +143,10 @@ export interface AgentRuntimeOptions {
    */
   toolTimeout?: Duration;
   /**
-   * [交权](../../../docs/terms.md)（docs/logic/orchestration/tech/handover.md）。不配也能交权：没有登记表就挑不到接手
-   * 节点，对话一律打[待接手](../../../docs/terms.md)标记，交给[定时回捞](../../../docs/terms.md)或下一个进程。
+   * [交权](../../../docs/terms.md)（docs/logic/orchestration/tech/handover.md）。没有登记表就挑不到接手节点。
+   * 这时仲裁机制支持[待接手](../../../docs/terms.md)标记的，对话打上标记，交给[定时回捞](../../../docs/terms.md)或下一个进程；
+   * 不支持的（比如进程内仲裁），节点下线时照旧[中止](../../../docs/terms.md)（交权 · 技术方案 §10.4）。
+   * 持久化没有 `tails` 时同样中止。
    */
   handover?: {
     /** 本节点地址，与租约里的 `holder` 相同（接手节点靠它认出「预留给我的」）。 */
@@ -187,7 +189,11 @@ export interface ShutdownResult {
   handedOver: number;
   /** [挂起](../../../docs/terms.md)的轮数：关闭那一刻它们在等人，人回来在任意节点接着干。 */
   suspended: number;
-  /** 中止的轮数。只在持久化没有工具收尾记录（`Persistence.tails`）时出现——那时正在跑工具的轮交不出去。 */
+  /**
+   * [中止](../../../docs/terms.md)的轮数。三种情况会中止在干活的轮：
+   * 持久化没有工具收尾记录（`Persistence.tails`）；挑不到接手节点，仲裁机制又不支持待接手标记；
+   * 轮不理交权信号，撞了宽限期。
+   */
   aborted: number;
   /** 交给了哪个节点。`undefined` = 没挑到，交出去的对话打了待接手标记，等定时回捞或下一个进程。 */
   target: string | undefined;
@@ -250,7 +256,10 @@ export interface AgentRuntime {
    * 返回之后本节点可以退出：没有轮、没有工具在跑，本进程的订阅都收到了[请重连帧](../../../docs/terms.md)。
    */
   shutdown(opts?: { graceMs?: number }): Promise<ShutdownResult>;
-  /** 进程是否正在[优雅关闭](../../../docs/terms.md)（接入层据此转 503）。 */
+  /**
+   * 本节点是否在[节点下线](../../../docs/terms.md)。验证环境的闸门可以据此对浏览器请求回 503；
+   * 消息、答复本身不会因此被拒，照常入队、交给接手节点。
+   */
   isShuttingDown(): boolean;
   /**
    * [在场](../../../docs/terms.md)上报：此刻有人正盯着这条会话。`suspend.onPresence` 为 `"extend"` 时，
@@ -584,8 +593,8 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       const carried = buffer.filter((frame): frame is Extract<Frame, { kind: "message" }> => frame.kind === "message");
       // `activity` 帧本身照旧丢掉（第 ④ 步紧接着发权威快照），但**它带的信息不能跟着丢**。
       //
-      // 别的副本收尾是「**先**广播 `activity:false`、**后**释放归属」（`queue.ts` 的
-      // `settleTurn`），中间还隔着一次落库。回放恰好落在这段窗口里时，下面的 `inspect()`
+      // 别的副本最后放手时是「**先**广播 `activity:false`、**后**释放归属」（`queue.ts` 的
+      // `runToCompletion`），中间还隔着一次落库。回放恰好落在这段窗口里时，下面的 `inspect()`
       // 仍会报「有人持有」——若据此去跟远端，第 ⑤ 步就会等一帧**刚被自己丢掉、而且永远
       // 不会再来**的收尾帧，这条流就挂死了（客户端的转圈也停不下来：流不关就不重连）。
       //
@@ -621,11 +630,10 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       //
       // 判据刻意仍用**第 ③ 步捕获的那个 `turn`**，不重新查登记表：这里到第 ⑤ 步之间要是
       // 换了判据，「这一轮刚好在 ③④ 之间收尾」那条窄路上会把已经躺在缓冲里的收尾
-      // `message` 帧丢掉——而收尾窗口里重连恰恰是最该管用的那一刻。于是控制流一行没变，
-      // 变的只是这一帧的内容。
+      // `message` 帧丢掉——而收尾窗口里重连恰恰是最该管用的那一刻。
       //
-      // **归属报的是我们自己上一次的 `holder` 时不算「有轮在跑」**：收尾是先删登记表、
-      // 再释放归属（见 `queue.ts` 的 `settleTurn`），中间那一小段两边都查得到「有人持有」
+      // **归属报的是我们自己上一次的 `holder` 时不算「有轮在跑」**：最后放手时是先删登记表、
+      // 再释放归属（见 `queue.ts` 的 `runToCompletion`），中间那一小段两边都查得到「有人持有」
       // 却没有任何东西在跑。不排除它的话，这一帧会说「还在跑」然后流立刻断掉——客户端
       // 的转圈动画就停在那儿了。释放失败时这段窗口会一直拖到租约过期。
       const remote = localActive ? undefined : await arbitration.inspect(conversationId);
@@ -787,7 +795,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
   }
 
   /**
-   * 这一轮还没完、但此刻没人持有：[工具收尾](../../../docs/terms.md)还在某个下线中的节点上跑，或者交权之后还没有
+   * 这一轮还没完、但此刻没人持有：[工具收尾](../../../docs/terms.md)还在某个[节点下线](../../../docs/terms.md)的节点上跑，或者交权之后还没有
    * 节点接着跑。
    */
   async function parkedWork(conversationId: string): Promise<boolean> {
@@ -811,7 +819,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
 
   /**
    * 工具收尾期间用户按了停止：旧节点的入站已关，没法通知它，只能在收尾记录上记一个停止标记，
-   * 旧节点每秒查一次（技术方案 §9）。`true` = 至少记上了一条。
+   * 旧节点每秒查一次（交权 · 技术方案 §9）。`true` = 至少记上了一条。
    */
   async function requestTailStop(conversationId: string): Promise<boolean> {
     if (await stopUnfinished(conversationId)) {return true;}
@@ -857,7 +865,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
 
     subscribe,
 
-    // 两条路（技术方案 §5.7）：等人项还在本进程内存里（内存窗口内）→ 直接交给正在等的那一轮；
+    // 两条路（挂起与恢复 · 技术方案 §5.7）：等人项还在本进程内存里（内存窗口内）→ 直接交给正在等的那一轮；
     // 不在了（挂起了，或者在别的副本上等着）→ 写进裁决表那一行，推一把，由恢复轮接上。
     async submitDecision(conversationId, callId, decision) {
       if (await human.settleReview(conversationId, callId, decision)) {return true;}
@@ -948,8 +956,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
      * [崩溃恢复](../../../docs/terms.md)：库里还留着[起轮标记](../../../docs/terms.md)= 那一轮
      * 没人管了（进程被强杀、OOM、断电），补一条「已停止」。
      *
-     * **判据是直接的**——不再依赖「chunk 行会被 GC 掉」这个副作用，GC 漏跑不会再把活着
-     * 的轮误判成孤儿。幂等：补完就把标记清了，再跑一次扫不到它。
+     * **判据是直接的**：只看起轮标记，不靠任何副作用推断，所以活着的轮不会被误判成孤儿。幂等：补完就把标记清了，再跑一次扫不到它。
      *
      * 顺序是**先清标记再抢归属**：标记还在的话 `acquire` 会被自己要恢复的那条挡成
      * `busy`。
@@ -993,7 +1000,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
             await acquired.grant.release();
           }
           // 崩掉的那一轮身后还排着消息：打上[待接手](../../../docs/terms.md)标记，`start()` 的回捞会把它们推起来——
-          // 否则要等用户再发一条（定时回捞只认这个标记，不再把「队列不空」当成有活）。
+          // 否则要等用户再发一条（定时回捞只认这个标记，不看队列是否为空）。
           if ((await persistence.queue.list(conversationId)).length > 0) {await markAwaitingTakeover(ctx, conversationId);}
         } catch (error) {
           // 一个会话恢复失败不该让整轮扫描停下——记一行，继续下一个。
@@ -1002,7 +1009,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       }
       // 崩掉的恢复轮：人已经答过了，他在等那个操作执行。推一把让它重来——**那条命令可能会被执行
       // 第二次**（崩溃不是干净边界，不知道它执行完没有），这是有意的取舍：宁可至少执行一次，也不要
-      // 让人批准过的操作静默丢失（技术方案 §5.9）。不 await：一轮的寿命与启动扫描无关。
+      // 让人批准过的操作静默丢失（挂起与恢复 · 技术方案 §5.9）。不 await：一轮的寿命与启动扫描无关。
       for (const conversationId of interruptedResumes) {
         logger.warn(LOG_SCOPE, "crashed turn was a resume attempt; retrying it", { conversationId });
         void advance(ctx, conversationId).catch((error: unknown) => {
@@ -1059,11 +1066,13 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
      * [交权](../../../docs/terms.md)（docs/logic/orchestration/tech/handover.md §5、§6）。顺序是硬要求：
      *
      * 1. **先置关闭闸门**，否则收尾期间[自动出队](../../../docs/terms.md)会源源不断起新轮。
-     * 2. 登记表里把自己标成下线中——尽量缩短别人看到旧状态的窗口。与这里在跑的轮无关的订阅现在就踢。
+     * 2. 登记表里把自己标成 `leaving`——尽量缩短别人看到旧状态的窗口。与这里在跑的轮无关的订阅现在就踢。
      * 3. **挑接手节点**（在给任何一轮发信号之前：各轮收尾时就要按它做预留）。
-     * 4. 逐轮处置：等人的挂起；其余发交权信号——模型输出掐断重来，工具留在本节点上跑完。没有工具收尾记录
-     *    （`Persistence.tails`）的持久化只能中止。各轮收尾时自己做「登记收尾 → 标待接手 → 预留放手」。
-     * 5. 等各轮收尾，然后一次性请接手节点接手全部交出去的对话。
+     * 4. 逐轮处置：等人的挂起；其余发交权信号——模型输出掐断重来，工具留在本节点上跑完。
+     *    交不出去时在干活的轮一律[中止](../../../docs/terms.md)：持久化没有 `tails`，或者挑不到接手节点、
+     *    仲裁机制又不支持待接手标记（交权 · 技术方案 §10.4）。
+     *    各轮收尾时自己做「登记收尾 → 标待接手 → 预留放手 → 马上请接手」。
+     * 5. 各轮都收尾之后，再批量请一次接手，兜住前面没成的。
      * 6. 踢掉剩下的订阅（[请重连帧](../../../docs/terms.md)），等本节点上的[工具收尾](../../../docs/terms.md)跑完。
      *
      * 重复调用返回同一次关闭的结果。
