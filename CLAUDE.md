@@ -45,6 +45,7 @@ pnpm workspace 三组成员（见 [pnpm-workspace.yaml](./pnpm-workspace.yaml)�
 
 - 根 `pnpm build` / `typecheck` / `test` 只 filter `./packages/*`，**不覆盖 apps、examples 与 docs**；动了 apps 要进对应目录跑它自己的 `typecheck`/`lint`/`test`。
 - CI（`.github/workflows/ci.yml`）跑的是 `pnpm -r build|typecheck|test`，覆盖**全部** 20 个成员——本地只跑根脚本会漏掉 apps/examples/docs 的问题。
+- 集群端到端（`test:cluster` / `test:cluster-handover` / `test:cluster-console` / `test:lab`，真 Docker 起多节点）单独一个 workflow `.github/workflows/cluster-e2e.yml`：四套并行，只在改到 core / agent / persist-* / stream-redis / node-server 时、合入 main 时和手动触发时跑；失败时上传 `apps/node-server/logs/`。用的是演示模型，不需要也不会用任何密钥。
 - **文档站的死链检查藏在 `pnpm -r build` 里**（`docs` 的 build 就是 `vitepress build`，构建时会校验全站链接）；`typecheck` 查的是 `.vitepress/` 下的配置。但 **front matter 体检（`docs:check`）不在 `-r` 的三个脚本里**，CI 单列了一步。
 - chat 应用另有根级 `chat:bootstrap`（建库 + 生成 OpenAPI 与前端 client）、`chat:server`、`chat:web`；文档站有 `docs:dev` / `docs:build` / `docs:preview` / `docs:check`（都是 `--filter @runko/docs` 的快捷方式）。
 - **lint 跟其余三个根脚本不一样：`pnpm lint` / `pnpm lint:fix` 走的是 `pnpm -r`，覆盖全部 19 个有 lint 脚本的成员**（`packages/*` 十五个 + `examples` + 三个 app；只有 `docs` 没配——它的源码里没有可 lint 的 JS/TS，`.vitepress/cache` 全是构建缓存）。规则分两套：`packages/*`、`examples` 与 `cloudflare-worker-server` 引根目录的 `eslint.config.base.js`（共享基线，目前只有「花括号强制」一条）；`web` 与 `node-server` 各有自己的完整配置（prettier + import 排序 + react-hooks），不引基线。

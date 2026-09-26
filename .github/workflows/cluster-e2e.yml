@@ -1,0 +1,75 @@
+name: Cluster E2E
+
+# 多节点集群的端到端：真 Docker、真 Postgres、真 Redis、nginx 前面挂几个节点，制造断网、崩溃、下线、
+# 滚动发布这类真故障。用的是演示模型 + 本地沙盒——**不需要任何密钥**，测试也会把模型相关的环境变量
+# 显式置空，不会调真模型。
+#
+# 跑一次十来分钟，所以不挂在每个 PR 上：只在改到了轮编排、持久化、node-server 时跑，合入 main 时跑，
+# 以及手动触发。
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/core/src/**'
+      - 'packages/agent/src/**'
+      - 'packages/persist-*/src/**'
+      - 'packages/stream-redis/src/**'
+      - 'apps/node-server/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/cluster-e2e.yml'
+  pull_request:
+    paths:
+      - 'packages/core/src/**'
+      - 'packages/agent/src/**'
+      - 'packages/persist-*/src/**'
+      - 'packages/stream-redis/src/**'
+      - 'apps/node-server/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/cluster-e2e.yml'
+  workflow_dispatch:
+
+# 同一个分支上新推了提交，旧的那次就不用跑完了。
+concurrency:
+  group: cluster-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # 四套各起一个任务并行跑：它们的 compose 项目名与端口各不相同，本来就互不干扰。
+    # 一套挂了不取消其他几套，好一次看全哪些红了。
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [test:cluster, test:cluster-handover, test:cluster-console, test:lab]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # 测试进程自己也 import 了 @runko/* 的包，跨包解析指向各自的 dist，要先构建。
+      - run: pnpm --filter '@runko-chat/node-server...' build
+
+      - run: docker version && docker compose version
+
+      - run: pnpm --filter @runko-chat/node-server run ${{ matrix.suite }}
+
+      # 测试把每个容器的日志和测试步骤写进 apps/node-server/logs/。失败时只看断言往往看不出原因。
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ strategy.job-index }}
+          path: apps/node-server/logs/
+          if-no-files-found: ignore
+          retention-days: 7
