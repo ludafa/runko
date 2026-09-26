@@ -26,8 +26,13 @@ export interface Usage {
   cachedInputTokens?: number;
 }
 
-/** 轮失败的 error 载荷（`RunkoMessageMetadata.error` 与 `RunkoSessionError`）。 */
+/**
+ * 轮失败的 error 载荷（`RunkoMessageMetadata.error` 与 `RunkoSessionError`）。
+ *
+ * `internal_error`（系统异常）core 自己不产出：留给编排层报 core 之外的故障，比如一轮的结果没能写进账本
+ * （docs/logic/orchestration/tech/single-ledger.md §6.1）。它的 `message` 是一句不含细节的通用话，细节只进日志。
+ */
 export interface RunkoError {
-  code: "max_turns" | "context_overflow" | "provider_error" | "aborted";
+  code: "max_turns" | "context_overflow" | "provider_error" | "aborted" | "internal_error";
   message: string;
 }

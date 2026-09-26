@@ -138,7 +138,20 @@ related: ["logic/orchestration/features/steer-and-queue.md", "logic/orchestratio
 
 验证残留：一个 e2e 会话（`repo` 上一条 `nimbo/chat-a8ca485e-…` 分支 + 一个 Vercel 沙盒，沙盒会按 `SANDBOX_IDLE_TIMEOUT_MS` 自行回收），以及一个 `queue-e2e-*@example.com` 测试账号——按需清理。
 
+## 出队不放手（2026-09-26）
+
+方案见[技术方案 §8.3](../tech/steer-and-queue.md)。和[单一账本的「先存好再说完成」](./single-ledger.md)同批施工，都改收尾这一段。
+
+| 阶段 | 目标 | 涉及文件 | 产出 | 状态 |
+|---|---|---|---|---|
+| Q1 | 收尾时队列有货就带着归属接着跑：先通知宿主、再出队、先登记下一轮再撤上一轮；两轮之间不广播 `activity:false`、不放手 | `packages/agent/src/runtime/queue.ts` | 实现 | ✅ `canChainNextTurn` + `chainNextQueued`；出队之后发现节点开始下线就放回队首、走普通收尾 |
+| Q2 | 单测：排队两条 → 同一条订阅里看到三轮、中间没有 `activity:false`；归属没换过手；出队拿到空的走普通收尾；挂起 / 下线 / 用户停止不接着跑；起下一轮失败照样收尾 | `packages/agent/test/` | 用例 | ✅ `settle-order.test.ts` 5 条（三轮一条订阅、只抢一次放一次、通知在出队之前、中间一轮装配失败、队列被清空）。挂起 / 下线 / 用户停止沿用既有用例 |
+| Q3 | 前端核对：同一条流里接下一轮，不走重连；「待发」区跟着队列快照变 | `apps/web`（预计只动测试） | 用例 | ✅ 只动测试：`use-chat-messages.test.ts` 新增「同一条流接上下一轮，不重连」 |
+| Q4 | 集群端到端：流连在 N2、跑在 N1，排队的下一轮从同一条流过来 | `apps/node-server/test/e2e/` | 用例 | ✅ `cluster.e2e.test.ts` §4.9：3 号上的一条 WebSocket 看到两个 completed、一次 turnActive:false；两轮之间租约持有者始终是 1 号 |
+
 ## 变更记录
+
+- 2026-09-26：排队的下一轮改成持有者**不放手、直接接着跑**，一条流贯穿整个队列（技术方案 §8.3）。起因：多节点下收尾先放手再重新抢，平白多一次归属换手、一次断流、以及前端 1 秒的重连等待。
 
 - 2026-07-25：产品/技术/施工三份文档定稿；术语表登记「排队（queue）」「出队（dequeue）」并修订 steer 词条（补「chat 里需显式选择」）。存储定案为 `conversations` 加 JSON 列（否决新增子表与写入[账本](../../../terms.md)两案，理由见 [tech §2](../tech/steer-and-queue.md)）。
 

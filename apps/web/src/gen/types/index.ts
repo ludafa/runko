@@ -11,6 +11,10 @@ export type {
 } from './ChatConfig.ts';
 export type { ChatMessageFrame } from './ChatMessageFrame.ts';
 export type { ChatQueueFrame } from './ChatQueueFrame.ts';
+export type {
+  ChatReconnectFrame,
+  ChatReconnectFrameReconnectEnumKey,
+} from './ChatReconnectFrame.ts';
 export type { ChatTurnStateFrame } from './ChatTurnStateFrame.ts';
 export type { ConsoleConversation } from './ConsoleConversation.ts';
 export type { ConsoleNode, ConsoleNodeStateEnumKey } from './ConsoleNode.ts';
@@ -257,6 +261,7 @@ export { approvalAckOkEnum } from './ApprovalAck.ts';
 export { chatConfigDefaultProviderEnum } from './ChatConfig.ts';
 export { chatConfigModelEnum } from './ChatConfig.ts';
 export { chatConfigProvidersEnum } from './ChatConfig.ts';
+export { chatReconnectFrameReconnectEnum } from './ChatReconnectFrame.ts';
 export { consoleNodeStateEnum } from './ConsoleNode.ts';
 export { consoleOfflineAckOkEnum } from './ConsoleOfflineAck.ts';
 export { consoleOnlineAckOkEnum } from './ConsoleOnlineAck.ts';

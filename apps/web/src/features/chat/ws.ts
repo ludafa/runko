@@ -17,6 +17,13 @@ import { parseChatReplayFrame } from './schema';
 const NORMAL_CLOSURE = 1000;
 /** 会话不存在或不属于你——与 HTTP 那边的 404 同一个意思。 */
 const NOT_FOUND = 4004;
+/**
+ * [请重连帧](../../../../../docs/terms.md)之后的关闭码——服务端发完那一帧就用它关连接
+ * （`apps/node-server` 的 `chat-ws.ts` `CLOSE_SERVICE_RESTART`，docs/logic/orchestration/tech/handover.md §8）。
+ * **导出**给 `use-chat-messages.ts` 用：即使那一帧因为某种原因没被处理到，单凭这个关闭码
+ * 也要走[快速重连](../../../../../docs/terms.md)，不能被当成普通掉线走指数退避。
+ */
+export const CLOSE_SERVICE_RESTART = 1012;
 
 /** 把页面地址换成 WebSocket 地址：同源、同端口，只是协议不同。 */
 function wsUrl(path: string): string {

@@ -8,16 +8,18 @@
  * 框架。构建者只调一句 `enqueue(conversationId, input)`，不需要知道有竞态这回事。
  */
 import { pendingCallIds, resolveResumeTarget } from "@runko/core";
-import type { RunkoUIMessage, Settlement } from "@runko/core";
+import type { CallOutcome, RunkoUIMessage, Settlement } from "@runko/core";
 
 import { describeError } from "../logger.js";
 import type { DecisionRecord, DecisionStore } from "../persistence.js";
-import type { EnqueueResult, Frame, QueuedInput, TurnInput } from "../types.js";
+import type { EnqueueResult, Frame, QueuedInput, TurnInput, TurnStatus } from "../types.js";
 import type { RuntimeContext } from "./context.js";
-import { appendInterruptedMarker, ledgerEndsWithPendingCalls, pendingCallIdsAtLedgerEnd, readLedgerEnd } from "./interrupted-marker.js";
+import { appendInterruptedMarker, needsContinuation, pendingCallIdsAtLedgerEnd, readLedgerEnd } from "./interrupted-marker.js";
+import { handOffSettledTurn, markAwaitingTakeover, readTailSettlement, requestTakeover, TAIL_UNKNOWN_MESSAGE } from "./handover.js";
+import { requeueInputsBack } from "./requeue.js";
 import { settleOrphanedDecisionsSafely } from "./orphaned-decisions.js";
 import { ASK_USER_TIMEOUT_MESSAGE } from "./ask-user.js";
-import { ABORT_REASON_HOLDER_LOST } from "./reasons.js";
+import { ABORT_REASON_HOLDER_LOST, ABORT_REASON_SHUTDOWN } from "./reasons.js";
 import { createActiveTurn } from "./registry.js";
 import type { ActiveTurn } from "./registry.js";
 import { driveTurn, nextTurnNumber } from "./turn.js";
@@ -31,8 +33,11 @@ export interface EnqueueOptions {
 
 type StartOutcome =
   | { started: true }
-  /** `awaiting_human`：账本末尾有[挂起](../../../../docs/terms.md)留下的悬空调用，只能等人答完、跑恢复轮。 */
-  | { started: false; reason: "busy" | "shutting_down" | "held_by_other" | "awaiting_human"; holder?: string };
+  /**
+   * `awaiting_human`：账本末尾有悬空调用（[挂起](../../../../docs/terms.md)在等人，或[工具收尾](../../../../docs/terms.md)
+   * 在等结果），只能跑恢复轮。`unfinished`：上一轮[交权](../../../../docs/terms.md)了、还没接着跑完。两种都不能开普通轮。
+   */
+  | { started: false; reason: "busy" | "shutting_down" | "held_by_other" | "awaiting_human" | "unfinished"; holder?: string };
 
 /**
  * 起一轮。
@@ -78,17 +83,23 @@ export async function startTurn(ctx: RuntimeContext, conversationId: string, inp
   // 后面，这份账本就再也恢复不了了。
   // 也必须在登记之后：查的这一次打库期间，本进程同会话的另一条请求要看到「有人在跑」而排队，
   // 而不是去抢归属、抢不到又把自己误报成 `held_by_other`。
-  let awaitingHuman: boolean;
+  let tail: RunkoUIMessage[];
   try {
-    awaitingHuman = await ledgerEndsWithPendingCalls(ctx.persistence, conversationId);
+    tail = await readLedgerEnd(ctx.persistence, conversationId);
   } catch (error) {
     await backOut(ctx, turn);
     throw error;
   }
-  if (awaitingHuman) {
+  if (pendingCallIds(tail).length > 0) {
     await backOutWaiting(ctx, turn);
     await resumeIfAnsweredMeanwhile(ctx, conversationId);
     return { started: false, reason: "awaiting_human" };
+  }
+  // 上一轮交权了还没接着跑：先把它跑完，这条新消息排在后面（接着跑的那一轮收尾时出队）。
+  // 调用方负责把它入队并推一把（`advance` 会先接着跑）。
+  if (needsContinuation(tail)) {
+    await backOutWaiting(ctx, turn);
+    return { started: false, reason: "unfinished" };
   }
 
   publish(ctx, conversationId, { kind: "activity", active: true, ...(acquired.grant.holder !== "" ? { holder: acquired.grant.holder } : {}) });
@@ -133,15 +144,22 @@ async function backOut(ctx: RuntimeContext, turn: ActiveTurn): Promise<void> {
 async function requeueUndeliveredSteers(ctx: RuntimeContext, turn: ActiveTurn): Promise<void> {
   const undelivered = turn.steered.slice(turn.steersDelivered);
   if (undelivered.length === 0) {return;}
-  let queue: QueuedInput[] = [];
-  for (const input of undelivered) {
-    queue = (await ctx.persistence.queue.enqueue(turn.conversationId, input, { max: Number.MAX_SAFE_INTEGER, onFull: "reject" })).queue;
-  }
-  publish(ctx, turn.conversationId, { kind: "queue", queue });
-  ctx.logger.info(LOG_SCOPE, "turn suspended before these steers reached the model; queued them for after the resume", {
+  await requeueInputsBack(ctx, turn.conversationId, undelivered);
+  ctx.logger.info(LOG_SCOPE, "turn ended before these steers reached the model; queued them for the next turn", {
     conversationId: turn.conversationId,
     count: undelivered.length,
   });
+}
+
+/**
+ * 这一轮收尾时，已经告诉用户「插进去了」、却还没交给模型的插话要不要转进待发队列。
+ *
+ * 挂起与[交权](../../../../docs/terms.md)一定要：这一轮会由别的轮接着跑，插话留在它的内存里就没了。节点下线时
+ * 中止的也要（用户什么都没做，话不该丢）。**用户按停止的不要**——停止会清空队列，把插话放回去等于没停。
+ */
+function shouldRequeueSteers(turn: ActiveTurn, status: string): boolean {
+  if (status === "suspended" || status === "handed-over") {return true;}
+  return turn.aborted && turn.abortReason === ABORT_REASON_SHUTDOWN;
 }
 
 /**
@@ -202,18 +220,50 @@ async function runToCompletion(ctx: RuntimeContext, turn: ActiveTurn): Promise<v
     ctx.human.settleAllPending(turn, "The turn this request belonged to has already ended."),
   );
 
-  // ①½ 挂起时还没注入的插话转进待发队列。排在广播「没有轮在跑了」之前：订阅者收到那一帧就收线，
-  //     队列快照要赶在它前面送到。
-  if (status === "suspended") {
+  // ①½ 还没注入的插话转进待发队列（见 `shouldRequeueSteers`）。排在广播「没有轮在跑了」之前：订阅者收到
+  //     那一帧就收线，队列快照要赶在它前面送到。
+  if (shouldRequeueSteers(turn, status)) {
     await step("requeue-undelivered-steers", () => requeueUndeliveredSteers(ctx, turn));
   }
 
+  // 通知宿主「这一轮收尾了」。排在出队之前：宿主据「这一轮结束时队列里还有没有货」决定要不要推「跑完了」，
+  // 先出队的话，最后一条排队消息起轮时队列刚好空了，就会误报一次。
+  let settledNotified = false;
+  const notifySettled = (): void => {
+    if (settledNotified) {return;}
+    settledNotified = true;
+    try {
+      ctx.hooks.onTurnSettled?.({ conversationId, turn: turn.turnNumber, status, input: turn.input });
+    } catch (error) {
+      ctx.logger.error(LOG_SCOPE, "onTurnSettled hook threw", { conversationId, error: describeError(error) });
+    }
+  };
+
+  // ①¾ [待发队列](../../../../docs/terms.md)里还有货：**带着同一个归属直接起下一轮**，不广播「没有轮在跑了」、
+  //     不放手——直播流靠那一帧收线，没收到就一直开着，下一轮的内容接着从同一条流过来
+  //     （docs/logic/orchestration/tech/steer-and-queue.md §8.3）。
+  if (canChainNextTurn(ctx, turn, status)) {
+    await step("await-decision-writes", async () => {
+      await Promise.all(turn.decisionWrites);
+    });
+    notifySettled();
+    let chained = false;
+    await step("chain-next-queued", async () => {
+      chained = await chainNextQueued(ctx, turn, status);
+    });
+    if (chained) {return;}
+  }
+
   // ② 先广播「没有轮在跑了」，再删登记——订阅者靠这一帧收线。
+  //    **[已交权](../../../../docs/terms.md)的不广播**：这份对话马上由接手节点接着跑，别的节点上跟着看的订阅者
+  //    收到这一帧就收线了，再也看不到后面的内容。本节点的订阅者由请重连帧送走（`shutdown` 的第 6 步）。
   turn.endStatus = status;
   turn.done = true;
-  await step("publish-inactive", () => {
-    publish(ctx, conversationId, { kind: "activity", active: false });
-  });
+  if (status !== "handed-over") {
+    await step("publish-inactive", () => {
+      publish(ctx, conversationId, { kind: "activity", active: false });
+    });
+  }
 
   // 裁决表登记等齐再放手：挂起之后别的副本随时可能来恢复，它要读的那几行必须已经在库里。
   // 这些 promise 从不 reject（失败在里面记日志），`step` 只是一层保险。
@@ -225,18 +275,28 @@ async function runToCompletion(ctx: RuntimeContext, turn: ActiveTurn): Promise<v
   //    一轮之前**：`startTurn` 开头就有「已有进行中的一轮就拒绝」的守卫，顺序反了下一轮
   //    必然被自己这一轮挡掉。
   //    `registry.delete` 与 `markSettled` 都是同步的、不会抛，中间那步会碰宿主所以要兜。
+  //    [已交权](../../../../docs/terms.md)的那一轮不是普通放手：先登记工具收尾、打待接手标记，再把归属预留给接手节点
+  //    （`handOffSettledTurn` 的注释）。
   ctx.registry.delete(turn);
-  await step("release-grant", () => turn.grant.release());
+  if (status === "handed-over") {
+    await step("hand-off", () => handOffSettledTurn(ctx, turn));
+  } else {
+    await step("release-grant", () => turn.grant.release());
+  }
+  // 节点在下线、这一轮没交权但队列里还有货：打[待接手](../../../../docs/terms.md)标记、记进这次要交出去的名单——
+  // 否则那几条消息留在库里没人推（技术方案 §3.2 的 G2）。**必须在 `markSettled` 之前**：`shutdown` 等的就是它，
+  // 等到之后马上就复制名单去请接手，晚一步就漏了。
+  if (ctx.isShuttingDown() && status !== "handed-over") {
+    await step("hand-off-queue", async () => {
+      if ((await ctx.persistence.queue.list(conversationId)).length === 0) {return;}
+      await markAwaitingTakeover(ctx, conversationId);
+      ctx.handover.handedOff.add(conversationId);
+    });
+  }
   turn.markSettled();
 
-  // ④ 通知排在起下一轮**之前**：宿主的队列抑制逻辑要读的是「这一轮结束时队列里还有没有
-  //    货」，而出队的第一件事就是把队首拿走。顺序反了，最后一条排队消息起轮时队列刚好
-  //    空了，就会误报一次「跑完了」。
-  try {
-    ctx.hooks.onTurnSettled?.({ conversationId, turn: turn.turnNumber, status, input: turn.input });
-  } catch (error) {
-    ctx.logger.error(LOG_SCOPE, "onTurnSettled hook threw", { conversationId, error: describeError(error) });
-  }
+  // ④ 通知排在起下一轮**之前**（理由见 `notifySettled`）。上面接着跑的那条路要是已经通知过，这里不再重复。
+  notifySettled();
 
   // ⑤ 交棒：看这个会话接下来该干什么。同样兜一层——要碰持久化，抛错不该反噬到已经收好的这一轮。
   //    - 普通轮正常收尾（completed / failed / interrupted）：账本末尾不可能有悬空调用，直接出队。
@@ -246,6 +306,14 @@ async function runToCompletion(ctx: RuntimeContext, turn: ActiveTurn): Promise<v
   //      装配失败、生成器抛了、或者改写后的那条没写进账本。立刻再试就是热循环，而最后一种情况下
   //      工具已经执行过了，再试一次就**再执行一次**，一直循环下去。答案还在裁决表里，下一次有人
   //      推一把（比如用户又发了一条）时重来（技术方案 §5.8）。
+  // 节点在下线：不出队（队列里的货上面已经交出去了）。
+  if (ctx.isShuttingDown()) {return;}
+  // 接着跑的那一轮装配失败了：账本没动，还需要接着跑。不立刻再试（沙盒持续不可用时就是热循环），
+  // 打上待接手标记，交给定时回捞过一会儿再推。
+  if (turn.continuation === true && status === "crashed") {
+    await step("park-failed-continuation", () => markAwaitingTakeover(ctx, conversationId));
+    return;
+  }
   const mayBeSuspended = status === "suspended" || turn.resume !== undefined;
   if (!mayBeSuspended) {
     await step("start-next-queued", () => startNextQueued(ctx, conversationId));
@@ -264,6 +332,54 @@ async function runToCompletion(ctx: RuntimeContext, turn: ActiveTurn): Promise<v
       await advance(ctx, conversationId, { resume: !unfinished });
     });
   }
+}
+
+/**
+ * 这一轮收尾时能不能带着归属接着跑队列里的下一条。不能的几种都有别的路要走：挂起或恢复轮
+ * （账本末尾可能有悬空调用，走 `advance`）、交权（归属要预留给接手节点）、下线中（队列交出去）、
+ * 接着跑的那一轮装配失败（交给定时回捞，免得热循环）、归属已经丢了（不再是持有者）。
+ */
+function canChainNextTurn(ctx: RuntimeContext, turn: ActiveTurn, status: TurnStatus): boolean {
+  if (status === "handed-over" || status === "suspended" || turn.resume !== undefined) {return false;}
+  if (turn.continuation === true && status === "crashed") {return false;}
+  if (ctx.isShuttingDown()) {return false;}
+  return !turn.grant.signal.aborted;
+}
+
+/**
+ * 出队，用 `turn` 的归属起下一轮。返回 `false` = 没接着跑（队列空了、或出队之后发现节点开始下线），
+ * 调用方照普通收尾走。
+ *
+ * **先登记下一轮、再撤上一轮**，中间没有 `await`：本进程的订阅复查、`getActivity()`、新请求的
+ * 「有没有轮在跑」都看登记表，两轮之间哪怕一瞬间是空的，它们都会误以为没轮在跑。
+ */
+async function chainNextQueued(ctx: RuntimeContext, turn: ActiveTurn, status: TurnStatus): Promise<boolean> {
+  const { conversationId } = turn;
+  const { item, queue } = await ctx.persistence.queue.dequeue(conversationId);
+  if (item === undefined) {return false;}
+  // 出队这一次打库期间节点开始下线了：放回去，走普通收尾（那里会把队列交出去）。`shutdown` 取的是
+  // 登记表的快照，这之后再登记的轮它等不到。
+  if (ctx.isShuttingDown() || turn.grant.signal.aborted) {
+    const restored = await ctx.persistence.queue.requeueFront(conversationId, item);
+    publish(ctx, conversationId, { kind: "queue", queue: restored });
+    return false;
+  }
+  publish(ctx, conversationId, { kind: "queue", queue });
+
+  const next = createActiveTurn({ conversationId, grant: turn.grant, input: item.input, turnNumber: 1 });
+  ctx.registry.set(next);
+  turn.endStatus = status;
+  turn.done = true;
+  turn.markSettled();
+  ctx.logger.info(LOG_SCOPE, "dequeued input, continuing with the same ownership", { conversationId, itemId: item.id });
+  // 不 await、必须接 `.catch`：理由同 `startTurn`。
+  void runToCompletion(ctx, next).catch((error: unknown) => {
+    ctx.logger.error(LOG_SCOPE, "turn settle path rejected unexpectedly", {
+      conversationId,
+      error: describeError(error),
+    });
+  });
+  return true;
 }
 
 /**
@@ -311,11 +427,66 @@ async function settleDisplacedTurn(ctx: RuntimeContext, turn: ActiveTurn): Promi
  */
 export async function advance(ctx: RuntimeContext, conversationId: string, opts: { resume?: boolean } = {}): Promise<void> {
   if (ctx.isShuttingDown() || ctx.registry.has(conversationId)) {return;}
-  if (await ledgerEndsWithPendingCalls(ctx.persistence, conversationId)) {
+  const tail = await readLedgerEnd(ctx.persistence, conversationId);
+  if (pendingCallIds(tail).length > 0) {
     if (opts.resume ?? true) {await startResume(ctx, conversationId);}
     return;
   }
+  // 上一轮[交权](../../../../docs/terms.md)了：先接着跑完它，队列里的消息等它收尾再出队。
+  if (needsContinuation(tail)) {
+    await startContinuation(ctx, conversationId);
+    return;
+  }
   await startNextQueued(ctx, conversationId);
+}
+
+/**
+ * 开一轮**接着跑**：上一轮在模型输出段或两步之间交权了，账本末尾是用户消息或工具结果，这一轮不追加任何
+ * 消息、直接调模型（core 的 `continueTurn`）。占位与复查的顺序同 `startResume`。
+ */
+export async function startContinuation(ctx: RuntimeContext, conversationId: string): Promise<"started" | "busy" | "not_needed"> {
+  if (ctx.isShuttingDown() || ctx.registry.has(conversationId)) {return "busy";}
+  const acquired = await ctx.arbitration.acquire(conversationId, {
+    seedSeq: () => ctx.persistence.ledger.maxSeq(conversationId),
+  });
+  if (!acquired.ok) {return "busy";}
+
+  ctx.registry.lastHolder = acquired.grant.holder;
+  const turn = createActiveTurn({
+    conversationId,
+    grant: acquired.grant,
+    input: { text: "" },
+    turnNumber: 1,
+    ...(acquired.takeover !== undefined ? { takeover: acquired.takeover } : {}),
+  });
+  turn.continuation = true;
+  ctx.registry.set(turn);
+
+  // 顶掉了一个过期持有者（接手节点接着跑到一半崩了）：先按崩溃给它那一轮补「已停止」，再看还要不要接着跑——
+  // 补上之后账本末尾不再是交权标记，就不接着跑了，与普通轮、启动扫描碰上崩溃残留时的结局一致。
+  if (turn.takeover !== undefined) {
+    await settleDisplacedTurn(ctx, turn);
+    delete turn.takeover;
+  }
+
+  let still: boolean;
+  try {
+    still = needsContinuation(await readLedgerEnd(ctx.persistence, conversationId));
+  } catch (error) {
+    await backOut(ctx, turn);
+    throw error;
+  }
+  if (!still) {
+    await backOutWaiting(ctx, turn);
+    return "not_needed";
+  }
+
+  publish(ctx, conversationId, { kind: "activity", active: true, ...(acquired.grant.holder !== "" ? { holder: acquired.grant.holder } : {}) });
+  ctx.logger.info(LOG_SCOPE, "continuing a handed-over turn", { conversationId });
+  void runToCompletion(ctx, turn).catch((error: unknown) => {
+    ctx.logger.error(LOG_SCOPE, "continuation turn settle path rejected unexpectedly", { conversationId, error: describeError(error) });
+  });
+  return "started";
 }
 
 type ResumeStartOutcome = "started" | "busy" | "not_suspended" | "nothing_answered";
@@ -371,7 +542,12 @@ export async function startResume(
   }
   const picked = found;
 
-  turn.resume = { callId: picked.callId, settlement: picked.settlement };
+  turn.resume = {
+    callId: picked.callId,
+    settlement: picked.settlement,
+    ...(picked.also !== undefined && picked.also.length > 0 ? { also: picked.also } : {}),
+  };
+  if (picked.stopAfterSettle) {turn.stopAfterSettle = true;}
   turn.input = { text: "", ...(picked.decidedBy !== undefined ? { userId: picked.decidedBy } : {}) };
   publish(ctx, conversationId, { kind: "activity", active: true, ...(acquired.grant.holder !== "" ? { holder: acquired.grant.holder } : {}) });
   ctx.logger.info(LOG_SCOPE, "resuming suspended turn", { conversationId, callId: picked.callId, kind: picked.settlement.kind });
@@ -388,6 +564,10 @@ interface AnsweredCall {
   callId: string;
   settlement: Settlement;
   decidedBy: string | undefined;
+  /** 工具收尾期间用户按了停止：结清之后就停，不再调模型。 */
+  stopAfterSettle: boolean;
+  /** 同一轮里一起结清的另外几条工具收尾。 */
+  also?: { callId: string; outcome: CallOutcome }[];
 }
 
 /**
@@ -401,9 +581,41 @@ async function findAnsweredCall(
   conversationId: string,
   opts: { quiet?: boolean } = {},
 ): Promise<AnsweredCall | "not_suspended" | undefined> {
-  const tail = await readLedgerEnd(ctx.persistence, conversationId);
-  const pending = pendingCallIds(tail);
+  const ledgerTail = await readLedgerEnd(ctx.persistence, conversationId);
+  const pending = pendingCallIds(ledgerTail);
   if (pending.length === 0) {return "not_suspended";}
+  // [工具收尾](../../../../docs/terms.md)先查，而且**全部有结果才开恢复轮、在同一轮里一起结清**（技术方案 §6.2）：
+  // 一次只结清一个的话，剩下的还悬着，这一轮只能以挂起收尾——用户会收到一条「在等你」的通知，其实没有东西要他答。
+  // 审批通过之后、执行到一半被交权的调用，裁决表里也有一行「允许」——拿那一行去恢复会把工具再执行一遍，所以先查收尾。
+  const handedOver = new Set(ledgerTail.at(-1)?.metadata?.handedOver?.callIds ?? []);
+  const fromTails: { callId: string; outcome: CallOutcome }[] = [];
+  let stopAfterSettle = false;
+  for (const callId of pending) {
+    const tail = await ctx.persistence.tails?.get(conversationId, callId);
+    let read: { settlement: Settlement; stopAfterSettle: boolean } | undefined;
+    if (tail !== undefined) {
+      read = await readTailSettlement(ctx, tail);
+      if (read === undefined) {return undefined;} // 还有工具在旧节点上跑：等它
+    } else if (handedOver.has(callId) && (await ctx.persistence.decisions.get(conversationId, callId)) === undefined) {
+      // 交权时交出去了、却没登记上收尾记录（登记那一刻库出错）：没有人会写它的结果，直接记成「结果未知」。
+      read = { settlement: { kind: "error", errorText: TAIL_UNKNOWN_MESSAGE }, stopAfterSettle: false };
+    }
+    if (read === undefined) {continue;}
+    const { settlement } = read;
+    if ((settlement.kind !== "output" && settlement.kind !== "error") || !canResume(ledgerTail, callId, settlement)) {
+      if (opts.quiet !== true) {
+        ctx.logger.warn(LOG_SCOPE, "tool tail result cannot settle its call; skipping", { conversationId, callId });
+      }
+      continue;
+    }
+    fromTails.push({ callId, outcome: settlement });
+    stopAfterSettle ||= read.stopAfterSettle;
+  }
+  const [firstTail, ...otherTails] = fromTails;
+  if (firstTail !== undefined) {
+    return { callId: firstTail.callId, settlement: firstTail.outcome, decidedBy: undefined, stopAfterSettle, also: otherTails };
+  }
+
   for (const callId of pending) {
     const record = await ctx.persistence.decisions.get(conversationId, callId);
     if (record?.decidedAt === undefined) {continue;}
@@ -411,13 +623,13 @@ async function findAnsweredCall(
     // 裁决表里的答案与账本里那个部件对不上（比如自定义工具在审批通过之后又调了
     // `ctx.suspend()`——它没有自己的那一行）：这一条 agent 层恢复不了，跳过，免得每推一把
     // 就起一轮必败的恢复（技术方案 §12 的已知限制）。
-    if (!canResume(tail, callId, settlement)) {
+    if (!canResume(ledgerTail, callId, settlement)) {
       if (opts.quiet !== true) {
         ctx.logger.warn(LOG_SCOPE, "answered call cannot be resumed from its decision record; skipping", { conversationId, callId });
       }
       continue;
     }
-    return { callId, settlement, decidedBy: record.decidedBy };
+    return { callId, settlement, decidedBy: record.decidedBy, stopAfterSettle: false };
   }
   return undefined;
 }
@@ -497,6 +709,13 @@ export async function answerSuspended(
   }
   const settled = await ctx.persistence.decisions.settle(conversationId, callId, settlement);
   if (!settled) {return false;}
+  // 节点在下线：推不动（`advance` 直接返回），答案却已经落库——打[待接手](../../../../docs/terms.md)标记，
+  // 接手节点或定时回捞会接上（技术方案 §3.2 的 G3）。
+  if (ctx.isShuttingDown()) {
+    await markAwaitingTakeover(ctx, conversationId);
+    ctx.handover.handedOff.add(conversationId);
+    return true;
+  }
   await nudge(ctx, conversationId, callId);
   return true;
 }
@@ -545,6 +764,13 @@ export async function startNextQueued(ctx: RuntimeContext, conversationId: strin
     ctx.logger.info(LOG_SCOPE, "shutting down, queued input put back", { conversationId, itemId: item.id });
     return;
   }
+  if (outcome.reason === "unfinished") {
+    const restored = await ctx.persistence.queue.requeueFront(conversationId, item);
+    publish(ctx, conversationId, { kind: "queue", queue: restored });
+    ctx.logger.info(LOG_SCOPE, "previous turn was handed over and not finished yet; queued input put back", { conversationId, itemId: item.id });
+    await startContinuation(ctx, conversationId);
+    return;
+  }
   if (outcome.reason === "awaiting_human") {
     // 挂起中：放回队首，等人答完、恢复轮收尾时再取。这是正常状态，不是故障。
     const restored = await ctx.persistence.queue.requeueFront(conversationId, item);
@@ -572,9 +798,8 @@ export async function enqueue(
   input: TurnInput,
   opts: EnqueueOptions = {},
 ): Promise<EnqueueResult> {
-  if (ctx.isShuttingDown()) {
-    return { mode: "rejected", reason: "shutting_down", message: "The server is shutting down; retry shortly." };
-  }
+  // 节点在下线（[交权](../../../../docs/terms.md)中）：不拒绝，排进队列交给接手节点——对用户来说这条消息照常有效。
+  if (ctx.isShuttingDown()) {return await enqueueWhileLeaving(ctx, conversationId, input);}
 
   const active = ctx.registry.get(conversationId);
   if (active !== undefined) {
@@ -593,6 +818,10 @@ export async function enqueue(
   if (outcome.started) {return { mode: "started" };}
   if (outcome.reason === "shutting_down") {
     return { mode: "rejected", reason: "shutting_down", message: "The server is shutting down; retry shortly." };
+  }
+  if (outcome.reason === "unfinished") {
+    // 上一轮交权了还没接着跑完：这条排队，`enqueueOnly` 的那一脚会先把上一轮接着跑完。
+    return await enqueueOnly(ctx, conversationId, input);
   }
   if (outcome.reason === "awaiting_human") {
     // 挂起中来的新消息排队，等人答完再跑（技术方案 §9.3）。队列关着就只能拒——报 `busy`
@@ -618,6 +847,26 @@ export async function enqueue(
   }
   // `busy`：窄竞态——另一条请求在这两步之间抢先起了一轮。排队是正确回落。
   return await enqueueOnly(ctx, conversationId, input);
+}
+
+/**
+ * 下线期间来的消息：入队、打[待接手](../../../../docs/terms.md)标记、记进这次要交出去的名单；挑到了接手节点就马上请它接手。
+ * 队列关着的只能拒（与平时「在跑、又不许排队」同一个结局）。
+ */
+async function enqueueWhileLeaving(ctx: RuntimeContext, conversationId: string, input: TurnInput): Promise<EnqueueResult> {
+  if (!ctx.queue.enabled) {
+    return { mode: "rejected", reason: "shutting_down", message: "The server is shutting down; retry shortly." };
+  }
+  const result = await ctx.persistence.queue.enqueue(conversationId, input, { max: ctx.queue.max, onFull: ctx.queue.onFull });
+  if (!result.ok) {
+    return { mode: "rejected", reason: "queue_full", message: `The pending queue is full (max ${String(ctx.queue.max)}).` };
+  }
+  publish(ctx, conversationId, { kind: "queue", queue: result.queue });
+  await markAwaitingTakeover(ctx, conversationId);
+  ctx.handover.handedOff.add(conversationId);
+  const target = ctx.handover.target;
+  if (target !== undefined && !ctx.registry.has(conversationId)) {void requestTakeover(ctx, target, [conversationId]);}
+  return { mode: "queued", queued: result.queued, queue: result.queue };
 }
 
 /** 只入队（+ 兜底推进），不尝试起轮。 */

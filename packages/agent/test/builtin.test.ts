@@ -4,10 +4,16 @@
  */
 import { describe, expect, it } from "vitest";
 
-import type { ArbitrationConformanceSetup, ConformanceCase, PersistenceConformanceSetup } from "@runko/conformance";
-import { arbitrationCases, persistenceCases } from "@runko/conformance";
+import type {
+  ArbitrationConformanceSetup,
+  ConformanceCase,
+  NodeRegistryConformanceSetup,
+  PersistenceConformanceSetup,
+  ToolTailConformanceSetup,
+} from "@runko/conformance";
+import { arbitrationCases, nodeRegistryCases, persistenceCases, toolTailCases } from "@runko/conformance";
 import type { Frame } from "../src/index.js";
-import { inProcessArbitration, inProcessStream, memoryPersistence } from "../src/index.js";
+import { inProcessArbitration, inProcessStream, memoryNodeRegistry, memoryPersistence } from "../src/index.js";
 
 // 内置内存实现也要跑一致性套件——它是「换实现不改行为」这个承诺的**基准**，
 // 别的实现全都对着它看齐。同一套用例在 `@runko/conformance`。
@@ -41,6 +47,24 @@ runCases<PersistenceConformanceSetup>("memoryPersistence", persistenceCases, () 
 // **内存版只接「通用」这一组。** 另外两组它给不了——归属表就在自己进程里，没有第二个
 // 节点，也没有「心跳超时」这回事。分组是三个独立数组而不是可选字段，所以这里少接两组
 // 是一目了然的事实陈述，不是静默跳过。
+runCases<ToolTailConformanceSetup>("memoryPersistence · 工具收尾", toolTailCases, () => {
+  const { tails } = memoryPersistence();
+  if (tails === undefined) {throw new Error("memoryPersistence 应当带工具收尾记录");}
+  return { tails };
+});
+
+runCases<NodeRegistryConformanceSetup>("memoryNodeRegistry", nodeRegistryCases, () => {
+  // 进程内没有租约表可数：负载就是这张表，套件造负载时往里加。
+  const loads = new Map<string, number>();
+  return {
+    registry: memoryNodeRegistry({ loadOf: (node) => loads.get(node) ?? 0 }),
+    acquireLoad: (node, count) => {
+      loads.set(node, (loads.get(node) ?? 0) + count);
+      return Promise.resolve();
+    },
+  };
+});
+
 runCases<ArbitrationConformanceSetup>("inProcessArbitration", arbitrationCases, () => ({
   arbitration: inProcessArbitration(),
 }));

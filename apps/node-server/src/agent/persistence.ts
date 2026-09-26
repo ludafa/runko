@@ -8,11 +8,12 @@
  * 想知道这四张表长什么样，看 `@runko/persist-kysely` 的 `schema.sql`。本应用只在两处直接
  * 读它们（会话列表的两个计数，见 `runko-tables.ts`），其余一律走接口。
  */
-import type { Arbitration, Persistence } from '@runko/agent';
+import type { Arbitration, NodeRegistry, Persistence } from '@runko/agent';
 import {
   DEFAULT_TAKEOVER_MS,
   kyselyPersistence,
   leaseArbitration,
+  nodeRegistry,
 } from '@runko/persist-kysely';
 
 import type { Db } from '../db/instance.js';
@@ -50,15 +51,36 @@ export interface ChatArbitrationOptions {
   holder?: string;
 }
 
+/**
+ * 这个进程的名字：配了 `RUNKO_NODE_URL`（多副本时本副本的可达地址）就用它，否则 `local`。
+ * 租约的 `holder` 与[交权](../../../../docs/terms.md)里的节点地址必须是同一个值——接手节点靠它认出
+ * 「这份对话预留给我」。
+ */
+export function resolveNodeName(env: NodeJS.ProcessEnv = process.env): string {
+  const nodeUrl = env.RUNKO_NODE_URL?.trim();
+  return nodeUrl !== undefined && nodeUrl !== '' ? nodeUrl : 'local';
+}
+
+/**
+ * [发布序号](../../../../docs/terms.md)（`RUNKO_RELEASE_SEQ`）：发布流水线每次发布递增，回滚也递增。
+ * 交权时只挑序号不比自己小的节点接手。不配或写错一律当 0。
+ */
+export function readReleaseSeq(env: NodeJS.ProcessEnv = process.env): number {
+  const value = Number(env.RUNKO_RELEASE_SEQ?.trim());
+  return Number.isInteger(value) && value >= 0 ? value : 0;
+}
+
+/** [节点登记表](../../../../docs/terms.md)：与租约表在同一个库里（`agent_nodes`）。 */
+export function createChatNodeRegistry(db: Db): NodeRegistry {
+  return nodeRegistry(db, { flavor });
+}
+
 export function createChatArbitration(
   db: Db,
   opts: ChatArbitrationOptions = {},
   env: NodeJS.ProcessEnv = process.env,
 ): Arbitration {
-  const nodeUrl = env.RUNKO_NODE_URL?.trim();
-  const holder =
-    opts.holder ??
-    (nodeUrl !== undefined && nodeUrl !== '' ? nodeUrl : 'local');
+  const holder = opts.holder ?? resolveNodeName(env);
   // 心跳与接管阈值可调：验证环境要把时间轴压扁（缺省 5 秒 / 60 秒，一个场景要等一分钟）。
   // 不配就用框架的缺省值。
   const heartbeatMs = readMs('RUNKO_HEARTBEAT_MS', env);

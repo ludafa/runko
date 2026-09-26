@@ -103,6 +103,38 @@ describe('summarizeConversation', () => {
     expect(stats.totalTokens).toBe(8);
   });
 
+  it('已交权（handed-over）不计入失败，也不单独计一轮——这一轮由接手节点接着跑，那一轮才算数', () => {
+    const stats = summarizeConversation([
+      turn({
+        status: 'handed-over',
+        handedOver: { callIds: [] },
+        durationMs: 100,
+        usage: { totalTokens: 7 },
+      }),
+      turn({
+        status: 'completed',
+        durationMs: 1000,
+        usage: { totalTokens: 5 },
+      }),
+    ]);
+
+    expect(stats.completedTurns).toBe(1);
+    expect(stats.failedTurns).toBe(0);
+    expect(stats.suspendedTurns).toBe(0);
+  });
+
+  it('整份账本只有 handed-over（还没有接手节点的收尾）：轮数为 0，不算一轮失败', () => {
+    const stats = summarizeConversation([
+      turn({ status: 'handed-over', handedOver: { callIds: [] } }),
+    ]);
+
+    expect(stats).toMatchObject({
+      completedTurns: 0,
+      failedTurns: 0,
+      suspendedTurns: 0,
+    });
+  });
+
   it('没有 metadata.status 的消息（用户消息、进行中的轮）不计入', () => {
     const stats = summarizeConversation([
       { id: 'u1', role: 'user', parts: [] },
@@ -281,5 +313,23 @@ describe('ConversationDetailsDialog — 统计 tab', () => {
     const dialog = await openTab(user, '统计');
 
     expect(within(dialog).getByText(/1 轮失败/)).toBeInTheDocument();
+  });
+
+  it('已交权不标成失败——账本里只有一条 handed-over 和一条 completed 时，只显示「轮数 1」，不出现「失败」字样', async () => {
+    const user = userEvent.setup();
+    render(
+      <ConversationDetailsDialog
+        conversation={conversation()}
+        messages={[
+          turn({ status: 'handed-over', handedOver: { callIds: [] } }),
+          turn({ status: 'completed', durationMs: 100 }),
+        ]}
+      />,
+    );
+
+    const dialog = await openTab(user, '统计');
+
+    expect(within(dialog).getByText('1')).toBeInTheDocument(); // 轮数
+    expect(within(dialog).queryByText(/失败/)).not.toBeInTheDocument();
   });
 });

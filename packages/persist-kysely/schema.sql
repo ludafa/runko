@@ -1,12 +1,15 @@
--- runko 持久化的参考 DDL —— 四张表，三个方言各一份。
+-- runko 持久化的参考 DDL —— 七张表，三个方言各一份。
 --
 -- 两条路都留（见 docs/host/contract/tech/persistence.md §7）：
 --   ① 直接调包导出的 `migrate(db, { flavor })`，它跑的就是下面这些；
 --   ② 想并进自己的迁移体系（drizzle / prisma / flyway / 手写），照抄本文件。
 --
--- ⚠️ **`migrate()` 只做首建，不做 schema 演进**：四张表都是 `IF NOT EXISTS`，表已经
+-- ⚠️ **`migrate()` 只做首建，不做 schema 演进**：七张表都是 `IF NOT EXISTS`，表已经
 -- 存在时它是彻底的 no-op，不会改列、加列或改排序规则。后续版本若动了 schema，老库
 -- 必须由宿主自己出一次迁移——本包不带版本表、不记 migration 历史。
+--
+-- `agent_handover` 独立于 `agent_leases`（不给租约表加列）：`migrate()` 的承诺是只建表
+-- 不改表，老库上的租约表永远补不上新列，新建一张表就没有这个问题。
 --
 -- ⚠️ **不能并发调**：Postgres 上多个实例同时跑 `CREATE TABLE IF NOT EXISTS` 会撞
 -- `pg_type` 的唯一索引报重复键（Postgres 已知行为）。幂等 ≠ 可并发。
@@ -58,6 +61,37 @@ CREATE TABLE IF NOT EXISTS agent_leases (
   CONSTRAINT agent_leases_pk PRIMARY KEY (conversation_id)
 );
 
+CREATE TABLE IF NOT EXISTS agent_handover (
+  conversation_id   varchar(255) NOT NULL,
+  reserved_for      varchar(255),
+  reserved_until    integer,
+  awaiting_takeover integer      NOT NULL DEFAULT 0,
+  updated_at        integer      NOT NULL,
+  CONSTRAINT agent_handover_pk PRIMARY KEY (conversation_id)
+);
+
+CREATE TABLE IF NOT EXISTS agent_nodes (
+  node         varchar(255) NOT NULL,
+  release_seq  integer      NOT NULL,
+  state        varchar(32)  NOT NULL,
+  heartbeat_at integer      NOT NULL,
+  started_at   integer      NOT NULL,
+  CONSTRAINT agent_nodes_pk PRIMARY KEY (node)
+);
+
+CREATE TABLE IF NOT EXISTS agent_tool_tails (
+  conversation_id varchar(255) NOT NULL,
+  tool_call_id    varchar(255) NOT NULL,
+  tool_name       varchar(255) NOT NULL,
+  runner          varchar(255) NOT NULL,
+  started_at      integer      NOT NULL,
+  deadline        integer      NOT NULL,
+  outcome         text,
+  settled_at      integer,
+  stop_requested  integer      NOT NULL DEFAULT 0,
+  CONSTRAINT agent_tool_tails_pk PRIMARY KEY (conversation_id, tool_call_id)
+);
+
 -- ===========================================================================
 -- PostgreSQL
 -- ===========================================================================
@@ -102,6 +136,37 @@ CREATE TABLE IF NOT EXISTS agent_leases (
   heartbeat_at    bigint       NOT NULL,
   acquired_at     bigint       NOT NULL,
   CONSTRAINT agent_leases_pk PRIMARY KEY (conversation_id)
+);
+
+CREATE TABLE IF NOT EXISTS agent_handover (
+  conversation_id   varchar(255) NOT NULL,
+  reserved_for      varchar(255),
+  reserved_until    bigint,
+  awaiting_takeover bigint       NOT NULL DEFAULT 0,
+  updated_at        bigint       NOT NULL,
+  CONSTRAINT agent_handover_pk PRIMARY KEY (conversation_id)
+);
+
+CREATE TABLE IF NOT EXISTS agent_nodes (
+  node         varchar(255) NOT NULL,
+  release_seq  bigint       NOT NULL,
+  state        varchar(32)  NOT NULL,
+  heartbeat_at bigint       NOT NULL,
+  started_at   bigint       NOT NULL,
+  CONSTRAINT agent_nodes_pk PRIMARY KEY (node)
+);
+
+CREATE TABLE IF NOT EXISTS agent_tool_tails (
+  conversation_id varchar(255) NOT NULL,
+  tool_call_id    varchar(255) NOT NULL,
+  tool_name       varchar(255) NOT NULL,
+  runner          varchar(255) NOT NULL,
+  started_at      bigint       NOT NULL,
+  deadline        bigint       NOT NULL,
+  outcome         jsonb,
+  settled_at      bigint,
+  stop_requested  bigint       NOT NULL DEFAULT 0,
+  CONSTRAINT agent_tool_tails_pk PRIMARY KEY (conversation_id, tool_call_id)
 );
 
 -- ===========================================================================
@@ -152,4 +217,35 @@ CREATE TABLE IF NOT EXISTS agent_leases (
   heartbeat_at    bigint       NOT NULL,
   acquired_at     bigint       NOT NULL,
   CONSTRAINT agent_leases_pk PRIMARY KEY (conversation_id)
+);
+
+CREATE TABLE IF NOT EXISTS agent_handover (
+  conversation_id   varchar(255) COLLATE utf8mb4_bin NOT NULL,
+  reserved_for      varchar(255),
+  reserved_until    bigint,
+  awaiting_takeover bigint       NOT NULL DEFAULT 0,
+  updated_at        bigint       NOT NULL,
+  CONSTRAINT agent_handover_pk PRIMARY KEY (conversation_id)
+);
+
+CREATE TABLE IF NOT EXISTS agent_nodes (
+  node         varchar(255) COLLATE utf8mb4_bin NOT NULL,
+  release_seq  bigint       NOT NULL,
+  state        varchar(32)  NOT NULL,
+  heartbeat_at bigint       NOT NULL,
+  started_at   bigint       NOT NULL,
+  CONSTRAINT agent_nodes_pk PRIMARY KEY (node)
+);
+
+CREATE TABLE IF NOT EXISTS agent_tool_tails (
+  conversation_id varchar(255) COLLATE utf8mb4_bin NOT NULL,
+  tool_call_id    varchar(255) COLLATE utf8mb4_bin NOT NULL,
+  tool_name       varchar(255) NOT NULL,
+  runner          varchar(255) NOT NULL,
+  started_at      bigint       NOT NULL,
+  deadline        bigint       NOT NULL,
+  outcome         json,
+  settled_at      bigint,
+  stop_requested  bigint       NOT NULL DEFAULT 0,
+  CONSTRAINT agent_tool_tails_pk PRIMARY KEY (conversation_id, tool_call_id)
 );

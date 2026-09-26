@@ -128,9 +128,29 @@ export function mongoArbitration(db: Db, opts: MongoArbitrationOptions): Arbitra
   const isLive = (doc: Pick<LeaseDoc, "holder" | "leaseToken" | "heartbeatAt">, at: number): boolean =>
     doc.leaseToken !== null && at - doc.heartbeatAt <= takeoverMs && !isMyOrphan(doc);
 
+  /**
+   * [交接预留](../../../docs/terms.md)还有效吗——`reservedUntil` 缺席或已过 = 没有预留，
+   * 退化成「没人持有」。返回预留给谁，`undefined` = 没有有效预留。
+   */
+  const activeReservedFor = (
+    doc: Pick<LeaseDoc, "reservedFor" | "reservedUntil"> | null,
+    at: number,
+  ): string | undefined => {
+    if (doc === null || doc.reservedFor === null || doc.reservedUntil === null) {return undefined;}
+    return doc.reservedUntil > at ? doc.reservedFor : undefined;
+  };
+
   async function acquire(conversationId: string, ctx: AcquireContext): Promise<AcquireResult> {
     const at = now();
     const existing = await col.findOne({ _id: conversationId });
+
+    // 有效预留只放行被预留者——**不调 `seedSeq`**（契约要求它是惰性的）。持有中的会话
+    // 不会同时有有效预留（`releaseTo` 放手与写预留是同一次 CAS），所以这条判断放在
+    // 「有人持有」的快路之前不会误伤正常持有者。
+    const reservedFor = activeReservedFor(existing, at);
+    if (reservedFor !== undefined && reservedFor !== opts.holder) {
+      return { ok: false, reason: "busy", holder: reservedFor };
+    }
 
     // 快路：有人持有且还活着 → 直接报 busy，**不调 `seedSeq`**（契约要求它是惰性的：
     // 抢不到归属时不该白查一次账本）。这一步只是优化，真正的原子性在下面那条 CAS。
@@ -158,16 +178,31 @@ export function mongoArbitration(db: Db, opts: MongoArbitrationOptions): Arbitra
           seqWatermark: watermark,
           heartbeatAt: 0,
           acquiredAt: at,
+          reservedFor: null,
+          reservedUntil: null,
+          awaitingTakeover: false,
         });
       } catch (error: unknown) {
         if (!isDuplicateKeyError(error)) {
           throw error;
         }
       }
+    } else if (existing.seqWatermark === null) {
+      // 文档已经存在，但水位还没播种——只有 `markAwaitingTakeover` 会垫出这种文档
+      // （这个会话打过待接手标记，却从没有被真正 `acquire` 过）。这里补种一次。
+      //
+      // 条件更新（`seqWatermark: null` 才写得进）避免并发下重复播种：账本在这段时间
+      // 不会有并发写，两边算出的水位理应一致，谁先写谁赢，另一边的更新落空也不算错。
+      const watermark = await ctx.seedSeq();
+      await col.updateOne({ _id: conversationId, seqWatermark: null }, { $set: { seqWatermark: watermark } });
     }
 
-    // **决胜负的就是这一条。** 只有「没人持有」或「持有者已超时」才让抢；`seqWatermark`
-    // 刻意不动——抢占一个已有的会话时重播水位会让 seq 倒退，撞上账本里已有的行。
+    // **决胜负的就是这一条。** 只有「没人持有」或「持有者已超时」才让抢，**且没有别人的
+    // 有效预留**（`reservedFor` 为空、或就是我自己、或已经过期）；`seqWatermark` 刻意不动
+    // ——抢占一个已有的会话时重播水位会让 seq 倒退，撞上账本里已有的行。
+    //
+    // 抢到之后顺手把预留清掉（`$set` 里的 `reservedFor/reservedUntil: null`）：这一步与
+    // 「放手」在 SQL 那几家要开一个事务，这里免费——findOneAndUpdate 本来就是单文档 CAS。
     //
     // 返回非 `null` 就是抢到了：这份文档是**这一次原子更新之后**的样子，令牌一定是我的，
     // 不需要再读回来比对（SQL 那一档那一步是为了绕开 MySQL 的 affectedRows）。
@@ -175,14 +210,30 @@ export function mongoArbitration(db: Db, opts: MongoArbitrationOptions): Arbitra
       {
         _id: conversationId,
         $or: [{ leaseToken: null }, ...staleOr(at)],
+        // 第二个顶层条件——MongoDB 把同一个 filter 对象里的多个顶层键隐式 AND 起来，
+        // `$or` 与 `$and` 是两个不同的键，可以并排写，不用手工套一层 `$and`。
+        $and: [{ $or: [{ reservedFor: null }, { reservedFor: opts.holder }, { reservedUntil: { $lte: at } }] }],
       },
-      { $set: { holder: opts.holder, leaseToken: token, heartbeatAt: at, acquiredAt: at } },
+      {
+        $set: {
+          holder: opts.holder,
+          leaseToken: token,
+          heartbeatAt: at,
+          acquiredAt: at,
+          reservedFor: null,
+          reservedUntil: null,
+        },
+      },
       { returnDocument: "after" },
     );
 
     if (won === null) {
-      // 没抢到——并发下另一个副本比我们快。报 busy 并带上**当前**持有者。
-      const current = await col.findOne({ _id: conversationId }, { projection: { holder: 1 } });
+      // 没抢到——可能是被别的副本抢先，也可能是被预留挡住了。重新问一次决定报给谁。
+      const current = await col.findOne({ _id: conversationId });
+      const blockedBy = activeReservedFor(current, now());
+      if (blockedBy !== undefined && blockedBy !== opts.holder) {
+        return { ok: false, reason: "busy", holder: blockedBy };
+      }
       return { ok: false, reason: "busy", holder: current?.holder ?? undefined };
     }
 
@@ -314,7 +365,9 @@ export function mongoArbitration(db: Db, opts: MongoArbitrationOptions): Arbitra
               { $inc: { seqWatermark: 1 }, $set: { heartbeatAt: beatAt } },
               { returnDocument: "after" },
             );
-            if (doc === null) {
+            if (doc === null || doc.seqWatermark === null) {
+              // 后一种情况理论上不该发生（`acquire` 保证抢到手时水位已经播种），
+              // 但类型上仍是 `number | null`；真出现就当成失去归属处理，不硬转类型。
               lose();
               return { ok: false, reason: "lost_ownership" };
             }
@@ -339,6 +392,19 @@ export function mongoArbitration(db: Db, opts: MongoArbitrationOptions): Arbitra
           { $set: { holder: null, leaseToken: null } },
         );
       },
+      async releaseTo(node: string, handoverOpts: { ttlMs: number }): Promise<void> {
+        if (released) {return;}
+        released = true;
+        clearInterval(timer);
+        const at = now();
+        // 单文档更新天然原子——放手与写预留在同一次 CAS 里完成，不像 SQL 那几家要开
+        // 一个跨表事务。`leaseToken: token` 这个条件保住了「只在还持有时生效」：不是
+        // 我的令牌了，这条就匹配不到，安静地什么都不做（跟 `release()` 一个道理）。
+        await col.updateOne(
+          { _id: conversationId, leaseToken: token },
+          { $set: { holder: null, leaseToken: null, reservedFor: node, reservedUntil: at + handoverOpts.ttlMs } },
+        );
+      },
     };
   }
 
@@ -346,9 +412,17 @@ export function mongoArbitration(db: Db, opts: MongoArbitrationOptions): Arbitra
     acquire,
 
     async inspect(conversationId: string): Promise<OwnershipInfo> {
+      const at = now();
       const doc = await col.findOne({ _id: conversationId });
-      if (doc === null || !isLive(doc, now())) {return { held: false };}
-      return { held: true, ...(doc.holder !== null ? { holder: doc.holder } : {}) };
+      if (doc !== null && isLive(doc, at)) {
+        return { held: true, ...(doc.holder !== null ? { holder: doc.holder } : {}) };
+      }
+      // 没有活着的持有者——看是不是还有一份有效的交接预留，有就报给接入层转发。
+      // `reserved: true` 标记「没人真持有」，供被预留的节点分辨这份对话正要交给我，
+      // 而不是我自己刚放掉的租约（见 `OwnershipInfo.reserved` 的注释）。
+      const reservedFor = activeReservedFor(doc, at);
+      if (reservedFor !== undefined) {return { held: true, holder: reservedFor, reserved: true };}
+      return { held: false };
     },
 
     /**
@@ -384,6 +458,67 @@ export function mongoArbitration(db: Db, opts: MongoArbitrationOptions): Arbitra
         { _id: conversationId, $or: staleOr(now()) },
         { $set: { holder: null, leaseToken: null } },
       );
+    },
+
+    /**
+     * 打[待接手](../../../docs/terms.md)标记。幂等，行不存在也要能打——`upsert` 补一份
+     * 「没人持有」的空租约。
+     *
+     * **`seqWatermark` 垫成 `null`，不是 0**：这份文档从没被真正 `acquire` 过，水位还没从
+     * 账本问过。写死成 0 会让下一次 `acquire()` 误以为已经播种、跳过 `seedSeq()`，发号从 1
+     * 开始，跟账本里已有的 seq 撞车。`acquire()` 见到 `null` 会自己补种。
+     */
+    async markAwaitingTakeover(conversationId: string): Promise<void> {
+      await col.updateOne(
+        { _id: conversationId },
+        {
+          $set: { awaitingTakeover: true },
+          $setOnInsert: {
+            holder: null,
+            leaseToken: null,
+            seqWatermark: null,
+            heartbeatAt: 0,
+            acquiredAt: now(),
+            reservedFor: null,
+            reservedUntil: null,
+          },
+        },
+        { upsert: true },
+      );
+    },
+
+    /** 撤掉待接手标记。幂等：文档本来就不存在时是 no-op（不 upsert）。 */
+    async clearAwaitingTakeover(conversationId: string): Promise<void> {
+      await col.updateOne({ _id: conversationId }, { $set: { awaitingTakeover: false } });
+    },
+
+    /**
+     * [定时回捞](../../../docs/terms.md)候选：只看打了待接手标记的那些，排除掉「有活着的
+     * 持有者」与「有有效预留」——那两种已经有人会推，回捞抢了没意义。
+     *
+     * **候选不看待发队列是不是空的。** 队列不空不等于卡住——在等人答复、按设计排着后续
+     * 消息的对话，队列也不空，但永远推不动，会白白占满每次的 `limit`，挤掉真正卡住（打了
+     * 待接手标记）的那些。真正需要回捞推一把的队列，框架会在崩溃恢复、下线交接时主动打上
+     * 待接手标记，不需要这里再兜底扫队列。
+     */
+    async listSweepCandidates(sweepOpts: { limit: number }): Promise<string[]> {
+      const at = now();
+      const awaiting = await col.find({ awaitingTakeover: true }, { projection: { _id: 1 } }).toArray();
+      const candidateIds = awaiting.map((doc) => doc._id);
+      if (candidateIds.length === 0) {return [];}
+
+      const docs = await col.find({ _id: { $in: candidateIds } }).toArray();
+      const byId = new Map(docs.map((doc) => [doc._id, doc]));
+
+      const result: string[] = [];
+      for (const id of candidateIds) {
+        if (result.length >= sweepOpts.limit) {break;}
+        const doc = byId.get(id) ?? null;
+        if (doc !== null && isLive(doc, at)) {continue;}
+        if (activeReservedFor(doc, at) !== undefined) {continue;}
+        result.push(id);
+      }
+      return result;
     },
   };
 }

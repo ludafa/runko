@@ -32,11 +32,10 @@ const USER_ID = 'user-1';
 
 type ChatEnv = { Variables: { userId: string } };
 
-/** 起一个真服务器，把 WebSocket 路由挂上去，带一个可控的下线信号。 */
+/** 起一个真服务器，把 WebSocket 路由挂上去。 */
 function startServer(
   db: Db,
   runtime: Parameters<typeof createChatWsApp>[0]['runtime'],
-  offlineSignal: AbortSignal,
 ) {
   const app = new Hono<ChatEnv>();
   const { upgradeWebSocket, injectWebSocket } = createNodeWebSocket({ app });
@@ -51,7 +50,6 @@ function startServer(
       }),
       upgradeWebSocket,
       toWire: toWireFrame,
-      offlineSignal,
       logger: silentLogger,
     }),
   );
@@ -93,7 +91,7 @@ function collect(url: string): {
   return { ready, done };
 }
 
-describe('节点下线：WebSocket 直播随 offlineSignal 以 1012 关闭', () => {
+describe('节点下线：WebSocket 直播收到请重连帧、以 1012 关闭', () => {
   let db: Db;
   let stop: (() => Promise<void>) | undefined;
 
@@ -121,7 +119,7 @@ describe('节点下线：WebSocket 直播随 offlineSignal 以 1012 关闭', () 
     });
   }
 
-  it('下线信号触发：连接以 1012（服务重启）关掉——即便那一轮还在跑、连接正开着', async () => {
+  it('交权之后：先收到 {reconnect:true}，再以 1012（服务重启）关掉——即便那一轮还没收尾', async () => {
     const sessions = createFakeSessions();
     const { runtime } = build(sessions);
     await createConversation(db, {
@@ -134,7 +132,7 @@ describe('节点下线：WebSocket 直播随 offlineSignal 以 1012 关闭', () 
       provider: 'local',
     });
     // 先起一轮，让连接连上之后真的卡在「等下一个 chunk」上——不然没有轮在跑时订阅
-    // 几毫秒内就自己回放完收线，offline 信号根本来不及赶在它前面。
+    // 几毫秒内就自己回放完收线，请重连帧根本来不及赶在它前面。
     expect(
       (await runtime.enqueue('conv-offline', { text: 'hi', userId: USER_ID }))
         .mode,
@@ -142,21 +140,21 @@ describe('节点下线：WebSocket 直播随 offlineSignal 以 1012 关闭', () 
     const session = await sessions.next();
     await session.started;
 
-    const controller = new AbortController();
-    const server = startServer(db, runtime, controller.signal);
+    const server = startServer(db, runtime);
     stop = server.close;
 
     const client = collect(
       `${server.url}/api/chat/conversations/conv-offline/ws`,
     );
     await client.ready;
-    controller.abort();
-    const { code } = await client.done;
+    // 假 session 不理交权信号：宽限期一到，框架照样踢掉本进程的订阅。
+    const shutdown = runtime.shutdown({ graceMs: 50 });
+    const { code, messages } = await client.done;
 
     expect(code).toBe(1012);
+    expect(messages.at(-1)).toBe(JSON.stringify({ reconnect: true }));
 
-    // 收尾：把这一轮跑完，别把假 session 悬在测试进程里（下线信号只关了这条直播连接，
-    // 没有中止那一轮本身）。
+    // 收尾：把这一轮跑完，别把假 session 悬在测试进程里。
     session.emit({ type: 'finish' });
     session.push({
       id: 'a-1',
@@ -169,9 +167,10 @@ describe('节点下线：WebSocket 直播随 offlineSignal 以 1012 关闭', () 
       messageMetadata: { turn: 1, usage: {}, status: 'completed' },
     });
     session.finish();
+    await shutdown;
   });
 
-  it('没有触发下线信号：正常收尾走 1000，不是 1012', async () => {
+  it('没有下线：正常收尾走 1000，不是 1012', async () => {
     const { runtime } = build();
     await createConversation(db, {
       id: 'conv-normal',
@@ -182,8 +181,7 @@ describe('节点下线：WebSocket 直播随 offlineSignal 以 1012 关闭', () 
       sandboxName: 'runko-chat-conv-normal',
       provider: 'local',
     });
-    const controller = new AbortController(); // 永不 abort
-    const server = startServer(db, runtime, controller.signal);
+    const server = startServer(db, runtime);
     stop = server.close;
 
     const client = collect(

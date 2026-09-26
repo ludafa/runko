@@ -65,12 +65,21 @@ import {
 } from './api';
 import { MessageLedger } from './materialize';
 import type { ChatReplayFrame, QueuedMessage } from './schema';
-import { frameSeq, isQueueFrame, isTurnStateFrame } from './schema';
+import {
+  frameSeq,
+  isQueueFrame,
+  isReconnectFrame,
+  isTurnStateFrame,
+} from './schema';
 import type { PendingUserEcho } from './timeline';
 import { findWaitingCallIds } from './timeline';
 import type { ChatTransport } from './transport';
 import { useChatTransport } from './transport';
-import { streamConversationTailWs } from './ws';
+import {
+  ChatWebSocketError,
+  CLOSE_SERVICE_RESTART,
+  streamConversationTailWs,
+} from './ws';
 
 export type ChatTurnStatus = 'idle' | 'streaming' | 'error';
 
@@ -143,9 +152,18 @@ export interface UseChatMessagesResult {
   submitAnswer: (callId: string, answer: string) => void;
 }
 
-/** 直播流重连的指数退避——1s、2s、4s、8s、16s，然后安静放弃。 */
+/** 直播流重连的指数退避——1s、2s、4s、8s、16s，然后安静放弃。真正的断线（没收到[请重连帧](../../../../../docs/terms.md)就断了）走这一条。 */
 const TAIL_RECONNECT_BASE_DELAY_MS = 1000;
 const TAIL_RECONNECT_MAX_ATTEMPTS = 5;
+
+/**
+ * [快速重连](../../../../../docs/terms.md)（docs/logic/orchestration/tech/handover.md §8）：收到
+ * [请重连帧](../../../../../docs/terms.md)、或 WebSocket 以 1012 关闭时，**不走**上面那套指数
+ * 退避——每隔这么久马上再试一次。
+ */
+const FAST_RECONNECT_INTERVAL_MS = 250;
+/** 快速重连最多试这么久；用完了还没连上，退回原有的指数退避（从头计数）。 */
+const FAST_RECONNECT_WINDOW_MS = 10_000;
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
@@ -240,6 +258,29 @@ export function useChatMessages(
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
+  /**
+   * 收到[请重连帧](../../../../../docs/terms.md)（或 WS 以 1012 关闭）时，置为
+   * `Date.now() + FAST_RECONNECT_WINDOW_MS`；`maybeReconnect` 据此判定这次重连要不要
+   * 走[快速重连](../../../../../docs/terms.md)而不是指数退避。`undefined` = 没有这回事，
+   * 走原有退避。
+   */
+  const fastReconnectDeadlineRef = useRef<number | undefined>(undefined);
+  /**
+   * `maybeReconnect()` 判定要真正重新打开一条 tail 连接时（快速重连或指数退避，两条
+   * 路都会）置真，`startTail()` 里在接新连接的帧之前消费并复位。
+   *
+   * 只在**重连**时置真——`sendMessage`/`followResumedTurn`/挂起排队那几处主动
+   * `openTail()` 不走这里：那些是**上一轮已经收尾之后**为一轮全新的对话开连接，
+   * 上一轮没来得及落地的草稿本来就不会再被更新，丢了就是真丢，不能碰。
+   *
+   * 覆盖两种情形：① `onTurnEnd` 已经确认过「模型输出段被交权」（那次已经立刻丢过一次，
+   * 这里防的是请重连帧到达前，这条连接自己先意外断线重连的窄窗口）；② 那条
+   * `handed-over` 的 metadata 发出的那一刻连接正好断着，客户端从未见过它——这两种都
+   * 一样：接手节点接着调模型是**新开一条**assistant 消息（旧的半截字不会再更新），
+   * 而同节点上真正的网络抖动重连，服务端会把当前草稿按原 id 重发、`upsert()` 自然
+   * 覆盖——所以「重连一律先丢一次手上的草稿」在这两种情形下都不会丢真实内容。
+   */
+  const discardDraftOnNextReconnectRef = useRef(false);
 
   // 只有带 seq（已落盘）的帧才做去重簿记（docs/logic/orchestration/tech/single-ledger.md §5 单-3）。
   // 一次性的 `ChunkEnvelope` 没有 `seq` 可以拿来去重，也不需要——它不会像落盘帧那样
@@ -318,10 +359,30 @@ export function useChatMessages(
       },
       (metadata) => {
         reconnectAttemptRef.current = 0;
-        setError(errorFromTurnEnd(metadata));
         // 这一轮真的停住了（或自己收尾了）——「正在停」的中间态到此结束。放在下面
         // 那个「队列非空则保持 streaming」的提前 return 之前，两条路都要复位。
         setStopping(false);
+
+        // [已交权](../../../../../docs/terms.md)：这一轮没结束，别的节点接着跑——不报错、
+        // 不落回 idle，保持 `streaming`，等新节点的帧接上（docs/logic/orchestration/tech/handover.md §6）。
+        // `handedOver.callIds` 为空 = 模型输出段被交权，那半段字要被接手节点重新生成的
+        // 内容整体替换，这里立刻丢掉（`materialize.ts` `replaceDraft` 的注释）；非空 = 工具段
+        // 被交权，账本末尾那次悬空调用是真实状态，留给接手节点结清，不能当草稿丢。
+        if (metadata.status === 'handed-over') {
+          if ((metadata.handedOver?.callIds.length ?? 0) === 0) {
+            // 立刻丢一次——这里就是「草稿变成成品」的分界点，减少请重连帧到达之前
+            // 那几十到几百毫秒里界面停留在半截字上的时间。就算这条连接在这之后、
+            // 请重连帧到达之前意外断线，下一次真正重连时 `startTail()` 也会兜底
+            // 再丢一次（见 `discardDraftOnNextReconnectRef` 的注释）。
+            ledgerRef.current?.replaceDraft();
+          }
+          turnInProgressRef.current = true;
+          setStatus('streaming');
+          setAwaitingFirstEvent(true);
+          return;
+        }
+
+        setError(errorFromTurnEnd(metadata));
 
         // [待发队列](../../../../../docs/terms.md)非空 = 服务端**必然**会自动
         // [出队](../../../../../docs/terms.md)起下一轮（docs/logic/orchestration/tech/steer-and-queue.md §5.1，
@@ -360,12 +421,17 @@ export function useChatMessages(
     );
     ledgerRef.current = ledger;
     for (const frame of initialFrames) {
-      // 两种状态快照帧都不属于账本（`QueueFrame`，docs/logic/orchestration/tech/steer-and-queue.md §4.3；
-      // [轮状态快照](../../../../../docs/terms.md)，docs/ingress/tech/chat-webapp.md §5.1）
-      // ——跳过，不喂 `MessageLedger`。队列快照对状态的贡献已经在 `queuedMessages` 的
-      // 初值里算过了（见上）；轮状态快照根本不会出现在 `initialFrames` 里（`GET .../messages`
-      // 只回放持久行，它只走直播流），这里跳过它纯粹是让类型收窄在一处说清。
-      if (isQueueFrame(frame) || isTurnStateFrame(frame)) {
+      // 三种非账本帧都跳过、不喂 `MessageLedger`（`QueueFrame`，docs/logic/orchestration/tech/steer-and-queue.md §4.3；
+      // [轮状态快照](../../../../../docs/terms.md)，docs/ingress/tech/chat-webapp.md §5.1；
+      // [请重连帧](../../../../../docs/terms.md)，docs/logic/orchestration/tech/handover.md §8）。队列快照对状态的
+      // 贡献已经在 `queuedMessages` 的初值里算过了（见上）；轮状态快照与请重连帧都根本不会
+      // 出现在 `initialFrames` 里（`GET .../messages` 只回放持久行，它们只走直播流），这里
+      // 跳过纯粹是让类型收窄在一处说清。
+      if (
+        isQueueFrame(frame) ||
+        isTurnStateFrame(frame) ||
+        isReconnectFrame(frame)
+      ) {
         continue;
       }
       ledger.applyFrame(frame);
@@ -382,6 +448,15 @@ export function useChatMessages(
       }
       if (isTurnStateFrame(frame)) {
         applyTurnState(frame.turnActive);
+        return;
+      }
+      if (isReconnectFrame(frame)) {
+        // [请重连帧](../../../../../docs/terms.md)：这条连接要关了，新持有者已经接手——
+        // 开一扇[快速重连](../../../../../docs/terms.md)窗口，`maybeReconnect` 据此跳过
+        // 指数退避（docs/logic/orchestration/tech/handover.md §8）。它是这条连接的最后一帧，
+        // 服务端发完就会自己关掉，用不着这里主动断。
+        fastReconnectDeadlineRef.current =
+          Date.now() + FAST_RECONNECT_WINDOW_MS;
         return;
       }
       const seq = frame.seq;
@@ -413,6 +488,13 @@ export function useChatMessages(
   const openTailRef = useRef<() => void>(() => undefined);
 
   function startTail(): void {
+    // `maybeReconnect()` 判定要重连时已经置真——见 `discardDraftOnNextReconnectRef`
+    // 的注释：这里在真正（重）开连接、接住新连接的帧之前丢一次手上的草稿。
+    if (discardDraftOnNextReconnectRef.current) {
+      discardDraftOnNextReconnectRef.current = false;
+      ledgerRef.current?.replaceDraft();
+    }
+
     tailAbortRef.current?.abort();
     const controller = new AbortController();
     tailAbortRef.current = controller;
@@ -426,6 +508,23 @@ export function useChatMessages(
       if (!turnInProgressRef.current) {
         return;
       }
+
+      // [快速重连](../../../../../docs/terms.md)：收到过请重连帧（或 WS 以 1012 关闭），
+      // 窗口没过期就不走下面的指数退避，隔 `FAST_RECONNECT_INTERVAL_MS` 直接再试。
+      const fastDeadline = fastReconnectDeadlineRef.current;
+      if (fastDeadline !== undefined) {
+        if (Date.now() < fastDeadline) {
+          discardDraftOnNextReconnectRef.current = true;
+          reconnectTimeoutRef.current = setTimeout(() => {
+            openTailRef.current();
+          }, FAST_RECONNECT_INTERVAL_MS);
+          return;
+        }
+        // 窗口用完还没连上——退回原有的退避逻辑，从头计数。
+        fastReconnectDeadlineRef.current = undefined;
+        reconnectAttemptRef.current = 0;
+      }
+
       // 退避次数用完，安静放弃
       if (reconnectAttemptRef.current >= TAIL_RECONNECT_MAX_ATTEMPTS) {
         return;
@@ -433,16 +532,31 @@ export function useChatMessages(
       const attempt = reconnectAttemptRef.current;
       reconnectAttemptRef.current += 1;
       const delay = TAIL_RECONNECT_BASE_DELAY_MS * 2 ** attempt;
+      discardDraftOnNextReconnectRef.current = true;
       reconnectTimeoutRef.current = setTimeout(() => {
         openTailRef.current();
       }, delay);
+    }
+
+    // 这条连接是否已经收到过第一帧——收到就说明这次（重）连成功了，结束[快速重连]
+    // (../../../../../docs/terms.md)窗口，回到「只有真断线才 250ms 重试」的姿态。
+    // 不然窗口只在到期时才清（见 `fastReconnectDeadlineRef` 的注释）：一次成功的
+    // 重连并不会替我们把它关掉，窗口剩下的时间里，哪怕是完全正常的收线/断线也会被
+    // 当成快速重连、每 250ms 重试一次。
+    let receivedFirstFrame = false;
+    function handleFrame(frame: ChatReplayFrame): void {
+      if (!receivedFirstFrame) {
+        receivedFirstFrame = true;
+        fastReconnectDeadlineRef.current = undefined;
+      }
+      applyFrame(frame);
     }
 
     // 每次（重）连都现读一次用户的选择：设置页一改，下一次连接就换通道。
     streamerFor(transport)(
       conversationId,
       lastSeqRef.current,
-      { onFrame: applyFrame },
+      { onFrame: handleFrame },
       controller.signal,
     )
       .then(() => {
@@ -452,6 +566,16 @@ export function useChatMessages(
         // 主动取消/卸载/被顶替，不是掉线
         if (isAbortError(tailError)) {
           return;
+        }
+        // WebSocket 专属：以[请重连帧](../../../../../docs/terms.md)之后的关闭码收尾，
+        // 与收到那一帧本身同等对待（它前面理应已经收到过那一帧，这里是双保险，
+        // 见 `ws.ts` `CLOSE_SERVICE_RESTART` 的注释）。
+        if (
+          tailError instanceof ChatWebSocketError &&
+          tailError.code === CLOSE_SERVICE_RESTART
+        ) {
+          fastReconnectDeadlineRef.current =
+            Date.now() + FAST_RECONNECT_WINDOW_MS;
         }
         maybeReconnect();
       });

@@ -283,6 +283,175 @@ describe('postQuestionAnswer', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// 503 自动重试（[节点下线](../../../../../../docs/terms.md)窗口）——发消息、停止、提交
+// 审批/提问答复这几个请求可能撞上一个正在关闭的节点，服务端约定回 503 时请求一定
+// 没被处理，按 `Retry-After` 重发是安全的。用 `postChatMessage` 覆盖通用行为
+// （等待时长、缺省/非法 Retry-After、重试次数上限、504 不重试），其余三个各留一条
+// 用例确认它们也走了这条重试路径。
+// ---------------------------------------------------------------------------
+
+describe('POST 请求的 503 自动重试', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('503 带 Retry-After（秒）时按这个时长等一下再重发，成功就正常 resolve', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response('node is going offline', {
+          status: 503,
+          headers: { 'Retry-After': '2' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, mode: 'started' }), {
+          status: 202,
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const promise = postChatMessage('sess_1', 'hello');
+    await vi.advanceTimersByTimeAsync(1900);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // 还没到 2 秒，不该已经重发
+
+    await vi.advanceTimersByTimeAsync(200);
+    await expect(promise).resolves.toBe('started');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('503 没带 Retry-After 时缺省等 1 秒', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('offline', { status: 503 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, mode: 'started' }), {
+          status: 202,
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const promise = postChatMessage('sess_1', 'hello');
+    await vi.advanceTimersByTimeAsync(900);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(200);
+    await expect(promise).resolves.toBe('started');
+  });
+
+  it('Retry-After 不是合法的非负数时，同样退回缺省的 1 秒', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response('offline', {
+          status: 503,
+          headers: { 'Retry-After': 'not-a-number' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, mode: 'started' }), {
+          status: 202,
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const promise = postChatMessage('sess_1', 'hello');
+    await vi.advanceTimersByTimeAsync(1000);
+    await expect(promise).resolves.toBe('started');
+  });
+
+  it('最多重发 3 次——连续 4 次都是 503 时，最终把这个 503 当成 ChatApiError 抛出', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('offline', {
+        status: 503,
+        headers: { 'Retry-After': '1' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const promise = postChatMessage('sess_1', 'hello').catch(
+      (caught: unknown) => caught,
+    );
+    // 3 次重试，每次都等 1 秒。
+    await vi.advanceTimersByTimeAsync(3000);
+    const error = await promise;
+
+    expect(fetchMock).toHaveBeenCalledTimes(4); // 1 次原始请求 + 3 次重发
+    expect(error).toBeInstanceOf(ChatApiError);
+    expect(error).toHaveProperty('status', 503);
+  });
+
+  it('504（网关超时，结果未知）不重试——立刻抛出，一次都不多发', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response('gateway timeout', { status: 504 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const error = await postChatMessage('sess_1', 'hello').catch(
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(ChatApiError);
+    expect(error).toHaveProperty('status', 504);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('postAbortTurn 也会对 503 自动重试', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('offline', { status: 503 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, queue: [] }), { status: 200 }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const promise = postAbortTurn('sess_1');
+    await vi.advanceTimersByTimeAsync(1000);
+    await expect(promise).resolves.toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('postApprovalDecision 也会对 503 自动重试', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('offline', { status: 503 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const promise = postApprovalDecision('sess_1', 'call_1', {
+      behavior: 'allow',
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    await expect(promise).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('postQuestionAnswer 也会对 503 自动重试', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('offline', { status: 503 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const promise = postQuestionAnswer('sess_1', 'call_2', '用主题色吧。');
+    await vi.advanceTimersByTimeAsync(1000);
+    await expect(promise).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('streamConversationTail', () => {
   afterEach(() => {
     vi.unstubAllGlobals();

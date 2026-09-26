@@ -84,6 +84,10 @@ jobs:
       # chat 应用的多副本与挂起恢复端到端，**再用真 Postgres 跑一遍**。
       # 上面 `pnpm -r test` 里它们跑的是「几个进程共用一个 SQLite 文件」那一档——核心路径
       # 一样，但跨机器部署只能用 Postgres，两档都跑过才算数。
+      # 副本启动时不建 Postgres 的表（多个副本同时建会撞），得先显式建一次。
+      - run: pnpm --filter @runko-chat/node-server db:migrate
+        env:
+          DATABASE_URL: postgres://runko:runko@127.0.0.1:5432/runko
       - run: pnpm --filter @runko-chat/node-server exec vitest run test/e2e
         env:
           DATABASE_URL: postgres://runko:runko@127.0.0.1:5432/runko

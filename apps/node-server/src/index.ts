@@ -43,88 +43,90 @@ try {
 const port = Number(process.env.SERVER_PORT ?? 3000);
 
 /**
- * [优雅关闭](../../../docs/terms.md)等收尾的上限（docs/logic/orchestration/tech/graceful-shutdown.md §7.1）。
- *
- * 默认 15 秒：K8s 的 `terminationGracePeriodSeconds` 默认 30 秒，留一半余量给连接关闭与
- * 进程退出。`node --watch` 侧是**无限期**等我们的（实测，见 tech 附录 A），所以这个值在
- * dev 环境纯粹是我们自己的保险——没有它，一个卡住的收尾会让热重载再也起不来。
+ * [交权](../../../docs/terms.md)时等各轮收尾的上限。交权本身几百毫秒就完成（模型输出掐断、工具留在本节点上
+ * 跑），这个上限只防装配卡住之类的意外。`node --watch` 侧是无限期等我们的，这是我们自己的保险。
  */
 const SHUTDOWN_TIMEOUT_MS = Number(process.env.SHUTDOWN_TIMEOUT_MS ?? 15_000);
 
 /**
- * 中止之前先让干活的轮自然跑完，最多等这么久（docs/host/node/tech/cluster-console.md §3.1）。
- *
- * **缺省 0 = 立刻中止**：本地 `node --watch` 热重载也发 SIGTERM，改一行代码等 90 秒不可接受。
- * 只有集群 compose 配成 90 秒——那里的 SIGTERM 来自运维容器的 `docker stop -t 120`，
- * 90 + 15（`SHUTDOWN_TIMEOUT_MS`）要留在 120 秒之内。
+ * `server.close()` 之后最多再等多久才硬退。这段时间留给 SIGTERM 之前就接下、还在处理的请求——比如建一个云沙盒要
+ * 十几秒到一分钟，中途断掉的话 nginx 会把这个 POST 重发给别的副本、再建一个沙盒。到点还没退（多半是替别的节点
+ * 转发的长连接）就硬断、退出（docs/logic/orchestration/tech/handover.md §5 的退出条件）。
  */
-const SHUTDOWN_FINISH_WINDOW_MS =
-  Number(process.env.SHUTDOWN_FINISH_WINDOW_MS) || 0;
+const FORCE_EXIT_AFTER_MS = 60_000;
 
 const server = serve({ fetch: app.fetch, port }, (info) => {
   console.log(`Server running at http://localhost:${info.port}`);
   console.log(`Swagger UI at http://localhost:${info.port}/reference`);
   console.log(`OpenAPI spec at http://localhost:${info.port}/doc`);
+  // **先监听、再登记并扫待接手**：浏览器的重连要尽快成功，别让它等一次全表扫描。
+  void chatRuntime.start().catch((error: unknown) => {
+    logger.error(LOG_SCOPE, 'failed to start the runtime background work', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
 });
 
 // WebSocket 的升级要挂在 HTTP 服务器上，所以只能在 `serve()` 之后。
 injectWebSocket(server);
 
 /**
- * 关闭顺序是硬要求（docs/logic/orchestration/tech/graceful-shutdown.md §3.2）：
+ * 收到 SIGTERM：[节点下线](../../../docs/terms.md)，顺序是硬要求（docs/logic/orchestration/tech/handover.md §5）：
  *
- * **先让轮收尾，再关 server。** 反过来的话，被中止那一轮的收尾帧根本发不到浏览器
- * ——它要经 `GET .../stream` 送出去，而 `server.close()` 会断掉那条 SSE 连接；更糟的是
- * `close()` 本身会等现有连接结束，SSE 是长连接，等于自己把自己锁住。
- *
- * 正着来则天然顺：轮一收尾，`emit('done')` 让 tail 正常关闭，`close()` 立刻就能完成。
+ * 1. **先关闸门**：浏览器来的一律 503，转发来的放到交接完成为止（真集群里是负载均衡 / mesh 在做这件事，见 `offline.ts`）。
+ * 2. **交权**（`chatRuntime.shutdown()`）：每份对话几百毫秒内交给别的副本；本节点上的直播收到请重连帧后收线；
+ *    还在跑的工具留在本节点上跑完、结果写库。它返回时本节点已经没活了。
+ * 3. 收 Redis 连接（最后几帧要广播出去）、关 HTTP 服务、退出。
  */
 async function shutdown(signal: NodeJS.Signals): Promise<void> {
   if (chatRuntime.isShuttingDown()) {
-    // 连按 Ctrl-C / 重复信号：不重跑一遍流程，只记一行。
-    logger.info(LOG_SCOPE, 'shutdown already in progress, ignoring signal', {
+    // 第二次信号：人不想等了（开发时 Ctrl-C 两下、热重载赶上一条长命令）。立刻退，
+    // 还在本节点上跑的工具收尾记不上结果，接手的一方到点会把它记成「结果未知」。
+    logger.warn(LOG_SCOPE, 'second signal during shutdown, exiting now', {
       signal,
     });
-    return;
+    process.exit(1);
   }
 
   logger.info(LOG_SCOPE, 'shutdown requested', {
     signal,
-    finishWindowMs: SHUTDOWN_FINISH_WINDOW_MS,
     timeoutMs: SHUTDOWN_TIMEOUT_MS,
   });
 
-  // [节点下线](../../../docs/terms.md)：先关闸门，再等轮收尾。反过来的话，等轮的这段时间里
-  // nginx 还在往这里派新请求。
   nodeOffline.goOffline();
-  // 直播什么时候断，看有没有别的节点能接着播：
-  // - 配了 Redis 广播：哪个节点都能播这一轮，现在就断，浏览器重连到别的节点，收尾帧从那边收；
-  // - 没配（单进程，或靠转发的多副本）：只有本节点能播。先断的话浏览器重连被闸门挡回，
-  //   收尾帧就发不出去，违反上面「先让轮收尾」那条——所以等轮收尾之后再断。
-  if (chatStream.broadcasts) {
-    nodeOffline.disconnectStreams();
-  }
 
-  const result = await chatRuntime.shutdown({
-    finishWindowMs: SHUTDOWN_FINISH_WINDOW_MS,
-    graceMs: SHUTDOWN_TIMEOUT_MS,
-  });
+  const result = await chatRuntime.shutdown({ graceMs: SHUTDOWN_TIMEOUT_MS });
+  nodeOffline.finishHandover();
 
-  // 还连着的只剩「没有轮在跑」的订阅，断开它们，`server.close()` 才等得到头。
-  nodeOffline.disconnectStreams();
-
-  // 轮都收完了再收 Redis 连接：反过来的话，最后几帧广播不出去。
   await chatStream.close().catch((error: unknown) => {
     logger.warn(LOG_SCOPE, 'failed to close the redis connections', {
       error: error instanceof Error ? error.message : String(error),
     });
   });
 
+  // `serve()` 的返回类型也覆盖 HTTP/2 服务器，那一种没有这两个方法；本应用跑的是 HTTP/1.1。
+  if ('closeIdleConnections' in server) {
+    server.closeIdleConnections();
+  }
+  setTimeout(() => {
+    logger.warn(LOG_SCOPE, 'connections still open; forcing exit', {
+      afterMs: FORCE_EXIT_AFTER_MS,
+    });
+    if ('closeAllConnections' in server) {
+      server.closeAllConnections();
+    }
+    process.exit(0);
+  }, FORCE_EXIT_AFTER_MS);
   server.close(() => {
     logger.info(LOG_SCOPE, 'shutdown complete', {
       signal,
-      finishedTurns: result.finished,
+      handedOverTurns: result.handedOver,
+      suspendedTurns: result.suspended,
       abortedTurns: result.aborted,
+      target: result.target ?? 'none',
+      transferred: result.transferred,
+      delegated: result.delegated,
+      toolTails: result.tails,
       // `false` = 撞了宽限期上限，那几个轮成了孤儿轮，下次启动由 `runtime.recover()` 补收尾。
       allTurnsSettled: result.settled,
       pendingTurns: result.pending,

@@ -30,8 +30,8 @@ import type { ExpressionBuilder, Kysely } from "kysely";
 import type { Flavor, FlavorTraits } from "./flavor.js";
 import { toNumber, traitsOf } from "./flavor.js";
 import { insertOrIgnore } from "./idempotent-insert.js";
-import type { RunkoDatabase } from "./schema.js";
-import { LEASES_TABLE } from "./schema.js";
+import type { HandoverTable, RunkoDatabase } from "./schema.js";
+import { HANDOVER_TABLE, LEASES_TABLE } from "./schema.js";
 
 /** 心跳间隔的默认值（毫秒）。定案见技术方案 §8.3。 */
 export const DEFAULT_HEARTBEAT_MS = 5_000;
@@ -130,9 +130,51 @@ export function leaseArbitration(db: Kysely<RunkoDatabase>, opts: LeaseArbitrati
   const isLive = (row: { holder: string | null; lease_token: string | null; heartbeat_at: number }, at: number): boolean =>
     row.lease_token !== null && at - toNumber(row.heartbeat_at) <= takeoverMs && !isMyOrphan(row);
 
+  const readHandover = async (conversationId: string) =>
+    await db
+      .selectFrom(HANDOVER_TABLE)
+      .selectAll()
+      .where("conversation_id", "=", conversationId)
+      .executeTakeFirst();
+
+  /**
+   * [交接预留](../../../docs/terms.md)还有效吗——`reserved_until` 缺席或已过 = 没有预留，
+   * 退化成「没人持有」。返回预留给谁，`undefined` = 没有有效预留。
+   */
+  const activeReservedFor = (
+    row: Pick<HandoverTable, "reserved_for" | "reserved_until"> | undefined,
+    at: number,
+  ): string | undefined => {
+    if (row === undefined || row.reserved_for === null || row.reserved_until === null) {return undefined;}
+    return toNumber(row.reserved_until) > at ? row.reserved_for : undefined;
+  };
+
+  /** 确保 `agent_handover` 有这一行（其余字段留默认值）。多处要用（预留 / 待接手都要先有行）。 */
+  const ensureHandoverRow = async (conversationId: string, at: number): Promise<void> => {
+    await insertOrIgnore(
+      traits,
+      db.insertInto(HANDOVER_TABLE).values({
+        conversation_id: conversationId,
+        reserved_for: null,
+        reserved_until: null,
+        awaiting_takeover: 0,
+        updated_at: at,
+      }),
+      ["conversation_id"],
+    ).execute();
+  };
+
   async function acquire(conversationId: string, ctx: AcquireContext): Promise<AcquireResult> {
     const at = now();
     const existing = await readRow(conversationId);
+    const reservedFor = activeReservedFor(await readHandover(conversationId), at);
+
+    // 有效预留只放行被预留者——**不调 `seedSeq`**（契约要求它是惰性的：抢不到归属时
+    // 不该白查一次账本）。持有中的会话不会同时有有效预留（`releaseTo` 放手与写预留是
+    // 同一步），所以这条判断放在「有人持有」的快路之前不会误伤正常持有者。
+    if (reservedFor !== undefined && reservedFor !== opts.holder) {
+      return { ok: false, reason: "busy", holder: reservedFor };
+    }
 
     // 快路：有人持有且还活着 → 直接报 busy，**不调 `seedSeq`**（契约要求它是惰性的：
     // 抢不到归属时不该白查一次账本）。这一步只是优化，真正的原子性在下面那条条件 UPDATE。
@@ -162,18 +204,48 @@ export function leaseArbitration(db: Kysely<RunkoDatabase>, opts: LeaseArbitrati
 
     // **决胜负的就是这一条。** 只有「没人持有」或「持有者已超时」才让抢；`seq_watermark`
     // 刻意不动——抢占一个已有的会话时重播水位会让 seq 倒退，撞上账本里已有的行。
+    //
+    // 再加一条 `NOT EXISTS`：挡住「别人的有效预留」。没有它的话，`readHandover` 那次早读
+    // 与这条 CAS 之间有一段窗口——`releaseTo` 恰好在窗口里把预留写给了另一个节点，我们
+    // 这条 CAS 若不重新核对就会抢到本该属于它的对话。`reserved_for = opts.holder`（预留
+    // 给我自己）不会被这条子查询挡住，所以被预留者照常抢得到。
     await db
       .updateTable(LEASES_TABLE)
       .set({ holder: opts.holder, lease_token: token, heartbeat_at: at, acquired_at: at })
       .where("conversation_id", "=", conversationId)
       .where((eb) => eb.or([eb("lease_token", "is", null), isStaleWhere(eb, at)]))
+      .where((eb) =>
+        eb.not(
+          eb.exists(
+            eb
+              .selectFrom(HANDOVER_TABLE)
+              .select(`${HANDOVER_TABLE}.conversation_id`)
+              .whereRef(`${HANDOVER_TABLE}.conversation_id`, "=", `${LEASES_TABLE}.conversation_id`)
+              .where(`${HANDOVER_TABLE}.reserved_for`, "is not", null)
+              .where(`${HANDOVER_TABLE}.reserved_for`, "<>", opts.holder)
+              .where(`${HANDOVER_TABLE}.reserved_until`, ">", at),
+          ),
+        ),
+      )
       .execute();
 
     const after = await readRow(conversationId);
     if (after === undefined || after.lease_token !== token) {
-      // 没抢到——并发下另一个节点比我们快。报 busy 并带上**当前**持有者。
+      // 没抢到——可能是被别的节点抢先，也可能是被预留挡住了（此时的预留可能是这次
+      // CAS 期间才写上的）。重新问一次决定报给谁。
+      const blockedBy = activeReservedFor(await readHandover(conversationId), now());
+      if (blockedBy !== undefined && blockedBy !== opts.holder) {
+        return { ok: false, reason: "busy", holder: blockedBy };
+      }
       return { ok: false, reason: "busy", holder: after?.holder ?? undefined };
     }
+
+    // 抢到了——**消费掉预留**（不管之前有没有），不然它会继续挡下一个人。
+    await db
+      .updateTable(HANDOVER_TABLE)
+      .set({ reserved_for: null, reserved_until: null, updated_at: now() })
+      .where("conversation_id", "=", conversationId)
+      .execute();
 
     const grant = createGrant(conversationId, token, at);
     // **抢到的是一个令牌还挂着的行** = 顶掉了一个过期的持有者（走到这里说明快路判它不活了）。
@@ -332,6 +404,46 @@ export function leaseArbitration(db: Kysely<RunkoDatabase>, opts: LeaseArbitrati
           .where("lease_token", "=", token)
           .execute();
       },
+      async releaseTo(node: string, handoverOpts: { ttlMs: number }): Promise<void> {
+        if (released) {return;}
+        released = true;
+        clearInterval(timer);
+        const at = now();
+        // 放手与写预留必须在**同一个事务**里：`agent_handover` 是独立于 `agent_leases`
+        // 的另一张表（见 `schema.ts` 的理由），两条 UPDATE 隔着一次往返，不包事务的话
+        // 会有一个「已经放手、预留还没写上」的窗口，别的节点可能挤进去抢走它。
+        await db.transaction().execute(async (trx) => {
+          const result = await trx
+            .updateTable(LEASES_TABLE)
+            .set({ holder: null, lease_token: null })
+            .where("conversation_id", "=", conversationId)
+            .where("lease_token", "=", token)
+            .executeTakeFirst();
+          // 这条 UPDATE 命中时值必然从「我的令牌」变成 `null`——不是「匹配到但没变」，
+          // 文件头第 ③ 条那个坑在这里不成立，`numUpdatedRows` 可信。
+          if (toNumber(result.numUpdatedRows) === 0) {
+            // 已经不再持有了（被接管或已经释放过）——`releaseTo` 跟 `release` 一样，
+            // **只在还持有时生效**，不留预留。
+            return;
+          }
+          await insertOrIgnore(
+            traits,
+            trx.insertInto(HANDOVER_TABLE).values({
+              conversation_id: conversationId,
+              reserved_for: null,
+              reserved_until: null,
+              awaiting_takeover: 0,
+              updated_at: at,
+            }),
+            ["conversation_id"],
+          ).execute();
+          await trx
+            .updateTable(HANDOVER_TABLE)
+            .set({ reserved_for: node, reserved_until: at + handoverOpts.ttlMs, updated_at: at })
+            .where("conversation_id", "=", conversationId)
+            .execute();
+        });
+      },
     };
   }
 
@@ -339,9 +451,17 @@ export function leaseArbitration(db: Kysely<RunkoDatabase>, opts: LeaseArbitrati
     acquire,
 
     async inspect(conversationId: string): Promise<OwnershipInfo> {
+      const at = now();
       const row = await readRow(conversationId);
-      if (row === undefined || !isLive(row, now())) {return { held: false };}
-      return { held: true, ...(row.holder !== null ? { holder: row.holder } : {}) };
+      if (row !== undefined && isLive(row, at)) {
+        return { held: true, ...(row.holder !== null ? { holder: row.holder } : {}) };
+      }
+      // 没有活着的持有者——看是不是还有一份有效的交接预留，有就报给接入层转发。
+      // `reserved: true` 标记「没人真持有」，供被预留的节点分辨这份对话正要交给我，
+      // 而不是我自己刚放掉的租约（见 `OwnershipInfo.reserved` 的注释）。
+      const reservedFor = activeReservedFor(await readHandover(conversationId), at);
+      if (reservedFor !== undefined) {return { held: true, holder: reservedFor, reserved: true };}
+      return { held: false };
     },
 
     /**
@@ -382,6 +502,62 @@ export function leaseArbitration(db: Kysely<RunkoDatabase>, opts: LeaseArbitrati
         .where("conversation_id", "=", conversationId)
         .where((eb) => isStaleWhere(eb, now()))
         .execute();
+    },
+
+    /** 打[待接手](../../../docs/terms.md)标记。幂等：行不存在就先补一行再打标。 */
+    async markAwaitingTakeover(conversationId: string): Promise<void> {
+      const at = now();
+      await ensureHandoverRow(conversationId, at);
+      await db
+        .updateTable(HANDOVER_TABLE)
+        .set({ awaiting_takeover: 1, updated_at: at })
+        .where("conversation_id", "=", conversationId)
+        .execute();
+    },
+
+    /** 撤掉待接手标记。幂等：行本来就不存在时是 no-op。 */
+    async clearAwaitingTakeover(conversationId: string): Promise<void> {
+      await db
+        .updateTable(HANDOVER_TABLE)
+        .set({ awaiting_takeover: 0, updated_at: now() })
+        .where("conversation_id", "=", conversationId)
+        .execute();
+    },
+
+    /**
+     * [定时回捞](../../../docs/terms.md)候选：只看打了待接手标记的那些，排除掉「有活着的
+     * 持有者」与「有有效预留」——那两种已经有人会推，回捞抢了没意义。
+     *
+     * **候选不看待发队列是不是空的。** 队列不空不等于卡住——在等人答复、按设计排着后续
+     * 消息的对话，队列也不空，但永远推不动，会白白占满每次的 `limit`，挤掉真正卡住（打了
+     * 待接手标记）的那些。真正需要回捞推一把的队列，框架会在崩溃恢复、下线交接时主动打上
+     * 待接手标记，不需要这里再兜底扫队列。
+     *
+     * 分两批查（候选 id 集合、租约行、预留行各一次），不是一个会话一个会话地查——候选
+     * 通常远小于全库规模，`limit` 也约束了返回量，没必要为它专门加索引。
+     */
+    async listSweepCandidates(sweepOpts: { limit: number }): Promise<string[]> {
+      const at = now();
+      const awaitingRows = await db.selectFrom(HANDOVER_TABLE).select("conversation_id").where("awaiting_takeover", "=", 1).execute();
+      const candidateIds = awaitingRows.map((row) => row.conversation_id);
+      if (candidateIds.length === 0) {return [];}
+
+      const [leaseRows, handoverRows] = await Promise.all([
+        db.selectFrom(LEASES_TABLE).selectAll().where("conversation_id", "in", candidateIds).execute(),
+        db.selectFrom(HANDOVER_TABLE).selectAll().where("conversation_id", "in", candidateIds).execute(),
+      ]);
+      const leaseById = new Map(leaseRows.map((row) => [row.conversation_id, row]));
+      const handoverById = new Map(handoverRows.map((row) => [row.conversation_id, row]));
+
+      const result: string[] = [];
+      for (const id of candidateIds) {
+        if (result.length >= sweepOpts.limit) {break;}
+        const lease = leaseById.get(id);
+        if (lease !== undefined && isLive(lease, at)) {continue;}
+        if (activeReservedFor(handoverById.get(id), at) !== undefined) {continue;}
+        result.push(id);
+      }
+      return result;
     },
   };
 }

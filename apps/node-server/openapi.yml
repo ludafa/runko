@@ -153,6 +153,7 @@ components:
               - $ref: "#/components/schemas/ChatMessageFrame"
               - $ref: "#/components/schemas/ChatQueueFrame"
               - $ref: "#/components/schemas/ChatTurnStateFrame"
+              - $ref: "#/components/schemas/ChatReconnectFrame"
       required:
         - frames
     ChatChunkEnvelope:
@@ -185,6 +186,15 @@ components:
           type: boolean
       required:
         - turnActive
+    ChatReconnectFrame:
+      type: object
+      properties:
+        reconnect:
+          type: boolean
+          enum:
+            - true
+      required:
+        - reconnect
     TurnTelemetry:
       type: object
       properties:
@@ -933,6 +943,7 @@ paths:
                   - $ref: "#/components/schemas/ChatMessageFrame"
                   - $ref: "#/components/schemas/ChatQueueFrame"
                   - $ref: "#/components/schemas/ChatTurnStateFrame"
+                  - $ref: "#/components/schemas/ChatReconnectFrame"
         "401":
           description: Unauthorized
           content:

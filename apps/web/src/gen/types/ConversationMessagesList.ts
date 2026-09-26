@@ -6,6 +6,7 @@
 import type { ChatChunkEnvelope } from './ChatChunkEnvelope.ts';
 import type { ChatMessageFrame } from './ChatMessageFrame.ts';
 import type { ChatQueueFrame } from './ChatQueueFrame.ts';
+import type { ChatReconnectFrame } from './ChatReconnectFrame.ts';
 import type { ChatTurnStateFrame } from './ChatTurnStateFrame.ts';
 
 export type ConversationMessagesList = {
@@ -13,6 +14,10 @@ export type ConversationMessagesList = {
    * @type array
    */
   frames: (
-    ChatChunkEnvelope | ChatMessageFrame | ChatQueueFrame | ChatTurnStateFrame
+    | ChatChunkEnvelope
+    | ChatMessageFrame
+    | ChatQueueFrame
+    | ChatTurnStateFrame
+    | ChatReconnectFrame
   )[];
 };

@@ -3,13 +3,20 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ChatReplayFrame, QueuedMessage } from '../schema';
 import { buildRenderEntries } from '../timeline';
+import { setChatTransport } from '../transport';
 import { useChatMessages } from '../use-chat-messages';
+import { CLOSE_SERVICE_RESTART } from '../ws';
 import { FakeChatFetch } from './helpers/fake-chat-fetch';
+import { FakeWebSocket, installFakeWebSocket } from './helpers/fake-websocket';
 import {
   assistantMessage,
   finishChunk,
+  finishStepChunk,
   messageMetadataChunk,
   startChunk,
+  startStepChunk,
+  textDeltaChunk,
+  textStartChunk,
   textStepChunks,
   toolApprovalRequestChunk,
   toolInputAvailableChunk,
@@ -30,6 +37,9 @@ function queuedMessage(id: string, text: string): QueuedMessage {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  // 只有走 WebSocket 通道的[快速重连](../../../../../../docs/terms.md)用例会碰它
+  // （`setChatTransport` 写 `localStorage`）——其余用例从不读写，清空对它们无害。
+  window.localStorage.clear();
 });
 
 describe('useChatMessages — 挂载', () => {
@@ -389,6 +399,386 @@ describe('useChatMessages — reconnect backoff', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(fake.streamRequests).toHaveLength(1); // 一次重连都没发起
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 快速重连（docs/logic/orchestration/tech/handover.md §8）——收到[请重连帧](../../../../../../docs/terms.md)
+// （或 WS 以 1012 关闭）时不走 1/2/4/8/16 秒的指数退避，隔 250ms 直接再试；窗口
+// （10 秒）用完退回原退避。真正的断线（没收到那一帧）仍走原退避——已经由上面
+// 「reconnect backoff」那组用例覆盖。
+// ---------------------------------------------------------------------------
+
+describe('useChatMessages — 快速重连（docs/logic/orchestration/tech/handover.md §8）', () => {
+  it('SSE：收到请重连帧后约 250ms 内重连（不是 1 秒起步的指数退避），期间状态全程 streaming、不报错', async () => {
+    vi.useFakeTimers();
+    const fake = setup();
+    const stream = fake.queueStream();
+    const { result } = renderHook(() =>
+      useChatMessages(
+        'sess_1',
+        [{ seq: 1, chunk: startChunk('m1') }],
+        [],
+        true,
+      ),
+    );
+    await vi.waitFor(() => {
+      expect(fake.streamRequests).toHaveLength(1);
+    });
+    expect(result.current.status).toBe('streaming');
+
+    const nextStream = fake.queueStream();
+    act(() => {
+      stream.pushFrame({ reconnect: true });
+      // 请重连帧是这条连接的最后一帧，服务端发完自己关掉（SSE 直接结束响应体）。
+      stream.close();
+    });
+
+    // 还没到 250ms——不该已经重连（区别于指数退避第一档的 1000ms）。
+    await vi.advanceTimersByTimeAsync(200);
+    expect(fake.streamRequests).toHaveLength(1);
+    expect(result.current.status).toBe('streaming');
+    expect(result.current.error).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(60);
+    await vi.waitFor(() => {
+      expect(fake.streamRequests).toHaveLength(2);
+    });
+    // 续传水位没丢——从上次看到的那条接着来。
+    expect(fake.streamRequests[1]).toMatchObject({ after: 1 });
+    expect(result.current.status).toBe('streaming');
+    expect(result.current.error).toBeUndefined();
+
+    nextStream.close();
+  });
+
+  it('WS：收到请重连帧、并以 1012（CLOSE_SERVICE_RESTART）关闭，同样约 250ms 内快速重连', async () => {
+    vi.useFakeTimers();
+    const fake = setup();
+    installFakeWebSocket();
+    setChatTransport('ws');
+    const { result } = renderHook(() =>
+      useChatMessages(
+        'sess_1',
+        [{ seq: 1, chunk: startChunk('m1') }],
+        [],
+        true,
+      ),
+    );
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(result.current.status).toBe('streaming');
+
+    act(() => {
+      FakeWebSocket.instances[0]?.emitMessage(
+        JSON.stringify({ reconnect: true }),
+      );
+      FakeWebSocket.instances[0]?.emitClose(CLOSE_SERVICE_RESTART, '');
+    });
+
+    await vi.advanceTimersByTimeAsync(200);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(result.current.status).toBe('streaming');
+
+    await vi.advanceTimersByTimeAsync(60);
+    await vi.waitFor(() => {
+      expect(FakeWebSocket.instances).toHaveLength(2);
+    });
+    expect(result.current.status).toBe('streaming');
+    expect(result.current.error).toBeUndefined();
+    expect(fake.streamRequests).toEqual([]); // 全程没有发出过一次 SSE 请求
+  });
+
+  it('快速重连窗口（10 秒）用完之后退回原有的指数退避（从 1 秒这一档重新数）', async () => {
+    vi.useFakeTimers();
+    const fake = setup();
+    const stream = fake.queueStream();
+    renderHook(() =>
+      useChatMessages(
+        'sess_1',
+        [{ seq: 1, chunk: startChunk('m1') }],
+        [],
+        true,
+      ),
+    );
+    await vi.waitFor(() => {
+      expect(fake.streamRequests).toHaveLength(1);
+    });
+
+    act(() => {
+      stream.pushFrame({ reconnect: true });
+      stream.close();
+    });
+
+    // 窗口内每 250ms 重试一次，全部落空——队列已空，fake 对没排队的 stream 请求
+    // 自动回 500（见 FakeChatFetch.fetch），这本身就等同于「重连失败」。
+    await vi.advanceTimersByTimeAsync(10_050);
+    const requestsAfterWindow = fake.streamRequests.length;
+    expect(requestsAfterWindow).toBeGreaterThan(1); // 窗口内确实重试过
+
+    // 窗口刚过，下一次重试还没到——指数退避第一档是 1000ms，比 250ms 长得多。
+    await vi.advanceTimersByTimeAsync(900);
+    expect(fake.streamRequests.length).toBe(requestsAfterWindow);
+
+    await vi.advanceTimersByTimeAsync(200);
+    await vi.waitFor(() => {
+      expect(fake.streamRequests.length).toBe(requestsAfterWindow + 1);
+    });
+  });
+
+  it('新连接一收到第一帧就结束快速重连窗口——窗口没到期，但之后的断线不再按 250ms 重试', async () => {
+    vi.useFakeTimers();
+    const fake = setup();
+    const stream = fake.queueStream();
+    renderHook(() =>
+      useChatMessages(
+        'sess_1',
+        [{ seq: 1, chunk: startChunk('m1') }],
+        [],
+        true,
+      ),
+    );
+    await vi.waitFor(() => {
+      expect(fake.streamRequests).toHaveLength(1);
+    });
+
+    const reconnectedStream = fake.queueStream();
+    act(() => {
+      stream.pushFrame({ reconnect: true });
+      stream.close();
+    });
+    await vi.advanceTimersByTimeAsync(260);
+    await vi.waitFor(() => {
+      expect(fake.streamRequests).toHaveLength(2);
+    });
+
+    // 新连接送来了第一帧——即使只是[轮状态快照](../../../../../../docs/terms.md)、没有任何
+    // 账本内容（正是接手节点查不到工具收尾结果就放手时给出的那种回应），也说明这次
+    // 重连已经成功，快速重连窗口该到此结束，不用等它自己 10 秒过期。
+    const nextBackoffStream = fake.queueStream();
+    act(() => {
+      reconnectedStream.pushFrame({ turnActive: true });
+      reconnectedStream.close(); // 之后正常断线——没有再收到请重连帧
+    });
+
+    // 还没到 1000ms（指数退避第一档）——如果窗口没结束，250ms 就该已经重试过了。
+    await vi.advanceTimersByTimeAsync(900);
+    expect(fake.streamRequests).toHaveLength(2);
+
+    await vi.advanceTimersByTimeAsync(200);
+    await vi.waitFor(() => {
+      expect(fake.streamRequests).toHaveLength(3);
+    });
+
+    nextBackoffStream.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 已交权（docs/logic/orchestration/tech/handover.md §6）——`onTurnEnd` 收到
+// `metadata.status === 'handed-over'` 时这一轮没有结束，保持 streaming、等接手节点
+// 的帧接上。`handedOver.callIds` 为空 = 模型输出段被交权，那半段字要被丢弃
+// （`MessageLedger.replaceDraft()`）；非空 = 工具段被交权，账本末尾那次悬空调用
+// 是真实状态，留给接手节点结清，不能被当草稿丢。
+// ---------------------------------------------------------------------------
+
+describe('useChatMessages — 已交权（docs/logic/orchestration/tech/handover.md §6）', () => {
+  it('模型输出段被交权（handedOver.callIds 为空）：不报错、保持 streaming，旧节点流出来的那半段字被整体丢弃', async () => {
+    const fake = setup();
+    const stream = fake.queueStream();
+    const nextStream = fake.queueStream(); // handed-over 之后 startTail() 会重新（重）开一条 tail
+    const { result } = renderHook(() => useChatMessages('sess_1', []));
+
+    act(() => {
+      stream.pushChunk(startChunk('draft-1'), 1);
+      stream.pushChunk(startStepChunk(), 2);
+      stream.pushChunk(textStartChunk('t'), 3);
+      stream.pushChunk(textDeltaChunk('t', '旧节点输出到一半'));
+    });
+    await waitFor(() => {
+      expect(result.current.messages).toHaveLength(1);
+    });
+
+    act(() => {
+      // 掐断模型流、不发 finish——服务端直接以独立的 message-metadata 收尾
+      // （docs/logic/orchestration/tech/handover.md §6.1）。
+      stream.pushChunk(
+        messageMetadataChunk({
+          turn: 1,
+          usage: {},
+          status: 'handed-over',
+          handedOver: { callIds: [] },
+        }),
+        4,
+      );
+    });
+
+    await waitFor(() => {
+      expect(result.current.messages).toHaveLength(0);
+    });
+    expect(result.current.status).toBe('streaming');
+    expect(result.current.error).toBeUndefined();
+    expect(result.current.awaitingFirstEvent).toBe(true);
+
+    stream.close();
+    nextStream.close();
+  });
+
+  it('工具段被交权（handedOver.callIds 非空）：不报错、保持 streaming，带悬空调用的那条消息不被丢弃', async () => {
+    const fake = setup();
+    const stream = fake.queueStream();
+    const nextStream = fake.queueStream();
+    const { result } = renderHook(() => useChatMessages('sess_1', []));
+
+    act(() => {
+      // 工具段交权时这一步已经正常 finish 了（旧节点不动工具，调用参数落账本，
+      // 悬空调用留给接手节点结清）。
+      stream.pushChunk(startChunk('tool-msg-1'), 1);
+      stream.pushChunk(startStepChunk(), 2);
+      stream.pushChunk(
+        toolInputAvailableChunk('call-1', 'bash', { command: 'sleep 90' }),
+        3,
+      );
+      stream.pushChunk(finishStepChunk(), 4);
+      stream.pushChunk(finishChunk('tool-calls'), 5);
+    });
+    await waitFor(() => {
+      expect(result.current.messages).toHaveLength(1);
+    });
+
+    act(() => {
+      stream.pushChunk(
+        messageMetadataChunk({
+          turn: 1,
+          usage: {},
+          status: 'handed-over',
+          handedOver: { callIds: ['call-1'] },
+        }),
+        6,
+      );
+    });
+
+    await waitFor(() => {
+      expect(result.current.status).toBe('streaming');
+    });
+    expect(result.current.error).toBeUndefined();
+    expect(result.current.awaitingFirstEvent).toBe(true);
+    // 带悬空调用的消息是真实状态，要留给接手节点结清——不能被当草稿丢掉。
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0]?.id).toBe('tool-msg-1');
+
+    stream.close();
+    nextStream.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 断线重连一律先丢一次草稿（docs/logic/orchestration/tech/handover.md §8）——不只是「实时收到
+// 了 handed-over 的 metadata」那一种情形：那条 metadata 发出的那一刻连接恰好断着、
+// 客户端从未见过它，一样要在下一次真正重连、接住新连接的帧之前丢一次手上的草稿，
+// 不能指望某次单独的 onTurnEnd 回调来兜底。
+// ---------------------------------------------------------------------------
+
+describe('useChatMessages — 重连一律先丢一次草稿（不止「实时收到 handed-over」那一种情形）', () => {
+  it('从未收到 handed-over 的 metadata（那条 chunk 发出时连接正好断着）：真正断线重连之后，旧节点流出来的半截字不会和接手节点的新内容一起留在时间线上', async () => {
+    const fake = setup();
+    const stream = fake.queueStream();
+    const { result } = renderHook(() =>
+      useChatMessages('sess_1', [], [], true),
+    );
+
+    // 旧节点流出一半就断线——没有 finish，也没有收尾的 message-metadata（模拟
+    // handed-over 那条 chunk 发出时连接正好断着，客户端从未见过它）。
+    act(() => {
+      stream.pushChunk(startChunk('draft-1'), 1);
+      stream.pushChunk(startStepChunk(), 2);
+      stream.pushChunk(textStartChunk('t'), 3);
+      stream.pushChunk(textDeltaChunk('t', '旧节点输出到一半'));
+    });
+    await waitFor(() => {
+      expect(result.current.messages).toHaveLength(1);
+    });
+    expect(result.current.messages[0]?.id).toBe('draft-1');
+
+    // 真正的断线（不是请重连帧）——走指数退避，第一档 1000ms 后重试。接手节点从
+    // 账本直接接着调模型，产出的是一条全新 id 的消息（§6.1：旧的半截字整个作废，
+    // 永远不会再被更新）。
+    const nextStream = fake.queueStream();
+    act(() => {
+      stream.error(new Error('network drop'));
+    });
+    await waitFor(
+      () => {
+        expect(fake.streamRequests).toHaveLength(2);
+      },
+      { timeout: 3000 },
+    );
+
+    // [seq](../../../../../../docs/terms.md) 接着上一条连接已经见过的往后编号——
+    // 重连时的续传是 `after=<lastSeq>`，用回 1/2/3 会撞上去重簿记，被当成重复帧
+    // 直接丢弃。
+    act(() => {
+      nextStream.pushChunk(startChunk('resumed-1'), 4);
+      nextStream.pushChunk(startStepChunk(), 5);
+      nextStream.pushChunk(textStartChunk('t2'), 6);
+      nextStream.pushChunk(textDeltaChunk('t2', '接手节点重新生成的内容'));
+    });
+    await waitFor(() => {
+      expect(result.current.messages).toHaveLength(1);
+    });
+    // 只剩接手节点的新内容——旧节点那半截字（'draft-1'）已经被重连时丢弃，不会与
+    // 新内容一起堆在时间线上。
+    expect(result.current.messages[0]?.id).toBe('resumed-1');
+
+    nextStream.close();
+  }, 10_000);
+
+  it('对照组：同一轮在同一连接上正常收尾，随后开新一轮——上一轮没来得及落地的消息不受影响（不是「重连」，是主动开一条全新连接）', async () => {
+    const fake = setup();
+    const mountStream = fake.queueStream();
+    const { result } = renderHook(() => useChatMessages('sess_1', []));
+
+    const turn1Stream = fake.queueStream();
+    act(() => {
+      result.current.sendMessage('第一条');
+    });
+    act(() => {
+      turn1Stream.pushMessage(1, userMessage('u1', '第一条'));
+      turn1Stream.pushChunk(startChunk('a1'), 2);
+      turn1Stream.pushChunk(finishChunk('stop'), 3);
+      turn1Stream.pushChunk(
+        messageMetadataChunk({ turn: 1, usage: {}, status: 'completed' }),
+        4,
+      );
+    });
+    await waitFor(() => {
+      expect(result.current.status).toBe('idle');
+    });
+    // 'a1' 只由 chunk 物化出来，从未以 MessageFrame 落地过——这是本用例要保护的对象。
+    expect(result.current.messages.map((m) => m.id)).toEqual(['u1', 'a1']);
+
+    const turn2Stream = fake.queueStream();
+    act(() => {
+      result.current.sendMessage('第二条');
+    });
+    await waitFor(() => {
+      expect(fake.streamRequests).toHaveLength(3);
+    });
+    act(() => {
+      turn2Stream.pushMessage(5, userMessage('u2', '第二条'));
+    });
+    await waitFor(() => {
+      expect(result.current.messages.map((m) => m.id)).toContain('u2');
+    });
+    // 上一轮的 'a1' 还在——开新一轮不是重连，不该触发 `replaceDraft()`。
+    expect(result.current.messages.map((m) => m.id)).toEqual([
+      'u1',
+      'a1',
+      'u2',
+    ]);
+
+    mountStream.close();
+    turn1Stream.close();
+    turn2Stream.close();
   });
 });
 
@@ -937,6 +1327,41 @@ describe('useChatMessages — 待发队列', () => {
       expect(result.current.queuedMessages).toEqual([]);
     });
     nextTurnStream.close();
+  });
+
+  it('排队的下一轮从同一条流接上（服务端不放手、两轮之间不发 turnActive:false）：不重连，不落回 idle', async () => {
+    const fake = setup();
+    const stream = fake.queueStream();
+    const { result } = renderHook(() =>
+      useChatMessages('sess_1', [], [queuedMessage('q1', '下一件事')]),
+    );
+
+    act(() => {
+      stream.pushChunk(startChunk('a1'), 2);
+      stream.pushChunk(finishChunk('stop'), 3);
+      stream.pushChunk(
+        messageMetadataChunk({ turn: 1, usage: {}, status: 'completed' }),
+        4,
+      );
+    });
+    await waitFor(() => {
+      expect(result.current.awaitingFirstEvent).toBe(true);
+    });
+    expect(result.current.status).toBe('streaming');
+
+    // 同一条流：出队后的队列快照 → 第 2 轮的用户消息 → 第 2 轮的回复。
+    act(() => {
+      stream.pushFrame({ queue: [] });
+      stream.pushMessage(5, userMessage('u2', '下一件事'));
+      stream.pushChunk(startChunk('a2'), 6);
+    });
+    await waitFor(() => {
+      expect(result.current.messages.map((m) => m.id)).toContain('a2');
+    });
+    expect(result.current.queuedMessages).toEqual([]);
+    expect(result.current.awaitingFirstEvent).toBe(false);
+    expect(fake.streamRequests).toHaveLength(1);
+    stream.close();
   });
 
   it('一轮收尾时队列为空：照旧落回 idle', async () => {

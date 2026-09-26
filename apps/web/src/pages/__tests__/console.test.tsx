@@ -40,7 +40,7 @@ const NOW = 1_700_000_000_000;
 
 /** 功能手册 §3.3：下线确认框要把三个时间点写清楚，一字不差。 */
 const OFFLINE_CONFIRM_TEXT =
-  '这个节点将不再接新请求；正在跑的轮最多再给 1 分 30 秒自然跑完，之后会被中止；2 分钟后进程还在就强杀。';
+  '这个节点将不再接新请求；正在跑的对话会马上交给别的节点接着跑，还在跑的命令留在这里跑完；2 分钟后进程还在就强杀。';
 
 function node(overrides: Partial<ConsoleNode> = {}): ConsoleNode {
   return {

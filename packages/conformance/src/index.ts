@@ -10,10 +10,13 @@
 export type {
   ArbitrationConformanceSetup,
   ConformanceCase,
+  HandoverConformanceSetup,
   MultiNodeConformanceSetup,
+  NodeRegistryConformanceSetup,
   PersistenceConformanceSetup,
   RestartConformanceSetup,
   TakeoverConformanceSetup,
+  ToolTailConformanceSetup,
 } from "./types.js";
 export { ConformanceAssertionError } from "./assert.js";
 export { persistenceCases } from "./persistence.js";
@@ -24,3 +27,6 @@ export {
   arbitrationTakeoverCases,
   arbitrationTakeoverReportCases,
 } from "./arbitration.js";
+export { handoverCases } from "./handover.js";
+export { nodeRegistryCases } from "./node-registry.js";
+export { toolTailCases } from "./tool-tails.js";

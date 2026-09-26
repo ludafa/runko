@@ -11,6 +11,7 @@ import type { StreamFanout } from "../stream.js";
 import type { TurnInput, TurnStatus } from "../types.js";
 import type { AgentDefinition } from "@runko/core";
 
+import type { HandoverContext } from "./handover.js";
 import type { ApprovalPendingEvent, HumanBridge, QuestionPendingEvent } from "./human.js";
 import type { TurnRegistry } from "./registry.js";
 import type { SessionFactory } from "./session-factory.js";
@@ -35,6 +36,17 @@ export interface RuntimeHooks {
   onApprovalPending?: (event: ApprovalPendingEvent) => void;
   /** agent 问了用户一个问题。同上。 */
   onQuestionPending?: (event: QuestionPendingEvent) => void;
+  /**
+   * 一条[工具收尾](../../../../docs/terms.md)在本节点上跑完了，**结果写库之前**调它（会等它返回，最多等几秒）。
+   * 宿主在这里把工具改过的东西存下来——比如进程内的沙盒要存一份快照，否则接手节点恢复时看不到那条命令的改动。
+   * 抛错或超时只记日志，结果照样写。
+   */
+  onToolTailFinished?: (event: { conversationId: string; callId: string; toolName: string }) => void | Promise<void>;
+  /**
+   * 一轮以[已交权](../../../../docs/terms.md)收尾、**放手之前**调它（会等它返回，最多等几秒）。宿主在这里把接手节点
+   * 要用的东西存下来——比如进程内的沙盒存一份快照；放手之后接手节点随时可能开始读。抛错或超时只记日志，照常放手。
+   */
+  onHandOff?: (event: { conversationId: string }) => void | Promise<void>;
 }
 
 /**
@@ -76,4 +88,8 @@ export interface RuntimeContext {
   /** 注册内置 `ask-user` 工具。 */
   askUser: boolean;
   isShuttingDown: () => boolean;
+  /** 单次工具执行的上限（毫秒），交给 core。 */
+  toolTimeoutMs: number | undefined;
+  /** [交权](../../../../docs/terms.md)的配置与这次下线的状态。 */
+  handover: HandoverContext;
 }

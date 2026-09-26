@@ -26,15 +26,18 @@ x-node-env: &node-env
   #   CLUSTER_CLIENT_URL=http://localhost:5273 pnpm cluster:up
   CLIENT_URL: ${CLUSTER_CLIENT_URL:-http://localhost:${CLUSTER_LB_PORT:-3940}}
   RUNKO_PEER_TOKEN: cluster-peer-token
-  # [节点下线](../../../../docs/terms.md)：控制台经运维容器发的 SIGTERM 到了之后，
-  # 节点要「先等干活的轮跑完，再中止」（docs/host/node/tech/cluster-console.md §3.1/§5）。
-  # 90 + 15 = 105 秒，比运维容器 `docker stop -t 120`（下面 `ops` 服务）留 15 秒
-  # 给断连接、进程退出。
+  # [节点下线](../../../../docs/terms.md)：SIGTERM 到了之后节点[交权](../../../../docs/terms.md)——几百毫秒内把
+  # 每份对话交给别的副本，还在跑的命令留在本节点上跑完再退出
+  # （docs/logic/orchestration/tech/handover.md §5）。
   #
-  # **本地 `pnpm dev` 不配这两个**（缺省 0 / 15000，见 `index.ts`）：`node --watch`
-  # 热重载也发 SIGTERM，改一行代码等 90 秒不可接受，只有这里的集群档才配非零值。
-  SHUTDOWN_FINISH_WINDOW_MS: ${CLUSTER_OFFLINE_FINISH_WINDOW_MS:-90000}
+  # 时间预算：命令最长跑 90 秒（`RUNKO_TOOL_TIMEOUT_MS`），运维容器 `docker stop -t 120` 留出
+  # 30 秒给写结果、关连接（§13「宽限期 ≥ 工具上限 + 30 秒」）。`SHUTDOWN_TIMEOUT_MS` 只管
+  # 「等各轮交出去」这一步，交权本身几百毫秒就完成，它只防装配卡住。
+  RUNKO_TOOL_TIMEOUT_MS: ${CLUSTER_TOOL_TIMEOUT_MS:-90000}
   SHUTDOWN_TIMEOUT_MS: ${CLUSTER_OFFLINE_GRACE_MS:-15000}
+  # [发布序号](../../../../docs/terms.md)：交权只挑序号不比自己小的副本接手。一次「发布」就是用更大的
+  # 序号起新副本（端到端测试里的滚动发布场景就这么做）。
+  RUNKO_RELEASE_SEQ: ${CLUSTER_RELEASE_SEQ:-1}
   # 运维容器的地址与内部令牌：控制台 API 转发「下线/上线」请求要用（cluster-console.md §8）。
   # 令牌与下面 `ops` 服务的 `RUNKO_OPS_TOKEN` 必须是同一个值——风格同上面的
   # `RUNKO_PEER_TOKEN`，demo 项目写死够用。
@@ -158,6 +161,40 @@ services:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
 
+  # **一次「发布」的新版本副本**：同一个镜像，[发布序号](../../../../docs/terms.md)更大。只在 `release`
+  # 这个 profile 下出现，平时不起。网络别名也叫 `node`，nginx 把流量一起分给它们：
+  #
+  #   CLUSTER_NEXT_REPLICAS=3 docker compose -f docker/cluster.compose.yml --profile release up -d --wait node-next
+  #
+  # 再逐个 `docker stop` 老副本，就是一次先启再停的滚动发布（docs/logic/orchestration/features/handover.md §5）。
+  node-next:
+    image: runko-cluster/node-server:dev
+    init: true
+    profiles: [release]
+    networks:
+      cluster:
+        aliases: [node]
+    environment:
+      <<: *node-env
+      RUNKO_RELEASE_SEQ: ${CLUSTER_NEXT_RELEASE_SEQ:-2}
+    command:
+      ["sh", "-c", "RUNKO_NODE_URL=http://$$(hostname):3900 exec node dist/index.js"]
+    ports: ["3900"]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3900/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
   # [运维容器](../../../../docs/terms.md)：集群控制台经它操作 Docker——列节点、
   # `docker stop -t 120`（下线）、`docker start`（上线），见
   # docs/host/node/tech/cluster-console.md §7。同一个镜像、换一个入口，不需要
@@ -176,8 +213,8 @@ services:
       # **项目名故意不配**：运维容器启动时问 Docker 自己属于哪个项目。端到端测试用
       # `-p runko-cluster-e2e` 另起一套，写死的话会去停开发者手上那套集群的节点。
       RUNKO_OPS_SERVICE: node
-      # 强杀期限（秒）。缺省 120；端到端测试把三个时长一起压扁（这个、上面的
-      # `CLUSTER_OFFLINE_FINISH_WINDOW_MS` 与 `CLUSTER_OFFLINE_GRACE_MS`），不然一个场景要等两分钟。
+      # 强杀期限（秒）。缺省 120（≥ 工具上限 90 秒 + 30 秒）；端到端测试把它与上面的
+      # `CLUSTER_TOOL_TIMEOUT_MS` 一起压扁，不然一个强杀场景要等两分钟。
       RUNKO_OPS_STOP_TIMEOUT_S: ${CLUSTER_OFFLINE_KILL_S:-120}
     command: ["node", "dist/ops/index.js"]
     # **必须 root**：镜像缺省 `USER node`，而宿主机的 `docker.sock` 只给 root（或 docker 组）

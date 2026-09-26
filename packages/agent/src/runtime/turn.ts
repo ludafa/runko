@@ -31,6 +31,7 @@ import { createAskUserTool } from "./ask-user.js";
 import type { ActiveTurn } from "./registry.js";
 import { ledgerEndsWithPendingCalls } from "./interrupted-marker.js";
 import { ABORT_DENY_MESSAGE, ABORT_REASON_USER, OWNERSHIP_LOST_MESSAGE } from "./reasons.js";
+import { requeueInputFront } from "./requeue.js";
 import type { DrivenSession } from "./session-factory.js";
 
 const LOG_SCOPE = "agent:turn";
@@ -118,6 +119,12 @@ interface DriveResult {
   status: TurnStatus;
 }
 
+/** `finalize` 有没有把这一轮的成品消息全部写进账本。 */
+type FinalizeOutcome = "complete" | "incomplete";
+
+/** 系统异常给用户看的那句话：不含细节，细节只进日志。 */
+const INTERNAL_ERROR_MESSAGE = "Internal error; this turn could not be completed.";
+
 /**
  * 驱动一轮。**从不 reject**（见文件头）。
  *
@@ -156,22 +163,32 @@ export async function driveTurn(ctx: RuntimeContext, turn: ActiveTurn): Promise<
     // 那会把收尾标记追加在悬空调用后面，永久弄坏这个会话（技术方案 §5.9）。它必须走到 core，
     // 在那里把停止当成「拒绝」来结清那次调用（`openTurnStream`）。
     const stopBeforeCore = (): boolean => turn.aborted && turn.resume === undefined;
+    // [交权](../../../../docs/terms.md)落在装配阶段：中止装配、**什么都不写**，普通轮的输入放回待发队列最前面，
+    // 接手的一方出队重来（docs/logic/orchestration/tech/handover.md §6 第一行）。
+    const handedOverBeforeCore = (): boolean => turn.handoverController.signal.aborted;
 
+    // 停止优先于交权：用户按了停止，就按停止收尾，别把他取消的事交给别的节点重做。
     if (stopBeforeCore()) {return await finishAborted(ctx, turn, publish);}
+    if (handedOverBeforeCore()) {return await finishHandedOverBeforeCore(ctx, turn);}
 
     const preparation = await ctx.prepareTurn({
       conversationId,
       input: turn.input,
       turnNumber: turn.turnNumber,
-      signal: turn.abortController.signal,
+      signal: AbortSignal.any([turn.abortController.signal, turn.handoverController.signal]),
       ...(turn.resume !== undefined ? { resume: { callId: turn.resume.callId } } : {}),
+      ...(turn.continuation === true ? { continuation: true as const } : {}),
     });
 
-    // 停止检查点：装配那几个远程调用（取沙盒、扫 skill）掐不断，但既然已经知道用户
-    // 要停，就别再往下白跑建 session。
+    // 停止 / 交权检查点：装配那几个远程调用（取沙盒、扫 skill）掐不断，但既然已经知道
+    // 用户要停（或节点要走），就别再往下白跑建 session。
     if (stopBeforeCore()) {
       await runDispose(ctx, preparation, conversationId);
       return await finishAborted(ctx, turn, publish);
+    }
+    if (handedOverBeforeCore()) {
+      await runDispose(ctx, preparation, conversationId);
+      return await finishHandedOverBeforeCore(ctx, turn);
     }
 
     const session = await ctx.sessionFactory(
@@ -182,6 +199,10 @@ export async function driveTurn(ctx: RuntimeContext, turn: ActiveTurn): Promise<
     if (stopBeforeCore()) {
       await runDispose(ctx, preparation, conversationId);
       return await finishAborted(ctx, turn, publish);
+    }
+    if (handedOverBeforeCore()) {
+      await runDispose(ctx, preparation, conversationId);
+      return await finishHandedOverBeforeCore(ctx, turn);
     }
 
     // ---- 就地升级成真正在跑的那一轮 ----
@@ -200,16 +221,28 @@ export async function driveTurn(ctx: RuntimeContext, turn: ActiveTurn): Promise<
         startedAt,
       });
     } finally {
-      await runDispose(ctx, preparation, conversationId);
+      // 交权时还有工具在这一轮的执行面上跑（[工具收尾](../../../../docs/terms.md)）：等它们跑完再收拾，
+      // 不然工具跑到一半沙盒就被宿主关了。
+      const tails = turn.handedOverCalls.map((call) => call.outcome);
+      if (tails.length === 0) {
+        await runDispose(ctx, preparation, conversationId);
+      } else {
+        void Promise.all(tails).then(() => runDispose(ctx, preparation, conversationId));
+      }
     }
   } catch (error) {
-    // 恢复轮装配失败：**账本一个字不写**——不写用户消息（人没说话），也不写收尾标记（会补在
-    // 悬空调用后面）。答案还在裁决表里，下一次推一把时重来；收尾第⑤步也不会立刻重试，免得
-    // 沙盒持续不可用时变成热循环（技术方案 §5.8）。
-    if (turn.resume !== undefined) {
-      ctx.logger.error(LOG_SCOPE, "resume turn assembly failed; conversation stays suspended", {
+    // 装配被交权打断（取沙盒之类的远程调用收到信号就抛）：与上面的检查点同一个结局，不算失败。
+    // 已经走过那条路、是它自己抛的（放回队列时库出错）就别再走一遍——放回队列不能安全地重做。
+    if (turn.handoverController.signal.aborted && !turn.aborted && !handedOverFinishTried.has(turn)) {
+      return await finishHandedOverBeforeCore(ctx, turn);
+    }
+    // 恢复轮与接着跑的那一轮装配失败：**账本一个字不写**——不写用户消息（人没说话），也不写收尾标记
+    // （恢复轮会补在悬空调用后面；接着跑的会盖掉交权标记，那半轮就再也接不上了）。下一次推一把时重来；
+    // 收尾第⑤步也不会立刻重试，免得沙盒持续不可用时变成热循环（技术方案 §5.8）。
+    if (turn.resume !== undefined || turn.continuation === true) {
+      ctx.logger.error(LOG_SCOPE, "resume or continuation turn assembly failed; the ledger is left as it was", {
         conversationId,
-        callId: turn.resume.callId,
+        callId: turn.resume?.callId,
         error: describeError(error),
       });
       return { status: "crashed" };
@@ -256,7 +289,8 @@ async function finishAborted(
   publish: (frame: Frame) => void,
 ): Promise<DriveResult> {
   ctx.logger.info(LOG_SCOPE, "turn stopped before it started", { conversationId: turn.conversationId });
-  await appendUserMessage(ctx, turn, publish);
+  // 接着跑的那一轮没有用户说话，不补用户消息，只写「已停止」。
+  if (turn.continuation !== true) {await appendUserMessage(ctx, turn, publish);}
   const metadata: RunkoMessageMetadata = {
     turn: turn.turnNumber,
     usage: {},
@@ -268,6 +302,24 @@ async function finishAborted(
   // ……账本那条给重连的和以后回放的。两者缺一都会有人看不到这个标记。
   await appendSettleMessage(ctx, turn, publish, metadata);
   return { status: "interrupted" };
+}
+
+/**
+ * [交权](../../../../docs/terms.md)落在装配阶段：账本一个字不写。普通轮把输入放回待发队列最前面——用户已经被告知
+ * 「发出去了」，接手的一方出队重来；恢复轮与接着跑的那一轮什么都不用放，账本本身就说明了接下来该干什么。
+ */
+/** 已经走过 `finishHandedOverBeforeCore` 的轮。 */
+const handedOverFinishTried = new WeakSet<ActiveTurn>();
+
+async function finishHandedOverBeforeCore(ctx: RuntimeContext, turn: ActiveTurn): Promise<DriveResult> {
+  handedOverFinishTried.add(turn);
+  ctx.logger.info(LOG_SCOPE, "handover arrived before the turn reached the model; nothing written", {
+    conversationId: turn.conversationId,
+  });
+  if (turn.resume === undefined && turn.continuation !== true) {
+    await requeueInputFront(ctx, turn.conversationId, turn.input);
+  }
+  return { status: "handed-over" };
 }
 
 /** 已经写过起轮用户消息的轮——`appendUserMessage` 在几条收尾路径上都可能被调到，写两遍就是账本里两条一样的话。 */
@@ -369,8 +421,17 @@ interface ConsumeOptions {
  * 信号处理（跟普通轮一样）。
  */
 function openTurnStream(turn: ActiveTurn, session: DrivenSession, modelText: string): AsyncGenerator<RunkoChunk, TurnResult> {
-  const signal = turn.abortController.signal;
-  if (turn.resume === undefined) {return session.stream(modelText, { signal });}
+  // 结清之后就停（工具收尾期间用户按了停止）：给 core 一个已经 abort 的信号——恢复开场照样结清那次调用，
+  // 然后第一个检查点就以「已停止」收尾，不再调模型。
+  const signal = turn.stopAfterSettle === true ? AbortSignal.abort(new Error(ABORT_REASON_USER)) : turn.abortController.signal;
+  const opts = { signal, handover: turn.handoverController.signal };
+  if (turn.continuation === true) {
+    if (session.continueTurn === undefined) {
+      throw new Error("This session factory's sessions cannot continue a handed-over turn (DrivenSession.continueTurn is missing).");
+    }
+    return session.continueTurn(opts);
+  }
+  if (turn.resume === undefined) {return session.stream(modelText, opts);}
   if (session.settleAndRun === undefined) {
     throw new Error("This session factory's sessions cannot resume a suspended turn (DrivenSession.settleAndRun is missing).");
   }
@@ -379,7 +440,8 @@ function openTurnStream(turn: ActiveTurn, session: DrivenSession, modelText: str
     turn.aborted && settlement.kind === "approval" && settlement.behavior === "allow"
       ? { kind: "approval", behavior: "deny", message: ABORT_DENY_MESSAGE }
       : settlement;
-  return session.settleAndRun(callId, effective, { signal });
+  const also = turn.resume.also ?? [];
+  return session.settleAndRun(callId, effective, also.length > 0 ? { ...opts, alsoSettle: also } : opts);
 }
 
 /** 一轮的主循环：把 `session.stream()` 吐出的每个 chunk「攒进草稿 → 推给订阅者」，跑完落盘。 */
@@ -396,19 +458,22 @@ async function consumeStream(
   // core 自己也会往内部账本 push 一条结构相同（id 不同、文本可能是 modelText）的
   // 副本——收尾时 `slice(priorMessageCount + 1)` 正是为了跳过那一条，不重复落盘。
   // 恢复轮没有这一条：人没说话，他只是答了一张卡片。
-  if (turn.resume === undefined) {await appendUserMessage(ctx, turn, publish);}
+  if (turn.resume === undefined && turn.continuation !== true) {await appendUserMessage(ctx, turn, publish);}
 
   let lastMetadata: RunkoMessageMetadata | undefined;
+  // 收尾帧**扣到成品消息写进账本之后**再发（docs/logic/orchestration/tech/single-ledger.md §6.1）：
+  // 前端一收到它就当这一轮结束了，先发的话会有一段「前端以为完了、库还没写」的空档。
+  let heldMetadata: RunkoMessageMetadata | undefined;
   let firstChunkReported = false;
   let firstOutputReported = false;
 
   // 正常收尾与「生成器抛了」两条路都要落盘，但**只能落一次**——标记在 await 之前就置上，
   // 这样 `finalize` 自己抛的时候 catch 分支也不会再跑一遍。
   let finalized = false;
-  const finalizeOnce = async (): Promise<void> => {
-    if (finalized) {return;}
+  const finalizeOnce = async (): Promise<FinalizeOutcome> => {
+    if (finalized) {return "complete";}
     finalized = true;
-    await finalize(ctx, turn, session, opts, publish);
+    return await finalize(ctx, turn, session, opts, publish);
   };
 
   try {
@@ -417,7 +482,12 @@ async function consumeStream(
     while (!step.done) {
       const chunk = step.value;
       const arrivedAt = Date.now();
-      if (chunk.type === "message-metadata") {lastMetadata = chunk.messageMetadata;}
+      if (chunk.type === "message-metadata") {
+        lastMetadata = chunk.messageMetadata;
+        heldMetadata = chunk.messageMetadata;
+        step = await generator.next();
+        continue;
+      }
       if (isDurableChunk(chunk)) {turn.draft.push(chunk);}
       publish({ kind: "chunk", chunk });
 
@@ -431,8 +501,15 @@ async function consumeStream(
       }
       step = await generator.next();
     }
+    // 交权那一刻还在跑的调用：core 把它们交回给我们继续持有，收尾时登记成[工具收尾](../../../../docs/terms.md)。
+    turn.handedOverCalls = step.value.handedOver?.running ?? [];
 
-    await finalizeOnce();
+    if ((await finalizeOnce()) === "incomplete") {
+      return await finishUnsaved(ctx, turn, publish, lastMetadata);
+    }
+    if (heldMetadata !== undefined) {
+      publish({ kind: "chunk", chunk: { type: "message-metadata", messageMetadata: heldMetadata } });
+    }
     ctx.logger.info(LOG_SCOPE, "turn finished", {
       conversationId,
       status: lastMetadata?.status,
@@ -481,7 +558,7 @@ async function finalize(
   session: DrivenSession,
   opts: Pick<ConsumeOptions, "priorMessageCount" | "baselineLast">,
   publish: (frame: Frame) => void,
-): Promise<void> {
+): Promise<FinalizeOutcome> {
   turn.draft.length = 0;
 
   let state: SessionState;
@@ -492,40 +569,90 @@ async function finalize(
       conversationId: turn.conversationId,
       error: describeError(error),
     });
-    return;
+    return "incomplete";
   }
 
   const newMessages = messagesToPersist(turn, state.messages, opts);
   // core 按先进先出注入插话，数一下进了账本的有几条，剩下的由收尾时转进待发队列（挂起时）。
   turn.steersDelivered = newMessages.filter((message) => message.role === "user" && message.metadata?.steered === true).length;
   const written: Frame[] = [];
-  for (const message of newMessages) {
-    const allocated = await turn.grant.nextSeq();
-    if (!allocated.ok) {
-      ctx.logger.warn(LOG_SCOPE, "lost ownership mid-finalize; stopping here", { conversationId: turn.conversationId });
-      break;
-    }
-    const result = await ctx.persistence.ledger.append({
-      conversationId: turn.conversationId,
-      seq: allocated.seq,
-      message,
-      ts: Date.now(),
-    });
-    if (!result.ok) {
-      ctx.logger.warn(LOG_SCOPE, "ledger write rejected mid-finalize; stopping here", {
+  let outcome: FinalizeOutcome = "complete";
+  try {
+    for (const message of newMessages) {
+      const allocated = await turn.grant.nextSeq();
+      if (!allocated.ok) {
+        ctx.logger.error(LOG_SCOPE, "lost ownership mid-finalize; stopping here", { conversationId: turn.conversationId });
+        outcome = "incomplete";
+        break;
+      }
+      const result = await ctx.persistence.ledger.append({
         conversationId: turn.conversationId,
         seq: allocated.seq,
+        message,
+        ts: Date.now(),
       });
-      break;
+      if (!result.ok) {
+        ctx.logger.error(LOG_SCOPE, "ledger write rejected mid-finalize; stopping here", {
+          conversationId: turn.conversationId,
+          seq: allocated.seq,
+        });
+        outcome = "incomplete";
+        break;
+      }
+      written.push({ kind: "message", seq: allocated.seq, message });
     }
-    written.push({ kind: "message", seq: allocated.seq, message });
+  } catch (error) {
+    // 库出错不往外抛：调用方据 `incomplete` 改发「系统异常」，细节只在这一行日志里。
+    ctx.logger.error(LOG_SCOPE, "ledger write threw mid-finalize; stopping here", {
+      conversationId: turn.conversationId,
+      error: describeError(error),
+    });
+    outcome = "incomplete";
   }
 
+  // 写进去了的照样广播：它们已经在账本里，重连回放也会拿到，直播这边不能少。
   for (const frame of written) {publish(frame);}
   ctx.logger.debug(LOG_SCOPE, "turn persistence finalized", {
     conversationId: turn.conversationId,
     messageCount: written.length,
+    outcome,
   });
+  return outcome;
+}
+
+/**
+ * 这一轮的成品消息没能全部写进账本：扣住的收尾帧（多半是「完成了」）**作废**，改发「系统异常」，
+ * 并尽量补一条失败标记（docs/logic/orchestration/tech/single-ledger.md §6.1）。
+ *
+ * **先发帧、再补标记**：库出错时补标记可能要等到连接超时，用户不该跟着干等。
+ * **归属已经丢了就不补**：这份对话不归本节点管了（库连不上时自我围栏也走到这里），再碰库只会卡住收尾；
+ * 接手的节点会补「已中断」。
+ * 失败标记也写不进去时只记日志、不抛：收尾剩下的几步（广播「没有轮在跑了」、放手）必须跑完，
+ * 不然这份对话会被锁死。
+ */
+async function finishUnsaved(
+  ctx: RuntimeContext,
+  turn: ActiveTurn,
+  publish: (frame: Frame) => void,
+  lastMetadata: RunkoMessageMetadata | undefined,
+): Promise<DriveResult> {
+  const failure: RunkoMessageMetadata = {
+    turn: turn.turnNumber,
+    usage: lastMetadata?.usage ?? {},
+    status: "failed",
+    error: { code: "internal_error", message: INTERNAL_ERROR_MESSAGE },
+  };
+  publish({ kind: "chunk", chunk: { type: "message-metadata", messageMetadata: failure } });
+  if (turn.grant.signal.aborted) {return { status: "failed" };}
+  try {
+    await appendSettleMessage(ctx, turn, publish, failure);
+  } catch (error) {
+    ctx.logger.error(LOG_SCOPE, "failed to persist the settle marker of an unsaved turn", {
+      conversationId: turn.conversationId,
+      error: describeError(error),
+    });
+  }
+  return { status: "failed" };
 }
 
 /**
@@ -541,6 +668,7 @@ function messagesToPersist(
   messages: RunkoUIMessage[],
   opts: Pick<ConsumeOptions, "priorMessageCount" | "baselineLast">,
 ): RunkoUIMessage[] {
+  if (turn.continuation === true) {return messages.slice(opts.priorMessageCount);}
   if (turn.resume === undefined) {return messages.slice(opts.priorMessageCount + 1);}
   const revised = messages[opts.priorMessageCount - 1];
   const unchanged = revised === undefined || opts.baselineLast === undefined || sameJson(revised, opts.baselineLast);
@@ -615,6 +743,7 @@ function buildSessionOptions(
     onReview,
     ...(preparation.instructionsAppend !== undefined ? { instructions: { append: preparation.instructionsAppend } } : {}),
     ...(preparation.telemetry !== undefined ? { telemetry: preparation.telemetry } : {}),
+    ...(ctx.toolTimeoutMs !== undefined ? { toolTimeoutMs: ctx.toolTimeoutMs } : {}),
   };
 }
 

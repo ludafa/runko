@@ -81,12 +81,29 @@ export interface Grant {
   nextSeq(): Promise<SeqResult>;
   /** 释放归属（同时抹掉[起轮标记](../../../docs/terms.md)）。幂等。 */
   release(): Promise<void>;
+  /**
+   * 放手，并把这份对话[交接预留](../../../docs/terms.md)给 `node`：`ttlMs` 之内**只有 `node` 的
+   * `acquire` 抢得到**，别的节点（包括[定时回捞](../../../docs/terms.md)）一律报 `busy`、`holder` 报
+   * `node`（接入层据此把请求转给它）；过期之后退化成没人持有。
+   *
+   * `node` 与 `holder` 同一个值空间（节点地址）。只在还持有时生效；之后这个 grant 与 `release()`
+   * 之后一样作废。
+   *
+   * **可选**：没实现它的仲裁机制，[交权](../../../docs/terms.md)时退化成普通 `release()`——谁先来谁接手，
+   * 只是少了「指定交接优先」这条保证。单进程实现用不上它。
+   */
+  releaseTo?(node: string, opts: { ttlMs: number }): Promise<void>;
 }
 
 /** `inspect` 的答案：这个会话此刻归属在谁手上。 */
 export interface OwnershipInfo {
   held: boolean;
   holder?: string;
+  /**
+   * `true` = 此刻没人真持有，这是一份有效的[交接预留](../../../docs/terms.md)（`holder` 报被预留的节点）。
+   * 被预留的节点靠它分辨「这份对话正要交给我」与「我自己刚放掉的租约」。可选：不做预留的实现不报它。
+   */
+  reserved?: boolean;
 }
 
 /** 库里还留着[起轮标记](../../../docs/terms.md)、但已经没人在跑的那些会话——启动扫描的输入。 */
@@ -109,4 +126,21 @@ export interface Arbitration {
   listStale(): Promise<StaleOwnership[]>;
   /** 清掉一条陈旧标记（补完收尾之后）。 */
   clearStale(conversationId: string): Promise<void>;
+  /**
+   * 给对话打上[待接手](../../../docs/terms.md)标记：它有活没干完、而此刻可能没人会去推（交权时没挑到
+   * 接手节点；工具收尾有了结果；下线期间有人答了卡片）。[定时回捞](../../../docs/terms.md)与新进程的启动
+   * 扫描据此推一把。幂等。
+   *
+   * 下面三个方法**可选，要么都实现、要么都不实现**；没实现时没有定时回捞，交权只靠指定交接。
+   */
+  markAwaitingTakeover?(conversationId: string): Promise<void>;
+  /** 撤掉待接手标记（推过了）。幂等。 */
+  clearAwaitingTakeover?(conversationId: string): Promise<void>;
+  /**
+   * [定时回捞](../../../docs/terms.md)的输入：**没人持有、也没有有效的交接预留**，但有活没干完的对话——
+   * 打了待接手标记的，以及[待发队列](../../../docs/terms.md)不空的（实现看得到队列表时）。
+   *
+   * 它只碰「预留已过期或根本没有预留」的对话，所以不会跟指定交接抢。
+   */
+  listSweepCandidates?(opts: { limit: number }): Promise<string[]>;
 }

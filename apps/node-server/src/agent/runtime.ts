@@ -15,6 +15,7 @@
  */
 import type {
   AgentRuntime,
+  NodeRegistry,
   RuntimeHooks,
   SessionFactory,
   StreamFanout,
@@ -39,7 +40,11 @@ import { classifyApproval, resolveApprovalMode } from './approval-policy.js';
 import { buildInstructions, gateWorkspace } from './chat-agent.js';
 import { hasConversationGrant } from './conversation-grants.js';
 import { resolveGithubPat, resolveRepo } from './github-repo.js';
-import { createChatArbitration, createChatPersistence } from './persistence.js';
+import {
+  createChatArbitration,
+  createChatPersistence,
+  readMs,
+} from './persistence.js';
 import type { AcquireMode, SandboxManager } from './sandbox-manager.js';
 import {
   buildModelText,
@@ -105,6 +110,19 @@ export interface ChatRuntimeDeps {
   logger?: Logger;
   /** [联网搜索](../../../../docs/terms.md)工具——不传时按 `EXA_API_KEY` 决定注不注册；显式传入用于测试。 */
   webSearchTool?: Tool;
+  /**
+   * [交权](../../../../docs/terms.md)：本节点地址、[发布序号](../../../../docs/terms.md)、[节点登记表](../../../../docs/terms.md)与出站「请接手」。
+   * 不传 = 单进程跑法：下线时挑不到接手节点，对话打上待接手标记，下一个进程起来时接走。
+   */
+  handover?: {
+    node: string;
+    releaseSeq: number;
+    nodes?: NodeRegistry;
+    requestTakeover?: (
+      node: string,
+      conversationIds: string[],
+    ) => Promise<boolean>;
+  };
   /**
    * 覆盖「怎么造出这一轮的 `Session`」。缺省即框架的默认工厂（core 的 `createSession`
    * + 文件工具八件套）。**集成测试用它塞一对假的 `stream()`/`toJSON()`**，于是整条轮编排
@@ -211,6 +229,8 @@ export function createChatRuntime(deps: ChatRuntimeDeps): AgentRuntime {
     },
     onTurnSettled: ({ conversationId, status, input }) => {
       markActive(conversationId);
+      // [已交权](../../../../docs/terms.md)不是结束：这一轮由别的节点接着跑，那边收尾时才通知。但沙盒快照照存——
+      // 接手节点要用它。
       // [本地沙盒](../../../../docs/terms.md)的文件在内存里，这里存一份快照下来——进程没了、
       // 或者下一轮落在别的副本上，都还能接着用。别的档是空操作。
       void deps.sandboxManager
@@ -221,12 +241,23 @@ export function createChatRuntime(deps: ChatRuntimeDeps): AgentRuntime {
             error: error instanceof Error ? error.message : String(error),
           });
         });
-      deps.notifier?.turnSettled({
-        conversationId,
-        userId: input.userId ?? '',
-        status,
+      if (status === 'handed-over') {
+        return;
+      }
+      // 接着跑、恢复工具收尾的那一轮没有「谁发的」（框架给的 `userId` 是空的）：通知发给会话的主人。
+      void resolveOwner(conversationId, input.userId).then((userId) => {
+        deps.notifier?.turnSettled({ conversationId, userId, status });
       });
     },
+    // [本地沙盒](../../../../docs/terms.md)的文件在内存里：交权放手之前、以及工具在本节点上收尾跑完、结果写库之前，
+    // 都要**等**快照存好——接手节点随时会开始读它。别的档是空操作。
+    onHandOff: async ({ conversationId }) => {
+      await deps.sandboxManager.persist(conversationId);
+    },
+    onToolTailFinished: async ({ conversationId }) => {
+      await deps.sandboxManager.persist(conversationId);
+    },
+    // 接手节点起的轮（接着跑、恢复工具收尾）没有「谁发的」：推送发给会话的主人。
     onApprovalPending: ({
       conversationId,
       callId,
@@ -235,26 +266,44 @@ export function createChatRuntime(deps: ChatRuntimeDeps): AgentRuntime {
       userId,
       timeoutMs,
     }) => {
-      deps.notifier?.approvalPending({
-        conversationId,
-        userId: userId ?? '',
-        callId,
-        toolName,
-        input,
-        timeoutMs,
+      void resolveOwner(conversationId, userId).then((owner) => {
+        deps.notifier?.approvalPending({
+          conversationId,
+          userId: owner,
+          callId,
+          toolName,
+          input,
+          timeoutMs,
+        });
       });
     },
     onQuestionPending: ({ conversationId, question, userId, timeoutMs }) => {
-      deps.notifier?.questionPending({
-        conversationId,
-        userId: userId ?? '',
-        question,
-        timeoutMs,
+      void resolveOwner(conversationId, userId).then((owner) => {
+        deps.notifier?.questionPending({
+          conversationId,
+          userId: owner,
+          question,
+          timeoutMs,
+        });
       });
     },
   };
 
+  async function resolveOwner(
+    conversationId: string,
+    userId: string | undefined,
+  ): Promise<string> {
+    if (userId !== undefined && userId !== '') {
+      return userId;
+    }
+    const row = await getConversationById(deps.db, conversationId).catch(
+      () => undefined,
+    );
+    return row?.userId ?? '';
+  }
+
   const memoryWindowMs = resolveMemoryWindowMs();
+  const toolTimeoutMs = readMs('RUNKO_TOOL_TIMEOUT_MS', process.env);
   return createAgentRuntime({
     // instructions/skills/tools/model 全是**逐轮**决定的（仓库、分支、沙盒里现有的
     // skill、按会话选的模型），所以这里只放一个占位——每一轮的 `prepareTurn` 都会把
@@ -265,7 +314,12 @@ export function createChatRuntime(deps: ChatRuntimeDeps): AgentRuntime {
     // **整个进程 import 就崩**——连不碰 agent 的端点（列会话、推送订阅）都起不来。
     agent: defineAgent({ model: PLACEHOLDER_MODEL }),
     persistence: createChatPersistence(deps.db),
-    arbitration: createChatArbitration(deps.db),
+    arbitration: createChatArbitration(
+      deps.db,
+      deps.handover !== undefined ? { holder: deps.handover.node } : {},
+    ),
+    ...(deps.handover !== undefined ? { handover: deps.handover } : {}),
+    ...(toolTimeoutMs !== undefined ? { toolTimeout: toolTimeoutMs } : {}),
     ...(deps.stream !== undefined ? { stream: deps.stream } : {}),
     logger: log,
     ...(memoryWindowMs !== undefined ?

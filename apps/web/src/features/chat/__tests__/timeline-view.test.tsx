@@ -1,3 +1,4 @@
+import { ABORT_REASON_SHUTDOWN } from '@runko/agent';
 import type { RunkoUIMessage } from '@runko/core';
 import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
@@ -518,6 +519,30 @@ describe('TimelineView — turn-stats / turn-failed bar placement', () => {
     expect(screen.queryByTestId('turn-stats-button')).not.toBeInTheDocument();
   });
 
+  it('系统异常（internal_error）显示「系统异常」和一句中文提示，不把服务端那句英文抛给用户', () => {
+    const messages: RunkoUIMessage[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        parts: [{ type: 'step-start' }],
+        metadata: {
+          status: 'failed',
+          error: {
+            code: 'internal_error',
+            message: 'Internal error; this turn could not be completed.',
+          },
+        },
+      },
+    ];
+    render(<TimelineView messages={messages} />);
+    expect(screen.getByTestId('turn-failed-bar')).toBeInTheDocument();
+    expect(screen.getByText('系统异常')).toBeInTheDocument();
+    expect(
+      screen.getByText('服务端出了问题，这一轮没能完成，请重新发送。'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Internal error/)).not.toBeInTheDocument();
+  });
+
   it('一轮被[停止](../../../../../../docs/terms.md)（status interrupted / code aborted）走中性的「已停止」标记，不是红色失败条，也不把 core 那句英文 message 抛给用户', () => {
     const messages: RunkoUIMessage[] = [
       {
@@ -560,7 +585,7 @@ describe('TimelineView — turn-stats / turn-failed bar placement', () => {
           status: 'interrupted',
           error: {
             code: 'aborted',
-            message: 'The server shut down while this turn was running.',
+            message: 'Server is shutting down; this turn was interrupted.',
           },
         },
       },
@@ -576,9 +601,88 @@ describe('TimelineView — turn-stats / turn-failed bar placement', () => {
     expect(screen.queryByText('已停止')).not.toBeInTheDocument();
     // core 那句英文同样不抛给用户。
     expect(
-      screen.queryByText('The server shut down while this turn was running.'),
+      screen.queryByText('Server is shutting down; this turn was interrupted.'),
     ).not.toBeInTheDocument();
     expect(screen.getByText('迁到一半')).toBeInTheDocument();
+  });
+
+  // 防漂移哨兵：`turn-marker.tsx` 的 `SHUTDOWN_ABORT_MESSAGE` 是 `@runko/agent`
+  // `ABORT_REASON_SHUTDOWN` 的手写镜像，组件自己没有导出那个常量。这里直接从
+  // `@runko/agent` 导入真值来断言渲染结果——服务端改了那句文案而 web 端没跟上时，
+  // 这条用例会先红（而不是继续显示成「已停止」，把用户搞糊涂）。
+  it('防漂移：用 @runko/agent 真正的 ABORT_REASON_SHUTDOWN 断言渲染结果，逐字对应「服务重启，这一轮已中断」', () => {
+    const messages: RunkoUIMessage[] = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          { type: 'text', text: '迁到一半', state: 'done' },
+        ],
+        metadata: {
+          status: 'interrupted',
+          error: { code: 'aborted', message: ABORT_REASON_SHUTDOWN },
+        },
+      },
+    ];
+    render(<TimelineView messages={messages} />);
+    expect(screen.getByText('服务重启，这一轮已中断')).toBeInTheDocument();
+    expect(screen.queryByText('已停止')).not.toBeInTheDocument();
+  });
+
+  // 已交权（docs/logic/orchestration/tech/handover.md §6.1）：模型输出段被交权时账本里那条
+  // 只有 step-start 部件的占位消息——不是中断，也不该有任何收尾标记，连气泡本身都不画。
+  it('已交权（模型输出段，只有 step-start 部件的占位消息）整条不渲染——没有气泡，也没有任何收尾标记', () => {
+    const messages: RunkoUIMessage[] = [
+      {
+        id: 'handed-over-1',
+        role: 'assistant',
+        parts: [{ type: 'step-start' }],
+        metadata: {
+          status: 'handed-over',
+          handedOver: { callIds: [] },
+          turn: 1,
+          usage: {},
+        },
+      },
+    ];
+    const { container } = render(<TimelineView messages={messages} />);
+
+    // 不是空状态——entries 里确实有这条消息，只是它自己渲染成了空。
+    expect(screen.queryByText('这条分支还没有指令')).not.toBeInTheDocument();
+    // 没有任何 `Message`（`from="assistant"`）气泡画出来——`MessageEntry` 对这条
+    // 消息整个返回 null。用 class 而不是深挖 `StickToBottom` 的内部 DOM 层数，
+    // 更不依赖它的具体嵌套结构。
+    expect(container.querySelector('.is-assistant')).toBeNull();
+    expect(screen.queryByTestId('turn-stopped-bar')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('turn-failed-bar')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('turn-suspended-bar')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('turn-stats-button')).not.toBeInTheDocument();
+  });
+
+  // 对照组：工具段被交权时，前面已经产出内容的那条消息**不是**只有 step-start——
+  // 它的真实内容（文本/工具卡片）照旧渲染，只是收尾标记落空（不是中断）。
+  it('已交权（工具段，消息里已有真实内容）：内容照常渲染，只是没有收尾标记', () => {
+    const messages: RunkoUIMessage[] = [
+      {
+        id: 'handed-over-2',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          { type: 'text', text: '我先跑一条命令', state: 'done' },
+        ],
+        metadata: {
+          status: 'handed-over',
+          handedOver: { callIds: ['call-1'] },
+          turn: 1,
+          usage: {},
+        },
+      },
+    ];
+    render(<TimelineView messages={messages} />);
+    expect(screen.getByText('我先跑一条命令')).toBeInTheDocument();
+    expect(screen.queryByTestId('turn-stopped-bar')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('turn-failed-bar')).not.toBeInTheDocument();
   });
 
   it('a "turn signal" placeholder message (empty parts, only metadata) renders just the trailing bar, no bubble', () => {

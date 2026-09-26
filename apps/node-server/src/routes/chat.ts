@@ -17,7 +17,12 @@ import type { GitHubRepoRef } from '../agent/github-repo.js';
 import { resolveGithubPat, resolveRepo } from '../agent/github-repo.js';
 import { createLocalProvider } from '../agent/local-sandbox.js';
 import { hasRealModel, resolveModel } from '../agent/model.js';
-import { createChatPersistence } from '../agent/persistence.js';
+import {
+  createChatNodeRegistry,
+  createChatPersistence,
+  readReleaseSeq,
+  resolveNodeName,
+} from '../agent/persistence.js';
 import { countPendingDecisions } from '../agent/runko-tables.js';
 import { createChatRuntime } from '../agent/runtime.js';
 import type {
@@ -90,6 +95,7 @@ import {
   RETRY_AFTER_SECONDS,
   RETRY_LATER_STATUS,
 } from './forward.js';
+import { createTakeoverApp, createTakeoverRequester } from './takeover.js';
 
 // ---------------------------------------------------------------------------
 // docs/ingress/tech/chat-webapp.md §2.2 `routes/chat.ts` (+ §2.2c（审批链）'s
@@ -128,11 +134,6 @@ export interface ChatRouteDeps {
    * 只在持有者内存里。见 docs/host/node/tech/cluster-lab.md §5。
    */
   forwardStream?: boolean;
-  /**
-   * [节点下线](../../../../docs/terms.md)信号：触发时断开本节点上的 SSE 直播，让浏览器重连到
-   * 别的节点（docs/host/node/tech/cluster-console.md §4.2）。不传 = 永不因下线断开。
-   */
-  offlineSignal?: AbortSignal;
   sandboxManager: SandboxManager;
   resolveModel: () => LanguageModel;
   /**
@@ -293,18 +294,23 @@ export function toWireFrame(frame: Frame): ChatReplayFrame {
       return { queue: toQueueDto(frame.queue) };
     case 'activity':
       return { turnActive: frame.active };
+    case 'reconnect':
+      return { reconnect: true };
   }
 }
 
 /** The SSE `event:` name for a wire frame — structural, not a shared literal field: the four frame kinds are told apart by which of `chunk`/`queue`/`turnActive`/`message` they actually carry (`schemas/chat.ts`'s own doc comment). */
 function frameEventName(
   frame: ChatReplayFrame,
-): 'chunk' | 'message' | 'queue' | 'turn-state' {
+): 'chunk' | 'message' | 'queue' | 'turn-state' | 'reconnect' {
   if ('chunk' in frame) {
     return 'chunk';
   }
   if ('queue' in frame) {
     return 'queue';
+  }
+  if ('reconnect' in frame) {
+    return 'reconnect';
   }
   return 'turnActive' in frame ? 'turn-state' : 'message';
 }
@@ -990,17 +996,9 @@ export function createChatApp(deps: ChatRouteDeps) {
       stream.onAbort(() => {
         abort.abort();
       });
-      // 节点下线时结束这条流：前端见「轮还在跑、流却断了」会退避重连，经 nginx 落到别的节点。
-      // **别的节点转发来的流不断**：转发说明直播只有本节点能播（没配 Redis 广播），断了
-      // 那边重连还是转回这里、又被立刻断掉，这一轮剩下的实时帧就全看不到了。
-      const offlineSignal =
-        deps.forwarder?.isForwarded(c) === true ?
-          undefined
-        : deps.offlineSignal;
-      const signal =
-        offlineSignal === undefined ?
-          abort.signal
-        : AbortSignal.any([abort.signal, offlineSignal]);
+      // [节点下线](../../../../docs/terms.md)时这条流由框架结束：这份对话交接完，最后一帧是请重连帧
+      // （`reconnect`），前端收到就立刻重连，落到新的持有者上。
+      const signal = abort.signal;
 
       for await (const frame of deps.runtime.subscribe(id, {
         ...(after !== undefined ? { after } : {}),
@@ -1358,6 +1356,36 @@ export const chatRuntime = createChatRuntime({
   notifier: defaultNotifier,
   ...(chatStream.fanout !== undefined ? { stream: chatStream.fanout } : {}),
   ...defaultTelemetry,
+  // [交权](../../../../docs/terms.md)：多副本时（配了 `RUNKO_NODE_URL`）登记到节点登记表，下线时把对话交给别的副本；
+  // 单进程只有节点名，挑不到接手节点，对话打待接手标记，下一个进程起来时接走。
+  handover: {
+    node: resolveNodeName(),
+    releaseSeq: readReleaseSeq(),
+    // 请接手要副本间令牌：没配令牌的多副本只登记、不互相请接手（`routes/takeover.ts` 那边也不开端点），
+    // 交出去的对话靠待接手标记与定时回捞接走。
+    ...(defaultNode !== undefined ?
+      {
+        nodes: createChatNodeRegistry(defaultDb),
+        ...((
+          defaultNode.peerToken !== undefined && defaultNode.peerToken !== ''
+        ) ?
+          {
+            requestTakeover: createTakeoverRequester(
+              defaultNode,
+              defaultLogger,
+            ),
+          }
+        : {}),
+      }
+    : {}),
+  },
+});
+
+/** [指定交接](../../../../docs/terms.md)的节点间端点，`app.ts` 挂在鉴权之外。 */
+export const takeoverApp = createTakeoverApp({
+  runtime: chatRuntime,
+  node: defaultNode,
+  logger: defaultLogger,
 });
 
 const defaultForwarder = createForwarder(defaultNode, defaultLogger);
@@ -1371,7 +1399,6 @@ export const chatApp = createChatApp({
   forwarder: defaultForwarder,
   // 广播到了每个副本，直播流就不必再转给持有者。
   forwardStream: !chatStream.broadcasts,
-  offlineSignal: nodeOffline.signal,
   decisions: createChatPersistence(defaultDb).decisions,
   sandboxManager: defaultSandboxManager,
   resolveModel,

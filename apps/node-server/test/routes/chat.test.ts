@@ -509,14 +509,15 @@ describe('routes/chat', () => {
       expect(sessions.all).toHaveLength(1); // 没有起第二轮
     });
 
-    it('会话不存在 → 404；关闭中 → 503', async () => {
+    it('会话不存在 → 404；关闭中 → 202 排队（交给接手的节点，不拒绝）', async () => {
       const { app, runtime } = build();
       expect((await post(app, 'nope', { text: 'x' })).status).toBe(404);
 
       const created = await createConversationVia(app);
       await runtime.shutdown({ graceMs: 50 });
       const response = await post(app, created.id, { text: 'x' });
-      expect(response.status).toBe(503);
+      expect(response.status).toBe(202);
+      expect(await response.json()).toMatchObject({ mode: 'queued' });
     });
   });
 

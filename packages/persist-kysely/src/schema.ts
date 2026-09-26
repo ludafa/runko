@@ -15,6 +15,9 @@ export const LEDGER_TABLE = "agent_ledger";
 export const DECISIONS_TABLE = "agent_decisions";
 export const QUEUE_TABLE = "agent_queue";
 export const LEASES_TABLE = "agent_leases";
+export const HANDOVER_TABLE = "agent_handover";
+export const NODES_TABLE = "agent_nodes";
+export const TAILS_TABLE = "agent_tool_tails";
 
 /** [账本](../../../docs/terms.md)：一个会话的全部成品消息。 */
 export interface LedgerTable {
@@ -79,6 +82,56 @@ export interface LeasesTable {
 }
 
 /**
+ * [交接预留 / 待接手](../../../docs/terms.md)表——**独立于 `agent_leases`**，不给租约表
+ * 加列。理由是 `migrate()` 的承诺：只建表、不改表（`CREATE TABLE IF NOT EXISTS`），老库
+ * 加了新字段的租约表永远不会被补上；新建一张表就没有这个问题，空着也没有代价。
+ *
+ * 一个会话一行，**长期存在**（跟 `LeasesTable` 一样，不随预留过期或撤标记删行）。
+ */
+export interface HandoverTable {
+  conversation_id: string;
+  /** 预留给哪个节点（`Grant.holder` 同一个值空间）。`null` = 没有预留。 */
+  reserved_for: string | null;
+  /** 预留截止时刻。`null` = 没有预留。过了这个时刻退化成「没人持有」。 */
+  reserved_until: number | null;
+  /** [待接手](../../../docs/terms.md)标记，0/1。 */
+  awaiting_takeover: number;
+  updated_at: number;
+}
+
+/** [节点登记表](../../../docs/terms.md)：一个节点一行，启动登记、定时刷新心跳。 */
+export interface NodesTable {
+  /** 节点地址，同租约里的 `holder`。 */
+  node: string;
+  /** [发布序号](../../../docs/terms.md)：每次发布递增，回滚也递增。 */
+  release_seq: number;
+  /** `ready` | `leaving`（[节点下线](../../../docs/terms.md)中）。 */
+  state: string;
+  heartbeat_at: number;
+  started_at: number;
+}
+
+/**
+ * [工具收尾](../../../docs/terms.md)记录：[交权](../../../docs/terms.md)那一刻还在跑、
+ * 留在旧节点上跑完的那次调用。
+ */
+export interface ToolTailsTable {
+  conversation_id: string;
+  tool_call_id: string;
+  tool_name: string;
+  /** 在哪个节点上收尾（同 `holder` 的值空间）。 */
+  runner: string;
+  started_at: number;
+  /** 过了这个时刻还没有结果，持有者就把它记成「结果未知」。 */
+  deadline: number;
+  /** `TailOutcome` 的 JSON。`null` = 还在跑。**只在为空时写得进**。 */
+  outcome: string | null;
+  settled_at: number | null;
+  /** 持有者要求停止，0/1。 */
+  stop_requested: number;
+}
+
+/**
  * 本包要求的库形状。宿主自己带 Kysely 实例时，把它并进自己的 `Database` 类型：
  *
  * ```ts
@@ -92,4 +145,7 @@ export interface RunkoDatabase {
   agent_decisions: DecisionsTable;
   agent_queue: QueueTable;
   agent_leases: LeasesTable;
+  agent_handover: HandoverTable;
+  agent_nodes: NodesTable;
+  agent_tool_tails: ToolTailsTable;
 }

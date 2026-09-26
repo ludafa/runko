@@ -13,6 +13,7 @@
  */
 import type {
   AgentDefinition,
+  CallOutcome,
   BuiltinToolName,
   DerivedDataCollector,
   RunkoChunk,
@@ -32,8 +33,14 @@ import { createFileTools } from "@runko/virtual-fs";
  * 只实现了 `stream`/`toJSON` 的假货进来（同 `sandbox-adapter` 那条「按结构声明接口，
  * 不认具体类」的纪律）。
  */
+/** 框架开一轮时给 session 的两个信号：中止，以及[交权](../../../../docs/terms.md)（见 core 的 `TurnOptions`）。 */
+export interface DrivenTurnOptions {
+  signal?: AbortSignal;
+  handover?: AbortSignal;
+}
+
 export interface DrivenSession {
-  stream(input: string, opts?: { signal?: AbortSignal }): AsyncGenerator<RunkoChunk, TurnResult>;
+  stream(input: string, opts?: DrivenTurnOptions): AsyncGenerator<RunkoChunk, TurnResult>;
   toJSON(): SessionState;
   steer?(input: string): boolean;
   /**
@@ -41,7 +48,16 @@ export interface DrivenSession {
    * `Session.settleAndRun`）。**可选**，同 `steer?`——自定义的 session 工厂不必跟着改；没有它的
    * session 遇到恢复轮会以一个明确的错误收尾，而不是静默跑错。
    */
-  settleAndRun?(callId: string, settlement: Settlement, opts?: { signal?: AbortSignal }): AsyncGenerator<RunkoChunk, TurnResult>;
+  settleAndRun?(
+    callId: string,
+    settlement: Settlement,
+    opts?: DrivenTurnOptions & { alsoSettle?: { callId: string; outcome: CallOutcome }[] },
+  ): AsyncGenerator<RunkoChunk, TurnResult>;
+  /**
+   * 接着跑（core 的 `Session.continueTurn`）：[交权](../../../../docs/terms.md)之后接手的一方用。**可选**，同上——
+   * 没有它的 session 遇到接着跑的那一轮以一个明确的错误收尾。
+   */
+  continueTurn?(opts?: DrivenTurnOptions): AsyncGenerator<RunkoChunk, TurnResult>;
 }
 
 export type SessionFactory = (

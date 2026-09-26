@@ -62,6 +62,72 @@ async function requestJson(input: string, init: RequestInit): Promise<unknown> {
   return response.json() as Promise<unknown>;
 }
 
+/** 节点下线闸门回 503 时不带 `Retry-After`，或带一个不合法的值——退回等 1 秒。 */
+const DEFAULT_RETRY_AFTER_SECONDS = 1;
+/** 见 `requestJsonWithRetry` 的注释：503 最多重发这么多次。 */
+const MAX_503_RETRIES = 3;
+
+function retryAfterMs(response: Response): number {
+  const header = response.headers.get('Retry-After');
+  const seconds = header === null ? NaN : Number(header);
+  const safeSeconds =
+    Number.isFinite(seconds) && seconds >= 0 ?
+      seconds
+    : DEFAULT_RETRY_AFTER_SECONDS;
+  return safeSeconds * 1000;
+}
+
+/** 可被 `signal` 提前打断的 `setTimeout`——重试等待期间调用方撤销请求（如组件卸载）要立刻停手，不能白等完再抛弃结果。 */
+function delay(
+  ms: number,
+  signal: AbortSignal | null | undefined,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted === true) {
+      reject(new DOMException('aborted', 'AbortError'));
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        reject(new DOMException('aborted', 'AbortError'));
+      },
+      { once: true },
+    );
+  });
+}
+
+/**
+ * 给[节点下线](../../../../../docs/terms.md)那道 503 窗口用的重试版 `requestJson`：
+ * 发消息、[停止](../../../../../docs/terms.md)、提交审批/提问答复这几个请求可能
+ * 在极短的时间里撞上一个正在关闭的节点——服务端约定回 503 时请求一定没被处理，
+ * 按 `Retry-After`（秒，缺省 1）等一下重发是安全的，最多重发 `MAX_503_RETRIES` 次。
+ *
+ * **504（网关超时）不在此列**：那表示请求已经发出、结果未知，重发可能让它被执行
+ * 两次，照旧只抛错、不重试；其余状态码也一律照旧。
+ */
+async function requestJsonWithRetry(
+  input: string,
+  init: RequestInit,
+): Promise<unknown> {
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await fetch(input, { credentials: 'include', ...init });
+    if (response.status === 503 && attempt < MAX_503_RETRIES) {
+      await delay(retryAfterMs(response), init.signal);
+      continue;
+    }
+    if (!response.ok) {
+      throw new ChatApiError(response.status, await readBodyText(response));
+    }
+    if (response.status === 204 || response.status === 205) {
+      return null;
+    }
+    return response.json() as Promise<unknown>;
+  }
+}
+
 export async function listConversations(
   signal?: AbortSignal,
 ): Promise<Conversation[]> {
@@ -159,7 +225,9 @@ export interface ChatFrameStreamHandlers {
  *
  * Resolves once the server has accepted it (202); rejects with `ChatApiError`
  * on a non-2xx response — notably `409` for a full 待发队列, or (窄竞态) a turn
- * already in progress that couldn't be steered either.
+ * already in progress that couldn't be steered either. 撞上[节点下线](../../../../../docs/terms.md)
+ * 窗口的 503 会按 `Retry-After` 自动重发（见 `requestJsonWithRetry`），调用方看到的
+ * 要么是最终成功，要么是重发用完之后的 `ChatApiError`。
  *
  * resolve 的值是服务端**实际**的分流结果（`mode`，见 `startTurnAckSchema`）：它可能与
  * 请求的 `intent` 不一致，调用方需要据此修正自己的乐观状态——目前唯一的用处是
@@ -172,7 +240,7 @@ export async function postChatMessage(
   intent?: 'queue' | 'steer',
   signal?: AbortSignal,
 ): Promise<StartTurnMode> {
-  const json = await requestJson(
+  const json = await requestJsonWithRetry(
     `/api/chat/conversations/${encodeURIComponent(conversationId)}/messages`,
     {
       method: 'POST',
@@ -192,13 +260,14 @@ export async function postChatMessage(
  * resolve 只代表「停止已请求」：真正停下的那一刻由 agent 当时在做什么决定，界面靠直播
  * 流上那条 `status: 'interrupted'` 的 `message-metadata` 才知道停住了（与审批「不做乐观
  * 翻转」同一姿态）。`409` = 没有进行中的一轮（含「刚好自己结束了」的窄竞态），
- * `use-chat-messages.ts` 靠 `ChatApiError.status` 把它当成无事发生。
+ * `use-chat-messages.ts` 靠 `ChatApiError.status` 把它当成无事发生。503 自动重发，
+ * 见 `requestJsonWithRetry`。
  */
 export async function postAbortTurn(
   conversationId: string,
   signal?: AbortSignal,
 ): Promise<QueuedMessage[]> {
-  const json = await requestJson(
+  const json = await requestJsonWithRetry(
     `/api/chat/conversations/${encodeURIComponent(conversationId)}/abort`,
     { method: 'POST', signal },
   );
@@ -249,7 +318,8 @@ export async function clearQueuedMessages(
  * route (kubb generates it from `openapi.yml`), but its default
  * `@kubb/plugin-client/clients/fetch` client never checks `response.ok`/
  * throws on a non-2xx status — unusable for the 404-vs-anything-else
- * distinction this hook needs, so this stays hand-written.
+ * distinction this hook needs, so this stays hand-written. 503 自动重发，见
+ * `requestJsonWithRetry`。
  */
 export async function postApprovalDecision(
   conversationId: string,
@@ -257,7 +327,7 @@ export async function postApprovalDecision(
   decision: { behavior: 'allow' | 'allow-session' | 'deny'; message?: string },
   signal?: AbortSignal,
 ): Promise<void> {
-  await requestJson(
+  await requestJsonWithRetry(
     `/api/chat/conversations/${encodeURIComponent(conversationId)}/approvals/${encodeURIComponent(callId)}`,
     {
       method: 'POST',
@@ -275,7 +345,7 @@ export async function postQuestionAnswer(
   answer: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  await requestJson(
+  await requestJsonWithRetry(
     `/api/chat/conversations/${encodeURIComponent(conversationId)}/questions/${encodeURIComponent(callId)}`,
     {
       method: 'POST',

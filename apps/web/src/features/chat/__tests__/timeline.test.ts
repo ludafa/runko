@@ -410,6 +410,220 @@ describe('MessageLedger (materialize.ts)', () => {
 
     expect(replay.latest()).toEqual(live.latest());
   });
+
+  it('a standalone message-metadata arriving while a message stream is still open (no finish) still closes it and fires onTurnEnd exactly once — the handed-over-mid-output shape (docs/logic/orchestration/tech/handover.md §6.1：掐断模型流、不发 finish，直接来一条独立的收尾 message-metadata)', async () => {
+    const { ledger, latest, turnEndCount } = collectLedger();
+    for (const frame of toChunkEnvelopes([
+      startChunk('mid-1'),
+      startStepChunk(),
+      textStartChunk('t'),
+      textDeltaChunk('t', '正在输出到一半'),
+    ])) {
+      ledger.applyFrame(frame);
+    }
+    await flushLedger();
+    expect(turnEndCount()).toBe(0); // 还没收尾
+
+    ledger.applyFrame({
+      seq: 100,
+      chunk: messageMetadataChunk({
+        turn: 1,
+        usage: {},
+        status: 'handed-over',
+        handedOver: { callIds: [] },
+      }),
+    });
+
+    expect(turnEndCount()).toBe(1); // 恰好触发一次，不是 0（此前的缺陷）也不是多次
+    const messages = latest();
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.id).toBe('mid-1');
+    expect(messages[0]?.metadata?.status).toBe('handed-over');
+  });
+});
+
+describe('MessageLedger.replaceDraft()（[交权](../../../../../../docs/terms.md)时「整体替换草稿」，docs/logic/orchestration/tech/handover.md §6.1、§8）', () => {
+  it('丢掉一条只由 chunk 物化出来、从未以 MessageFrame 落地过的消息——旧节点流出来的那半段字', async () => {
+    const { ledger, latest } = collectLedger();
+    for (const frame of toChunkEnvelopes([
+      startChunk('draft-1'),
+      startStepChunk(),
+      textStartChunk('t'),
+      textDeltaChunk('t', '半段字'),
+    ])) {
+      ledger.applyFrame(frame);
+    }
+    await flushLedger();
+    expect(latest()).toHaveLength(1);
+
+    ledger.replaceDraft();
+
+    expect(latest()).toEqual([]);
+  });
+
+  it('不丢已经以 MessageFrame（带 seq 的成品消息）落地过的消息', () => {
+    const { ledger, latest } = collectLedger();
+    ledger.applyFrame({
+      seq: 1,
+      message: assistantMessage(
+        'landed-1',
+        [{ type: 'text', text: '已经是成品', state: 'done' }],
+        { status: 'completed' },
+      ),
+    });
+    expect(latest()).toHaveLength(1);
+
+    ledger.replaceDraft();
+
+    expect(latest()).toHaveLength(1);
+    expect(latest()[0]?.id).toBe('landed-1');
+  });
+
+  it('混合场景：只丢草稿尾巴，保留更早已落地的消息与它们的顺序', async () => {
+    const { ledger, latest } = collectLedger();
+    ledger.applyFrame({ seq: 1, message: userMessage('u1', '继续') });
+    for (const frame of toChunkEnvelopes(
+      [
+        startChunk('draft-2'),
+        startStepChunk(),
+        textStartChunk('t'),
+        textDeltaChunk('t', '被交权的半句'),
+      ],
+      1,
+    )) {
+      ledger.applyFrame(frame);
+    }
+    await flushLedger();
+    expect(latest().map((m) => m.id)).toEqual(['u1', 'draft-2']);
+
+    ledger.replaceDraft();
+
+    expect(latest().map((m) => m.id)).toEqual(['u1']);
+  });
+
+  it('replaceDraft() 之后，接手节点重新生成的一段新 start/…/finish 序列能正常物化（没有残留的打开流或过期的 lastAssistantId）', async () => {
+    const { ledger, latest, turnEndCount } = collectLedger();
+    for (const frame of toChunkEnvelopes([
+      startChunk('draft-3'),
+      startStepChunk(),
+      textStartChunk('t1'),
+      textDeltaChunk('t1', '旧节点的半段字'),
+    ])) {
+      ledger.applyFrame(frame);
+    }
+    await flushLedger();
+    ledger.replaceDraft();
+    expect(latest()).toEqual([]);
+
+    for (const frame of toChunkEnvelopes(
+      [
+        startChunk('resumed-1'),
+        startStepChunk(),
+        textStartChunk('t2'),
+        textDeltaChunk('t2', '接手节点重新生成的内容'),
+        textEndChunk('t2'),
+        finishStepChunk(),
+        finishChunk('stop'),
+      ],
+      1,
+    )) {
+      ledger.applyFrame(frame);
+    }
+    ledger.applyFrame({
+      seq: 100,
+      chunk: messageMetadataChunk({ turn: 2, usage: {}, status: 'completed' }),
+    });
+    await flushLedger();
+
+    const messages = latest();
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.id).toBe('resumed-1');
+    expect(collectText(messages[0])).toBe('接手节点重新生成的内容');
+    expect(messages[0]?.metadata?.status).toBe('completed');
+    expect(turnEndCount()).toBe(1);
+  });
+
+  it('丢弃的草稿不会被「close() 之前已排队、close() 之后才异步吐出」的 chunk 复活——旧节点最后一个 text-delta 与 handed-over 的 metadata 前后脚到达那条竞态', async () => {
+    const { ledger, latest } = collectLedger();
+    for (const frame of toChunkEnvelopes([
+      startChunk('draft-1'),
+      startStepChunk(),
+      textStartChunk('t'),
+    ])) {
+      ledger.applyFrame(frame);
+    }
+    await flushLedger();
+    expect(latest()).toHaveLength(1);
+
+    // 关键时序：这条 text-delta 在 replaceDraft() 之前就同步 enqueue 进了当前管道
+    // （`applyChunk` 里的 `openController.enqueue(chunk)`），但 `readUIMessageStream()`
+    // 要等一个真正的宏任务才会把它吐给 `consume()`——这里不给它这个宏任务，直接调
+    // `replaceDraft()`，模拟「旧节点的最后一个 text-delta 和 handed-over 的 metadata
+    // 前后脚到达，异步管线还没追上」。
+    ledger.applyFrame({ chunk: textDeltaChunk('t', '旧节点输出到一半') });
+    ledger.replaceDraft();
+    expect(latest()).toEqual([]);
+
+    // 那条迟到的 chunk 现在才真正被 `consume()` 处理——不该把 'draft-1' 复活。
+    await flushLedger();
+    expect(latest()).toEqual([]);
+  });
+
+  it('成品先到、收尾帧后到（服务端先存好再说完成）：管道里还没吐完的旧草稿不会把成品盖回去——交权时被扔掉的半步不再冒出来', async () => {
+    const { ledger, latest } = collectLedger();
+    for (const frame of toChunkEnvelopes([
+      startChunk('mid-2'),
+      startStepChunk(),
+      textStartChunk('t'),
+    ])) {
+      ledger.applyFrame(frame);
+    }
+    await flushLedger();
+
+    // 旧节点最后一段字同步进了管道，还没来得及被 `consume()` 吐出；紧接着到的是成品（不含这半步）
+    // 和 handed-over 收尾帧。
+    ledger.applyFrame({ chunk: textDeltaChunk('t', '被扔掉的半步') });
+    ledger.applyFrame({
+      seq: 7,
+      message: assistantMessage('mid-2', [{ type: 'step-start' }]),
+    });
+    ledger.applyFrame({
+      seq: 8,
+      chunk: messageMetadataChunk({
+        turn: 1,
+        usage: {},
+        status: 'handed-over',
+        handedOver: { callIds: [] },
+      }),
+    });
+    ledger.replaceDraft();
+    await flushLedger();
+
+    const messages = latest();
+    expect(messages.map((message) => message.id)).toEqual(['mid-2']);
+    expect(collectText(messages[0])).not.toContain('被扔掉的半步');
+  });
+
+  it('管道开在成品落地之后（恢复那一轮拿成品当种子接着写）：照常更新，不被当成旧草稿挡掉', async () => {
+    const { ledger, latest } = collectLedger();
+    ledger.applyFrame({
+      seq: 1,
+      message: assistantMessage('m-old', [{ type: 'step-start' }]),
+    });
+    for (const frame of toChunkEnvelopes([
+      startChunk('m-old'),
+      startStepChunk(),
+      textStartChunk('t'),
+      textDeltaChunk('t', '接着写'),
+      textEndChunk('t'),
+      finishChunk('stop'),
+    ])) {
+      ledger.applyFrame(frame);
+    }
+    await flushLedger();
+
+    expect(collectText(latest()[0])).toContain('接着写');
+  });
 });
 
 describe('MessageLedger onUserMessage (this ticket’s fix — the FIFO-pop signal use-chat-messages.ts relies on)', () => {

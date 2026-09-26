@@ -97,6 +97,13 @@ export function summarizeConversation(
     if (metadata?.status === undefined) {
       continue;
     }
+    if (metadata.status === 'handed-over') {
+      // [已交权](../../../../../../docs/terms.md)：这一轮还没真正收尾，由接手节点
+      // 接着跑，那一轮结束时的收尾状态才算数——这一条既不是失败，也不单独计一轮
+      // （docs/logic/orchestration/tech/handover.md §6.1，与 `message-entry.tsx` 对它「不渲染任何
+      // 收尾标记」同一姿态）。
+      continue;
+    }
     if (metadata.status === 'completed') {
       stats.completedTurns += 1;
     } else if (metadata.status === 'suspended') {

@@ -92,5 +92,7 @@ export function inProcessArbitration(opts: InProcessArbitrationOptions = {}): Ar
     clearStale(): Promise<void> {
       return Promise.resolve();
     },
+    // 交接预留与[待接手](../../../../docs/terms.md)标记这一档都不实现：单进程没有别的节点可交；标记记在内存里
+    // 的话，进程一退就没了，新进程找不到它——还不如让 `shutdown` 照旧中止，用户至少看得到「已中断」。
   };
 }

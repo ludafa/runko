@@ -762,6 +762,68 @@ describe.skipIf(!RUN)(
       }
     }, 300_000);
 
+    it('§4.9 排队的下一轮：持有者不放手、接着跑，非持有者上的同一条直播连接一路看完整个队列', async () => {
+      const id = await createConversation(node(1));
+      expect(mode(await send(node(1), id, textFor('第一件', 6_000)))).toBe(
+        'started',
+      );
+      await waitActive(node(1), id);
+      const holder = await leaseHolder(id);
+      const watcher = watch(node(3).url, id);
+      try {
+        // 消息打到 2 号：转给持有者，进待发队列。
+        expect(mode(await send(node(2), id, textFor('第二件', 4_000)))).toBe(
+          'queued',
+        );
+        step('4.9', '1 号在跑、2 号收的排队消息、3 号上连着直播', {
+          conversationId: id,
+        });
+
+        // 两轮都写进账本之前，归属一直在同一个副本手上——两轮之间没有「放手再抢」。
+        const holders = new Set<string | null | undefined>();
+        await waitFor(
+          async () => {
+            const rows = await ledger(node(1), id);
+            const done =
+              rows.filter((row) => row.role === 'assistant').length === 2;
+            if (!done) {
+              holders.add(await leaseHolder(id));
+            }
+            return done;
+          },
+          120_000,
+          '两轮都跑完',
+        );
+        expect([...holders]).toEqual([holder]);
+
+        await waitIdle(node(1), id);
+        // 收尾那一帧要走完 Redis 这一跳，多等一下再看。
+        await sleep(1_500);
+        const endings = watcher.frames
+          .map((frame) => field(field(frame, 'chunk'), 'messageMetadata'))
+          .map((metadata) => text(field(metadata, 'status')))
+          .filter((status) => status !== undefined);
+        const inactive = watcher.frames.filter(
+          (frame) => field(frame, 'turnActive') === false,
+        );
+        step('4.9', '3 号那条连接看到的收尾', {
+          conversationId: id,
+          endings: endings.join(','),
+          inactive: inactive.length,
+        });
+        expect(endings).toEqual(['completed', 'completed']);
+        expect(inactive).toHaveLength(1);
+        expect(shape(await ledger(node(1), id))).toEqual([
+          ['user', '第一件'],
+          ['assistant', 'completed'],
+          ['user', '第二件'],
+          ['assistant', 'completed'],
+        ]);
+      } finally {
+        watcher.close();
+      }
+    }, 180_000);
+
     it('§4.7 连接所在的副本挂掉：带 after 重连到别的副本能接着看，不重不漏', async () => {
       const id = await createConversation(node(1));
       expect(mode(await send(node(1), id, textFor('续传', 20_000)))).toBe(

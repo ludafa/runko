@@ -9,9 +9,11 @@
  * 框架**不碰 HTTP**：`subscribe` 给的是中立的 `AsyncIterable`，序列化成 SSE / WebSocket
  * 是[接入层](../../../docs/terms.md)的事。
  */
+import { pendingCallIds } from "@runko/core";
 import type { AgentDefinition, RunkoUIMessage } from "@runko/core";
 
 import type { Arbitration } from "./arbitration.js";
+import type { NodeRegistry } from "./nodes.js";
 import { inProcessArbitration } from "./builtin/in-process-arbitration.js";
 import { inProcessStream } from "./builtin/in-process-stream.js";
 import { memoryPersistence } from "./builtin/memory-persistence.js";
@@ -22,8 +24,10 @@ import type { TurnPreparer } from "./prepare.js";
 import type { RuntimeContext, RuntimeHooks, SteerPolicy } from "./runtime/context.js";
 import { durationToMs } from "./runtime/duration.js";
 import type { Duration } from "./runtime/duration.js";
+import { markAwaitingTakeover, pickTakeoverTarget, requestTakeover } from "./runtime/handover.js";
+import type { HandoverContext } from "./runtime/handover.js";
 import { HumanBridge } from "./runtime/human.js";
-import { appendInterruptedMarker } from "./runtime/interrupted-marker.js";
+import { appendInterruptedMarker, needsContinuation, pendingCallIdsAtLedgerEnd, readLedgerEnd } from "./runtime/interrupted-marker.js";
 import { settleOrphanedDecisionsSafely } from "./runtime/orphaned-decisions.js";
 import type { SubmittedDecision } from "./runtime/human.js";
 import { advance, answerSuspended, enqueue as enqueueInput, publishQueue, startNextQueued, startTurn } from "./runtime/queue.js";
@@ -49,12 +53,25 @@ const LOG_SCOPE = "agent:runtime";
  * 框架还在内存里等（挂起与恢复 · 技术方案 §8.2）。
  */
 const DEFAULT_MEMORY_WINDOW: Duration = "5m";
-/** [交权](../../../docs/terms.md)宽限期：正在干活的轮，等多久还没收尾就不等了。 */
+/**
+ * [交权](../../../docs/terms.md)时等各轮收尾的上限。交权本身几百毫秒就完成（模型输出掐断、工具留在本节点上跑），
+ * 这个上限只防装配卡住之类的意外。
+ */
 const DEFAULT_SHUTDOWN_GRACE_MS = 15_000;
-/** [等待窗口](../../../docs/terms.md)缺省值：不等，立刻分流（等人的挂起、其余中止）。 */
-const DEFAULT_SHUTDOWN_FINISH_WINDOW_MS = 0;
-/** 等待窗口期间多久检查一次「有没有轮转入等人」，以便把它立刻挂起而不是占到窗口结束。 */
-const SHUTDOWN_FINISH_POLL_MS = 500;
+/** 单次工具执行的上限。平时与交权时一样生效，交权时旧节点最多等这么久（技术方案 §6.3）。 */
+const DEFAULT_TOOL_TIMEOUT: Duration = "2m";
+/** [交接预留](../../../docs/terms.md)的有效期：覆盖一次「请接手」的往返加重试（技术方案 §7.4）。 */
+const DEFAULT_RESERVATION_TTL: Duration = "10s";
+/** [节点登记表](../../../docs/terms.md)的心跳间隔。 */
+const DEFAULT_NODE_HEARTBEAT: Duration = "5s";
+/** 登记表里多久没心跳就不算候选。三个心跳。 */
+const DEFAULT_NODE_FRESH: Duration = "15s";
+/** [定时回捞](../../../docs/terms.md)的间隔。 */
+const DEFAULT_SWEEP_INTERVAL: Duration = "10s";
+/** 一次回捞最多推几份对话。 */
+const DEFAULT_SWEEP_BATCH = 50;
+/** 工具收尾撞上工具上限之后，再等它写库、通知的余量。 */
+const TAIL_WAIT_MARGIN_MS = 10_000;
 const DEFAULT_QUEUE_MAX = 10;
 /**
  * 跟着别的副本看直播时，没收到货就最多等这么久，然后回头问一次归属还在不在。
@@ -116,14 +133,44 @@ export interface AgentRuntimeOptions {
     onPresence?: "extend" | "ignore";
   };
   shutdown?: {
-    /** [交权](../../../docs/terms.md)宽限期：中止之后等收尾的上限。缺省 15 秒。 */
+    /** 等各轮收尾的上限。缺省 15 秒。 */
     graceMs?: number;
+  };
+  /**
+   * 单次工具执行的上限，缺省 `"2m"`，`0` = 不限。到点先 abort 工具，还不回来就给模型一个「超时已终止」的结果。
+   * **平时也生效**：交权时旧节点最多等这么久才能退出（docs/logic/orchestration/tech/handover.md §6.3）。
+   * 超过它的任务应当改成「后台起任务、之后再查」。
+   */
+  toolTimeout?: Duration;
+  /**
+   * [交权](../../../docs/terms.md)（docs/logic/orchestration/tech/handover.md）。不配也能交权：没有登记表就挑不到接手
+   * 节点，对话一律打[待接手](../../../docs/terms.md)标记，交给[定时回捞](../../../docs/terms.md)或下一个进程。
+   */
+  handover?: {
+    /** 本节点地址，与租约里的 `holder` 相同（接手节点靠它认出「预留给我的」）。 */
+    node?: string;
+    /** [发布序号](../../../docs/terms.md)：每次发布递增，回滚也递增。缺省 0。 */
+    releaseSeq?: number;
+    /** [节点登记表](../../../docs/terms.md)。 */
+    nodes?: NodeRegistry;
     /**
-     * [等待窗口](../../../docs/terms.md)：干活的轮先自然跑完，最多等这么久再中止。缺省 `0` = 不等、立刻
-     * 分流（等人的挂起、其余中止）——本地开发用 `node --watch` 热重载也发 SIGTERM，
-     * 缺省值必须是「不等」，不然改一行代码就要卡住等几十秒。
+     * 出站「请接手」：让 `node` 上的 runtime 执行 `takeOver(conversationIds)`，返回它答应了没有。
+     * `conversationIds` 为空 = 只问一句「你现在接不接」（对方在下线就答否）。宿主写（HTTP、RPC 都行）。
      */
-    finishWindowMs?: number;
+    requestTakeover?: (node: string, conversationIds: string[]) => Promise<boolean>;
+    /** [交接预留](../../../docs/terms.md)的有效期，缺省 `"10s"`。 */
+    reservationTtl?: Duration;
+    /** 登记表心跳间隔，缺省 `"5s"`。 */
+    nodeHeartbeat?: Duration;
+    /** 登记表里多久没心跳就不算候选，缺省 `"15s"`。 */
+    nodeFresh?: Duration;
+  };
+  /** [定时回捞](../../../docs/terms.md)。仲裁机制实现了 `listSweepCandidates` 才有。 */
+  sweep?: {
+    /** 间隔，缺省 `"10s"`；`0` = 不做定时回捞（`start()` 那一次扫描照做）。 */
+    interval?: Duration;
+    /** 一次最多推几份对话，缺省 50。 */
+    batch?: number;
   };
 }
 
@@ -136,15 +183,23 @@ export interface SubscribeOptions {
 }
 
 export interface ShutdownResult {
-  /** 这次关闭中止了几个轮（含还在[起轮装配](../../../docs/terms.md)里的）。 */
-  aborted: number;
-  /** 这次关闭[挂起](../../../docs/terms.md)了几个轮——关闭那一刻或等待窗口期间它们在等人，挂起是无损的，人回来在任意节点接着干。 */
+  /** 以[已交权](../../../docs/terms.md)收尾的轮数——它们由别的节点接着跑。 */
+  handedOver: number;
+  /** [挂起](../../../docs/terms.md)的轮数：关闭那一刻它们在等人，人回来在任意节点接着干。 */
   suspended: number;
-  /** [等待窗口](../../../docs/terms.md)内正常完成（`completed`）的轮数；被用户停止、跑失败的不算。`finishWindowMs` 不传或为 `0` 时恒为 `0`。 */
-  finished: number;
-  /** 是否全部收尾完毕。`false` = 撞了宽限期上限，还有轮没等到。 */
+  /** 中止的轮数。只在持久化没有工具收尾记录（`Persistence.tails`）时出现——那时正在跑工具的轮交不出去。 */
+  aborted: number;
+  /** 交给了哪个节点。`undefined` = 没挑到，交出去的对话打了待接手标记，等定时回捞或下一个进程。 */
+  target: string | undefined;
+  /** 交出去的对话数（含队列里还有货、答了卡片没恢复的）。 */
+  transferred: number;
+  /** 接手节点答应了「请接手」。`false` 时预留过期后由定时回捞接上。 */
+  delegated: boolean;
+  /** 在本节点上跑完的[工具收尾](../../../docs/terms.md)数。 */
+  tails: number;
+  /** 各轮是否都收尾了。`false` = 撞了宽限期上限。 */
   settled: boolean;
-  /** 撞超时时还剩几个没收尾。 */
+  /** 撞上限时还剩几个没收尾。 */
   pending: number;
 }
 
@@ -180,8 +235,21 @@ export interface AgentRuntime {
   readLedger(conversationId: string, opts?: { afterSeq?: number }): Promise<{ seq: number; message: RunkoUIMessage }[]>;
   /** 启动扫描：给[孤儿轮](../../../docs/terms.md)补「已停止」收尾。只在进程启动、开始服务之前跑一次。 */
   recover(): Promise<RecoveryResult>;
-  /** [交权](../../../docs/terms.md)：停掉在跑的轮并等它们收尾。**不退进程**——那是宿主的事。 */
-  shutdown(opts?: { finishWindowMs?: number; graceMs?: number }): Promise<ShutdownResult>;
+  /**
+   * 开始服务之后调一次：登记到[节点登记表](../../../docs/terms.md)、开心跳与[定时回捞](../../../docs/terms.md)，并马上
+   * 扫一遍[待接手](../../../docs/terms.md)的对话。**先让宿主开始监听、再调它**——浏览器的重连要尽快成功。
+   */
+  start(): Promise<void>;
+  /**
+   * 接手（被别的节点的「请接手」调到）：逐个抢归属，按账本末尾决定接着跑、等工具结果还是出队。
+   * 本节点自己在下线时返回 `false`（拒绝）。`conversationIds` 为空 = 只答「接不接」。
+   */
+  takeOver(conversationIds: string[]): Promise<boolean>;
+  /**
+   * [交权](../../../docs/terms.md)：把手上每一份对话交给别的节点，等本节点上的工具收尾跑完。**不退进程**——那是宿主的事。
+   * 返回之后本节点可以退出：没有轮、没有工具在跑，本进程的订阅都收到了[请重连帧](../../../docs/terms.md)。
+   */
+  shutdown(opts?: { graceMs?: number }): Promise<ShutdownResult>;
   /** 进程是否正在[优雅关闭](../../../docs/terms.md)（接入层据此转 503）。 */
   isShuttingDown(): boolean;
   /**
@@ -221,6 +289,8 @@ function resolveMemoryWindows(options: AgentRuntimeOptions, logger: Logger): { a
 }
 
 export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
+  // `runShutdown` 在下面的闭包里定义，这里只是为了让 `shutdown()` 能提前引用它。
+  let runShutdown: (graceMs: number) => Promise<ShutdownResult> = () => Promise.reject(new Error("runtime not initialised"));
   const logger = options.logger ?? noopLogger;
   const persistence = options.persistence ?? memoryPersistence();
   const stream = options.stream ?? inProcessStream();
@@ -228,6 +298,39 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
   const registry = new TurnRegistry();
   const hooks = options.hooks ?? {};
   let shuttingDown = false;
+  let shutdownRun: Promise<ShutdownResult> | undefined;
+  let started = false;
+  const timers: ReturnType<typeof setInterval>[] = [];
+
+  const toolTimeoutMs = durationToMs(options.toolTimeout ?? DEFAULT_TOOL_TIMEOUT, "toolTimeout") || undefined;
+  const handover: HandoverContext = {
+    node: options.handover?.node ?? "local",
+    releaseSeq: options.handover?.releaseSeq ?? 0,
+    nodes: options.handover?.nodes,
+    requestTakeover: options.handover?.requestTakeover,
+    reservationTtlMs: durationToMs(options.handover?.reservationTtl ?? DEFAULT_RESERVATION_TTL, "handover.reservationTtl"),
+    nodeFreshMs: durationToMs(options.handover?.nodeFresh ?? DEFAULT_NODE_FRESH, "handover.nodeFresh"),
+    target: undefined,
+    handedOff: new Set(),
+    tails: new Set(),
+  };
+  const nodeHeartbeatMs = durationToMs(options.handover?.nodeHeartbeat ?? DEFAULT_NODE_HEARTBEAT, "handover.nodeHeartbeat");
+  const sweepIntervalMs = durationToMs(options.sweep?.interval ?? DEFAULT_SWEEP_INTERVAL, "sweep.interval");
+  const sweepBatch = options.sweep?.batch ?? DEFAULT_SWEEP_BATCH;
+
+  /**
+   * 本进程上每份对话的订阅者——[请重连帧](../../../docs/terms.md)只发给它们，**不经流分发**（见 `Frame` 的 `reconnect`）。
+   * 值是「踢掉这一条订阅」的回调。
+   */
+  const localSubscribers = new Map<string, Set<() => void>>();
+  /** 最后一次踢订阅已经发生：此后登记上来的订阅一登记就收到请重连帧。 */
+  let subscribersKicked = false;
+  const kickSubscribers = (shouldKick: (conversationId: string) => boolean): void => {
+    for (const [conversationId, kicks] of localSubscribers) {
+      if (!shouldKick(conversationId)) {continue;}
+      for (const kick of [...kicks]) {kick();}
+    }
+  };
 
   const extendOnPresence = (options.suspend?.onPresence ?? "extend") === "extend";
   const human = new HumanBridge({
@@ -258,6 +361,8 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     },
     askUser: options.human?.askUser ?? true,
     isShuttingDown: () => shuttingDown,
+    toolTimeoutMs,
+    handover,
   };
 
   /**
@@ -283,6 +388,131 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     turn.abortController.abort(new Error(reason));
   }
 
+  /** 这几轮在 `ms` 之内都收尾了吗。`true` = 超时了。 */
+  async function settledWithin(turns: ActiveTurn[], ms: number): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = await Promise.race([
+      Promise.all(turns.map((turn) => turn.settled)).then(() => false),
+      new Promise<true>((resolve) => {
+        timer = setTimeout(() => {
+          resolve(true);
+        }, ms);
+      }),
+    ]);
+    if (timer !== undefined) {clearTimeout(timer);}
+    return timedOut;
+  }
+
+  runShutdown = async (graceMs: number): Promise<ShutdownResult> => {
+    shuttingDown = true;
+    for (const timer of timers.splice(0)) {clearInterval(timer);}
+    if (handover.nodes !== undefined) {
+      await handover.nodes.markLeaving(handover.node).catch((error: unknown) => {
+        logger.warn(LOG_SCOPE, "could not mark this node as leaving", { error: describeError(error) });
+      });
+    }
+
+    const snapshot = registry.snapshot();
+    const busy = new Set(snapshot.map((turn) => turn.conversationId));
+    kickSubscribers((conversationId) => !busy.has(conversationId));
+
+    // 交得出去的前提：工具收尾记得下来，并且交给了谁（挑到了接手节点）或者交不出去时能留下一个
+    // **跨进程还在**的[待接手](../../../docs/terms.md)标记。两样都没有（单进程 + 进程内仲裁）的话，交出去的对话
+    // 重启之后没人找得到，用户连「已中断」都看不到——那就照旧中止。
+    if (snapshot.length > 0 && persistence.tails !== undefined) {handover.target = await pickTakeoverTarget(ctx);}
+    const canHandOver =
+      persistence.tails !== undefined && (handover.target !== undefined || arbitration.markAwaitingTakeover !== undefined);
+    logger.info(LOG_SCOPE, "shutdown: handing over active turns", { count: snapshot.length, target: handover.target, canHandOver, graceMs });
+
+    let aborted = 0;
+    for (const turn of snapshot) {
+      // **先判定、再动它**：`suspendTurn` 会清空等人项，判定写在它后面就永远判不到「在等人」。
+      const waiting = turn.pendingReviews.size + turn.pendingQuestions.size > 0;
+      // 用户已经按了停止：让它照停止收尾，别交出去——交出去的话接手节点会把用户取消的事再做一遍。
+      if (turn.aborted) {continue;}
+      // 等人的与干活的都标成「这一轮要挂起」：干活的那一轮若正好请求人审，也就地挂起、不再开窗口。
+      human.suspendTurn(turn, "handover");
+      if (waiting) {continue;}
+      if (canHandOver) {
+        turn.handoverController.abort(new Error("handover"));
+      } else {
+        await abortTurn(turn, ABORT_REASON_SHUTDOWN);
+        aborted += 1;
+      }
+    }
+
+    let timedOut = await settledWithin(snapshot, graceMs);
+    // 宽限期到了还有轮没收尾：多半是它的 session 不理交权信号（自己写的 session 工厂只转了中止信号）。
+    // 退回中止，再给一个宽限期。
+    if (timedOut) {
+      const stuck = snapshot.filter((turn) => !turn.done && !turn.aborted);
+      for (const turn of stuck) {
+        await abortTurn(turn, ABORT_REASON_SHUTDOWN);
+        aborted += 1;
+      }
+      if (stuck.length > 0) {
+        logger.warn(LOG_SCOPE, "shutdown: turns ignored the handover signal; aborting them", { count: stuck.length });
+        timedOut = await settledWithin(snapshot, graceMs);
+      }
+    }
+
+    const handedOver = snapshot.filter((turn) => turn.endStatus === "handed-over").length;
+    const suspended = snapshot.filter((turn) => turn.endStatus === "suspended").length;
+    const transferred = [...handover.handedOff];
+    const delegated =
+      transferred.length > 0 && handover.target !== undefined ? await requestTakeover(ctx, handover.target, transferred) : false;
+    if (transferred.length > 0 && !delegated) {
+      logger.warn(LOG_SCOPE, "conversations were not taken over directly; the periodic sweep will pick them up", {
+        count: transferred.length,
+        target: handover.target,
+      });
+    }
+
+    // 交接完成：本进程上剩下的订阅一律发请重连帧，浏览器立刻去新持有者那里。此后才登记上来的订阅
+    // （升级请求在闸门关上之前就进来了）也一登记就收到它。
+    subscribersKicked = true;
+    kickSubscribers(() => true);
+
+    const tailRuns = [...handover.tails];
+    if (tailRuns.length > 0) {
+      logger.info(LOG_SCOPE, "shutdown: waiting for tool tails to finish on this node", { count: tailRuns.length });
+      // 工具不限时（`toolTimeout: 0`）就一直等：兜底的是宿主的强杀期限。
+      if (toolTimeoutMs === undefined) {
+        await Promise.all(tailRuns);
+      } else {
+        let tailTimer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([
+          Promise.all(tailRuns),
+          new Promise<void>((resolve) => {
+            tailTimer = setTimeout(resolve, toolTimeoutMs + TAIL_WAIT_MARGIN_MS);
+          }),
+        ]);
+        if (tailTimer !== undefined) {clearTimeout(tailTimer);}
+      }
+    }
+    if (handover.nodes !== undefined) {
+      await handover.nodes.remove(handover.node).catch((error: unknown) => {
+        logger.warn(LOG_SCOPE, "could not remove this node from the registry", { error: describeError(error) });
+      });
+    }
+
+    const pending = registry.size;
+    const result: ShutdownResult = {
+      handedOver,
+      suspended,
+      aborted,
+      target: handover.target,
+      transferred: transferred.length,
+      delegated,
+      tails: tailRuns.length,
+      settled: !timedOut,
+      pending: timedOut ? pending : 0,
+    };
+    if (timedOut) {logger.error(LOG_SCOPE, "shutdown: timed out waiting for turns to settle", { ...result });}
+    else {logger.info(LOG_SCOPE, "shutdown: done", { ...result });}
+    return result;
+  };
+
   async function* subscribe(conversationId: string, opts: SubscribeOptions = {}): AsyncGenerator<Frame, void> {
     const follow = opts.follow ?? "turn";
     const buffer: Frame[] = [];
@@ -305,6 +535,16 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       buffer.push(frame);
       scheduleWake();
     });
+    // 本节点下线、这份对话交出去之后被踢：发完[请重连帧](../../../docs/terms.md)就收线。
+    let kicked = false;
+    const kick = (): void => {
+      kicked = true;
+      scheduleWake();
+    };
+    const kicks = localSubscribers.get(conversationId) ?? new Set<() => void>();
+    kicks.add(kick);
+    localSubscribers.set(conversationId, kicks);
+    if (subscribersKicked) {kicked = true;}
     const onAbort = (): void => {
       ended = true;
       scheduleWake();
@@ -355,6 +595,10 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       buffer.length = 0;
 
       for (const chunk of draft) {yield { kind: "chunk", chunk };}
+      if (kicked) {
+        yield { kind: "reconnect" };
+        return;
+      }
 
       // 回放期间落盘并广播的成品消息，就地补发——**必须在下面那两帧快照和
       // `follow:'turn'` 的提前 return 之前**：`finalize` 广播 `message` 的同时也广播了
@@ -385,9 +629,15 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       // 却没有任何东西在跑。不排除它的话，这一帧会说「还在跑」然后流立刻断掉——客户端
       // 的转圈动画就停在那儿了。释放失败时这段窗口会一直拖到租约过期。
       const remote = localActive ? undefined : await arbitration.inspect(conversationId);
+      // 没人持有、但这一轮还没完（[工具收尾](../../../docs/terms.md)在跑、交权之后还没接着跑）：照「在跑」对待——
+      // 等有人接上，帧照样过来。有效的[交接预留](../../../docs/terms.md)同理，**哪怕是预留给本节点的**：它不是「我自己
+      // 刚放掉的租约」，是马上要在本节点接着跑的一轮。
+      const parked = !localActive && remote?.held !== true && (await parkedWork(conversationId));
+      const reservedForMe = remote?.reserved === true && remote.holder === handover.node;
       const heldElsewhere =
-        remote?.held === true &&
-        (registry.lastHolder === undefined || remote.holder !== registry.lastHolder);
+        parked ||
+        (remote?.held === true &&
+          (remote.reserved === true || registry.lastHolder === undefined || remote.holder !== registry.lastHolder));
       // 回放期间刚收到过远端的收尾广播，就以那一帧为准：它是持有者自己说的，比还没释放的
       // 归属记录新（见上面 `remoteEndedDuringReplay` 的注释）。
       const remoteActive = heldElsewhere && !remoteEndedDuringReplay;
@@ -408,13 +658,19 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       // 正常收线还是靠那一帧广播过来的 `activity:false`；**但不能只靠它**——持有者被
       // `kill -9`（没人接管）或这条订阅漏了，那一帧永远不会到。所以下面第 ⑤ 步给这条路
       // 加了一道定期复查归属的出口。
-      const followRemote = follow === "turn" && remoteActive && stream.crossInstance === true;
+      // 等不跨进程的流也要跟：预留给本节点的那一轮起来之后帧是本进程发的；没人接手的那种要定期复查，
+      // 等到有人接上就收线让客户端重连（在别的节点上的话会被转过去）。
+      const followRemote = follow === "turn" && remoteActive && (stream.crossInstance === true || reservedForMe || parked);
       if (!localActive && !followRemote && follow === "turn") {return;}
 
       // ⑤ 直播。「先看有没有货，没货才等」——`scheduleWake` 换新 promise 的写法下，一个在
       //    本循环 yield 期间到达的帧唤醒的是已经没人等的旧 promise，那次唤醒会丢；先看
       //    缓冲就让丢唤醒不再有后果。
       while (!ended) {
+        if (kicked && buffer.length === 0) {
+          yield { kind: "reconnect" };
+          return;
+        }
         if (buffer.length === 0) {
           if (!followRemote) {
             await waiter;
@@ -436,7 +692,14 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
           ]);
           if (timer !== undefined) {clearTimeout(timer);}
           if (buffer.length > 0 || ended) {continue;}
-          if ((await arbitration.inspect(conversationId)).held) {continue;}
+          if (kicked || registry.has(conversationId)) {continue;}
+          const info = await arbitration.inspect(conversationId);
+          if (info.held) {
+            // 别的节点接上了、而帧传不过来（不跨进程的流）：收线，客户端重连时会被转给它。
+            if (stream.crossInstance !== true && info.holder !== handover.node) {return;}
+            continue;
+          }
+          if (await parkedWork(conversationId)) {continue;}
           yield { kind: "activity", active: false };
           return;
         }
@@ -455,8 +718,136 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       }
     } finally {
       unsubscribe();
+      kicks.delete(kick);
+      if (kicks.size === 0 && localSubscribers.get(conversationId) === kicks) {localSubscribers.delete(conversationId);}
       opts.signal?.removeEventListener("abort", onAbort);
     }
+  }
+
+  /**
+   * [定时回捞](../../../docs/terms.md)一轮：找没人持有、没有有效预留、但有活没干完的对话，逐个推一把。
+   * 推之前先撤掉[待接手](../../../docs/terms.md)标记；[工具收尾](../../../docs/terms.md)还没结果的推不动，重新标上，下一轮再看
+   * （过了截止时间会被记成「结果未知」）。
+   */
+  let sweeping = false;
+  async function sweepOnce(): Promise<void> {
+    if (shuttingDown || sweeping || arbitration.listSweepCandidates === undefined) {return;}
+    sweeping = true;
+    try {
+      const candidates = await arbitration.listSweepCandidates({ limit: sweepBatch });
+      for (const conversationId of candidates) {
+        if (shuttingDown) {return;}
+        if (registry.has(conversationId)) {continue;}
+        await nudgeHandedOver(conversationId);
+      }
+    } catch (error) {
+      logger.error(LOG_SCOPE, "periodic sweep failed", { error: describeError(error) });
+    } finally {
+      sweeping = false;
+    }
+  }
+
+  /**
+   * 推一份交过来（或被回捞到）的对话。[待接手](../../../docs/terms.md)标记**只在真推动了、或确实没活了时才撤**：
+   * 本节点恰好开始下线（`advance` 直接返回）、工具收尾还没结果、交权的那一轮还没接着跑——这些情况下撤了标记，
+   * 定时回捞就再也找不到它。
+   */
+  async function nudgeHandedOver(conversationId: string): Promise<void> {
+    if (shuttingDown) {return;}
+    try {
+      await advance(ctx, conversationId);
+      if (registry.has(conversationId)) {
+        await arbitration.clearAwaitingTakeover?.(conversationId);
+        return;
+      }
+      if (await hasUnpushedWork(conversationId)) {
+        await markAwaitingTakeover(ctx, conversationId);
+        return;
+      }
+      await arbitration.clearAwaitingTakeover?.(conversationId);
+    } catch (error) {
+      logger.error(LOG_SCOPE, "failed to pick up a handed-over conversation", { conversationId, error: describeError(error) });
+      await markAwaitingTakeover(ctx, conversationId);
+    }
+  }
+
+  /**
+   * 这份对话有活、却没人在推：工具收尾还在跑（或有了结果没结清）、交权的那一轮还没接着跑、或者队列里有货而
+   * 账本末尾没有在等人的调用。在等人答的不算——那要人来推。
+   */
+  async function hasUnpushedWork(conversationId: string): Promise<boolean> {
+    const tail = await readLedgerEnd(persistence, conversationId);
+    if (needsContinuation(tail)) {return true;}
+    const pending = pendingCallIds(tail);
+    for (const callId of pending) {
+      if ((await persistence.tails?.get(conversationId, callId)) !== undefined) {return true;}
+    }
+    if (pending.length > 0) {return false;}
+    return (await persistence.queue.list(conversationId)).length > 0;
+  }
+
+  /**
+   * 这一轮还没完、但此刻没人持有：[工具收尾](../../../docs/terms.md)还在某个下线中的节点上跑，或者交权之后还没有
+   * 节点接着跑。
+   */
+  async function parkedWork(conversationId: string): Promise<boolean> {
+    const tail = await readLedgerEnd(persistence, conversationId);
+    if (needsContinuation(tail)) {return true;}
+    const tails = persistence.tails;
+    if (tails === undefined) {return false;}
+    for (const callId of pendingCallIds(tail)) {
+      const record = await tails.get(conversationId, callId);
+      if (record !== undefined && record.outcome === undefined && Date.now() < record.deadline) {return true;}
+    }
+    return false;
+  }
+
+  function startTimer(ms: number, run: () => void): void {
+    if (ms <= 0) {return;}
+    const timer = setInterval(run, ms);
+    if (typeof timer.unref === "function") {timer.unref();}
+    timers.push(timer);
+  }
+
+  /**
+   * 工具收尾期间用户按了停止：旧节点的入站已关，没法通知它，只能在收尾记录上记一个停止标记，
+   * 旧节点每秒查一次（技术方案 §9）。`true` = 至少记上了一条。
+   */
+  async function requestTailStop(conversationId: string): Promise<boolean> {
+    if (await stopUnfinished(conversationId)) {return true;}
+    const tails = persistence.tails;
+    if (tails === undefined) {return false;}
+    let requested = false;
+    for (const callId of await pendingCallIdsAtLedgerEnd(persistence, conversationId)) {
+      if (await tails.requestStop(conversationId, callId)) {requested = true;}
+    }
+    if (!requested) {return false;}
+    const queue = await persistence.queue.clear(conversationId);
+    publishQueue(ctx, conversationId, queue);
+    logger.info(LOG_SCOPE, "stop requested for a tool still finishing on another node", { conversationId });
+    return true;
+  }
+
+  /**
+   * 交权之后还没人接着跑的那一轮，用户按了停止：抢到归属，补一条「已停止」，清队列。抢不到（已经有节点
+   * 接上在跑了）就算了，那边的停止由转发送到。
+   */
+  async function stopUnfinished(conversationId: string): Promise<boolean> {
+    if (!needsContinuation(await readLedgerEnd(persistence, conversationId))) {return false;}
+    const acquired = await arbitration.acquire(conversationId, { seedSeq: () => persistence.ledger.maxSeq(conversationId) });
+    if (!acquired.ok) {return false;}
+    try {
+      const marker = await appendInterruptedMarker(persistence, acquired.grant, ABORT_REASON_USER);
+      if (marker.written) {ctx.stream.publish(conversationId, { kind: "message", seq: marker.seq, message: marker.message });}
+    } finally {
+      await acquired.grant.release();
+    }
+    const queue = await persistence.queue.clear(conversationId);
+    publishQueue(ctx, conversationId, queue);
+    await arbitration.clearAwaitingTakeover?.(conversationId);
+    ctx.stream.publish(conversationId, { kind: "activity", active: false });
+    logger.info(LOG_SCOPE, "stopped a handed-over turn before anyone continued it", { conversationId });
+    return true;
   }
 
   return {
@@ -492,8 +883,9 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     async abort(conversationId, reason = ABORT_REASON_USER) {
       const turn = registry.get(conversationId);
       // 判定「有没有轮在跑」必须在清队列**之前**：没有轮在跑时清队列会把一次误点变成
-      // 一次丢消息（队列本来要等下一次轮收尾才发）。
-      if (turn === undefined) {return false;}
+      // 一次丢消息（队列本来要等下一次轮收尾才发）。本地没有轮，但有工具正在别的节点上收尾的，
+      // 停的是那个工具。
+      if (turn === undefined) {return await requestTailStop(conversationId);}
 
       // 清队列必须在 abort **之前**：这一轮收尾时会自动[出队](../../../docs/terms.md)起下一轮，
       // 先 abort 再清存在真实竞态——abort 解开挂起的审批后这一轮可能立刻收尾，队首那条
@@ -517,6 +909,13 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
         return { active: true, phase: local.phase, holder: local.grant.holder, local: true };
       }
       const info = await arbitration.inspect(conversationId);
+      // 预留给本节点、还没接上：算本地的——停止、发消息都在这里处理，别转给自己。
+      if (info.held && info.reserved === true && info.holder === handover.node) {
+        return { active: true, holder: handover.node, local: true };
+      }
+      // 这一轮还没完但没人持有（工具在别的节点上收尾、交权之后还没接着跑）：算「在跑」，但不报 holder——
+      // 旧节点的入站已经关了，别把请求转过去。
+      if (!info.held && (await parkedWork(conversationId))) {return { active: true, local: false };}
       return {
         active: info.held,
         ...(info.holder !== undefined ? { holder: info.holder } : {}),
@@ -593,6 +992,9 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
             // 归属被一个已经没人管的 grant 永久占着，此后再也起不了轮。
             await acquired.grant.release();
           }
+          // 崩掉的那一轮身后还排着消息：打上[待接手](../../../docs/terms.md)标记，`start()` 的回捞会把它们推起来——
+          // 否则要等用户再发一条（定时回捞只认这个标记，不再把「队列不空」当成有活）。
+          if ((await persistence.queue.list(conversationId)).length > 0) {await markAwaitingTakeover(ctx, conversationId);}
         } catch (error) {
           // 一个会话恢复失败不该让整轮扫描停下——记一行，继续下一个。
           logger.error(LOG_SCOPE, "failed to recover orphaned turn", { conversationId, error: describeError(error) });
@@ -612,102 +1014,63 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       return { scanned: stale.length, recovered };
     },
 
+    async start() {
+      if (started) {return;}
+      started = true;
+      const { nodes, node, releaseSeq } = handover;
+      if (nodes !== undefined) {
+        // 登记失败不能让后面的心跳、回捞一起作废：记一行，心跳那一拍发现没登记上就重登一次。
+        let registered = await nodes.register({ node, releaseSeq }).then(
+          () => true,
+          (error: unknown) => {
+            logger.error(LOG_SCOPE, "could not register this node; retrying on the next heartbeat", { error: describeError(error) });
+            return false;
+          },
+        );
+        startTimer(nodeHeartbeatMs, () => {
+          if (shuttingDown) {return;}
+          const beat = registered ? nodes.heartbeat(node) : nodes.register({ node, releaseSeq });
+          void beat.then(
+            () => {
+              registered = true;
+            },
+            (error: unknown) => {
+              logger.warn(LOG_SCOPE, "node registry heartbeat failed", { error: describeError(error) });
+            },
+          );
+        });
+      }
+      if (arbitration.listSweepCandidates !== undefined) {
+        startTimer(sweepIntervalMs, () => {
+          void sweepOnce();
+        });
+      }
+      await sweepOnce();
+    },
+
+    async takeOver(conversationIds) {
+      if (shuttingDown) {return false;}
+      await Promise.all(conversationIds.map((conversationId) => nudgeHandedOver(conversationId)));
+      if (conversationIds.length > 0) {logger.info(LOG_SCOPE, "took over conversations", { count: conversationIds.length });}
+      return true;
+    },
+
     /**
-     * [交权](../../../docs/terms.md)。五步的顺序都是硬要求：
+     * [交权](../../../docs/terms.md)（docs/logic/orchestration/tech/handover.md §5、§6）。顺序是硬要求：
      *
-     * 1. **先置关闭闸门**，否则收尾期间[自动出队](../../../docs/terms.md)会源源不断起新轮，
-     *    这个函数永远等不完。
-     * 2. 快照当前全部活跃轮 + 各自的「收尾了」promise。
-     * 3. **等待窗口**（`finishWindowMs > 0` 才有）：等人的轮立刻[挂起](../../../docs/terms.md)——挂起是
-     *    无损的，那次调用原样留在账本里，人回来在任意节点接着干；干活的轮不动它，让它自然收尾。
-     *    窗口期间每 `SHUTDOWN_FINISH_POLL_MS` 再看一遍，中途转入等人的轮也挂起，不占到窗口结束；
-     *    全部收尾就提前结束窗口。
-     * 4. **窗口到点还没收尾的：等人的挂起，其余中止。** 中止理由是 `ABORT_REASON_SHUTDOWN`——
-     *    经 core 透传进收尾 metadata，界面据此显示「服务重启，这一轮已中断」而不是「已停止」。
-     *    `finishWindowMs` 缺省 `0` 时窗口长度是 0，这一步就是发生的唯一一步。
-     *    **两种都不清队列**：服务重启不该吞掉用户排的消息。
-     * 5. 等齐或撞宽限期。撞了不抛错也不强制清理登记：那些轮成了[孤儿轮](../../../docs/terms.md)，
-     *    交给下次启动的 `recover()`——两道防线在这里接上。
+     * 1. **先置关闭闸门**，否则收尾期间[自动出队](../../../docs/terms.md)会源源不断起新轮。
+     * 2. 登记表里把自己标成下线中——尽量缩短别人看到旧状态的窗口。与这里在跑的轮无关的订阅现在就踢。
+     * 3. **挑接手节点**（在给任何一轮发信号之前：各轮收尾时就要按它做预留）。
+     * 4. 逐轮处置：等人的挂起；其余发交权信号——模型输出掐断重来，工具留在本节点上跑完。没有工具收尾记录
+     *    （`Persistence.tails`）的持久化只能中止。各轮收尾时自己做「登记收尾 → 标待接手 → 预留放手」。
+     * 5. 等各轮收尾，然后一次性请接手节点接手全部交出去的对话。
+     * 6. 踢掉剩下的订阅（[请重连帧](../../../docs/terms.md)），等本节点上的[工具收尾](../../../docs/terms.md)跑完。
+     *
+     * 重复调用返回同一次关闭的结果。
      */
-    async shutdown(opts) {
-      const graceMs = opts?.graceMs ?? options.shutdown?.graceMs ?? DEFAULT_SHUTDOWN_GRACE_MS;
-      const finishWindowMs = opts?.finishWindowMs ?? options.shutdown?.finishWindowMs ?? DEFAULT_SHUTDOWN_FINISH_WINDOW_MS;
-      shuttingDown = true;
-
-      const snapshot = registry.snapshot();
-      if (snapshot.length === 0) {
-        logger.debug(LOG_SCOPE, "shutdown: no active turns", {});
-        return { aborted: 0, suspended: 0, finished: 0, settled: true, pending: 0 };
-      }
-      logger.info(LOG_SCOPE, "shutdown: settling active turns", { count: snapshot.length, finishWindowMs, graceMs });
-
-      const settledPromises = snapshot.map((turn) => turn.settled);
-      let aborted = 0;
-      let suspended = 0;
-
-      // 等人的轮立刻挂起；`suspendedTurns` 用来去重，同一轮不会被挂起、计数两次。
-      const suspendedTurns = new Set<ActiveTurn>();
-      const suspendIfWaiting = (turn: ActiveTurn): boolean => {
-        if (suspendedTurns.has(turn)) {return true;}
-        if (turn.pendingReviews.size + turn.pendingQuestions.size === 0) {return false;}
-        human.suspendTurn(turn, "handover");
-        suspendedTurns.add(turn);
-        suspended += 1;
-        return true;
-      };
-
-      if (finishWindowMs > 0) {
-        for (const turn of snapshot) {suspendIfWaiting(turn);}
-
-        const deadline = Date.now() + finishWindowMs;
-        let busy = snapshot.filter((turn) => !turn.done && !suspendedTurns.has(turn));
-        // 只建一次：每轮询一次就建一个会给每个在跑的轮多挂一个回调，一直留到它收尾。
-        // 挂起的轮也会收尾，所以「全部收尾」同样能提前结束窗口。
-        const allSettled = Promise.all(busy.map((turn) => turn.settled));
-        while (busy.length > 0) {
-          const remaining = deadline - Date.now();
-          if (remaining <= 0) {break;}
-          let tickTimer: ReturnType<typeof setTimeout> | undefined;
-          await Promise.race([
-            allSettled,
-            new Promise<void>((resolve) => {
-              tickTimer = setTimeout(resolve, Math.min(SHUTDOWN_FINISH_POLL_MS, remaining));
-            }),
-          ]);
-          if (tickTimer !== undefined) {clearTimeout(tickTimer);}
-          busy = busy.filter((turn) => !turn.done);
-          for (const turn of busy) {suspendIfWaiting(turn);}
-          busy = busy.filter((turn) => !suspendedTurns.has(turn));
-        }
-      }
-
-      const finished = finishWindowMs > 0 ? snapshot.filter((turn) => turn.endStatus === "completed").length : 0;
-      if (finished > 0) {logger.info(LOG_SCOPE, "shutdown: turns finished naturally during the finish window", { finished });}
-
-      for (const turn of snapshot) {
-        if (turn.done || suspendIfWaiting(turn)) {continue;}
-        await abortTurn(turn, ABORT_REASON_SHUTDOWN);
-        aborted += 1;
-      }
-
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const timedOut = await Promise.race([
-        Promise.all(settledPromises).then(() => false),
-        new Promise<true>((resolve) => {
-          timer = setTimeout(() => {
-            resolve(true);
-          }, graceMs);
-        }),
-      ]);
-      if (timer !== undefined) {clearTimeout(timer);}
-
-      const pending = registry.size;
-      if (timedOut) {
-        logger.error(LOG_SCOPE, "shutdown: timed out waiting for turns to settle", { aborted, suspended, finished, pending });
-        return { aborted, suspended, finished, settled: false, pending };
-      }
-      logger.info(LOG_SCOPE, "shutdown: all turns settled", { aborted, suspended, finished });
-      return { aborted, suspended, finished, settled: true, pending: 0 };
+    shutdown(opts) {
+      shutdownRun ??= runShutdown(opts?.graceMs ?? options.shutdown?.graceMs ?? DEFAULT_SHUTDOWN_GRACE_MS);
+      return shutdownRun;
     },
 
     isShuttingDown() {

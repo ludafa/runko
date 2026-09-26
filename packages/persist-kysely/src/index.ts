@@ -28,14 +28,19 @@ import type { Kysely } from "kysely";
 
 import type { Flavor } from "./flavor.js";
 import { traitsOf } from "./flavor.js";
+import type { NodeRegistryOptions } from "./nodes.js";
+import { nodeRegistry } from "./nodes.js";
 import type { RunkoDatabase } from "./schema.js";
 import { createDecisionStore, createLedgerStore, createQueueStore } from "./stores.js";
+import { createToolTailStore } from "./tails.js";
 
 export const RUNKO_PERSIST_KYSELY_VERSION = "0.0.0" as const;
 
 export type { Flavor, FlavorTraits } from "./flavor.js";
 export type { LeaseArbitrationOptions } from "./arbitration.js";
 export { leaseArbitration, DEFAULT_HEARTBEAT_MS, DEFAULT_TAKEOVER_MS } from "./arbitration.js";
+export type { NodeRegistryOptions } from "./nodes.js";
+export { nodeRegistry } from "./nodes.js";
 export type { MigrateOptions } from "./migrate.js";
 export { migrate } from "./migrate.js";
 export type { DecisionsTable, LedgerTable, RunkoDatabase, QueueTable } from "./schema.js";
@@ -70,5 +75,6 @@ export function kyselyPersistence<DB extends RunkoDatabase>(
     ledger: createLedgerStore(scoped, traits),
     decisions: createDecisionStore(scoped, traits),
     queue: createQueueStore(scoped, traits),
+    tails: createToolTailStore(scoped, traits),
   };
 }

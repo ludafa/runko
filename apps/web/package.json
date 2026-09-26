@@ -73,6 +73,7 @@
     "@kubb/plugin-oas": "^4.37.5",
     "@kubb/plugin-ts": "^4.37.5",
     "@kubb/plugin-zod": "^4.37.5",
+    "@runko/agent": "workspace:*",
     "@tanstack/router-plugin": "^1.167.32",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

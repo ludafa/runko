@@ -16,9 +16,9 @@
  * **已经在用 Kysely 了？** 别用这个包——直接装 `@runko/persist-kysely`，把你自己的
  * 实例给它，runko 的四张表和你的表就在同一个实例、同一套迁移之下。
  */
-import type { Arbitration, Persistence } from "@runko/agent";
-import type { LeaseArbitrationOptions, RunkoDatabase } from "@runko/persist-kysely";
-import { kyselyPersistence, leaseArbitration, migrate as migrateKysely } from "@runko/persist-kysely";
+import type { Arbitration, NodeRegistry, Persistence } from "@runko/agent";
+import type { LeaseArbitrationOptions, NodeRegistryOptions, RunkoDatabase } from "@runko/persist-kysely";
+import { kyselyPersistence, leaseArbitration, migrate as migrateKysely, nodeRegistry } from "@runko/persist-kysely";
 import { Kysely, MysqlDialect } from "kysely";
 import type { Pool as MysqlPool } from "mysql2";
 
@@ -84,4 +84,36 @@ export type MysqlArbitrationOptions = Omit<LeaseArbitrationOptions, "flavor">;
  */
 export function mysqlArbitration(pool: MysqlPool, opts: MysqlArbitrationOptions): Arbitration {
   return leaseArbitration(toKysely(pool), { ...opts, flavor: "mysql" });
+}
+
+/**
+ * `mysqlNodeRegistry()` 的入参——就是 `@runko/persist-kysely` 的那份，**去掉 `flavor`**：
+ * 本包只接一家，方言不该再让调用方填一遍。
+ */
+export type MysqlNodeRegistryOptions = Omit<NodeRegistryOptions, "flavor">;
+
+/**
+ * 把同一个驱动装成**[节点登记表](../../../docs/terms.md)**——[指定交接](../../../docs/terms.md)
+ * 挑接手节点用，多副本部署才要它。
+ *
+ * ```ts
+ * createAgentRuntime({
+ *   agent,
+ *   prepareTurn,
+ *   persistence: mysqlPersistence(pool),
+ *   arbitration: mysqlArbitration(pool, { holder: process.env.RUNKO_NODE_URL }),
+ *   handover: {
+ *     node: process.env.RUNKO_NODE_URL,
+ *     nodes: mysqlNodeRegistry(pool),
+ *     requestTakeover: (node, conversationIds) => askPeerToTakeOver(node, conversationIds),
+ *   },
+ * });
+ * ```
+ *
+ * `askPeerToTakeOver` 是你写的出站调用：让对方节点执行 `runtime.takeOver(conversationIds)`，返回它答应了没有。
+ *
+ * `migrate()` 仍然只调一次——登记表 `agent_nodes` 已经在里面了。
+ */
+export function mysqlNodeRegistry(pool: MysqlPool, opts: MysqlNodeRegistryOptions = {}): NodeRegistry {
+  return nodeRegistry(toKysely(pool), { ...opts, flavor: "mysql" });
 }

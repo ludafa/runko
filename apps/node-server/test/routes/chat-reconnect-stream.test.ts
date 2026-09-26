@@ -1,19 +1,15 @@
 /**
- * [节点下线](../../../../docs/terms.md)信号触发时，`GET .../stream`（SSE 直播）要断开——
- * 前端见「轮还在跑却断了」会退避重连，经 nginx 落到别的节点
- * （docs/host/node/tech/cluster-console.md §4.2）。
+ * [节点下线](../../../../docs/terms.md)时，`GET .../stream`（SSE 直播）的最后一帧是[请重连帧](../../../../docs/terms.md)：
+ * 框架在这份对话交接完之后发它、然后收线，前端收到就立刻重连（docs/logic/orchestration/tech/handover.md §8）。
  *
- * 闸门本身（挡不挡新请求）在 `test/offline.test.ts` 里测；这里只测**既有连接**怎么响应
- * `deps.offlineSignal`——直接给 `buildChatApp` 传一个我们自己控制的 `AbortSignal`，
- * 不必真的走一遍 SIGTERM/`disconnectStreams()`。
+ * 闸门本身（挡不挡新请求）在 `test/offline.test.ts` 里测；这里只测**既有连接**。
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import { createLocalProvider } from '../../src/agent/local-sandbox.js';
 import { resolveModel } from '../../src/agent/model.js';
 import { createSandboxManager } from '../../src/agent/sandbox-manager.js';
 import type { Db } from '../../src/db/instance.js';
-import { createForwarder, FORWARDED_HEADER } from '../../src/routes/forward.js';
 import type { ChatReplayFrame } from '../../src/schemas/chat.js';
 import {
   chatReplayFrameSchema,
@@ -75,6 +71,9 @@ function createIncrementalReader(response: Response) {
     get isClosed() {
       return closed;
     },
+    get frames(): ChatReplayFrame[] {
+      return parseSseFrames(buffer);
+    },
     async readUntil(
       predicate: (frames: ChatReplayFrame[]) => boolean,
       maxAttempts = 300,
@@ -100,7 +99,7 @@ function createIncrementalReader(response: Response) {
   };
 }
 
-describe('节点下线：SSE 直播随 offlineSignal 断开', () => {
+describe('节点下线：SSE 直播以请重连帧收尾', () => {
   let db: Db;
   let sessions: FakeSessions;
 
@@ -110,7 +109,7 @@ describe('节点下线：SSE 直播随 offlineSignal 断开', () => {
     sessions = createFakeSessions();
   });
 
-  function build(offlineSignal?: AbortSignal, withForwarder = false) {
+  function build() {
     const sandboxManager = createSandboxManager(
       { local: createLocalProvider({ db, logger: silentLogger }) },
       { logger: silentLogger },
@@ -121,13 +120,9 @@ describe('节点下线：SSE 直播随 offlineSignal 断开', () => {
       resolveModel,
       userId: USER_ID,
       sessionFactory: sessions.factory,
-      ...(offlineSignal !== undefined ? { offlineSignal } : {}),
-      ...(withForwarder ? { forwarder: createForwarder() } : {}),
     });
   }
 
-  // `sandboxManager` 这里只装了 `local` 那一档——与 `test/routes/chat-ws.test.ts` 的
-  // `startServer` 助手同款，不传 `provider` 就落到能用的那一档。
   async function createConversationVia(app: ReturnType<typeof build>['app']) {
     const response = await app.request('/api/chat/conversations', {
       method: 'POST',
@@ -137,9 +132,8 @@ describe('节点下线：SSE 直播随 offlineSignal 断开', () => {
     return ConversationSchema.parse(await response.json());
   }
 
-  it('下线信号触发：正在直播的这条 SSE 连接结束，即便那一轮还在跑', async () => {
-    const controller = new AbortController();
-    const { app } = build(controller.signal);
+  it('交权之后：这条 SSE 连接的最后一帧是 {reconnect:true}，然后结束——即便那一轮还没收尾', async () => {
+    const { app, runtime } = build();
     const created = await createConversationVia(app);
     await app.request(`/api/chat/conversations/${created.id}/messages`, {
       method: 'POST',
@@ -154,41 +148,22 @@ describe('节点下线：SSE 直播随 offlineSignal 断开', () => {
       `/api/chat/conversations/${created.id}/stream`,
     );
     const reader = createIncrementalReader(response);
-    // 先确认连接真的建立、且轮还在跑（权威快照到了）——不是还没连上就巧合关闭。
     await reader.readUntil((frames) =>
       frames.some((frame) => 'turnActive' in frame && frame.turnActive),
     );
-    expect(reader.isClosed).toBe(false);
 
-    controller.abort();
+    // 假 session 不理交权信号：宽限期一到，框架照样给本进程的订阅发请重连帧。
+    const shutdown = runtime.shutdown({ graceMs: 50 });
     await reader.waitClosed();
+    expect(reader.frames.at(-1)).toEqual({ reconnect: true });
 
-    // 那一轮本身没有被下线信号打断——它只关掉了这一条直播连接。
-    expect(session.signal?.aborted).not.toBe(true);
-
-    // 收尾：让这一轮跑完，避免把假 session 悬在测试进程里。
     session.emit({ type: 'finish' });
-    session.push({
-      id: 'a-1',
-      role: 'assistant',
-      parts: [{ type: 'text', text: 'hi' }],
-      metadata: { turn: 1, usage: {}, status: 'completed' },
-    });
-    session.emit({
-      type: 'message-metadata',
-      messageMetadata: { turn: 1, usage: {}, status: 'completed' },
-    });
     session.finish();
-    await vi.waitFor(async () => {
-      const activity = await app.request(
-        `/api/chat/conversations/${created.id}/activity`,
-      );
-      expect(await activity.json()).toMatchObject({ active: false });
-    });
+    await shutdown;
   });
 
-  it('没配 offlineSignal（生产默认装配以外的宿主，或单进程跑法）：轮结束前连接不会因为下线而中途关闭', async () => {
-    const { app } = build(); // 不传 offlineSignal
+  it('没有下线：轮正常收尾，连接照常关闭，不带请重连帧', async () => {
+    const { app } = build();
     const created = await createConversationVia(app);
     await app.request(`/api/chat/conversations/${created.id}/messages`, {
       method: 'POST',
@@ -205,7 +180,6 @@ describe('节点下线：SSE 直播随 offlineSignal 断开', () => {
     await reader.readUntil((frames) =>
       frames.some((frame) => 'turnActive' in frame && frame.turnActive),
     );
-    // 给它一点时间——没有信号可触发，连接不该自己关掉。
     await sleep(30);
     expect(reader.isClosed).toBe(false);
 
@@ -221,47 +195,7 @@ describe('节点下线：SSE 直播随 offlineSignal 断开', () => {
       messageMetadata: { turn: 1, usage: {}, status: 'completed' },
     });
     session.finish();
-    await reader.waitClosed(); // 轮正常收尾，连接正常关闭
-  });
-
-  it('别的节点转发来的直播：下线信号触发也不断（没配 Redis 时只有本节点能播）', async () => {
-    const controller = new AbortController();
-    const { app } = build(controller.signal, true);
-    const created = await createConversationVia(app);
-    await app.request(`/api/chat/conversations/${created.id}/messages`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'hello' }),
-    });
-    const session = await sessions.next();
-    await session.started;
-    session.emit({ type: 'start', messageId: 'm-1' });
-
-    const response = await app.request(
-      `/api/chat/conversations/${created.id}/stream`,
-      { headers: { [FORWARDED_HEADER]: '1' } },
-    );
-    const reader = createIncrementalReader(response);
-    await reader.readUntil((frames) =>
-      frames.some((frame) => 'turnActive' in frame && frame.turnActive),
-    );
-
-    controller.abort();
-    await sleep(30);
-    expect(reader.isClosed).toBe(false);
-
-    session.emit({ type: 'finish' });
-    session.push({
-      id: 'a-1',
-      role: 'assistant',
-      parts: [{ type: 'text', text: 'hi' }],
-      metadata: { turn: 1, usage: {}, status: 'completed' },
-    });
-    session.emit({
-      type: 'message-metadata',
-      messageMetadata: { turn: 1, usage: {}, status: 'completed' },
-    });
-    session.finish();
-    await reader.waitClosed(); // 轮收尾，连接照常关闭
+    await reader.waitClosed();
+    expect(reader.frames.some((frame) => 'reconnect' in frame)).toBe(false);
   });
 });

@@ -1,0 +1,6 @@
+{
+  "type": "object",
+  "properties": { "reconnect": { "type": "boolean", "enum": [true] } },
+  "required": ["reconnect"],
+  "x-readme-ref-name": "ChatReconnectFrame"
+}

@@ -53,15 +53,18 @@ import type { Persistence } from "@runko/agent";
 import type { Db } from "mongodb";
 
 import { createDecisionStore, createLedgerStore, createQueueStore } from "./stores.js";
+import { createToolTailStore } from "./tails.js";
 
 export const RUNKO_PERSIST_MONGO_VERSION = "0.0.0" as const;
 
-export type { DecisionDoc, LeaseDoc, LedgerDoc, QueueDoc } from "./collections.js";
+export type { DecisionDoc, LeaseDoc, LedgerDoc, NodeDoc, QueueDoc, ToolTailDoc } from "./collections.js";
 export {
   DECISIONS_COLLECTION,
   LEASES_COLLECTION,
   LEDGER_COLLECTION,
+  NODES_COLLECTION,
   QUEUE_COLLECTION,
+  TAILS_COLLECTION,
 } from "./collections.js";
 export type { MongoArbitrationOptions } from "./arbitration.js";
 export {
@@ -69,6 +72,8 @@ export {
   DEFAULT_TAKEOVER_MS,
   mongoArbitration,
 } from "./arbitration.js";
+export type { MongoNodeRegistryOptions } from "./nodes.js";
+export { mongoNodeRegistry } from "./nodes.js";
 export { migrate } from "./migrate.js";
 
 /**
@@ -77,13 +82,14 @@ export { migrate } from "./migrate.js";
  * **吃 `Db` 而不是 `MongoClient`**：选哪个 database 是宿主的决定（多租户可能一租户
  * 一个 db），连接的生命周期也归宿主管——本包不 connect、不 close。
  *
- * 三个集合固定叫 `agent_ledger` / `agent_decisions` / `agent_queue`，你自己的集合
- * 照常在同一个 db 里，互不干扰。
+ * 四个集合固定叫 `agent_ledger` / `agent_decisions` / `agent_queue` / `agent_tool_tails`，
+ * 你自己的集合照常在同一个 db 里，互不干扰。
  */
 export function mongoPersistence(db: Db): Persistence {
   return {
     ledger: createLedgerStore(db),
     decisions: createDecisionStore(db),
     queue: createQueueStore(db),
+    tails: createToolTailStore(db),
   };
 }
