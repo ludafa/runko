@@ -10,7 +10,7 @@ import { sql } from "kysely";
 import type { Flavor } from "./flavor.js";
 import { traitsOf } from "./flavor.js";
 import type { RunkoDatabase } from "./schema.js";
-import { DECISIONS_TABLE, LEASES_TABLE, LEDGER_TABLE, QUEUE_TABLE } from "./schema.js";
+import { DECISIONS_TABLE, HANDOVER_TABLE, LEASES_TABLE, LEDGER_TABLE, NODES_TABLE, QUEUE_TABLE, TAILS_TABLE } from "./schema.js";
 
 export interface MigrateOptions {
   flavor: Flavor;
@@ -83,7 +83,50 @@ export async function migrate(db: Kysely<RunkoDatabase>, opts: MigrateOptions): 
     .addPrimaryKeyConstraint("agent_leases_pk", ["conversation_id"])
     .execute();
 
-  // ⚠️ **`migrate()` 只做首建，不做 schema 演进。** 四张表全是 `CREATE TABLE IF NOT
+  // [交接预留 / 待接手](../../../docs/terms.md)：**独立于 `agent_leases`**，不给租约表
+  // 加列——`migrate()` 只建表不改表，老库上的租约表永远补不上新列。
+  await db.schema
+    .createTable(HANDOVER_TABLE)
+    .ifNotExists()
+    .addColumn("conversation_id", key, (c) => c.notNull())
+    // 不用 `key`（不带 MySQL 排序规则）：这一列的角色跟 `agent_leases.holder` 一样，
+    // 是拿来对照节点地址的不透明字符串，不是主键。
+    .addColumn("reserved_for", "varchar(255)")
+    .addColumn("reserved_until", t.intColumnType)
+    .addColumn("awaiting_takeover", t.intColumnType, (c) => c.notNull().defaultTo(0))
+    .addColumn("updated_at", t.intColumnType, (c) => c.notNull())
+    .addPrimaryKeyConstraint("agent_handover_pk", ["conversation_id"])
+    .execute();
+
+  // [节点登记表](../../../docs/terms.md)：指定交接挑接手节点用。
+  await db.schema
+    .createTable(NODES_TABLE)
+    .ifNotExists()
+    .addColumn("node", key, (c) => c.notNull())
+    .addColumn("release_seq", t.intColumnType, (c) => c.notNull())
+    .addColumn("state", "varchar(32)", (c) => c.notNull())
+    .addColumn("heartbeat_at", t.intColumnType, (c) => c.notNull())
+    .addColumn("started_at", t.intColumnType, (c) => c.notNull())
+    .addPrimaryKeyConstraint("agent_nodes_pk", ["node"])
+    .execute();
+
+  // [工具收尾](../../../docs/terms.md)：交权那一刻还在跑、留在旧节点上跑完的那次调用。
+  await db.schema
+    .createTable(TAILS_TABLE)
+    .ifNotExists()
+    .addColumn("conversation_id", key, (c) => c.notNull())
+    .addColumn("tool_call_id", key, (c) => c.notNull())
+    .addColumn("tool_name", "varchar(255)", (c) => c.notNull())
+    .addColumn("runner", "varchar(255)", (c) => c.notNull())
+    .addColumn("started_at", t.intColumnType, (c) => c.notNull())
+    .addColumn("deadline", t.intColumnType, (c) => c.notNull())
+    .addColumn("outcome", t.jsonColumnType)
+    .addColumn("settled_at", t.intColumnType)
+    .addColumn("stop_requested", t.intColumnType, (c) => c.notNull().defaultTo(0))
+    .addPrimaryKeyConstraint("agent_tool_tails_pk", ["conversation_id", "tool_call_id"])
+    .execute();
+
+  // ⚠️ **`migrate()` 只做首建，不做 schema 演进。** 七张表全是 `CREATE TABLE IF NOT
   // EXISTS`：表已经存在时它是彻底的 no-op，**不会**改列、加列或改排序规则。所以后续版本
   // 若动了 schema（哪怕只是给某列换排序规则），老库必须由宿主自己出一次迁移——本包不
   // 带版本表、不记 migration 历史。README 与 `schema.sql` 里写的是同一句承诺。

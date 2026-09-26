@@ -40,36 +40,9 @@ import {
   QUEUE_COLLECTION,
   toBson,
 } from "./collections.js";
-import { isDuplicateKeyError } from "./errors.js";
+import { ignoringDuplicateKey, isDuplicateKeyError } from "./errors.js";
 
 const OK: WriteResult = { ok: true };
-
-/**
- * 幂等插入的**兜底那一半**：吞掉重复键，其余错误照抛。
- *
- * 幂等本身靠 `upsert` + `$setOnInsert`（在调用点写），不靠异常——「先查再插」有竞态
- * 窗口，「插了 catch」会把真正的写失败也一起吞掉。
- *
- * 但 `upsert` 在并发下**仍可能抛重复键**：两个请求同时发现不存在、同时插，唯一索引
- * 挡下后一个。这是 MongoDB 明确记录的行为，不是 bug。那一支的结果照样是「已经有了
- * 一行」——契约要的是「不得写出两行」，满足了，所以吞掉。
- *
- * **只包异常处理、不包 `updateOne` 本身**是刻意的：这样 `$setOnInsert` 的字段能在
- * **具体的调用点**跟具体的文档类型对上，写错字段当场编译不过。包成一个泛型 helper
- * 反而会把类型冲开、逼出一个 `as`。
- */
-async function ignoringDuplicateKey<T>(write: () => Promise<T>): Promise<T | undefined> {
-  try {
-    return await write();
-  } catch (error: unknown) {
-    if (!isDuplicateKeyError(error)) {
-      throw error;
-    }
-    // 撞唯一索引 = 并发下另一个 upsert 抢先建了同一条。返回 undefined，让调用方自己
-    // 决定这算幂等（同一条重写）还是拒绝（别的内容占了这个号）。
-    return undefined;
-  }
-}
 
 // ---------------------------------------------------------------------------
 // 账本

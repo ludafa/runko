@@ -1,6 +1,9 @@
 /**
  * 租约版[归属仲裁机制](../../../docs/terms.md)跑[一致性套件](../../conformance/src/arbitration.ts)
- * 的**全部三组**——包括内存版跑不了的「多节点」与「超时接管」。
+ * 的**全部三组**——包括内存版跑不了的「多节点」与「超时接管」。另外三组
+ * （[交接预留 / 待接手 / 定时回捞](../../conformance/src/handover.ts)、
+ * [节点登记表](../../conformance/src/node-registry.ts)、
+ * [工具收尾](../../conformance/src/tool-tails.ts)）见文件末尾。
  *
  * **两个 `Arbitration` 实例 = 两个逻辑节点。** 它们共享同一个库、`holder` 不同，走的是
  * 与真·两个进程完全相同的那条路（令牌 CAS 落在数据库里）。真开两个 OS 进程是另一档
@@ -14,12 +17,16 @@
  * 「新鲜」的心跳时刻。
  */
 import { PGlite } from "@electric-sql/pglite";
+import type { ToolTailStore } from "@runko/agent";
 import type {
   ArbitrationConformanceSetup,
   ConformanceCase,
+  HandoverConformanceSetup,
   MultiNodeConformanceSetup,
+  NodeRegistryConformanceSetup,
   RestartConformanceSetup,
   TakeoverConformanceSetup,
+  ToolTailConformanceSetup,
 } from "@runko/conformance";
 import {
   arbitrationCases,
@@ -27,6 +34,9 @@ import {
   arbitrationRestartCases,
   arbitrationTakeoverCases,
   arbitrationTakeoverReportCases,
+  handoverCases,
+  nodeRegistryCases,
+  toolTailCases,
 } from "@runko/conformance";
 import Database from "better-sqlite3";
 import { Kysely, MysqlDialect, PostgresDialect, SqliteDialect } from "kysely";
@@ -34,7 +44,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { traitsOf } from "../src/flavor.js";
 import type { Flavor, RunkoDatabase } from "../src/index.js";
-import { leaseArbitration, migrate } from "../src/index.js";
+import { kyselyPersistence, leaseArbitration, migrate, nodeRegistry } from "../src/index.js";
 import type { FaultyDialect } from "./helpers/faulty-dialect.js";
 import { faultySqlite } from "./helpers/faulty-dialect.js";
 import { pgliteDialect } from "./helpers/pglite-dialect.js";
@@ -244,6 +254,180 @@ if (MYSQL_URL !== undefined) {
 } else {
   describe.skip("lease · mysql (真库)", () => {
     it("没给 RUNKO_TEST_MYSQL_URL，跳过", () => undefined);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// H2：交接预留 / 待接手 / 定时回捞
+// ---------------------------------------------------------------------------
+
+function clearHandover(db: Kysely<RunkoDatabase>): Promise<void> {
+  return db.deleteFrom("agent_handover").execute().then(() => undefined);
+}
+
+/**
+ * `persistence` 只在「一条用例一个库」的档位给——「队列不空」那条用例会往
+ * `agent_queue` 里写一行。共用库的那几档（pglite / 真库）也在跑
+ * `conformance.test.ts` 的持久化套件，两边并发碰同一张队列表容易撞车（那份文件的
+ * `truncate()` 会整表 `DELETE`）。sqlite 每条用例都是全新的 `:memory:` 库，不存在
+ * 这个问题，所以「队列不空」这条只在 sqlite 档跑到。
+ */
+function handoverSetupFor(
+  db: Kysely<RunkoDatabase>,
+  flavor: Flavor,
+  opts: { withPersistence: boolean },
+): HandoverConformanceSetup {
+  const base = setupFor(db, flavor);
+  return {
+    arbitration: base.arbitration,
+    other: base.other,
+    self: "node-a",
+    otherNode: "node-b",
+    ...(opts.withPersistence ? { persistence: kyselyPersistence(db, { flavor }) } : {}),
+  };
+}
+
+runCases<HandoverConformanceSetup>("lease · sqlite · 交接预留 / 待接手 / 定时回捞", handoverCases, async () => {
+  const sqlite = new Database(":memory:");
+  const db = new Kysely<RunkoDatabase>({ dialect: new SqliteDialect({ database: sqlite }) });
+  await migrate(db, { flavor: "sqlite" });
+  return {
+    ...handoverSetupFor(db, "sqlite", { withPersistence: true }),
+    cleanup: async () => {
+      await db.destroy();
+    },
+  };
+});
+
+runCases<HandoverConformanceSetup>("lease · postgres (pglite) · 交接预留 / 待接手 / 定时回捞", handoverCases, async () => {
+  const db = await sharedPglite();
+  await clearLeases(db);
+  await clearHandover(db);
+  return handoverSetupFor(db, "postgres", { withPersistence: false });
+});
+
+if (POSTGRES_URL !== undefined) {
+  runCases<HandoverConformanceSetup>("lease · postgres (真库) · 交接预留 / 待接手 / 定时回捞", handoverCases, async () => {
+    const db = await sharedRealPostgres(POSTGRES_URL);
+    await clearLeases(db);
+    await clearHandover(db);
+    return handoverSetupFor(db, "postgres", { withPersistence: false });
+  });
+}
+
+if (MYSQL_URL !== undefined) {
+  runCases<HandoverConformanceSetup>("lease · mysql (真库) · 交接预留 / 待接手 / 定时回捞", handoverCases, async () => {
+    const db = await sharedRealMysql(MYSQL_URL);
+    await clearLeases(db);
+    await clearHandover(db);
+    return handoverSetupFor(db, "mysql", { withPersistence: false });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// H2：节点登记表
+// ---------------------------------------------------------------------------
+
+function clearNodes(db: Kysely<RunkoDatabase>): Promise<void> {
+  return db.deleteFrom("agent_nodes").execute().then(() => undefined);
+}
+
+/** `acquireLoad` 用一个绑定到目标节点名的仲裁实例，各抢一份全新的、互不冲突的对话。 */
+function nodeRegistrySetupFor(db: Kysely<RunkoDatabase>, flavor: Flavor): NodeRegistryConformanceSetup {
+  const traits = traitsOf(flavor);
+  return {
+    registry: nodeRegistry(db, { flavor: traits }),
+    acquireLoad: async (node, count) => {
+      const arbitration = leaseArbitration(db, { flavor: traits, holder: node });
+      for (let i = 0; i < count; i += 1) {
+        await arbitration.acquire(`load-${node}-${crypto.randomUUID()}`, { seedSeq: () => Promise.resolve(0) });
+      }
+    },
+  };
+}
+
+runCases<NodeRegistryConformanceSetup>("lease · sqlite · 节点登记表", nodeRegistryCases, async () => {
+  const sqlite = new Database(":memory:");
+  const db = new Kysely<RunkoDatabase>({ dialect: new SqliteDialect({ database: sqlite }) });
+  await migrate(db, { flavor: "sqlite" });
+  return {
+    ...nodeRegistrySetupFor(db, "sqlite"),
+    cleanup: async () => {
+      await db.destroy();
+    },
+  };
+});
+
+runCases<NodeRegistryConformanceSetup>("lease · postgres (pglite) · 节点登记表", nodeRegistryCases, async () => {
+  const db = await sharedPglite();
+  await clearNodes(db);
+  return nodeRegistrySetupFor(db, "postgres");
+});
+
+if (POSTGRES_URL !== undefined) {
+  runCases<NodeRegistryConformanceSetup>("lease · postgres (真库) · 节点登记表", nodeRegistryCases, async () => {
+    const db = await sharedRealPostgres(POSTGRES_URL);
+    await clearNodes(db);
+    return nodeRegistrySetupFor(db, "postgres");
+  });
+}
+
+if (MYSQL_URL !== undefined) {
+  runCases<NodeRegistryConformanceSetup>("lease · mysql (真库) · 节点登记表", nodeRegistryCases, async () => {
+    const db = await sharedRealMysql(MYSQL_URL);
+    await clearNodes(db);
+    return nodeRegistrySetupFor(db, "mysql");
+  });
+}
+
+// ---------------------------------------------------------------------------
+// H2：工具收尾
+// ---------------------------------------------------------------------------
+
+function clearTails(db: Kysely<RunkoDatabase>): Promise<void> {
+  return db.deleteFrom("agent_tool_tails").execute().then(() => undefined);
+}
+
+/** `Persistence.tails` 是可选字段，`kyselyPersistence` 实际总是带它——没带就是实现坏了。 */
+function tailsOf(db: Kysely<RunkoDatabase>, flavor: Flavor): ToolTailStore {
+  const tails = kyselyPersistence(db, { flavor }).tails;
+  if (tails === undefined) {
+    throw new Error("kyselyPersistence 应该总是带 tails");
+  }
+  return tails;
+}
+
+runCases<ToolTailConformanceSetup>("lease · sqlite · 工具收尾", toolTailCases, async () => {
+  const sqlite = new Database(":memory:");
+  const db = new Kysely<RunkoDatabase>({ dialect: new SqliteDialect({ database: sqlite }) });
+  await migrate(db, { flavor: "sqlite" });
+  return {
+    tails: tailsOf(db, "sqlite"),
+    cleanup: async () => {
+      await db.destroy();
+    },
+  };
+});
+
+runCases<ToolTailConformanceSetup>("lease · postgres (pglite) · 工具收尾", toolTailCases, async () => {
+  const db = await sharedPglite();
+  await clearTails(db);
+  return { tails: tailsOf(db, "postgres") };
+});
+
+if (POSTGRES_URL !== undefined) {
+  runCases<ToolTailConformanceSetup>("lease · postgres (真库) · 工具收尾", toolTailCases, async () => {
+    const db = await sharedRealPostgres(POSTGRES_URL);
+    await clearTails(db);
+    return { tails: tailsOf(db, "postgres") };
+  });
+}
+
+if (MYSQL_URL !== undefined) {
+  runCases<ToolTailConformanceSetup>("lease · mysql (真库) · 工具收尾", toolTailCases, async () => {
+    const db = await sharedRealMysql(MYSQL_URL);
+    await clearTails(db);
+    return { tails: tailsOf(db, "mysql") };
   });
 }
 

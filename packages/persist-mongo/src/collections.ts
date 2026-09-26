@@ -14,6 +14,8 @@ export const LEDGER_COLLECTION = "agent_ledger";
 export const DECISIONS_COLLECTION = "agent_decisions";
 export const QUEUE_COLLECTION = "agent_queue";
 export const LEASES_COLLECTION = "agent_leases";
+export const NODES_COLLECTION = "agent_nodes";
+export const TAILS_COLLECTION = "agent_tool_tails";
 
 /**
  * [账本](../../../docs/terms.md)文档。
@@ -64,12 +66,27 @@ export interface LeaseDoc {
   holder: string | null;
   /** 一次租期的唯一标识（[租期标识](../../../docs/terms.md)）。`null` = 没人持有。 */
   leaseToken: string | null;
-  /** [账本](../../../docs/terms.md)水位，**跨释放保留**——下次抢占才不用回账本重新问。 */
-  seqWatermark: number;
+  /**
+   * [账本](../../../docs/terms.md)水位，**跨释放保留**——下次抢占才不用回账本重新问。
+   * `null` = **还没播种**：这份文档是 `markAwaitingTakeover` 在会话从没被真正 `acquire`
+   * 过时垫出来的，`acquire()` 见到 `null` 要先调 `ctx.seedSeq()` 播种，不能当成合法的 0。
+   */
+  seqWatermark: number | null;
   /** 最后一次心跳写进来的时刻。别的副本判它死活看的就是这个值。 */
   heartbeatAt: number;
   /** 这次租期是什么时候抢到的。只用于排障，不参与任何判断。 */
   acquiredAt: number;
+  /**
+   * [交接预留](../../../docs/terms.md)：预留给哪个节点。`null` = 没有预留。**直接放在
+   * 租约文档上**（跟 SQL 那几家不同，那边独立建了一张 `agent_handover`）——Mongo 里
+   * 这是同一份文档，`findOneAndUpdate` 一次 CAS 就能把「放手」与「写预留」焊在一起，
+   * 不需要像 SQL 那样开一个跨表事务。
+   */
+  reservedFor: string | null;
+  /** 预留截止时刻。`null` = 没有预留。过了这个时刻退化成「没人持有」。 */
+  reservedUntil: number | null;
+  /** [待接手](../../../docs/terms.md)标记。 */
+  awaitingTakeover: boolean;
 }
 
 /** [待发队列](../../../docs/terms.md)文档。`_id` 直接用队列条目自己的 id。 */
@@ -80,6 +97,43 @@ export interface QueueDoc {
   seq: number;
   input: JsonValue;
   createdAt: number;
+}
+
+/**
+ * [节点登记表](../../../docs/terms.md)文档——`_id` 就是节点地址，唯一性由它白送。
+ * 与 SQL 那几家的字段名一一对应（[技术方案 §7.1](../../../docs/logic/orchestration/tech/handover.md)），
+ * 只是驼峰换下划线。
+ */
+export interface NodeDoc {
+  /** = 节点地址，同租约里的 `holder`。 */
+  _id: string;
+  /** [发布序号](../../../docs/terms.md)：每次发布递增，回滚也递增。 */
+  releaseSeq: number;
+  /** `ready` | `leaving`。 */
+  state: string;
+  heartbeatAt: number;
+  startedAt: number;
+}
+
+/**
+ * [工具收尾](../../../docs/terms.md)文档——[交权](../../../docs/terms.md)那一刻还在跑、
+ * 留在旧节点上跑完的那次调用。用 `conversationId` + `toolCallId` 一对唯一索引，
+ * 不用复合 `_id`（理由同 `LedgerDoc`）。
+ */
+export interface ToolTailDoc {
+  conversationId: string;
+  toolCallId: string;
+  toolName: string;
+  /** 在哪个节点上收尾（同 `holder` 的值空间）。 */
+  runner: string;
+  startedAt: number;
+  /** 过了这个时刻还没有结果，持有者就把它记成「结果未知」。 */
+  deadline: number;
+  /** `TailOutcome`。`null` = 还在跑。**只在为空时写得进**。 */
+  outcome: JsonValue | null;
+  settledAt: number | null;
+  /** 持有者要求停止。 */
+  stopRequested: boolean;
 }
 
 /**

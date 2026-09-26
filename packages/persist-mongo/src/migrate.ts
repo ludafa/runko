@@ -16,6 +16,7 @@ import {
   LEASES_COLLECTION,
   LEDGER_COLLECTION,
   QUEUE_COLLECTION,
+  TAILS_COLLECTION,
 } from "./collections.js";
 import { isIndexConflict } from "./errors.js";
 
@@ -80,5 +81,19 @@ export async function migrate(db: Db): Promise<void> {
     ensureIndex(db, LEASES_COLLECTION, { heartbeatAt: 1, leaseToken: 1 }, {
       name: "agent_leases_heartbeat_token",
     }),
+    // **只为 `listSweepCandidates` 建**（[定时回捞](../../../docs/terms.md)的输入之一：
+    // 打了[待接手](../../../docs/terms.md)标记的那些会话）。等值查询，不像 `heartbeatAt`
+    // 那样有 `$ne` 的坑，键序无所谓。
+    ensureIndex(db, LEASES_COLLECTION, { awaitingTakeover: 1 }, {
+      name: "agent_leases_awaiting_takeover",
+    }),
+    // [工具收尾](../../../docs/terms.md)：`(conversationId, toolCallId)` 唯一，同上面
+    // 账本 / 裁决表的道理——`begin` 的幂等靠它兜底。
+    ensureIndex(db, TAILS_COLLECTION, { conversationId: 1, toolCallId: 1 }, {
+      unique: true,
+      name: "agent_tool_tails_conversation_call",
+    }),
+    // [节点登记表](../../../docs/terms.md)：不额外建索引。`_id` 就是节点地址，白送唯一
+    // 索引；候选查询扫的是这张表的**全部**行（节点数通常是个位数到几十，用不上索引）。
   ]);
 }

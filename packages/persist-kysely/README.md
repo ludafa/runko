@@ -2,19 +2,19 @@
 
 runko 持久化的**核心实现**，底下是 [Kysely](https://kysely.dev)。
 
-四张表的读写与建表都在这儿；SQLite / PostgreSQL / MySQL 三个薄壳共用它。
+七张表的读写与建表都在这儿；SQLite / PostgreSQL / MySQL 三个薄壳共用它。
 
 ## 什么时候装它
 
-**你已经在用 Kysely。** 把你自己的实例给它，runko 的四张表和你的表就在同一个实例、
+**你已经在用 Kysely。** 把你自己的实例给它，runko 的七张表和你的表就在同一个实例、
 同一套迁移之下：
 
 ```ts
 import { Kysely, PostgresDialect } from "kysely";
-import { kyselyPersistence, migrate } from "@runko/persist-kysely";
+import { kyselyPersistence, migrate, nodeRegistry } from "@runko/persist-kysely";
 import type { RunkoDatabase } from "@runko/persist-kysely";
 
-// 把 runko 的四张表并进你自己的库类型
+// 把 runko 的七张表并进你自己的库类型
 interface MyDatabase extends RunkoDatabase {
   my_users: MyUsersTable;
 }
@@ -26,12 +26,20 @@ createAgentRuntime({
   agent,
   prepareTurn,
   persistence: kyselyPersistence(db, { flavor: "postgres" }),
+  // 多副本、想让[指定交接](../../docs/terms.md)挑到接手节点时再装——可选，
+  // 不装的话交权时挑不到接手节点，对话一律标成待接手。
+  handover: {
+    node: process.env.RUNKO_NODE_URL, // 本节点地址，与租约的 holder 相同
+    nodes: nodeRegistry(db, { flavor: "postgres" }),
+    // 请对方节点执行 runtime.takeOver(ids)——HTTP、RPC 都行，由你来写
+    requestTakeover: (node, conversationIds) => askPeerToTakeOver(node, conversationIds),
+  },
 });
 ```
 
 ### `migrate()` 的承诺范围
 
-**它只做首建，不做 schema 演进。** 四张表都是 `CREATE TABLE IF NOT EXISTS`——表已经
+**它只做首建，不做 schema 演进。** 七张表都是 `CREATE TABLE IF NOT EXISTS`——表已经
 存在时它是彻底的 no-op，**不会**改列、加列或改排序规则。所以：
 
 - 本包后续版本若动了 schema，**老库必须由你自己出一次迁移**。本包不带版本表、不记
@@ -86,7 +94,12 @@ createAgentRuntime({
 
 ## 表
 
-`agent_ledger`（账本）· `agent_decisions`（人工裁决留底）· `agent_queue`（待发队列）。
+`agent_ledger`（账本）· `agent_decisions`（人工裁决留底）· `agent_queue`（待发队列）·
+`agent_leases`（[租约](../../docs/terms.md)，多副本才用到）·
+`agent_handover`（[交接预留 / 待接手](../../docs/terms.md)，独立于 `agent_leases`——
+`migrate()` 只建表不改表，不给租约表加列）·
+`agent_nodes`（[节点登记表](../../docs/terms.md)）·
+`agent_tool_tails`（[工具收尾](../../docs/terms.md)）。
 
 **表名固定，不提供前缀开关。** Kysely 的类型按**字面量表名**推，前缀一动态化就得退回
 `any`，等于把这个库最值钱的东西扔掉去换一个几乎没人用的开关。要隔离请用 schema/database

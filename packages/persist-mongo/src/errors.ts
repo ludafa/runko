@@ -32,3 +32,26 @@ export function isIndexConflict(error: unknown): boolean {
   const code = codeOf(error);
   return typeof code === "number" && INDEX_CONFLICT_CODES.has(code);
 }
+
+/**
+ * 幂等插入的**兜底那一半**：吞掉重复键，其余错误照抛。
+ *
+ * 幂等本身靠 `upsert` + `$setOnInsert`（在调用点写），不靠异常——「先查再插」有竞态
+ * 窗口，「插了 catch」会把真正的写失败也一起吞掉。
+ *
+ * 但 `upsert` 在并发下**仍可能抛重复键**：两个请求同时发现不存在、同时插，唯一索引
+ * 挡下后一个。这是 MongoDB 明确记录的行为，不是 bug。那一支的结果照样是「已经有了
+ * 一行」——契约要的是「不得写出两行」，满足了，所以吞掉。
+ *
+ * 收在这里（而不是各自 store 一份）是因为 `stores.ts` 与 `tails.ts` 都要用它。
+ */
+export async function ignoringDuplicateKey<T>(write: () => Promise<T>): Promise<T | undefined> {
+  try {
+    return await write();
+  } catch (error: unknown) {
+    if (!isDuplicateKeyError(error)) {
+      throw error;
+    }
+    return undefined;
+  }
+}

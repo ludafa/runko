@@ -46,8 +46,10 @@ Mongo 的 `findOneAndDelete({...}, {sort})` **是数据库直接给的**。
 
 ## 它存什么
 
-四个集合：`agent_ledger`（账本）· `agent_decisions`（人工裁决留底）· `agent_queue`（待发队列）·
-`agent_leases`（租约，**只有多副本才会用到**）。
+六个集合：`agent_ledger`（账本）· `agent_decisions`（人工裁决留底）· `agent_queue`（待发队列）·
+`agent_tool_tails`（[工具收尾](../../docs/terms.md)）· `agent_leases`（租约，**只有多副本才会用到**，
+[交接预留 / 待接手](../../docs/terms.md)也存在这份文档上，不另开集合）·
+`agent_nodes`（[节点登记表](../../docs/terms.md)，同样只有多副本才用到）。
 
 集合名固定，不提供前缀开关——**要隔离请用另一个 database**，那在 Mongo 里是一等公民，
 比集合名前缀干净得多。
@@ -69,6 +71,14 @@ createAgentRuntime({
   prepareTurn,
   persistence: mongoPersistence(db),
   arbitration: mongoArbitration(db, { holder: process.env.RUNKO_NODE_URL }),
+  // 想让[指定交接](../../docs/terms.md)挑到接手副本，再装这一行——**可选**，
+  // 不装的话交权时挑不到接手节点，对话一律标成待接手。
+  handover: {
+    node: process.env.RUNKO_NODE_URL, // 与上面的 holder 相同
+    nodes: mongoNodeRegistry(db),
+    // 请对方节点执行 runtime.takeOver(ids)——HTTP、RPC 都行，由你来写
+    requestTakeover: (node, conversationIds) => askPeerToTakeOver(node, conversationIds),
+  },
 });
 ```
 

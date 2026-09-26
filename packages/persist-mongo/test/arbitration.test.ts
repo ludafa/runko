@@ -1,7 +1,10 @@
 /**
  * 租约版[归属仲裁机制](../../../docs/terms.md)的 Mongo 版，跑
  * [一致性套件](../../conformance/src/arbitration.ts)的**全部四组**——包括内存版跑不了的
- * 「多节点」与「超时接管」。
+ * 「多节点」与「超时接管」。另外三组
+ * （[交接预留 / 待接手 / 定时回捞](../../conformance/src/handover.ts)、
+ * [节点登记表](../../conformance/src/node-registry.ts)、
+ * [工具收尾](../../conformance/src/tool-tails.ts)）见文件后半段。
  *
  * **两个 `Arbitration` 实例 = 两个逻辑副本。** 它们共享同一个 database、`holder` 不同，
  * 走的是与真·两个进程完全相同的那条路（令牌 CAS 落在 Mongo 里）。
@@ -18,12 +21,16 @@
  * 于是随机失败（库越快撞上的概率越大）。冻住它的时钟之后，它爱跳多少拍都写不出一个
  * 「新鲜」的心跳时刻。
  */
+import type { ToolTailStore } from "@runko/agent";
 import type {
   ArbitrationConformanceSetup,
   ConformanceCase,
+  HandoverConformanceSetup,
   MultiNodeConformanceSetup,
+  NodeRegistryConformanceSetup,
   RestartConformanceSetup,
   TakeoverConformanceSetup,
+  ToolTailConformanceSetup,
 } from "@runko/conformance";
 import {
   arbitrationCases,
@@ -31,13 +38,25 @@ import {
   arbitrationRestartCases,
   arbitrationTakeoverCases,
   arbitrationTakeoverReportCases,
+  handoverCases,
+  nodeRegistryCases,
+  toolTailCases,
 } from "@runko/conformance";
 import type { Db } from "mongodb";
 import { MongoClient } from "mongodb";
 import { afterAll, describe, expect, it } from "vitest";
 
 import type { LeaseDoc } from "../src/index.js";
-import { LEASES_COLLECTION, migrate, mongoArbitration, mongoPersistence } from "../src/index.js";
+import {
+  LEASES_COLLECTION,
+  migrate,
+  mongoArbitration,
+  mongoNodeRegistry,
+  mongoPersistence,
+  NODES_COLLECTION,
+  QUEUE_COLLECTION,
+  TAILS_COLLECTION,
+} from "../src/index.js";
 import type { FaultyDb } from "./helpers/faulty-db.js";
 import { faultyDb } from "./helpers/faulty-db.js";
 
@@ -154,6 +173,65 @@ if (MONGO_URL === undefined) {
     const { db } = await sharedDb();
     await db.collection(LEASES_COLLECTION).deleteMany({});
     return setupFor(db);
+  });
+
+  // -------------------------------------------------------------------------
+  // H2：交接预留 / 待接手 / 定时回捞
+  //
+  // **不用担心跟 `conformance.test.ts` 抢队列表**：那份文件每条用例各开一个独立的
+  // database（`runko_conformance_*`），跟这里的 `runko_lease_*` 从来不是同一个库，
+  // 不像 Kysely 那两档真库是同一个物理实例、得靠「各清各的表」互相避让。
+  // -------------------------------------------------------------------------
+
+  runCases<HandoverConformanceSetup>("lease · mongo (真库) · 交接预留 / 待接手 / 定时回捞", handoverCases, async () => {
+    const { db } = await sharedDb();
+    await db.collection(LEASES_COLLECTION).deleteMany({});
+    await db.collection(QUEUE_COLLECTION).deleteMany({});
+    const base = setupFor(db);
+    return {
+      arbitration: base.arbitration,
+      other: base.other,
+      self: "node-a",
+      otherNode: "node-b",
+      persistence: mongoPersistence(db),
+    };
+  });
+
+  // -------------------------------------------------------------------------
+  // H2：节点登记表
+  // -------------------------------------------------------------------------
+
+  runCases<NodeRegistryConformanceSetup>("lease · mongo (真库) · 节点登记表", nodeRegistryCases, async () => {
+    const { db } = await sharedDb();
+    await db.collection(NODES_COLLECTION).deleteMany({});
+    return {
+      registry: mongoNodeRegistry(db),
+      acquireLoad: async (node, count) => {
+        const arbitration = mongoArbitration(db, { holder: node, ...TIMINGS });
+        for (let i = 0; i < count; i += 1) {
+          await arbitration.acquire(`load-${node}-${crypto.randomUUID()}`, { seedSeq: () => Promise.resolve(0) });
+        }
+      },
+    };
+  });
+
+  // -------------------------------------------------------------------------
+  // H2：工具收尾
+  // -------------------------------------------------------------------------
+
+  /** `Persistence.tails` 是可选字段，`mongoPersistence` 实际总是带它——没带就是实现坏了。 */
+  function tailsOf(db: Db): ToolTailStore {
+    const tails = mongoPersistence(db).tails;
+    if (tails === undefined) {
+      throw new Error("mongoPersistence 应该总是带 tails");
+    }
+    return tails;
+  }
+
+  runCases<ToolTailConformanceSetup>("lease · mongo (真库) · 工具收尾", toolTailCases, async () => {
+    const { db } = await sharedDb();
+    await db.collection(TAILS_COLLECTION).deleteMany({});
+    return { tails: tailsOf(db) };
   });
 
   // -------------------------------------------------------------------------

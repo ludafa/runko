@@ -18,7 +18,7 @@
  * });
  * ```
  */
-import type { Arbitration, Persistence } from "@runko/agent";
+import type { Arbitration, NodeRegistry, Persistence, ToolTailStore } from "@runko/agent";
 
 /** 一条一致性用例。`run` 抛错即失败——所有测试框架都认这个。 */
 export interface ConformanceCase<S> {
@@ -81,4 +81,43 @@ export interface TakeoverConformanceSetup extends MultiNodeConformanceSetup {
    * 撞上的概率越大。要么让持有者那一侧的时钟停在过去，要么真的把它的心跳停掉。
    */
   expire: (conversationId: string) => Promise<void>;
+}
+
+/**
+ * **[交接预留 / 待接手 / 定时回捞](../../../docs/terms.md)那一组要的 setup。**
+ *
+ * 只对实现了 `Grant.releaseTo` / `Arbitration.markAwaitingTakeover` 等一整套可选方法的
+ * 实现成立——跟 `TakeoverConformanceSetup` 一样单独成组，不把字段设成可选然后在用例里判
+ * `undefined`（理由见本文件头）。
+ */
+export interface HandoverConformanceSetup extends MultiNodeConformanceSetup {
+  /** `arbitration` 对应的 holder 名字——用例要拿它去跟 `busy` 的 `holder` 字段核对。 */
+  self: string;
+  /** `other` 对应的 holder 名字。 */
+  otherNode: string;
+  /**
+   * 待发队列不空那条用例要用到的持久化——**可选**：不是所有跑这一组的实现都同时
+   * 装了持久化（比如只测仲裁本身）。不提供时那一条用例直接跳过（`run` 里判 `undefined`
+   * 后 `return`，不是「假装测过」）。
+   */
+  persistence?: Persistence;
+}
+
+/** **[节点登记表](../../../docs/terms.md)的一致性套件要的 setup。** */
+export interface NodeRegistryConformanceSetup {
+  registry: NodeRegistry;
+  /**
+   * 造负载：以 `node` 为 holder，抢占 `count` 份全新的、彼此不冲突的对话，且**不释放**
+   * ——`candidates()` 的 `load` 字段就是数它们。实现内部想怎么造无所谓（通常是拿同一个
+   * 后端的另一个 `Arbitration` 实例去 `acquire`），套件只关心结果：那个节点此后看起来
+   * 持有 `count` 份对话。
+   */
+  acquireLoad: (node: string, count: number) => Promise<void>;
+  cleanup?: () => Promise<void> | void;
+}
+
+/** **[工具收尾](../../../docs/terms.md)的一致性套件要的 setup。** */
+export interface ToolTailConformanceSetup {
+  tails: ToolTailStore;
+  cleanup?: () => Promise<void> | void;
 }
