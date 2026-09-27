@@ -121,6 +121,20 @@ export type {
   GetApiConsoleOverviewQueryResponse,
 } from './types/GetApiConsoleOverview.ts';
 export type {
+  GetApiGithubRepos200,
+  GetApiGithubRepos401,
+  GetApiGithubRepos404,
+  GetApiGithubRepos409,
+  GetApiGithubReposQuery,
+  GetApiGithubReposQueryResponse,
+} from './types/GetApiGithubRepos.ts';
+export type {
+  GetApiGithubStatus200,
+  GetApiGithubStatus401,
+  GetApiGithubStatusQuery,
+  GetApiGithubStatusQueryResponse,
+} from './types/GetApiGithubStatus.ts';
+export type {
   GetApiNotes200,
   GetApiNotes401,
   GetApiNotesQuery,
@@ -132,11 +146,18 @@ export type {
   GetApiPushConfigQuery,
   GetApiPushConfigQueryResponse,
 } from './types/GetApiPushConfig.ts';
+export type { GithubRepoSummary } from './types/GithubRepoSummary.ts';
+export type { GithubReposResponse } from './types/GithubReposResponse.ts';
+export type { GithubStatus } from './types/GithubStatus.ts';
 export type { Note } from './types/Note.ts';
 export type { PostAnswerInput } from './types/PostAnswerInput.ts';
 export type {
   PostApiChatConversations201,
+  PostApiChatConversations400,
   PostApiChatConversations401,
+  PostApiChatConversations403,
+  PostApiChatConversations404,
+  PostApiChatConversations409,
   PostApiChatConversations500,
   PostApiChatConversationsMutation,
   PostApiChatConversationsMutationRequest,
@@ -254,6 +275,7 @@ export type { PushConfig } from './types/PushConfig.ts';
 export type { PushSubscribeInput } from './types/PushSubscribeInput.ts';
 export type { PushUnsubscribeInput } from './types/PushUnsubscribeInput.ts';
 export type { QueuedMessage } from './types/QueuedMessage.ts';
+export type { RepoSelector } from './types/RepoSelector.ts';
 export type { SkillSummary } from './types/SkillSummary.ts';
 export type {
   StartTurnAck,
@@ -272,6 +294,8 @@ export { getApiChatConversationsIdMessages } from './clients/getApiChatConversat
 export { getApiChatConversationsIdStream } from './clients/getApiChatConversationsIdStream.ts';
 export { getApiChatConversationsIdTurnsTurnTelemetry } from './clients/getApiChatConversationsIdTurnsTurnTelemetry.ts';
 export { getApiConsoleOverview } from './clients/getApiConsoleOverview.ts';
+export { getApiGithubRepos } from './clients/getApiGithubRepos.ts';
+export { getApiGithubStatus } from './clients/getApiGithubStatus.ts';
 export { getApiNotes } from './clients/getApiNotes.ts';
 export { getApiPushConfig } from './clients/getApiPushConfig.ts';
 export { postApiChatConversations } from './clients/postApiChatConversations.ts';
@@ -389,6 +413,18 @@ export {
   getApiConsoleOverviewQueryResponseSchema,
 } from './zod/getApiConsoleOverviewSchema.ts';
 export {
+  getApiGithubRepos200Schema,
+  getApiGithubRepos401Schema,
+  getApiGithubRepos404Schema,
+  getApiGithubRepos409Schema,
+  getApiGithubReposQueryResponseSchema,
+} from './zod/getApiGithubReposSchema.ts';
+export {
+  getApiGithubStatus200Schema,
+  getApiGithubStatus401Schema,
+  getApiGithubStatusQueryResponseSchema,
+} from './zod/getApiGithubStatusSchema.ts';
+export {
   getApiNotes200Schema,
   getApiNotes401Schema,
   getApiNotesQueryResponseSchema,
@@ -398,6 +434,9 @@ export {
   getApiPushConfig401Schema,
   getApiPushConfigQueryResponseSchema,
 } from './zod/getApiPushConfigSchema.ts';
+export { githubRepoSummarySchema } from './zod/githubRepoSummarySchema.ts';
+export { githubReposResponseSchema } from './zod/githubReposResponseSchema.ts';
+export { githubStatusSchema } from './zod/githubStatusSchema.ts';
 export { noteSchema } from './zod/noteSchema.ts';
 export { postAnswerInputSchema } from './zod/postAnswerInputSchema.ts';
 export {
@@ -446,7 +485,11 @@ export {
 } from './zod/postApiChatConversationsIdQuestionsCallidSchema.ts';
 export {
   postApiChatConversations201Schema,
+  postApiChatConversations400Schema,
   postApiChatConversations401Schema,
+  postApiChatConversations403Schema,
+  postApiChatConversations404Schema,
+  postApiChatConversations409Schema,
   postApiChatConversations500Schema,
   postApiChatConversationsMutationRequestSchema,
   postApiChatConversationsMutationResponseSchema,
@@ -502,6 +545,7 @@ export { pushConfigSchema } from './zod/pushConfigSchema.ts';
 export { pushSubscribeInputSchema } from './zod/pushSubscribeInputSchema.ts';
 export { pushUnsubscribeInputSchema } from './zod/pushUnsubscribeInputSchema.ts';
 export { queuedMessageSchema } from './zod/queuedMessageSchema.ts';
+export { repoSelectorSchema } from './zod/repoSelectorSchema.ts';
 export { skillSummarySchema } from './zod/skillSummarySchema.ts';
 export { startTurnAckSchema } from './zod/startTurnAckSchema.ts';
 export { turnTelemetryEventSchema } from './zod/turnTelemetryEventSchema.ts';

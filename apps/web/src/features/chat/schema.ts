@@ -367,3 +367,45 @@ export type ChatConfig = z.infer<typeof chatConfigSchema>;
 export const authConfigSchema = z.object({ github: z.boolean() });
 
 export type AuthConfig = z.infer<typeof authConfigSchema>;
+
+// ---- 按用户授权加载 GitHub 仓库（docs/ingress/tech/github-repo-access.md §5） ----
+
+/**
+ * `GET /api/github/status` 的响应——新建会话弹窗的「仓库」栏据此决定显示哪一步：
+ * 没配 App（`configured: false`）、配了但没连 GitHub（`linked: false`）、还是已连、
+ * 可以去列仓库。`installUrl` 没配 App 时是 `null`（没有 App 也就没有安装页）。
+ */
+export const githubStatusSchema = z.object({
+  configured: z.boolean(),
+  linked: z.boolean(),
+  installUrl: z.string().nullable(),
+});
+
+export type GithubStatus = z.infer<typeof githubStatusSchema>;
+
+/**
+ * `GET /api/github/repos` 里的一条。`installationId`/`repoId` 是签
+ * [安装令牌](../../../../../docs/terms.md)、建会话核对权限都按 id 认的两个字段——
+ * 用户改仓库名不会让它们失效，`fullName` 只用来在下拉框里显示。
+ */
+export const githubRepoSchema = z.object({
+  installationId: z.number().int(),
+  repoId: z.number().int(),
+  fullName: z.string(),
+  private: z.boolean(),
+  defaultBranch: z.string(),
+});
+
+export type GithubRepo = z.infer<typeof githubRepoSchema>;
+
+export const githubReposListSchema = z.object({
+  repos: z.array(githubRepoSchema),
+});
+
+/** `POST /api/chat/conversations` 请求体里 `repo` 字段的形状：云沙盒必填、本地沙盒不能带。 */
+export const githubRepoRefSchema = githubRepoSchema.pick({
+  installationId: true,
+  repoId: true,
+});
+
+export type GithubRepoRef = z.infer<typeof githubRepoRefSchema>;

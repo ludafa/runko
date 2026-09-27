@@ -29,8 +29,14 @@ import {
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
-import type { ChatConfig, Conversation, ConversationProvider } from '../schema';
+import type {
+  ChatConfig,
+  Conversation,
+  ConversationProvider,
+  GithubRepoRef,
+} from '../schema';
 import { StatusDot } from './conversation-status-badge';
+import { GithubRepoPicker } from './github-repo-picker';
 
 /** 每档 provider 在新建表单里的说法——选项本身（有哪几档、默认选哪个）来自 `/api/chat/config`，这里只管怎么讲。 */
 const PROVIDER_COPY: Record<
@@ -52,6 +58,11 @@ const FALLBACK_CHAT_CONFIG: ChatConfig = {
   model: 'demo',
 };
 
+/** 只有这两档跑在云沙盒里、需要挑一个仓库（docs/ingress/features/github-repo-access.md §2.4：本地沙盒没有 git，这一栏不出现）。 */
+function isCloudProvider(provider: ConversationProvider): boolean {
+  return provider === 'e2b' || provider === 'vercel';
+}
+
 export function SessionList({
   conversations,
   activeSessionId,
@@ -61,7 +72,11 @@ export function SessionList({
 }: {
   conversations: Conversation[];
   activeSessionId: string | undefined;
-  onCreate: (title: string, provider: ConversationProvider) => void;
+  onCreate: (
+    title: string,
+    provider: ConversationProvider,
+    repo?: GithubRepoRef,
+  ) => void;
   /** 正在建的那个会话的标题；`undefined` 表示当前没有在建。 */
   pendingTitle: string | undefined;
   /** `/api/chat/config` 的结果；`undefined` 表示还没拿到（含请求失败），此时退回 `FALLBACK_CHAT_CONFIG`。 */
@@ -74,11 +89,25 @@ export function SessionList({
   const [provider, setProvider] = useState<ConversationProvider>(
     config.defaultProvider,
   );
+  const [repo, setRepo] = useState<GithubRepoRef | undefined>(undefined);
+  const cloud = isCloudProvider(provider);
+
+  /** 切到本地沙盒时清掉之前选的仓库——本地没有仓库这一栏，带着旧选择没有意义。 */
+  function selectProvider(next: ConversationProvider) {
+    setProvider(next);
+    if (!isCloudProvider(next)) {
+      setRepo(undefined);
+    }
+  }
+
+  // 云沙盒必须选一个仓库才能建会话；本地沙盒没有这一栏，行为不变。
+  const canSubmit = !cloud || repo !== undefined;
 
   function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    onCreate(title.trim(), provider);
+    onCreate(title.trim(), provider, cloud ? repo : undefined);
     setTitle('');
+    setRepo(undefined);
     // 提交即关：会话区当帧就换成准备中视图（见 ProvisioningView），等待反馈在
     // 那儿，弹窗继续占着屏幕中央只会挡住它。
     setOpen(false);
@@ -147,7 +176,9 @@ export function SessionList({
                       <button
                         key={value}
                         type="button"
-                        onClick={() => setProvider(value)}
+                        onClick={() => {
+                          selectProvider(value);
+                        }}
                         aria-pressed={provider === value}
                         className={cn(
                           'flex flex-col items-start gap-0.5 rounded-md border px-3 py-2 text-left transition-colors',
@@ -166,6 +197,15 @@ export function SessionList({
                 </div>
               </div>
 
+              {cloud && (
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[0.6875rem] font-medium tracking-[0.02em]">
+                    仓库
+                  </span>
+                  <GithubRepoPicker value={repo} onChange={setRepo} />
+                </div>
+              )}
+
               <DialogFooter>
                 <Button
                   type="button"
@@ -177,7 +217,7 @@ export function SessionList({
                 >
                   取消
                 </Button>
-                <Button type="submit" size="sm">
+                <Button type="submit" size="sm" disabled={!canSubmit}>
                   建会话并开分支
                 </Button>
               </DialogFooter>

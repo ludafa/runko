@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   ChatApiError,
+  createConversation,
+  fetchGithubRepos,
+  fetchGithubStatus,
   postAbortTurn,
   postApprovalDecision,
   postChatMessage,
@@ -10,6 +13,27 @@ import {
 } from '../api';
 import type { ChatReplayFrame } from '../schema';
 import { frameSeq, isMessageFrame } from '../schema';
+
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/** 把一次 `fetch` 调用的请求体解回一个可判空判 key 的对象——不 cast、不 `any`，
+ * `JSON.parse` 的返回值先落进 `unknown`，再用类型守卫收窄（`createConversation`
+ * 的「云沙盒带 repo、本地不带」就是靠 `'repo' in body` 这样的判断来验证的，
+ * 关键在于 `JSON.stringify` 会整个丢掉值为 `undefined` 的属性——所以「没带这个
+ * key」和「带了但是 undefined」在 wire 上无法区分，也就没必要区分）。 */
+function parseJsonBody(init: RequestInit): Record<string, unknown> {
+  const body = init.body;
+  if (typeof body !== 'string') {
+    throw new Error('expected a string JSON body');
+  }
+  const parsed: unknown = JSON.parse(body);
+  if (!isJsonRecord(parsed)) {
+    throw new Error('expected the JSON body to parse into an object');
+  }
+  return parsed;
+}
 
 function sseResponse(chunks: string[], init?: { status?: number }): Response {
   const encoder = new TextEncoder();
@@ -278,6 +302,204 @@ describe('postQuestionAnswer', () => {
     const error = await postQuestionAnswer('sess_1', 'call_2', 'answer').catch(
       (caught: unknown) => caught,
     );
+    expect(error).toBeInstanceOf(ChatApiError);
+    expect(error).toHaveProperty('status', 404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 按用户授权加载 GitHub 仓库（docs/ingress/tech/github-repo-access.md §5）
+// ---------------------------------------------------------------------------
+
+describe('createConversation', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function okConversationResponse(): Response {
+    return new Response(
+      JSON.stringify({
+        id: 'conv-1',
+        title: null,
+        repo: null,
+        branchName: null,
+        sandboxName: 'runko-conv-1',
+        provider: 'e2b',
+        status: 'active',
+        lastActiveAt: new Date(0).toISOString(),
+        queuedMessages: [],
+        availableSkills: [],
+        turnInProgress: false,
+        pendingDecisions: 0,
+        createdAt: new Date(0).toISOString(),
+      }),
+      { status: 201 },
+    );
+  }
+
+  it('云沙盒（带 repo）：请求体里带上 repo 字段，值是 {installationId, repoId}', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(okConversationResponse());
+    vi.stubGlobal('fetch', fetchMock);
+
+    await createConversation({
+      provider: 'e2b',
+      repo: { installationId: 1, repoId: 100 },
+    });
+
+    const call = fetchMock.mock.calls[0];
+    expect(call).toBeDefined();
+    const init = call?.[1];
+    expect(init).toBeDefined();
+    if (init === undefined) {
+      return;
+    }
+    const body = parseJsonBody(init);
+    expect('repo' in body).toBe(true);
+    expect(body.repo).toEqual({ installationId: 1, repoId: 100 });
+  });
+
+  it('本地沙盒（不传 repo）：请求体里完全没有 repo 这个 key，不是 repo: undefined/null', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(okConversationResponse());
+    vi.stubGlobal('fetch', fetchMock);
+
+    await createConversation({ provider: 'local' });
+
+    const call = fetchMock.mock.calls[0];
+    expect(call).toBeDefined();
+    const init = call?.[1];
+    expect(init).toBeDefined();
+    if (init === undefined) {
+      return;
+    }
+    const body = parseJsonBody(init);
+    expect('repo' in body).toBe(false);
+  });
+
+  it('403（核对不过，github_repo_forbidden）作为 ChatApiError 抛出，调用方能取到 status', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(JSON.stringify({ error: 'github_repo_forbidden' }), {
+          status: 403,
+        }),
+      ),
+    );
+
+    const error = await createConversation({
+      provider: 'e2b',
+      repo: { installationId: 1, repoId: 100 },
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ChatApiError);
+    expect(error).toHaveProperty('status', 403);
+  });
+});
+
+describe('fetchGithubStatus', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('GETs /api/github/status 并解析出 { configured, linked, installUrl }', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          configured: true,
+          linked: false,
+          installUrl: 'https://github.com/apps/demo-app/installations/new',
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(fetchGithubStatus()).resolves.toEqual({
+      configured: true,
+      linked: false,
+      installUrl: 'https://github.com/apps/demo-app/installations/new',
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/github/status',
+      expect.objectContaining({ method: 'GET', credentials: 'include' }),
+    );
+  });
+
+  it('非 2xx 时作为 ChatApiError 抛出', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(new Response('server error', { status: 500 })),
+    );
+    await expect(fetchGithubStatus()).rejects.toThrow(ChatApiError);
+  });
+});
+
+describe('fetchGithubRepos', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('GETs /api/github/repos 并解析出 repos 数组', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          repos: [
+            {
+              installationId: 1,
+              repoId: 100,
+              fullName: 'acme/demo',
+              private: false,
+              defaultBranch: 'main',
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(fetchGithubRepos()).resolves.toEqual([
+      {
+        installationId: 1,
+        repoId: 100,
+        fullName: 'acme/demo',
+        private: false,
+        defaultBranch: 'main',
+      },
+    ]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/github/repos',
+      expect.objectContaining({ method: 'GET', credentials: 'include' }),
+    );
+  });
+
+  it('409（没连 GitHub）作为 ChatApiError 抛出，status 是 409', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(JSON.stringify({ error: 'github_not_linked' }), {
+          status: 409,
+        }),
+      ),
+    );
+    const error = await fetchGithubRepos().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ChatApiError);
+    expect(error).toHaveProperty('status', 409);
+  });
+
+  it('404（没配 App）作为 ChatApiError 抛出，status 是 404', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(new Response('not found', { status: 404 })),
+    );
+    const error = await fetchGithubRepos().catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(ChatApiError);
     expect(error).toHaveProperty('status', 404);
   });

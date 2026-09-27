@@ -84,6 +84,18 @@ export {
   getApiConsoleOverviewQueryResponseSchema,
 } from './getApiConsoleOverviewSchema.ts';
 export {
+  getApiGithubRepos200Schema,
+  getApiGithubRepos401Schema,
+  getApiGithubRepos404Schema,
+  getApiGithubRepos409Schema,
+  getApiGithubReposQueryResponseSchema,
+} from './getApiGithubReposSchema.ts';
+export {
+  getApiGithubStatus200Schema,
+  getApiGithubStatus401Schema,
+  getApiGithubStatusQueryResponseSchema,
+} from './getApiGithubStatusSchema.ts';
+export {
   getApiNotes200Schema,
   getApiNotes401Schema,
   getApiNotesQueryResponseSchema,
@@ -93,6 +105,9 @@ export {
   getApiPushConfig401Schema,
   getApiPushConfigQueryResponseSchema,
 } from './getApiPushConfigSchema.ts';
+export { githubRepoSummarySchema } from './githubRepoSummarySchema.ts';
+export { githubReposResponseSchema } from './githubReposResponseSchema.ts';
+export { githubStatusSchema } from './githubStatusSchema.ts';
 export { noteSchema } from './noteSchema.ts';
 export { postAnswerInputSchema } from './postAnswerInputSchema.ts';
 export {
@@ -141,7 +156,11 @@ export {
 } from './postApiChatConversationsIdQuestionsCallidSchema.ts';
 export {
   postApiChatConversations201Schema,
+  postApiChatConversations400Schema,
   postApiChatConversations401Schema,
+  postApiChatConversations403Schema,
+  postApiChatConversations404Schema,
+  postApiChatConversations409Schema,
   postApiChatConversations500Schema,
   postApiChatConversationsMutationRequestSchema,
   postApiChatConversationsMutationResponseSchema,
@@ -197,6 +216,7 @@ export { pushConfigSchema } from './pushConfigSchema.ts';
 export { pushSubscribeInputSchema } from './pushSubscribeInputSchema.ts';
 export { pushUnsubscribeInputSchema } from './pushUnsubscribeInputSchema.ts';
 export { queuedMessageSchema } from './queuedMessageSchema.ts';
+export { repoSelectorSchema } from './repoSelectorSchema.ts';
 export { skillSummarySchema } from './skillSummarySchema.ts';
 export { startTurnAckSchema } from './startTurnAckSchema.ts';
 export { turnTelemetryEventSchema } from './turnTelemetryEventSchema.ts';

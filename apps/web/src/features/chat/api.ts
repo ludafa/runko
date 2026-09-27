@@ -7,6 +7,7 @@
  * `fetch` (not `@kubb/plugin-client`'s wrapper) so `credentials` and the
  * SSE-specific streaming path are both fully under our control.
  */
+import { ChatApiError } from './api-error';
 import {
   abortTurnAckSchema,
   type AuthConfig,
@@ -19,6 +20,11 @@ import {
   conversationMessagesListSchema,
   type ConversationProvider,
   conversationSchema,
+  type GithubRepo,
+  type GithubRepoRef,
+  githubReposListSchema,
+  type GithubStatus,
+  githubStatusSchema,
   parseChatReplayFrame,
   type QueuedMessage,
   queueFrameSchema,
@@ -29,19 +35,7 @@ import {
 } from './schema';
 import { consumeSSEStream } from './sse';
 
-export class ChatApiError extends Error {
-  readonly status: number;
-
-  constructor(status: number, message: string) {
-    super(
-      message.length > 0 ?
-        message
-      : `chat API request failed with status ${String(status)}`,
-    );
-    this.name = 'ChatApiError';
-    this.status = status;
-  }
-}
+export { ChatApiError };
 
 async function readBodyText(response: Response): Promise<string> {
   try {
@@ -139,7 +133,16 @@ export async function listConversations(
 }
 
 export async function createConversation(
-  input: { title?: string; provider?: ConversationProvider },
+  input: {
+    title?: string;
+    provider?: ConversationProvider;
+    /**
+     * 云沙盒（`e2b`/`vercel`）必填、本地沙盒不能带
+     * （docs/ingress/tech/github-repo-access.md §5）。核对不过服务端回
+     * `403 github_repo_forbidden`，`ChatApiError.status` 能取到这个 403。
+     */
+    repo?: GithubRepoRef;
+  },
   signal?: AbortSignal,
 ): Promise<Conversation> {
   const json = await requestJson('/api/chat/conversations', {
@@ -183,6 +186,36 @@ export async function fetchAuthConfig(
 ): Promise<AuthConfig> {
   const json = await requestJson('/api/auth-config', { method: 'GET', signal });
   return authConfigSchema.parse(json);
+}
+
+/**
+ * `GET /api/github/status`（docs/ingress/tech/github-repo-access.md §5）：新建会话弹窗的
+ * 「仓库」栏据此决定显示连接 GitHub / 去装 App / 仓库下拉框中的哪一步。
+ */
+export async function fetchGithubStatus(
+  signal?: AbortSignal,
+): Promise<GithubStatus> {
+  const json = await requestJson('/api/github/status', {
+    method: 'GET',
+    signal,
+  });
+  return githubStatusSchema.parse(json);
+}
+
+/**
+ * `GET /api/github/repos`（docs/ingress/tech/github-repo-access.md §5）：用户通过
+ * GitHub App 授权过的全部仓库。没连 GitHub 时服务端回 `409`、没配 App 时回 `404`——
+ * 调用方应当只在 `fetchGithubStatus` 已经确认 `linked` 之后才调这个接口，这里不
+ * 特殊处理这两个状态码，一律作为 `ChatApiError` 抛出。
+ */
+export async function fetchGithubRepos(
+  signal?: AbortSignal,
+): Promise<GithubRepo[]> {
+  const json = await requestJson('/api/github/repos', {
+    method: 'GET',
+    signal,
+  });
+  return githubReposListSchema.parse(json).repos;
 }
 
 /**
