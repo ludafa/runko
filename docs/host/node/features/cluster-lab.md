@@ -46,7 +46,7 @@ pnpm --filter @runko-chat/node-server cluster:down
 
 起来之后：
 
-- **统一入口**是 nginx，缺省 `http://localhost:3940`。浏览器直接连它就行：`SERVER_URL=http://localhost:3940 pnpm chat:web`。
+- **统一入口**是 nginx，缺省 `http://localhost:3940`。**浏览器直接打开它就是完整的 chat 应用**：前端打包好了，由 nginx 托管（§3.2）。
 - **HTTP 与 WebSocket 都走同一个入口**，同一个端口。
 - **副本自己的端口是随机分配的**——五个容器不能都绑同一个固定端口。要直连某一个（测试里常用）：
   ```sh
@@ -59,22 +59,17 @@ pnpm --filter @runko-chat/node-server cluster:down
 
 ### 3.2 用浏览器连进来
 
-集群只跑服务端，前端还在本机跑。**两处地址要对上**，不然会卡在登录那一步：
+**直接打开 `http://localhost:3940`。**前端在 `cluster:up` 时一起打包进 nginx，页面和 API 同源，注册一个账号就能用。
+
+改前端、想要热更新时，再用本机的前端开发服务器连集群：
 
 ```sh
-# ① 起集群。CLUSTER_CLIENT_URL 指到前端的地址——容器里是 production 档，
-#    better-auth 会较真地校验 Origin，不指过去的话注册/登录一律 403。
-cd apps/node-server
-CLUSTER_CLIENT_URL=http://localhost:5273 CLUSTER_REPLICAS=3 pnpm cluster:up
-
-# ② 起前端，把它的 /api 代理指到 nginx（HTTP 与 WebSocket 都走这条）。
-#    端口取自仓库根 .env 的 CLIENT_PORT，缺省 5273。
-SERVER_URL=http://localhost:3940 pnpm chat:web
+SERVER_URL=http://localhost:3940 pnpm chat:web   # 然后开 http://localhost:5273
 ```
 
-然后开 `http://localhost:5273`。注册一个账号即可——集群用的是零配置那一档，不需要任何云账号。
-
-**不改 `CLUSTER_CLIENT_URL` 会怎样**：注册请求拿到 `403 {"code":"INVALID_ORIGIN"}`，界面上只看得到一次失败的登录，很难猜到原因。所以这一步单独列出来。
+- `SERVER_URL=...` 要和命令写在同一行。不写的话，前端开发服务器会读仓库根 `.env` 里单进程开发用的地址（3900），`/api` 请求一律 502。
+- 集群缺省信任 `http://localhost:5273` 这个来源，所以这条路也不用额外配置。前端开发服务器换了端口时，起集群带上 `CLUSTER_CLIENT_URL=http://localhost:<端口>`，否则注册会拿到 `403 {"code":"INVALID_ORIGIN"}`。
+- 两种方式同时能用：打开 3940 看的是 `cluster:up` 那一刻打包的前端，打开 5273 看的是你手上正在改的代码。
 
 ### 3.3 换成真模型（key 不进 git）
 
@@ -144,7 +139,7 @@ curl -s http://localhost:3940/api/chat/config -b cookie.txt
 
 **做：**
 
-- compose 起 1–5 个副本（改数量不用改配置文件）、nginx 统一入口（HTTP + WebSocket）、Postgres、Redis。
+- compose 起 1–5 个副本（改数量不用改配置文件）、nginx 统一入口（HTTP + WebSocket，外加打包好的前端）、Postgres、Redis。
 - Redis 版的[流分发](../../../terms.md)（新包 `@runko/stream-redis`）：直播内容广播给所有副本。
 - 一组跑完即退的集群测试，覆盖上面 8 条。
 
@@ -154,9 +149,10 @@ curl -s http://localhost:3940/api/chat/config -b cookie.txt
 - **不做跨机器**：还是一台机器上的容器。
 - **不把 Redis 当存储**。它只做广播：内容的事实来源永远是[账本](../../../terms.md)，Redis 掉一帧就靠回放补。
 - **WebSocket 只做直播流**（服务端 → 前端）。发消息、答审批、停止仍走 HTTP。
+- **nginx 托管的前端不热更新**：它是 `cluster:up` 那一刻打包的，改了前端要重新 `cluster:up`；要热更新用前端开发服务器（§3.2）。
 
 ## 6. 成功标准
 
-1. `CLUSTER_REPLICAS=1|3|5 cluster:up` 都能起来，nginx 入口可用。
+1. `CLUSTER_REPLICAS=1|3|5 cluster:up` 都能起来，nginx 入口可用；直接打开入口就是完整的 chat 应用，不用另起前端。
 2. §4 的 8 条各有一条自动化用例，跑完即退。
 3. 浏览器连 nginx 入口，WebSocket 能看到 agent 的输出；杀掉正在跑的那个副本，界面能自己接上。

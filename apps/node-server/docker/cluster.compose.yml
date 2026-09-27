@@ -18,13 +18,12 @@ x-node-env: &node-env
   # 所有副本必须用同一个登录密钥与同一个对外地址，否则 cookie 在副本之间认不过。
   BETTER_AUTH_SECRET: cluster-auth-secret-not-for-production
   SERVER_URL: http://localhost:${CLUSTER_LB_PORT:-3940}
-  # **登录只信任这一个来源**（better-auth 的 trustedOrigins，容器里是 production 档，
-  # 会较真地校验 Origin 头）。缺省是 nginx 自己的地址，够测试用（它们手动带这个 Origin）。
-  #
-  # **要用浏览器连进来就得改它**：前端 dev server 跑在另一个端口，浏览器带的 Origin 是
-  # 那个端口，对不上就一律 403、连注册都做不了。所以起集群时把它指到前端的地址：
-  #   CLUSTER_CLIENT_URL=http://localhost:5273 pnpm cluster:up
-  CLIENT_URL: ${CLUSTER_CLIENT_URL:-http://localhost:${CLUSTER_LB_PORT:-3940}}
+  # **登录信任两个来源**（容器里是 production 档，better-auth 会较真地校验 Origin 头）：
+  # ① 上面的 `SERVER_URL`，也就是入口本身——better-auth 缺省信任它，nginx 托管的前端与 API 同源；
+  # ② 这里的 `CLIENT_URL`，留给本机的前端开发服务器（改前端要热更新时用），缺省 5273。
+  # 前端开发服务器换了端口，就起集群时带上 `CLUSTER_CLIENT_URL=http://localhost:<端口>`，
+  # 不然从那个端口来的注册一律 403（docs/host/node/features/cluster-lab.md §3.2）。
+  CLIENT_URL: ${CLUSTER_CLIENT_URL:-http://localhost:5273}
   RUNKO_PEER_TOKEN: cluster-peer-token
   # [节点下线](../../../../docs/terms.md)：SIGTERM 到了之后节点[交权](../../../../docs/terms.md)——几百毫秒内把
   # 每份对话交给别的副本，还在跑的命令留在本节点上跑完再退出
@@ -237,9 +236,13 @@ services:
       timeout: 2s
       retries: 30
 
+  # 统一入口：nginx + 打包好的 chat 前端（docs/host/node/tech/cluster-lab.md §4.1）。
+  # nginx 配置也打进镜像，改了它要重新 `cluster:up`（带 --build）。
   lb:
-    image: nginx:1.27-alpine
-    volumes: ["./cluster.nginx.conf:/etc/nginx/conf.d/default.conf:ro"]
+    build:
+      context: ../../..
+      dockerfile: apps/node-server/docker/lb.Dockerfile
+    image: runko-cluster/lb:dev
     networks: [cluster]
     ports: ["${CLUSTER_LB_PORT:-3940}:80"]
     depends_on:

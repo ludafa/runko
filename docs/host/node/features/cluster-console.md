@@ -41,11 +41,10 @@ demo 项目，**不设管理员**：登录了就能用。
 ### 3.1 打开
 
 ```sh
-# 照常起集群（前端要连进来，所以把信任来源指到前端）
-CLUSTER_CLIENT_URL=http://localhost:5273 pnpm --filter @runko-chat/node-server cluster:up
+pnpm --filter @runko-chat/node-server cluster:up
 ```
 
-浏览器登录后，左侧栏点「集群控制台」，或直接访问 `/console`。
+浏览器打开集群入口 `http://localhost:3940`（前端已经打包进去，见[集群实验环境 · 功能 §3.2](./cluster-lab.md)），登录后点顶部导航的「集群控制台」，或直接访问 `/console`。
 
 ### 3.2 看到什么
 

@@ -135,6 +135,41 @@ location / {
 
 **不需要会话粘性**：直播流靠 Redis 广播，连到哪个副本都一样；要动持有者内存的那几条请求由应用自己转发。
 
+### 4.1 前端也由 nginx 托管
+
+nginx 镜像多一个构建阶段：在里面打包 `@runko-chat/web`，把产物拷进 nginx。于是入口 3940 同时是页面和 API，浏览器直接打开就能用。
+
+```mermaid
+flowchart LR
+  browser["浏览器 localhost:3940"] --> nginx
+  subgraph nginx["nginx"]
+    api["/api/…、/health、/doc、/reference"]
+    static["其余路径：打包好的前端<br/>找不到的回 index.html"]
+  end
+  api --> nodes["各节点"]
+  dev["前端开发服务器 localhost:5273<br/>（可选，改前端时用）"] -->|/api 代理| nginx
+```
+
+**分流规则**：
+
+| 路径 | 去哪 | 为什么 |
+|---|---|---|
+| `/api/…`（含 WebSocket 升级 `/api/chat/conversations/:id/ws`、better-auth 的 `/api/auth/…`） | 转给节点 | 应用的全部接口都在 `/api` 下 |
+| `/health`、`/doc`、`/reference` | 转给节点 | 健康检查与接口文档 |
+| `/assets/…` | 静态文件，长缓存 | Vite 产物带内容哈希，文件名变了才是新文件 |
+| 其余 | 静态文件，找不到回 `index.html`，不缓存 | 前端路由（`/console`、`/chat/:id`、`/login`）刷新时不能 404；`index.html` 要拿最新的 |
+
+**为什么同源就不用配来源**：better-auth 缺省信任它自己的 `baseURL` 的来源，集群里 `SERVER_URL` 就是入口地址，所以从入口打开的页面天然过得了来源校验。`CLIENT_URL` 于是空出来留给前端开发服务器，缺省 `http://localhost:5273`，两种方式同时能用。
+
+**前端代码不用改**：它请求一律写相对路径 `/api/…`，`VITE_API_URL` 不设就是同源。
+
+**否决过的做法**：
+
+| 做法 | 为什么不 |
+|---|---|
+| 节点自己托管静态文件 | 每个节点都要带一份前端，节点镜像变大；而且静态文件与应用逻辑混在一个进程里，下线、交权时还得替静态请求操心 |
+| 只保留前端开发服务器 | 要对上三样配置（`cluster:up`、`SERVER_URL`、`CLUSTER_CLIENT_URL`），对错一样就是 502 或 403；也测不到「真经过 nginx」这条路 |
+
 ## 5. 副本里怎么接线
 
 ```ts

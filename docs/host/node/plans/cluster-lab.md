@@ -23,6 +23,7 @@ related: ["host/node/features/cluster-lab.md", "host/node/tech/cluster-lab.md", 
 | C4 | 集群 compose：nginx 统一入口 + 1–5 副本 + Postgres + Redis | ✅ |
 | C5 | 集群端到端测试：租约 5 条 + WebSocket 3 条 | ✅ |
 | C6 | 验证方案、实测、代码审查 | ✅ |
+| C7 | 前端打包进 nginx：入口直接就是完整 chat 应用（技术方案 §4.1） | ✅ |
 
 **顺序**：C1 → C2 → C3 → C4 → C5 → C6。C3 可以与 C1/C2 并行（它不依赖 Redis，单副本下也能验）。
 
@@ -78,6 +79,17 @@ related: ["host/node/features/cluster-lab.md", "host/node/tech/cluster-lab.md", 
 - **那两条挂死成因**（值得记住，它们是同一处改动带出来的）：① 回放期间远端广播的 `activity:false` 被清缓冲丢掉，而紧接着的 `inspect()` 又落在「远端已广播、尚未释放归属」那段窗口里（中间隔着一次落库），于是去等一帧永远不会再来的收尾帧；② 持有者被 `kill -9` 且没人接管时，根本没有进程会广播那一帧。修法是「丢帧但留信息」+「跟远端时定期复查归属」。
 - **遗留**：集群端到端还缺一条「观看者挂在非持有者副本、把持有者 `kill -9` 且不触发接管」。这条路径已由 `@runko/agent` 的单测覆盖（定期复查那条），端到端再钉一遍要多花 4 分钟一轮，暂记在这里。
 
+### C7 · 前端打包进 nginx
+
+- **目标**：`cluster:up` 之后直接打开 `http://localhost:3940` 就能用；前端开发服务器那条路照旧能用，而且不用额外配来源。
+- **涉及文件**：
+  - `apps/node-server/docker/lb.Dockerfile`（新）：构建阶段打包 `@runko-chat/web`，最终镜像是 nginx + 产物；同名的 `.dockerignore`。
+  - `apps/node-server/docker/cluster.nginx.conf`：按路径分流（技术方案 §4.1 的表）。
+  - `apps/node-server/docker/cluster.compose.yml`：`lb` 改成从 `lb.Dockerfile` 构建；`CLIENT_URL` 缺省改成 `http://localhost:5273`。
+- **产出**：镜像能构建；集群端到端四套照旧全绿；浏览器打开 3940 能注册、建会话、发消息、看集群控制台，刷新 `/console` 不 404。
+- **依赖**：无。
+- **结论**：完成。与计划的偏差一处：正式打包时 `vite.config.ts` 会把 `SERVER_URL` 写死成登录客户端的地址，不给就退回 `http://localhost:3000`，浏览器实测时登录请求打到了 3000。`lb.Dockerfile` 打包时把 `SERVER_URL` 置空，登录客户端于是走相对路径，同源。
+
 ## 验证方案
 
 分三层：**跑完即退的自动用例**（回归靠它）、**手动起一套集群**（人眼看行为）、**浏览器走查**（真前端）。
@@ -110,13 +122,10 @@ pnpm cluster:down                       # 连数据一起删掉
 
 ```sh
 cd apps/node-server
-CLUSTER_CLIENT_URL=http://localhost:5273 CLUSTER_REPLICAS=3 pnpm cluster:up   # ① 集群
-SERVER_URL=http://localhost:3940 pnpm chat:web                                # ② 前端
+CLUSTER_REPLICAS=3 pnpm cluster:up   # 前端一起打包进 nginx
 ```
 
-`CLUSTER_CLIENT_URL` 不能省——容器里是 production 档，better-auth 只信任这一个来源，
-不指到前端地址的话注册直接 403（见[功能手册 §3.2](../features/cluster-lab.md#_3-2-用浏览器连进来)）。
-浏览器开 `http://localhost:5273`。
+浏览器开 `http://localhost:3940`。要走前端开发服务器那条路，另起 `SERVER_URL=http://localhost:3940 pnpm chat:web`、开 `http://localhost:5273`（见[功能手册 §3.2](../features/cluster-lab.md)）。
 
 1. 注册登录 → 建会话 → 发一条长消息，能看到内容一小段一小段出来。
 2. 顶栏 `Settings` → 把连接方式切成 **WebSocket** → 回会话页，正在跑的那一轮**不断**，继续往下出字。
@@ -132,6 +141,8 @@ SERVER_URL=http://localhost:3940 pnpm chat:web                                # 
 | 2026-09-22 | `test:cluster` 连跑四遍（两遍写用例时、一遍交付后复核、一遍审查返工修完之后） | 8/8 全绿，256s / 248s / 252s / 253s；跑完容器、网络、卷零残留 |
 | 2026-09-22 | 全仓 `build` / `typecheck` / `lint` / `test` + `docs:check` / `docs:build` / `check:doc-links` | 全绿 |
 | — | 浏览器走查 | **待做**（要人来点，见上面第三层） |
+| 2026-09-27 | C7：另起一套 2 副本集群（入口 3960），agent-browser 走查 | 通过：入口直接打开就是前端；注册、建会话、发消息、直播（SSE 与 WebSocket 两条通道，nginx 日志里 `/ws` 是 101）、集群控制台都正常；直接访问 `/console`、`/chat/:id` 不 404；`index.html` 带 `Cache-Control: no-cache`。来源校验：5273 放行、陌生来源 403 |
+| 2026-09-27 | C7：`test:cluster` / `test:cluster-handover` / `test:cluster-console` | 9/9、3/3、5/5 |
 
 ## 变更记录
 
@@ -139,3 +150,4 @@ SERVER_URL=http://localhost:3940 pnpm chat:web                                # 
 |---|---|
 | 2026-09-22 | C0：功能、技术、施工三份文档 |
 | 2026-09-22 | C1（stream-redis 新包）、C2（node-server 接上）、C3（WebSocket 通道）完成 |
+| 2026-09-27 | C7：前端打包进 nginx（`lb.Dockerfile`），入口直接就是完整 chat 应用；`CLIENT_URL` 缺省改为前端开发服务器 5273，两种用法并存 |

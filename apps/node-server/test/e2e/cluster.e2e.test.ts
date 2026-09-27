@@ -89,8 +89,8 @@ const LB_URL = `http://127.0.0.1:${String(PORTS.lb)}`;
 
 /**
  * 请求带的来源。容器里 `NODE_ENV=production`，better-auth 在这一档**要求带 Origin 且必须在
- * 信任列表里**（列表就是副本的 `CLIENT_URL`，也就是 nginx 那个地址）——浏览器永远会带，
- * 这里手动补上。
+ * 信任列表里**。入口地址本身在列表里（它是副本的 `SERVER_URL`，better-auth 缺省信任）——浏览器
+ * 永远会带，这里手动补上。
  */
 const ORIGIN = `http://localhost:${String(PORTS.lb)}`;
 
