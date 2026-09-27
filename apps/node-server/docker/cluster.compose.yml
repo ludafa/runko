@@ -68,8 +68,9 @@ x-node-env: &node-env
 
   # ─── 云沙盒（可选）──────────────────────────────────────────────────────
   # 同样从仓库根 `.env` 按名单透。服务端按 key 在不在决定新建会话能选哪几档沙盒：
-  # `E2B_API_KEY` 有值才出现 E2B，`VERCEL_TOKEN` 有值才出现 Vercel，全空只剩本地。
-  # 云沙盒会把仓库 clone 进去，所以 `GITHUB_REPO` / `GITHUB_PAT` 也要一起透。
+  # `E2B_API_KEY` 有值才出现 E2B，`VERCEL_TOKEN` 有值才出现 Vercel，**且都还要配了下面
+  # 那五项 GitHub App 才会出现**（docs/ingress/tech/github-repo-access.md §5）——没有 App
+  # 就没法给沙盒签仓库令牌。全空只剩本地沙盒。
   #
   # **故意不透 `SANDBOX_PROVIDER`**：那是单进程开发的默认档，集群里让用户在弹窗里选。
   E2B_API_KEY: ${E2B_API_KEY:-}
@@ -77,8 +78,12 @@ x-node-env: &node-env
   VERCEL_TOKEN: ${VERCEL_TOKEN:-}
   VERCEL_TEAM_ID: ${VERCEL_TEAM_ID:-}
   VERCEL_PROJECT_ID: ${VERCEL_PROJECT_ID:-}
-  GITHUB_REPO: ${GITHUB_REPO:-}
-  GITHUB_PAT: ${GITHUB_PAT:-}
+  GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+  GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
+  GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+  GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+  GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+  GITHUB_API_URL: ${GITHUB_API_URL:-}
   SANDBOX_IDLE_TIMEOUT_MS: ${SANDBOX_IDLE_TIMEOUT_MS:-}
 
 services:

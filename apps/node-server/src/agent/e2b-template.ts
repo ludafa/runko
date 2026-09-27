@@ -60,7 +60,7 @@ function resolvePositiveIntEnv(name: string, fallback: number): number {
  * Which template to create sandboxes from (`E2B_TEMPLATE`, default
  * `runko-chat-base`). Also the escape hatch back to stock `base` or to a
  * differently-sized variant without a code change. Read lazily, same "never
- * read env at import time" discipline as `model.ts` / `github-repo.ts`.
+ * read env at import time" discipline as `model.ts` / `github-app.ts`.
  */
 export function resolveE2bTemplate(): string {
   const raw = process.env.E2B_TEMPLATE?.trim();

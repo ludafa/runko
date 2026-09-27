@@ -43,6 +43,10 @@ export interface ConversationRow {
   provider: ConversationProvider;
   /** E2B 的[重连令牌](../../../../docs/terms.md) sandboxId；Vercel 恒为 null。 */
   sandboxId: string | null;
+  /** 签[安装令牌](../../../../docs/terms.md)要用的安装 id；本地沙盒、以及这个功能上线前建的会话为 null。 */
+  githubInstallationId: number | null;
+  /** 签令牌时按 id 限定仓库；同上，可空。 */
+  githubRepoId: number | null;
   status: ConversationStatus;
   lastActiveAt: Date;
   availableSkillsJson: string;
@@ -65,6 +69,8 @@ function toRow(raw: ConversationsTable): ConversationRow {
     sandboxName: raw.sandbox_name,
     provider: raw.provider,
     sandboxId: raw.sandbox_id,
+    githubInstallationId: raw.github_installation_id,
+    githubRepoId: raw.github_repo_id,
     status: raw.status,
     lastActiveAt: toDate(raw.last_active_at),
     availableSkillsJson: raw.available_skills_json,
@@ -89,6 +95,9 @@ export interface CreateConversationInput {
   provider?: ConversationProvider;
   /** E2B 的[重连令牌](docs/terms.md) sandboxId（建盒后由路由回填）；Vercel/建会话初始为 null。 */
   sandboxId?: string | null;
+  /** 核对通过后由路由回填；[本地沙盒](docs/terms.md)不传，省略即 null。 */
+  githubInstallationId?: number | null;
+  githubRepoId?: number | null;
 }
 
 export async function createConversation(
@@ -105,6 +114,8 @@ export async function createConversation(
     sandbox_name: input.sandboxName,
     provider: input.provider ?? 'vercel',
     sandbox_id: input.sandboxId ?? null,
+    github_installation_id: input.githubInstallationId ?? null,
+    github_repo_id: input.githubRepoId ?? null,
     status: 'active',
     last_active_at: now,
     available_skills_json: '[]', // 空 [skill 清单](../../../../docs/terms.md)——沙盒就绪后首次填上

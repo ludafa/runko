@@ -142,6 +142,20 @@ components:
             - vercel
             - e2b
             - local
+        repo:
+          $ref: "#/components/schemas/RepoSelector"
+    RepoSelector:
+      type: object
+      properties:
+        installationId:
+          type: integer
+          exclusiveMinimum: 0
+        repoId:
+          type: integer
+          exclusiveMinimum: 0
+      required:
+        - installationId
+        - repoId
     ConversationMessagesList:
       type: object
       properties:
@@ -335,6 +349,56 @@ components:
           minLength: 1
       required:
         - answer
+    GithubStatus:
+      type: object
+      properties:
+        configured:
+          type: boolean
+          description: 服务端是否配了 GitHub App。false 时新建会话弹窗里没有云沙盒可选
+        linked:
+          type: boolean
+          description: 这个用户是否连接过 GitHub（better-auth 的 account 表里有一条 github）
+        installUrl:
+          type:
+            - string
+            - "null"
+          description: 安装页地址（`https://github.com/apps/<slug>/installations/new`）；未配置时为 null
+      required:
+        - configured
+        - linked
+        - installUrl
+    GithubReposResponse:
+      type: object
+      properties:
+        repos:
+          type: array
+          items:
+            $ref: "#/components/schemas/GithubRepoSummary"
+      required:
+        - repos
+    GithubRepoSummary:
+      type: object
+      properties:
+        installationId:
+          type: integer
+        repoId:
+          type: integer
+        fullName:
+          type: string
+          examples:
+            - acme/demo
+        private:
+          type: boolean
+        defaultBranch:
+          type: string
+          examples:
+            - main
+      required:
+        - installationId
+        - repoId
+        - fullName
+        - private
+        - defaultBranch
     PushConfig:
       type: object
       properties:
@@ -564,8 +628,33 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Conversation"
+        "400":
+          description: 云沙盒 provider 没带 `repo`，或本地沙盒带了
+            `repo`（docs/ingress/tech/github-repo-access.md §5）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "401":
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: "`github_repo_forbidden`——这个安装里核对不到这个仓库"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: "`github_not_configured`——服务端没配 GitHub App"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: "`github_not_linked`——这个用户还没连接 GitHub"
           content:
             application/json:
               schema:
@@ -1135,6 +1224,54 @@ paths:
           description: Not found — either this session doesn’t exist (or isn’t the
             caller’s), or `callId` has no pending question on it (already
             answered, timed out, or never existed)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/github/status:
+    get:
+      tags:
+        - GitHub
+      summary: 前端据此决定新建会话弹窗里显示哪一步：连接 GitHub / 去装 App / 直接选仓库
+      responses:
+        "200":
+          description: Status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GithubStatus"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/github/repos:
+    get:
+      tags:
+        - GitHub
+      summary: 这个用户通过 GitHub App 授权过的全部仓库（跨全部安装）——新建会话的仓库下拉框
+      responses:
+        "200":
+          description: Repos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GithubReposResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: GitHub App 未配置
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: 这个用户还没连接 GitHub
           content:
             application/json:
               schema:

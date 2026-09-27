@@ -227,11 +227,24 @@ export const ConversationSchema = z
 
 export type ConversationDto = z.infer<typeof ConversationSchema>;
 
+/**
+ * 建会话时选中的仓库（docs/ingress/tech/github-repo-access.md §5）：`installationId` 是
+ * GitHub App 的这次安装、`repoId` 是仓库自己的数字 id（不是仓库名——改名不失效）。
+ * 云沙盒必填，[本地沙盒](../../../../docs/terms.md)不能带。
+ */
+export const RepoSelectorSchema = z
+  .object({
+    installationId: z.number().int().positive(),
+    repoId: z.number().int().positive(),
+  })
+  .openapi('RepoSelector');
+
 export const CreateConversationInputSchema = z
   .object({
     title: z.string().min(1).max(255).optional(),
-    /** 这次会话用哪家沙盒；省略时落服务端默认 `SANDBOX_PROVIDER`（未配则 `vercel`）。 */
+    /** 这次会话用哪家沙盒；省略时落服务端默认 `SANDBOX_PROVIDER`（未配则挑这台服务端配得起的第一档）。 */
     provider: z.enum(['vercel', 'e2b', 'local']).optional(),
+    repo: RepoSelectorSchema.optional(),
   })
   .openapi('CreateConversationInput');
 
