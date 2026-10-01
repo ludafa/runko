@@ -103,6 +103,7 @@
 | **沙盒适配器（sandbox adapter）** | — | 把某家厂商的沙盒 SDK 忠实翻译成 RunkoFS/RunkoExec 两个接口的独立可选包（如 `@runko/sandbox-vercel`）；只包视图、不管生命周期，运行时不 import 厂商 SDK。 |
 | **网关形态（gateway form）** | — | 沙盒 SDK 无法在普通 Node 进程直连时（如 Cloudflare）的接入方式：自部署一个 HTTP 网关把七个文件方法与 exec 映射成端点，runko 侧用纯 fetch 客户端连它。 |
 | **双角色 Worker（dual-role worker）** | — | `apps/cloudflare-worker-server` 的形态：同一个 Cloudflare Worker 既在进程内自驱 runko 会话（`/agent`），又对外提供[网关形态](#五沙盒与生命周期)端点（`/gateway/*`）供任意 Node 机器的客户端连入；两者共用同一套 `getSandbox` 接线与 Durable Object binding。 |
+| **会话对象（conversation object）** | — | chat 应用 Cloudflare 版里，**一个会话对应的那一个 Durable Object**：以会话 id 为名，这个会话的[账本](#三数据存哪怎么传)、待发队列、裁决表都存在它自带的 SQLite 里，agent 的轮也在它里面跑，浏览器的直播直接连它。平台保证同一个会话只有一个实例，所以[归属仲裁](#十三架构分层)什么都不用做。见 docs/host/cloudflare/tech/chat-on-cloudflare.md。 |
 | **沙盒 provider（sandbox provider）** | 沙盒厂商 | 一次会话选用哪家云沙盒（`vercel` / `e2b`）的选择项。决定 server 端 `sandbox-manager` 接哪个沙盒适配器、走哪套生命周期实现（建盒拉码方式、重连方式、休眠机制）。与会话 1:1 绑定，创建时选定即固定、运行中不切换。 |
 | **本地沙盒（local sandbox，provider 取值 `local`）** | — | chat 应用自带、不需要任何云账号的那一档[沙盒 provider](#五沙盒与生命周期)：文件放在进程内存里（`MemoryFS`），命令交给纯 TS 实现的 bash（`@runko/just-bash`），每轮收尾把整个文件树存一份进数据库，重启或换副本后照样接着用。没有 git、没有网络，所以建会话时不拉仓库、不建分支。见 docs/ingress/tech/unified-demo.md。 |
 | **GitHub App 安装（GitHub App installation）** | — | 用户把 runko 的 GitHub App 装到自己的账号或组织上，并勾选允许它访问哪些仓库。一次安装对应一个 `installation_id`；用户随时可以在 GitHub 上增减仓库或卸载。chat 应用只列、只拉用户安装时勾过的仓库。见 docs/ingress/features/github-repo-access.md。 |
