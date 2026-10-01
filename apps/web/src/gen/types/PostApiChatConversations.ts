@@ -13,9 +13,29 @@ import type { CreateConversationInput } from './CreateConversationInput.ts';
 export type PostApiChatConversations201 = Conversation;
 
 /**
+ * @description 云沙盒 provider 没带 `repo`，或本地沙盒带了 `repo`（docs/ingress/tech/github-repo-access.md §5）
+ */
+export type PostApiChatConversations400 = ApiError;
+
+/**
  * @description Unauthorized
  */
 export type PostApiChatConversations401 = ApiError;
+
+/**
+ * @description `github_repo_forbidden`——这个安装里核对不到这个仓库
+ */
+export type PostApiChatConversations403 = ApiError;
+
+/**
+ * @description `github_not_configured`——服务端没配 GitHub App
+ */
+export type PostApiChatConversations404 = ApiError;
+
+/**
+ * @description `github_not_linked`——这个用户还没连接 GitHub
+ */
+export type PostApiChatConversations409 = ApiError;
 
 /**
  * @description Repo/sandbox configuration or provisioning error
@@ -30,5 +50,11 @@ export type PostApiChatConversationsMutationResponse =
 export type PostApiChatConversationsMutation = {
   Response: PostApiChatConversations201;
   Request: PostApiChatConversationsMutationRequest;
-  Errors: PostApiChatConversations401 | PostApiChatConversations500;
+  Errors:
+    | PostApiChatConversations400
+    | PostApiChatConversations401
+    | PostApiChatConversations403
+    | PostApiChatConversations404
+    | PostApiChatConversations409
+    | PostApiChatConversations500;
 };

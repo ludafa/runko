@@ -6,6 +6,10 @@ import {
   conversationMessagesListSchema,
   conversationSchema,
   frameSeq,
+  githubRepoRefSchema,
+  githubRepoSchema,
+  githubReposListSchema,
+  githubStatusSchema,
   isMessageFrame,
   parseChatReplayFrame,
 } from '../schema';
@@ -184,5 +188,125 @@ describe('conversationSchema — 本地沙盒（provider: local，repo/branchNam
       return;
     }
     expect(result.data).toHaveLength(2);
+  });
+});
+
+// ---- 按用户授权加载 GitHub 仓库（docs/ingress/tech/github-repo-access.md §5） ----
+
+describe('githubStatusSchema', () => {
+  function status(
+    overrides: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    return {
+      configured: true,
+      linked: true,
+      installUrl: 'https://github.com/apps/demo-app/installations/new',
+      ...overrides,
+    };
+  }
+
+  it('接受合法的响应', () => {
+    const result = githubStatusSchema.safeParse(status());
+    expect(result.success).toBe(true);
+  });
+
+  it('installUrl 允许为 null（没配 App 时没有安装页）', () => {
+    const result = githubStatusSchema.safeParse(
+      status({ configured: false, linked: false, installUrl: null }),
+    );
+    expect(result.success).toBe(true);
+  });
+
+  it('installUrl 缺失（不是 null，是完全没有这个字段）时拒绝', () => {
+    const result = githubStatusSchema.safeParse({
+      configured: true,
+      linked: true,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('configured 缺失时拒绝', () => {
+    const result = githubStatusSchema.safeParse({
+      linked: true,
+      installUrl: null,
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('githubRepoSchema / githubReposListSchema', () => {
+  function repo(
+    overrides: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    return {
+      installationId: 1,
+      repoId: 100,
+      fullName: 'acme/demo',
+      private: false,
+      defaultBranch: 'main',
+      ...overrides,
+    };
+  }
+
+  it('接受合法的一条仓库', () => {
+    const result = githubRepoSchema.safeParse(repo());
+    expect(result.success).toBe(true);
+  });
+
+  it('installationId 不是整数（比如带小数）时拒绝', () => {
+    const result = githubRepoSchema.safeParse(repo({ installationId: 1.5 }));
+    expect(result.success).toBe(false);
+  });
+
+  it('repoId 不是整数（比如是字符串）时拒绝', () => {
+    const result = githubRepoSchema.safeParse(repo({ repoId: '100' }));
+    expect(result.success).toBe(false);
+  });
+
+  it('缺少 fullName 时拒绝', () => {
+    const result = githubRepoSchema.safeParse({
+      installationId: 1,
+      repoId: 100,
+      private: false,
+      defaultBranch: 'main',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('githubReposListSchema 要求包在 { repos } 里，不接受裸数组', () => {
+    const wrapped = githubReposListSchema.safeParse({ repos: [repo()] });
+    expect(wrapped.success).toBe(true);
+
+    const bare = githubReposListSchema.safeParse([repo()]);
+    expect(bare.success).toBe(false);
+  });
+});
+
+describe('githubRepoRefSchema — POST /api/chat/conversations 里 repo 字段的形状', () => {
+  it('只要 installationId/repoId 两个整数字段，多余字段不影响', () => {
+    const result = githubRepoRefSchema.safeParse({
+      installationId: 1,
+      repoId: 100,
+      fullName: '多余字段也能过',
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+    // .pick() 出来的 schema 不带多余字段
+    expect(result.data).toEqual({ installationId: 1, repoId: 100 });
+  });
+
+  it('installationId 非整数时拒绝', () => {
+    const result = githubRepoRefSchema.safeParse({
+      installationId: 1.1,
+      repoId: 100,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('缺少 repoId 时拒绝', () => {
+    const result = githubRepoRefSchema.safeParse({ installationId: 1 });
+    expect(result.success).toBe(false);
   });
 });

@@ -39,7 +39,12 @@ import type { TelemetryStore } from '../telemetry.js';
 import { classifyApproval, resolveApprovalMode } from './approval-policy.js';
 import { buildInstructions, gateWorkspace } from './chat-agent.js';
 import { hasConversationGrant } from './conversation-grants.js';
-import { resolveGithubPat, resolveRepo } from './github-repo.js';
+import type { GithubApp, GithubRepoRef } from './github-app.js';
+import {
+  defaultGithubApp,
+  GithubRepoForbiddenError,
+  splitFullName,
+} from './github-app.js';
 import {
   createChatArbitration,
   createChatPersistence,
@@ -101,6 +106,8 @@ export interface ChatRuntimeDeps {
   stream?: StreamFanout;
   sandboxManager: SandboxManager;
   resolveModel: () => LanguageModel;
+  /** 同 `routes/chat.ts` 的 `ChatRouteDeps.githubApp`：起轮时取安装令牌用。缺省用生产单例。 */
+  githubApp?: GithubApp;
   /** telemetry 事件集成（透传给 core，逐 turn 的模型调用事件）。缺省 = 不采集。 */
   telemetry?: SessionTelemetry;
   /** 遥测**写侧**的落库口——本文件用它写起轮装配的两条事件。缺省 = 不采集。 */
@@ -159,6 +166,7 @@ export function resolveMemoryWindowMs(
  */
 export function createChatRuntime(deps: ChatRuntimeDeps): AgentRuntime {
   const log = deps.logger ?? defaultLogger;
+  const githubApp = deps.githubApp ?? defaultGithubApp;
   /** 每一轮的装配耗时，按 conversationId 暂存，等第一个 chunk 抵达时取走。 */
   const pendingTimings = new Map<string, LaunchTimings>();
 
@@ -340,8 +348,33 @@ export function createChatRuntime(deps: ChatRuntimeDeps): AgentRuntime {
       // [本地沙盒](../../../../docs/terms.md)没有 git：仓库与令牌这两个配置这一档不读，
       // 什么都没配也起得来。
       const usesGit = row.provider !== 'local';
-      const repoRef = usesGit ? resolveRepo() : undefined;
-      const githubPat = usesGit ? resolveGithubPat() : undefined;
+      let repoRef: GithubRepoRef | undefined;
+      let githubToken: string | undefined;
+      if (usesGit) {
+        // 老会话：按全局仓库建的那批，没有安装/仓库 id——它们不再能开新一轮
+        // （docs/ingress/tech/github-repo-access.md §7），历史照常能看。
+        if (
+          row.repo === null ||
+          row.githubInstallationId === null ||
+          row.githubRepoId === null
+        ) {
+          throw new Error('这个会话建于按用户授权之前，请新建会话');
+        }
+        repoRef = splitFullName(row.repo);
+        try {
+          const minted = await githubApp.getRepoToken({
+            userId: row.userId,
+            installationId: row.githubInstallationId,
+            repoId: row.githubRepoId,
+          });
+          githubToken = minted.token;
+        } catch (error) {
+          if (error instanceof GithubRepoForbiddenError) {
+            throw new Error('没有权限访问这个仓库了', { cause: error });
+          }
+          throw error;
+        }
+      }
 
       const acquireStopwatch = startStopwatch();
       const acquired = await deps.sandboxManager.acquire({
@@ -361,7 +394,7 @@ export function createChatRuntime(deps: ChatRuntimeDeps): AgentRuntime {
             repoName: repoRef.repo,
           }
         : {}),
-        ...(githubPat !== undefined ? { githubPat } : {}),
+        ...(githubToken !== undefined ? { githubToken } : {}),
       });
       const acquireMs = acquireStopwatch();
 

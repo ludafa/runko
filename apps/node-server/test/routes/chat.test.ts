@@ -20,7 +20,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createChatPersistence } from '../../src/agent/persistence.js';
 import type { Db } from '../../src/agent/store.js';
-import { getConversation, updateConversation } from '../../src/agent/store.js';
+import {
+  createConversation,
+  getConversation,
+  updateConversation,
+} from '../../src/agent/store.js';
 import type {
   ChatReplayFrame,
   ChunkEnvelope,
@@ -36,6 +40,7 @@ import {
 } from '../../src/schemas/chat.js';
 import { createTelemetryStore } from '../../src/telemetry.js';
 import { buildChatApp, unauthorizedMiddleware } from '../helpers/chat-app.js';
+import { createFakeGithubApp } from '../helpers/fake-github-app.js';
 import type { FakeSandboxManager } from '../helpers/fake-sandbox-manager.js';
 import { createFakeSandboxManager } from '../helpers/fake-sandbox-manager.js';
 import type {
@@ -205,35 +210,47 @@ describe('routes/chat', () => {
   let db: Db;
   let sandboxManager: FakeSandboxManager;
   let sessions: FakeSessions;
+  let githubApp: ReturnType<typeof createFakeGithubApp>;
 
   beforeEach(async () => {
-    vi.stubEnv('GITHUB_REPO', 'git@github.com:acme/demo.git');
-    vi.stubEnv('GITHUB_PAT', 'test-pat');
     db = await createTestDb();
     await seedUser(db, USER_ID);
     await seedUser(db, 'user-2');
     sandboxManager = createFakeSandboxManager();
     sessions = createFakeSessions();
+    githubApp = createFakeGithubApp();
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
-  /** 默认：假 session 驱动（零模型）。传 `real: true` 走真 core + 真文件工具。 */
-  function build(opts: { real?: boolean; userId?: string } = {}) {
+  /**
+   * 默认：假 session 驱动（零模型）。传 `real: true` 走真 core + 真文件工具。
+   * 传 `githubApp` 覆盖这个用例自己的假 GitHub（默认共享 `beforeEach` 里那份）——
+   * 用来单独装配「没配 App」「没连接」这类边界场景，互不影响其它用例。
+   */
+  function build(
+    opts: {
+      real?: boolean;
+      userId?: string;
+      githubApp?: ReturnType<typeof createFakeGithubApp>;
+    } = {},
+  ) {
     return buildChatApp({
       db,
       sandboxManager,
       resolveModel: () => stopOnlyModel('hi'),
       userId: opts.userId ?? USER_ID,
+      githubApp: opts.githubApp ?? githubApp,
       ...(opts.real === true ? {} : { sessionFactory: sessions.factory }),
     });
   }
 
   /**
    * 建一个会话。**默认点名 `vercel`**：本文件测的是云沙盒那条路（假的 manager 演它），
-   * 而服务端的缺省档随环境而变（什么 key 都没配时是本地沙盒）。
+   * 而服务端的缺省档随环境而变（什么 key 都没配时是本地沙盒）。仓库默认指向假
+   * `githubApp` 认得的那一条（`acme/demo`，installationId/repoId 都是 1）。
    */
   async function createConversationVia(
     app: ReturnType<typeof build>['app'],
@@ -242,7 +259,11 @@ describe('routes/chat', () => {
     const response = await app.request('/api/chat/conversations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'vercel', ...body }),
+      body: JSON.stringify({
+        provider: 'vercel',
+        repo: { installationId: 1, repoId: 1 },
+        ...body,
+      }),
     });
     return ConversationSchema.parse(await response.json());
   }
@@ -284,6 +305,96 @@ describe('routes/chat', () => {
       expect(created.availableSkills.map((skill) => skill.name)).toContain(
         'frontend-design',
       );
+    });
+
+    it('建会话成功：沙盒拿到仓库 owner/name/cloneUrl 与安装令牌；行落 fullName + installation_id + repo_id', async () => {
+      const { app } = build();
+      const created = await createConversationVia(app);
+
+      const call = sandboxManager.acquireCalls[0];
+      expect(call?.repoOwner).toBe('acme');
+      expect(call?.repoName).toBe('demo');
+      expect(call?.repoCloneUrl).toBe('https://github.com/acme/demo.git');
+      expect(call?.githubToken).toBe('fake-installation-token');
+
+      const row = await getConversation(db, created.id, USER_ID);
+      expect(row?.repo).toBe('acme/demo');
+      expect(row?.githubInstallationId).toBe(1);
+      expect(row?.githubRepoId).toBe(1);
+    });
+
+    it('云沙盒建会话没带 repo → 400，不碰沙盒', async () => {
+      const { app } = build();
+      const response = await app.request('/api/chat/conversations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'vercel' }),
+      });
+      expect(response.status).toBe(400);
+      expect(sandboxManager.acquireCalls).toHaveLength(0);
+    });
+
+    it('本地沙盒建会话带了 repo → 400，不碰沙盒', async () => {
+      const { app } = build();
+      const response = await app.request('/api/chat/conversations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'local',
+          repo: { installationId: 1, repoId: 1 },
+        }),
+      });
+      expect(response.status).toBe(400);
+      expect(sandboxManager.acquireCalls).toHaveLength(0);
+    });
+
+    it('这个安装里核对不到这个仓库 → 403 github_repo_forbidden，不碰沙盒、不落库', async () => {
+      const { app } = build();
+      const response = await app.request('/api/chat/conversations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'vercel',
+          repo: { installationId: 999, repoId: 999 },
+        }),
+      });
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: 'github_repo_forbidden' });
+      expect(sandboxManager.acquireCalls).toHaveLength(0);
+    });
+
+    it('这个用户还没连接 GitHub → 409 github_not_linked', async () => {
+      const { app } = build({
+        githubApp: createFakeGithubApp({ linked: false }),
+      });
+      const response = await app.request('/api/chat/conversations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'vercel',
+          repo: { installationId: 1, repoId: 1 },
+        }),
+      });
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ error: 'github_not_linked' });
+      expect(sandboxManager.acquireCalls).toHaveLength(0);
+    });
+
+    it('服务端没配 GitHub App → 404 github_not_configured', async () => {
+      const { app } = build({
+        githubApp: createFakeGithubApp({ configured: false }),
+      });
+      const response = await app.request('/api/chat/conversations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'vercel',
+          repo: { installationId: 1, repoId: 1 },
+        }),
+      });
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({ error: 'github_not_configured' });
+      expect(sandboxManager.acquireCalls).toHaveLength(0);
     });
 
     it('列表只给自己的；别人的会话查不到（404，不泄露存在性）', async () => {
@@ -852,6 +963,7 @@ describe('routes/chat', () => {
         userId: USER_ID,
         telemetryStore,
         sessionFactory: sessions.factory,
+        githubApp,
       });
       const created = await createConversationVia(app);
       telemetryStore.record('model-call-end', `${created.id}#1`, { ok: true });
@@ -877,6 +989,7 @@ describe('routes/chat', () => {
         sandboxManager,
         resolveModel: () => model.model,
         userId: USER_ID,
+        githubApp,
       });
       const created = await createConversationVia(app);
       await post(app, created.id, { text: 'say hi' });
@@ -902,6 +1015,7 @@ describe('routes/chat', () => {
         sandboxManager,
         resolveModel: () => model.model,
         userId: USER_ID,
+        githubApp,
       });
       const created = await createConversationVia(app);
       await post(app, created.id, { text: 'first' });
@@ -951,6 +1065,56 @@ describe('routes/chat', () => {
       });
 
       session.finish();
+    });
+  });
+
+  describe('runtime.prepareTurn —— 老会话与权限收回（docs/ingress/tech/github-repo-access.md §7/§3.3）', () => {
+    it('按全局仓库建的老会话（没有 installation/repo id）→ 起轮失败，报「这个会话建于按用户授权之前，请新建会话」', async () => {
+      const { app } = build();
+      const legacyId = 'legacy-conv-1';
+      // 直接落库模拟「这个功能上线前建的会话」：云沙盒 provider，但没有安装/仓库 id。
+      await createConversation(db, {
+        id: legacyId,
+        userId: USER_ID,
+        title: 'Legacy session',
+        repo: 'acme/old-repo',
+        branchName: `runko/chat-${legacyId}`,
+        sandboxName: `runko-chat-${legacyId}`,
+        provider: 'e2b',
+      });
+
+      const response = await post(app, legacyId, { text: 'hello' });
+      expect(response.status).toBe(202);
+
+      await vi.waitFor(async () => {
+        const messages = await ledgerMessages(legacyId);
+        expect(messages.at(-1)?.metadata?.status).toBe('failed');
+      });
+      const messages = await ledgerMessages(legacyId);
+      expect(messages.at(-1)?.metadata?.error?.message).toBe(
+        '这个会话建于按用户授权之前，请新建会话',
+      );
+      // 装配在碰沙盒之前就失败了——不该有任何一次 acquire。
+      expect(sandboxManager.acquireCalls).toHaveLength(0);
+    });
+
+    it('起轮时发现用户已经在 GitHub 上收回了这个仓库的权限 → 起轮失败，报「没有权限访问这个仓库了」', async () => {
+      const { app } = build();
+      const created = await createConversationVia(app);
+
+      // 换一套「这个安装现在什么仓库都没有」的假 GitHub，模拟会话建好之后权限被收回。
+      const revoked = build({ githubApp: createFakeGithubApp({ repos: [] }) });
+      const response = await post(revoked.app, created.id, { text: 'hello' });
+      expect(response.status).toBe(202);
+
+      await vi.waitFor(async () => {
+        const messages = await ledgerMessages(created.id);
+        expect(messages.at(-1)?.metadata?.status).toBe('failed');
+      });
+      const messages = await ledgerMessages(created.id);
+      expect(messages.at(-1)?.metadata?.error?.message).toBe(
+        '没有权限访问这个仓库了',
+      );
     });
   });
 });

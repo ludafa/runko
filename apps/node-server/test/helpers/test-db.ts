@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { Kysely, SqliteDialect } from 'kysely';
+import { Kysely, sql, SqliteDialect } from 'kysely';
 
 import type { Db } from '../../src/db/instance.js';
 import { migrateDatabase } from '../../src/db/migrate.js';
@@ -33,4 +33,28 @@ export async function seedUser(db: Db, id: string): Promise<void> {
       updatedAt: now,
     })
     .execute();
+}
+
+/**
+ * 直接往 better-auth 的 `account` 表插一行 `provider_id = 'github'`——
+ * `GET /api/github/status` 的 `linked` 就是查这张表（见 `routes/github.ts`
+ * 的 `hasLinkedGithubAccount`）。
+ *
+ * 这张表是 better-auth 自己迁移出来的，`ChatDatabase.account`（`db/schema.ts`）
+ * 只声明了本应用会读的那三列（`id`/`userId`/`providerId`），但表上还有
+ * `accountId`/`createdAt`/`updatedAt` 等 `NOT NULL` 列——直接 `insertInto('account')`
+ * 会被 Kysely 的类型挡住（多出声明外的必填列），所以这里用 `sql` 标签写原生
+ * INSERT，绕开这层类型声明的缺口，不引入 `as` 断言。
+ */
+export async function linkGithubAccount(
+  db: Db,
+  userId: string,
+  opts: { accountId?: string } = {},
+): Promise<void> {
+  const now = new Date().toISOString();
+  const accountId = opts.accountId ?? `${userId}-github-account`;
+  await sql`
+    INSERT INTO account (id, accountId, providerId, userId, createdAt, updatedAt)
+    VALUES (${`account-${accountId}`}, ${accountId}, ${'github'}, ${userId}, ${now}, ${now})
+  `.execute(db);
 }

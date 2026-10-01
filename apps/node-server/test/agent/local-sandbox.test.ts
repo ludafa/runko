@@ -20,7 +20,7 @@ const SANDBOX = 'runko-chat-conv-1';
 const CREATE_PARAMS: CreateSandboxParams = {
   name: SANDBOX,
   cloneUrl: '',
-  githubPat: '',
+  githubToken: '',
   timeoutMs: 60_000,
   keepAlive: { idleTimeoutMs: 60_000 },
 };

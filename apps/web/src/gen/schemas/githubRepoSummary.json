@@ -1,0 +1,18 @@
+{
+  "type": "object",
+  "properties": {
+    "installationId": { "type": "integer" },
+    "repoId": { "type": "integer" },
+    "fullName": { "type": "string", "examples": ["acme/demo"] },
+    "private": { "type": "boolean" },
+    "defaultBranch": { "type": "string", "examples": ["main"] }
+  },
+  "required": [
+    "installationId",
+    "repoId",
+    "fullName",
+    "private",
+    "defaultBranch"
+  ],
+  "x-readme-ref-name": "GithubRepoSummary"
+}

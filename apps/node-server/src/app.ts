@@ -16,6 +16,7 @@ import {
 import { createChatWsApp } from './routes/chat-ws.js';
 import { consoleApp } from './routes/console.js';
 import { exampleApp } from './routes/example.js';
+import { githubRoutes } from './routes/github.js';
 import { pushApp } from './routes/push.js';
 
 const app = new OpenAPIHono();
@@ -73,6 +74,7 @@ app.route(
 );
 app.route('/', exampleApp);
 app.route('/', chatApp);
+app.route('/', githubRoutes);
 app.route('/', pushApp);
 app.route('/', consoleApp);
 

@@ -39,6 +39,19 @@ export interface UserTable {
   updatedAt: string;
 }
 
+/**
+ * better-auth 的账号表——同 `UserTable`，**它建的，不是我们建的**，这里只声明本应用
+ * 会碰的那几列：`GET /api/github/status` 判断「有没有连过 GitHub」就是查
+ * `provider_id = 'github'` 有没有一行（列名是 better-auth 的缺省驼峰）。用户令牌本身
+ * 不从这张表直接读——那由 better-auth 的 `auth.api.getAccessToken` 代管刷新
+ * （见 `agent/github-app.ts`）。
+ */
+export interface AccountTable {
+  id: string;
+  userId: string;
+  providerId: string;
+}
+
 /** 沙盒 provider（docs/host/contract/tech/sandbox-provider.md）：这次会话跑在哪一档沙盒上，建会话时选定、1:1 绑定、运行中不切换。 */
 export type ConversationProvider = 'vercel' | 'e2b' | 'local';
 
@@ -62,6 +75,10 @@ export interface ConversationsTable {
   provider: ConversationProvider;
   /** E2B 的[重连令牌](../../../../docs/terms.md)：建盒后服务端分配的 sandboxId，落库才能跨进程恢复。Vercel 按确定性沙盒名恢复，恒为空。 */
   sandbox_id: string | null;
+  /** 签[安装令牌](../../../../docs/terms.md)要指名哪次安装——[本地沙盒](../../../../docs/terms.md)与按用户授权上线前建的会话都为空。 */
+  github_installation_id: number | null;
+  /** 签令牌时按仓库 id 而不是名字限定范围——改名字不失效。同上，可空。 */
+  github_repo_id: number | null;
   status: ConversationStatus;
   last_active_at: number;
   /**
@@ -145,6 +162,7 @@ export interface ChatPresenceTable {
 /** 本应用与 better-auth 的表；框架那四张由 `RunkoDatabase` 带进来。 */
 export interface ChatDatabase extends RunkoDatabase {
   user: UserTable;
+  account: AccountTable;
   conversations: ConversationsTable;
   push_subscriptions: PushSubscriptionsTable;
   conversation_grants: ConversationGrantsTable;

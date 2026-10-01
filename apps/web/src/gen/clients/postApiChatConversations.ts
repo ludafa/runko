@@ -7,7 +7,11 @@ import fetch from '@kubb/plugin-client/clients/fetch';
 import type {
   PostApiChatConversationsMutationRequest,
   PostApiChatConversationsMutationResponse,
+  PostApiChatConversations400,
   PostApiChatConversations401,
+  PostApiChatConversations403,
+  PostApiChatConversations404,
+  PostApiChatConversations409,
   PostApiChatConversations500,
 } from '../types/PostApiChatConversations.ts';
 import type {
@@ -38,7 +42,12 @@ export async function postApiChatConversations(
   const res = await request<
     PostApiChatConversationsMutationResponse,
     ResponseErrorConfig<
-      PostApiChatConversations401 | PostApiChatConversations500
+      | PostApiChatConversations400
+      | PostApiChatConversations401
+      | PostApiChatConversations403
+      | PostApiChatConversations404
+      | PostApiChatConversations409
+      | PostApiChatConversations500
     >,
     PostApiChatConversationsMutationRequest
   >({

@@ -63,9 +63,10 @@ const RM_RECURSIVE_FORCE_RE =
   /\brm\s[^\n]*(?:-[a-zA-Z]*[rRf][a-zA-Z]*\b|--recursive\b|--force\b)/;
 
 /**
- * 引用了 GitHub REST API 域名、或沙盒自己那个 PAT 环境变量（`$GH_TOKEN`）的 `curl`。
+ * 引用了 GitHub REST API 域名、`$GH_TOKEN`、或沙盒里的令牌文件（`runko-github-token`，
+ * docs/ingress/tech/github-repo-access.md §4）的 `curl`。
  *
- * 这条就是「建 PR 及其同类操作」的路径（`chat-agent.ts` 的提示词里就是这么教模型的）。
+ * 这是「拿令牌直接调 GitHub API」的路径——推送走 git 凭据助手，不经这里。
  * 静态分析没有可靠办法在这里分辨读（GET）与写（POST/PATCH/DELETE），所以两者一律
  * 走人审——「静态无法区分读写，一律人审」。
  */
@@ -73,7 +74,7 @@ function isGithubApiCurl(command: string): boolean {
   if (!/\bcurl\b/.test(command)) {
     return false;
   }
-  return /api\.github\.com|\$GH_TOKEN/.test(command);
+  return /api\.github\.com|\$GH_TOKEN|runko-github-token/.test(command);
 }
 
 /** 一条 bash `command` 字符串是不是危险到 `'dangerous'` 档也要人来看一眼（docs/ingress/tech/chat-webapp.md §2.2c（审批链））。 */

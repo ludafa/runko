@@ -34,6 +34,7 @@ import type {
   ChatConfig,
   Conversation,
   ConversationProvider,
+  GithubRepoRef,
 } from '@/features/chat/schema';
 import { HeaderSidebarTrigger } from '@/layouts/app-layout';
 
@@ -41,6 +42,8 @@ import { HeaderSidebarTrigger } from '@/layouts/app-layout';
 interface PendingCreate {
   title: string;
   provider: ConversationProvider;
+  /** 云沙盒（`e2b`/`vercel`）才有；本地沙盒不带（docs/ingress/tech/github-repo-access.md §5）。 */
+  repo: GithubRepoRef | undefined;
   startedAt: number;
 }
 
@@ -93,6 +96,7 @@ export function ChatLayout({
       const conversation = await createConversation({
         ...(input.title.length > 0 ? { title: input.title } : {}),
         provider: input.provider,
+        ...(input.repo !== undefined ? { repo: input.repo } : {}),
       });
       setConversations((prev) => [conversation, ...prev]);
       setPending(undefined);
@@ -111,8 +115,12 @@ export function ChatLayout({
     }
   }
 
-  function handleCreate(title: string, provider: ConversationProvider) {
-    void runCreate({ title, provider, startedAt: Date.now() });
+  function handleCreate(
+    title: string,
+    provider: ConversationProvider,
+    repo?: GithubRepoRef,
+  ) {
+    void runCreate({ title, provider, repo, startedAt: Date.now() });
   }
 
   // 准备中/失败都要占住会话区（children 是上一个会话或空态，留着会让人以为没点上）。
