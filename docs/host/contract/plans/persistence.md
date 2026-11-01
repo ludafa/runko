@@ -198,19 +198,24 @@ Kysely 的宿主装它，把自己的实例给它，两套表进同一个实例�
 
 不给连接串时，需要真库的那几档 `describe.skip` 并**说明原因**——不是静默跳过。
 
-```sh
-docker run -d --name runko-pg    -e POSTGRES_PASSWORD=runko -e POSTGRES_USER=runko -e POSTGRES_DB=runko -p 5433:5432 postgres:18
-docker run -d --name runko-mysql -e MYSQL_ROOT_PASSWORD=runko -e MYSQL_DATABASE=runko -p 3307:3306 mysql:9
-docker run -d --name runko-mongo -p 27018:27017 mongo:8
+本地的三个真库由仓库根目录的 `compose.yaml` 提供，端口与下面的连接串一致：
 
+```sh
+pnpm db:up      # 起 Postgres 5433 · MySQL 3307 · MongoDB 27018，全部健康才返回
+pnpm test:db    # 带上三个连接串跑 packages/* 的测试
+pnpm db:down
+```
+
+`test:db` 等价于手动带上连接串：
+
+```sh
 RUNKO_TEST_POSTGRES_URL=postgres://runko:runko@127.0.0.1:5433/runko \
 RUNKO_TEST_MYSQL_URL=mysql://root:runko@127.0.0.1:3307/runko \
 RUNKO_TEST_MONGO_URL=mongodb://127.0.0.1:27018 \
-  pnpm -r test
+  pnpm test
 ```
 
-> **CI 上目前只跑 SQLite 与 pglite**——MySQL 与 MongoDB 那两档没有进程内替身，
-> 需要 service container 才能进流水线。**这是个已知的覆盖缺口。**
+CI 用 service container 起同样的三个库（见 `.github/workflows/ci.yml`），真库那几档每次都跑。
 
 ## 验收
 

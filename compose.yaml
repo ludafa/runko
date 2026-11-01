@@ -1,0 +1,84 @@
+# 本地开发与测试用的数据库：Postgres · MySQL · MongoDB · Redis。
+#
+#   pnpm db:up               # 起好，全部健康才返回
+#   pnpm test:db             # 带上三个真库跑 packages/* 的测试（与 CI 同一批真库用例）
+#   pnpm db:down             # 停掉；Postgres 里的开发数据留着
+#   docker compose down -v   # 连 Postgres 的数据卷一起删
+#
+# 端口是各家默认端口 + 1（5433 / 3307 / 27018 / 6380），只绑 127.0.0.1：
+# 本机常有别的项目占着默认端口，弱密码的库也不该暴露到局域网。
+#
+# 库怎么分：
+# - 测试用 `runko`。测试会整表清空 agent_* 表，所以不能和开发数据共用一个库。
+# - chat 应用开发用 `runko_dev`（Postgres 里另建的库）。在根 .env 里填上
+#     DATABASE_URL=postgres://runko:runko@127.0.0.1:5433/runko_dev
+#   第一次用要先建表：pnpm --filter @runko-chat/node-server db:migrate
+#   （Postgres 下服务启动时不建表）。多副本开发时再加 REDIS_URL=redis://127.0.0.1:6380。
+# - MySQL 与 MongoDB 只给测试用，数据放内存盘，容器一停就清空。
+#
+# 镜像与 CI（.github/workflows/ci.yml）的 service container 保持一致。
+name: runko-dev
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: runko
+      POSTGRES_PASSWORD: runko
+      POSTGRES_DB: runko
+    ports: ["127.0.0.1:5433:5432"]
+    # PG 18 起镜像的数据目录是 /var/lib/postgresql/18/docker，卷要挂在上一级。
+    volumes: ["postgres-data:/var/lib/postgresql"]
+    configs:
+      # 只在数据卷为空（第一次起）时执行。
+      - source: postgres-create-dev-db
+        target: /docker-entrypoint-initdb.d/create-dev-db.sql
+    healthcheck:
+      # 走 TCP 而不是 unix socket：首次初始化时有个只听 socket 的临时实例，
+      # 用 socket 判活会在建库脚本跑完之前就报健康。
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U runko -d runko"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  mysql:
+    image: mysql:9
+    environment:
+      MYSQL_ROOT_PASSWORD: runko
+      MYSQL_DATABASE: runko
+    ports: ["127.0.0.1:3307:3306"]
+    tmpfs: [/var/lib/mysql]
+    healthcheck:
+      # 同理走 TCP：初始化阶段的临时实例不听端口。
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-prunko"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+
+  mongo:
+    image: mongo:9
+    ports: ["127.0.0.1:27018:27017"]
+    tmpfs: [/data/db]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand({ ping: 1 })"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  # chat 应用多副本开发时的流分发（@runko/stream-redis）。测试不用它。
+  redis:
+    image: redis:8-alpine
+    ports: ["127.0.0.1:6380:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+configs:
+  postgres-create-dev-db:
+    content: |
+      CREATE DATABASE runko_dev OWNER runko;
+
+volumes:
+  postgres-data:

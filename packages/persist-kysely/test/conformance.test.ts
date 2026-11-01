@@ -10,9 +10,9 @@
  *
  * **前两档永远跑**：CI 不用配 service container、贡献者不用装 Docker。
  * **后两档给了连接串才跑**，没给就 `describe.skip` 掉并在输出里说明——不是静默跳过。
+ * 这两档的表由 `global-setup.ts` 在开跑前建好。
  *
- * MySQL 没有 WASM 替身，所以它**只有**真库这一档。这是个已知的覆盖缺口：CI 上
- * MySQL 目前不跑，得靠本地或带 service container 的流水线。
+ * MySQL 没有 WASM 替身，所以它**只有**真库这一档：本地不起 MySQL 就测不到它。
  */
 import { PGlite } from "@electric-sql/pglite";
 import type { ConformanceCase, PersistenceConformanceSetup } from "@runko/conformance";
@@ -127,7 +127,7 @@ if (POSTGRES_URL !== undefined) {
     const { Pool } = await import("pg");
     const pool = new Pool({ connectionString: POSTGRES_URL });
     const db = new Kysely<RunkoDatabase>({ dialect: new PostgresDialect({ pool }) });
-    await migrate(db, { flavor: "postgres" });
+    // 表已由 global-setup.ts 建好；这里并发建表会撞 Postgres 的 `pg_type` 唯一索引。
     await truncate(db);
     return {
       persistence: kyselyPersistence(db, { flavor: "postgres" }),
@@ -147,7 +147,7 @@ if (MYSQL_URL !== undefined) {
     const { createPool } = await import("mysql2");
     const pool = createPool(MYSQL_URL);
     const db = new Kysely<RunkoDatabase>({ dialect: new MysqlDialect({ pool }) });
-    await migrate(db, { flavor: "mysql" });
+    // 表已由 global-setup.ts 建好。
     await truncate(db);
     return {
       persistence: kyselyPersistence(db, { flavor: "mysql" }),
