@@ -10,7 +10,7 @@
  *
  * `listStale()` 恒空**不是偷懒**：标记跟进程同生共死，进程一没标记也没了，所以它
  * 结构上就看不到自己上次崩溃的残留。要做[崩溃恢复](../../../../docs/terms.md)就得有一个
- * 跨进程的落地实现（宿主提供，见 `apps/node-server` 的 drizzle 版）。
+ * 跨进程的落地实现（比如 `@runko/persist-kysely` 的 `leaseArbitration`）。
  */
 import type {
   AcquireContext,

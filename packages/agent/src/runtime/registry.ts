@@ -38,7 +38,7 @@ export interface PendingEntry<T> {
   /**
    * 登记那一行的写入（从不 reject——失败在里面记日志）。**结清之前必须先等它**：连接池下登记的
    * INSERT 与结清的 UPDATE 可能走不同连接、到达顺序不保证，UPDATE 先到就匹配 0 行，INSERT 随后
-   * 落地，留下一条永远待定的行（技术方案 §11.2）。
+   * 落地，留下一条永远待定的行（挂起与恢复 · 技术方案 §11.2）。
    */
   recorded: Promise<boolean>;
 }
@@ -83,8 +83,9 @@ export interface ActiveTurn {
   steer: ((input: string) => boolean) | undefined;
   /**
    * 这一轮接下的全部插话，按到达顺序。core 按先进先出注入，所以前 `steersDelivered` 条已经进了
-   * 账本，其余的只活在这一轮的内存里——这一轮以[挂起](../../../../docs/terms.md)收尾时要把它们转进
-   * 待发队列，否则用户被告知「插进去了」的话就这么没了。
+   * 账本，其余的只活在这一轮的内存里。这一轮以[挂起](../../../../docs/terms.md)或[已交权](../../../../docs/terms.md)收尾、
+   * 或因节点下线被[中止](../../../../docs/terms.md)时，要把它们转进待发队列（见 `queue.ts` 的 `shouldRequeueSteers`），
+   * 否则用户被告知「插进去了」的话就这么没了。
    */
   steered: TurnInput[];
   /** 已经注入账本的插话条数，落盘时（`finalize`）数出来。 */
@@ -136,7 +137,7 @@ export interface ActiveTurn {
   handedOverCalls: HandedOverCall[];
   turnNumber: number;
   done: boolean;
-  /** 这一轮是怎么结束的；`done` 置上的同时写入。交权据此只把 `completed` 算作「自然跑完」。 */
+  /** 这一轮是怎么结束的；`done` 置上的同时写入。关闭时据它数已交权和挂起的轮数。 */
   endStatus?: TurnStatus;
   /** 收尾完成——[优雅关闭](../../../../docs/terms.md)等的就是它。 */
   settled: Promise<void>;

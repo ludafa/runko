@@ -434,7 +434,7 @@ describe('MessageLedger (materialize.ts)', () => {
       }),
     });
 
-    expect(turnEndCount()).toBe(1); // 恰好触发一次，不是 0（此前的缺陷）也不是多次
+    expect(turnEndCount()).toBe(1); // 恰好触发一次：不是 0，也不是多次
     const messages = latest();
     expect(messages).toHaveLength(1);
     expect(messages[0]?.id).toBe('mid-1');

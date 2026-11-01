@@ -201,8 +201,8 @@ export function mongoArbitration(db: Db, opts: MongoArbitrationOptions): Arbitra
     // 有效预留**（`reservedFor` 为空、或就是我自己、或已经过期）；`seqWatermark` 刻意不动
     // ——抢占一个已有的会话时重播水位会让 seq 倒退，撞上账本里已有的行。
     //
-    // 抢到之后顺手把预留清掉（`$set` 里的 `reservedFor/reservedUntil: null`）：这一步与
-    // 「放手」在 SQL 那几家要开一个事务，这里免费——findOneAndUpdate 本来就是单文档 CAS。
+    // 抢到之后在同一次 CAS 里清掉预留（`$set` 里的 `reservedFor/reservedUntil: null`）。
+    // SQL 那几家这一步是抢到后另发一条 UPDATE。
     //
     // 返回非 `null` 就是抢到了：这份文档是**这一次原子更新之后**的样子，令牌一定是我的，
     // 不需要再读回来比对（SQL 那一档那一步是为了绕开 MySQL 的 affectedRows）。

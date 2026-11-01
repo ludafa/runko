@@ -76,7 +76,7 @@ export function requestSuspend(request: SuspendRequest, reason?: string): never 
 // ============================================================================
 
 /**
- * 恢复一次悬空调用时给的东西。它要跟那条部件的状态对得上（技术方案 §5.2 的表）：
+ * 恢复一次悬空调用时给的东西。它要跟那条部件的状态对得上（挂起与恢复 · 技术方案 §5.2 的表）：
  *
  * | 部件停在 | 接受 |
  * |---|---|
@@ -147,7 +147,7 @@ function isPendingState(part: RunkoToolPart): boolean {
  * 最后一条消息里悬着的 callId，按部件顺序（= 模型发出调用的顺序）。
  *
  * 只看最后一条，因为悬空调用**只能**在那里：它后面再接任何消息，provider 都会 400
- * （技术方案 §5.3 的实测）。宿主可以拿它判断「这个会话现在能不能开普通轮」。
+ * （挂起与恢复 · 技术方案 §5.3 的实测）。宿主可以拿它判断「这个会话现在能不能开普通轮」。
  */
 export function pendingCallIds(messages: RunkoUIMessage[]): string[] {
   const last = messages[messages.length - 1];

@@ -1,12 +1,15 @@
 /**
- * 四个集合的文档形状，以及**唯一一处需要小心的类型边界**：BSON ↔ JSON。
+ * 六个集合的文档形状，以及**唯一一处需要小心的类型边界**：BSON ↔ JSON。
  *
- * 集合名固定：`agent_ledger` / `agent_decisions` / `agent_queue` / `agent_leases`。理由同
- * SQL 那几家——要隔离请用**另一个 database**（Mongo 里那是一等公民，比表名前缀干净得多）。
+ * 集合名固定：`agent_ledger` / `agent_decisions` / `agent_queue` / `agent_tool_tails` /
+ * `agent_leases` / `agent_nodes`。理由同 SQL 那几家——要隔离请用**另一个 database**
+ * （Mongo 里那是一等公民，比表名前缀干净得多）。
  *
- * 前三个是[持久化](../../../docs/host/contract/features/persistence.md)的，第四个是
- * [归属仲裁](../../../docs/terms.md)的——**两件事，装配时各传各的**，只是恰好住在同一个
- * database 里。
+ * 它们分属三样宿主能力，**装配时各传各的**，只是恰好住在同一个 database 里：
+ * - 账本、裁决、[待发队列](../../../docs/terms.md)、[工具收尾](../../../docs/terms.md)归
+ *   [持久化](../../../docs/host/contract/features/persistence.md)；
+ * - 租约归[归属仲裁](../../../docs/terms.md)，交接预留与待接手也记在租约文档上；
+ * - `agent_nodes` 是[节点登记表](../../../docs/terms.md)。
  */
 import type { JsonValue } from "@runko/core";
 

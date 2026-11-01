@@ -2,14 +2,15 @@
  * 替**已经没人管的那一轮**补一条「已停止」标记——[孤儿轮](../../../../docs/terms.md)在
  * [账本](../../../../docs/terms.md)里的收尾。
  *
- * 两处调用，形状必须完全一致（界面靠同一个 `status` 显示「已停止」，只有理由文案不同）：
+ * 三处调用，形状必须完全一致（界面靠同一个 `status` 显示「已停止」，只有理由文案不同）：
  *
  * | 调用方 | 什么时候 | 理由 |
  * |---|---|---|
  * | `recover()`（`runtime.ts`） | 进程启动时扫出的陈旧[起轮标记](../../../../docs/terms.md) | `ABORT_REASON_SHUTDOWN` |
  * | `settleDisplacedTurn()`（`queue.ts`，由 `runToCompletion` 调） | 起轮时顶掉了一个过期持有者（`AcquireResult.takeover`） | `ABORT_REASON_HOLDER_LOST` |
+ * | `stopUnfinished()`（`runtime.ts`） | [交权](../../../../docs/terms.md)之后还没人接着跑，用户按了停止 | `ABORT_REASON_USER` |
  *
- * 第二处存在的理由：多副本下常常是**别的副本先接手**，接手时租约行被覆盖，启动扫描此后再也
+ * `settleDisplacedTurn` 存在的理由：多副本下常常是**别的副本先接手**，接手时租约行被覆盖，启动扫描此后再也
  * 扫不到那一轮。见[多副本部署 · 技术方案 §9](../../../../docs/host/node/tech/multi-replica.md)。
  *
  * **它只收账本这一半**，[裁决表](../../../../docs/terms.md)那一半由调用方另调
@@ -72,7 +73,7 @@ export async function appendInterruptedMarker(
 
 /**
  * 账本末尾那条消息里有没有悬空调用。只读最后一条（取最大 seq、读它）——悬空调用只可能在
- * 那里（技术方案 §5.3）。起轮守卫、收尾标记、孤儿裁决行三处都靠它判断「这个会话是不是挂起着」。
+ * 那里（挂起与恢复 · 技术方案 §5.3）。起轮守卫、收尾标记、孤儿裁决行三处都靠它判断「这个会话是不是挂起着」。
  */
 export async function ledgerEndsWithPendingCalls(persistence: Persistence, conversationId: string): Promise<boolean> {
   return (await pendingCallIdsAtLedgerEnd(persistence, conversationId)).length > 0;

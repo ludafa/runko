@@ -249,7 +249,7 @@ export interface Session {
   send(input: Input, opts?: TurnOptions): Promise<TurnResult>;
   /** 结构化输出（§4.8；实现见本文件头"结构化输出"一节 / `structured.ts`）。 */
   send<T>(input: Input, opts: TurnOptions & { outputSchema: z.ZodType<T> }): Promise<TurnResult & { structuredOutput: T }>;
-  /** ai 的 UIMessageChunk 词汇表（对 `RunkoUIMessage` 实例化，`state.ts` 的 `RunkoChunk`）——任何 AI SDK 兼容客户端可直接消费（docs/logic/orchestration/tech/single-ledger.md §5 单-2 目标架构 2）。 */
+  /** ai 的 UIMessageChunk 词汇表（对 `RunkoUIMessage` 实例化，`state.ts` 的 `RunkoChunk`）——任何 AI SDK 兼容客户端可直接消费（单一账本 · 技术方案 docs/logic/orchestration/tech/single-ledger.md）。 */
   stream(input: Input, opts?: TurnOptions): AsyncGenerator<RunkoChunk, TurnResult>;
   /**
    * 恢复轮：结清一次[挂起](../../../docs/terms.md)留下的悬空调用，然后接着跑——不追加 user 消息，

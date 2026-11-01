@@ -11,10 +11,10 @@
  * `parts: []`、只有 `metadata`——一轮在任何 step 跑起来之前就失败的少见情况），它自然
  * 就只渲染出那个尾部标记，没有气泡。[已交权](../../../../../../docs/terms.md)时（模型
  * 输出段被交权）账本里那条只有 `step-start` 部件、`metadata.status === 'handed-over'`
- * 的占位消息更进一步——它连尾部标记都不画（§6.1：不是中断，不该有任何标记），于是
+ * 的占位消息更进一步——它连尾部标记都不画（它不是中断，见术语表「已交权」），于是
  * `partNodes`/`turnEndNode` 一起落空，整条消息（连气泡本身）都不渲染。
  *
- * **工具部件的分发**（docs/logic/orchestration/tech/single-ledger.md §6）：受控调用处于
+ * **工具部件的分发**（单一账本技术方案 docs/logic/orchestration/tech/single-ledger.md §5）：受控调用处于
  * `approval-requested` 时渲染 `ApprovalCard`，而不是通用的 `ToolCallCard`；`ask-user`
  * 工具的 `input-available`/`output-available` 两态渲染 `QuestionCard`（同一个「别重复
  * 显示」的理由）。其余工具部件/状态一律走 `ToolCallCard`，它覆盖剩下的整个状态空间
@@ -237,7 +237,8 @@ export function MessageEntry({
       />
     : message.metadata.status === 'handed-over' ?
       // [已交权](../../../../../../docs/terms.md)不是中断，也不是失败——这一轮由接手节点接着
-      // 跑，不渲染任何收尾标记（docs/logic/orchestration/tech/handover.md §6.1）。
+      // 跑，界面上跟接手那一轮连成一轮，不渲染任何收尾标记（见术语表「已交权」；
+      // 交权技术方案 docs/logic/orchestration/tech/handover.md §14）。
       null
     : message.metadata.error !== undefined ?
       <TurnFailedBar error={message.metadata.error} />

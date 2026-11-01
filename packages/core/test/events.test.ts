@@ -4,9 +4,8 @@ import type { RunkoChunk, RunkoDataParts, RunkoMessageMetadata } from "../src/st
 import type { RunkoError, Usage } from "../src/events.js";
 
 /**
- * 编译期穷尽性断言（docs/logic/orchestration/tech/single-ledger.md §5 单-2 工单原文
- * "改写为对 RunkoChunk/RunkoDataParts/RunkoMessageMetadata 的等价穷尽性检查，
- * 保持漏成员编译即炸的防线精神"）：只要下面任一 switch 漏了一个变体，
+ * 编译期穷尽性断言：对 RunkoChunk / RunkoDataParts / RunkoMessageMetadata 做穷尽检查，
+ * 漏一个成员就编译失败。只要下面任一 switch 漏了一个变体，
  * default 分支里的实参类型就不再是 never，`pnpm typecheck` 直接编译失败。
  */
 function assertNever(x: never): never {
@@ -166,7 +165,7 @@ describe("RunkoChunk", () => {
 
 /**
  * 穷尽 `RunkoDataParts` 的全部五个 data 部件名（docs/logic/orchestration/tech/single-ledger.md
- * §2.2b：`tool-progress` 是 transient；`tool-timing` 是 chat 可观测性新增的
+ * §3.2：`tool-progress` 是 transient；`tool-timing` 是 chat 可观测性新增的
  * **持久**部件，与 `tool-progress` 相反——见 state.ts 头注释）。
  */
 function describeDataPartName(name: keyof RunkoDataParts): string {
@@ -194,12 +193,11 @@ describe("RunkoDataParts", () => {
 });
 
 /**
- * 穷尽 `RunkoMessageMetadata.status` 的四态（`interrupted` 对应 `RunkoError.code === "aborted"`，
+ * 穷尽 `RunkoMessageMetadata.status` 的五态（`interrupted` 对应 `RunkoError.code === "aborted"`，
  * loop.ts 的 `statusForError`）。
  *
- * `suspended` 目前**只有类型、没有产出方**——它是[挂起](../../../docs/architecture/tech/agent-kernel.md)
- * 的收尾态，等 K3 落地才会真的被写出来（`finalizeTurn` 的 `status` 参数至今仍是三值联合）。
- * 先进联合类型是为了让宿主/界面提前占好渲染分支。这条穷尽性测试保证它别被遗漏。
+ * `suspended` 是[挂起](../../../docs/terms.md)的收尾态，`handed-over` 是[已交权](../../../docs/terms.md)的收尾态。
+ * 界面要为每一态都备好渲染分支，这条穷尽性测试保证谁都别被遗漏。
  */
 function describeStatus(status: NonNullable<RunkoMessageMetadata["status"]>): string {
   switch (status) {

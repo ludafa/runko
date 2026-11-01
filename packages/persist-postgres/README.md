@@ -32,14 +32,14 @@ persist-mysql  ─┘
 ```
 
 **已经在用 Kysely 了？** 别用这个包——直接装 `@runko/persist-kysely`，把你自己的实例
-给它，runko 的四张表和你的表就在同一个实例、同一套迁移之下。
+给它，runko 的七张表和你的表就在同一个实例、同一套迁移之下。
 
 **一种库一个包**，所以本包只 `peerDependencies` `pg`——不会把别家的驱动拖进你的
 依赖树。
 
 ## 它存什么
 
-四张表：`agent_ledger`（账本）· `agent_decisions`（人工裁决留底）· `agent_queue`（待发队列）· `agent_leases`（租约表）。
+七张表：`agent_ledger`（账本）· `agent_decisions`（人工裁决留底）· `agent_queue`（待发队列）· `agent_tool_tails`（[工具收尾](../../docs/terms.md)）· `agent_leases`（租约表）· `agent_handover`（[交接预留 / 待接手](../../docs/terms.md)）· `agent_nodes`（[节点登记表](../../docs/terms.md)）。
 表名固定，不提供前缀开关——要隔离请用 schema/database。
 
 **它不存你的东西。** runko 只认一个不透明的 `conversationId`，会话叫什么、属于谁，

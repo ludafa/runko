@@ -163,8 +163,8 @@ describe("Session.send<T>(...outputSchema)", () => {
     const result = await session.send("summarize", { outputSchema: summarySchema });
 
     expect(result.finalResponse).toBe("here is your summary");
-    // TurnResult.items 已随 SessionItem 退役移除（docs/logic/orchestration/tech/single-ledger.md §5 单-2）——"发生了什么"
-    // 现在读账本本身：这个 turn 的 assistant 消息应携带一个落地的 text 部件。
+    // "发生了什么"读账本本身（docs/logic/orchestration/tech/single-ledger.md）：这个 turn 的 assistant 消息
+    // 应携带一个落地的 text 部件。
     const messages = session.toJSON().messages;
     const assistantMessage = messages[messages.length - 1];
     expect(assistantMessage?.role).toBe("assistant");

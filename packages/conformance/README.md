@@ -1,6 +1,6 @@
 # @runko/conformance
 
-**runko 宿主能力的契约一致性套件。** 写了一个[持久化](../../docs/host/contract/features/persistence.md)或[归属仲裁机制](../../docs/logic/arbitration/features/arbitration-impl.md)的实现，拿它验合不合契约。
+**runko 宿主能力的契约一致性套件。** 写了一个[持久化](../../docs/host/contract/features/persistence.md)、[归属仲裁机制](../../docs/logic/arbitration/features/arbitration-impl.md)或[节点登记表](../../docs/terms.md)的实现，拿它验合不合契约。
 
 接口注释里写死了一堆承诺——「同一个 seq 重复写入不得写出两行」「`settle` 对已结清的返回 `false` 而不是抛」「取号一律不抛错」——这个包把它们变成**可执行的断言**。runko 自己的五个官方实现跑的就是这一份。
 
@@ -32,9 +32,9 @@ describe("我自己的持久化实现", () => {
 
 每条用例都要一份**干净的**实现（空库 / 新实例），所以 `makeSetup` 放在 `it` 里面调，不要放在外面共用一个。
 
-## 三组归属仲裁用例，按能力分开接
+## 归属仲裁用例，按能力分组接
 
-归属仲裁的实现能力不一样：内存版就在一个进程里，没有第二个节点、也没有「心跳超时」这回事；租约版才有。所以用例**分三个数组**，不是一个数组配可选字段——后者会让一个本该支持接管的实现漏传 `expire` 时**静默跳过**那几条还显示绿。
+归属仲裁的实现能力不一样：内存版就在一个进程里，没有第二个节点、也没有「心跳超时」这回事；租约版才有。所以用例**按能力分成几个数组**，不是一个数组配可选字段——后者会让一个本该支持接管的实现漏传 `expire` 时**静默跳过**那几条还显示绿。
 
 | 导出 | 谁跑 | 需要的 setup |
 | --- | --- | --- |
@@ -42,14 +42,27 @@ describe("我自己的持久化实现", () => {
 | `arbitrationMultiNodeCases` | 能表达两个节点的 | `+ other` |
 | `arbitrationTakeoverCases` | 能表达超时接管的 | `+ expire` |
 | `arbitrationTakeoverReportCases` | 顶掉过期持有者时报 `takeover` 的（可选能力，见 `AcquireResult.takeover`） | `+ expire` |
+| `arbitrationRestartCases` | 能表达「同名重启」的 | `+ other, restart, freezeClock` |
+| `handoverCases` | 实现了[交接预留](../../docs/terms.md)（`Grant.releaseTo`）与[待接手](../../docs/terms.md)三个方法的 | `+ other, self, otherNode`，可选 `persistence` |
 
 ```ts
 import { arbitrationCases, arbitrationTakeoverCases } from "@runko/conformance";
 ```
 
-跑了哪几组写在你自己的代码里，一眼可查。（三个数组之间没有类型绑定——少接一组编译照过，这条靠代码评审守。）
+跑了哪几组写在你自己的代码里，一眼可查。（这几个数组之间没有类型绑定——少接一组编译照过，这条靠代码评审守。）
+
+`handoverCases` 的 `persistence` 是个例外：不给时，「[待发队列](../../docs/terms.md)不空」那一条会静默跳过、显示为通过。能给就给。
 
 **`expire` 要让持有者「持续」看起来死了。** 只把心跳时刻拨到过去是不够的：持有者还活着，它下一拍心跳就把时刻刷回来了，接管会随机失败。要么让持有者那一侧的时钟停在过去，要么真的把它的心跳停掉。
+
+## 另外两组
+
+| 导出 | 验什么 | 需要的 setup |
+| --- | --- | --- |
+| `toolTailCases` | 持久化的可选成员 `tails`（[工具收尾](../../docs/terms.md)记录） | `{ tails }` |
+| `nodeRegistryCases` | [节点登记表](../../docs/terms.md)：候选怎么排、`leaving` 与过期心跳不算候选 | `{ registry, acquireLoad }` |
+
+`acquireLoad(node, count)` 用来造负载：让 `node` 看起来持有 `count` 份对话，候选里的 `load` 数的就是它。
 
 ## 断言失败长什么样
 

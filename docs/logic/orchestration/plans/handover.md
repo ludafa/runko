@@ -71,7 +71,7 @@ related: ["logic/orchestration/features/handover.md", "logic/orchestration/tech/
 
 ### H3 · 轮编排：按阶段交权
 
-- `shutdown()` 改成：标下线中 → 挑接手节点 → 对每份对话按阶段收尾（技术方案 §6 那张表）→ 预留 → 调宿主给的「请接手」回调 → 等工具收尾 → 返回。
+- `shutdown()` 改成：登记表里标成 `leaving` → 挑接手节点 → 对每份对话按阶段收尾（技术方案 §6 那张表）→ 预留 → 调宿主给的「请接手」回调 → 等工具收尾 → 返回。
 - 工具收尾：登记记录、跑完写结果、查停止标记、截止时间到了由持有者写「未知」。
 - 接手入口 `runtime.takeOver(conversationIds)`：逐个抢归属，按账本末尾决定接下来做什么（技术方案 §7.5）。
 - 一个都挑不到时标待接手；`recover()` 同时扫待接手。

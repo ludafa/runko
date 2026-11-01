@@ -23,12 +23,20 @@ export interface NodeRegistryOptions {
 }
 
 /**
- * 建一个节点登记表。
+ * 建一个节点登记表，交给 runtime 用。
  *
  * ```ts
- * const registry = nodeRegistry(db, { flavor: "postgres" });
- * await registry.register({ node: process.env.RUNKO_NODE_URL, releaseSeq: Number(process.env.RUNKO_RELEASE_SEQ) });
+ * createAgentRuntime({
+ *   // ...
+ *   handover: {
+ *     node: process.env.RUNKO_NODE_URL,
+ *     releaseSeq: Number(process.env.RUNKO_RELEASE_SEQ), // 发布序号：每次发布递增，回滚也递增
+ *     nodes: nodeRegistry(db, { flavor: "postgres" }),
+ *   },
+ * });
  * ```
+ *
+ * 登记和心跳由 runtime 自己做，不用手动调 `register`。
  */
 export function nodeRegistry(db: Kysely<RunkoDatabase>, opts: NodeRegistryOptions): NodeRegistry {
   const traits = typeof opts.flavor === "string" ? traitsOf(opts.flavor) : opts.flavor;
@@ -66,7 +74,7 @@ export function nodeRegistry(db: Kysely<RunkoDatabase>, opts: NodeRegistryOption
     },
 
     async heartbeat(node: string): Promise<void> {
-      // 只动心跳，不动状态——下线中的节点照样要续，好让别人知道它还活着。
+      // 只动心跳，不动状态。处于节点下线（`leaving`）的节点照样要续，好让别人知道它还活着。
       await db.updateTable(NODES_TABLE).set({ heartbeat_at: now() }).where("node", "=", node).execute();
     },
 

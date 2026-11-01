@@ -11,7 +11,7 @@ runko 持久化的**核心实现**，底下是 [Kysely](https://kysely.dev)。
 
 ```ts
 import { Kysely, PostgresDialect } from "kysely";
-import { kyselyPersistence, migrate, nodeRegistry } from "@runko/persist-kysely";
+import { kyselyPersistence, leaseArbitration, migrate, nodeRegistry } from "@runko/persist-kysely";
 import type { RunkoDatabase } from "@runko/persist-kysely";
 
 // 把 runko 的七张表并进你自己的库类型
@@ -26,10 +26,12 @@ createAgentRuntime({
   agent,
   prepareTurn,
   persistence: kyselyPersistence(db, { flavor: "postgres" }),
-  // 多副本、想让[指定交接](../../docs/terms.md)挑到接手节点时再装——可选，
-  // 不装的话交权时挑不到接手节点，对话一律标成待接手。
+  // 多副本才要下面两项。交权靠租约版仲裁，只配 handover 不够。
+  arbitration: leaseArbitration(db, { flavor: "postgres", holder: process.env.RUNKO_NODE_URL }),
+  // 指定交接：挑一个接手节点。可选，不配就挑不到，对话一律打待接手标记。
   handover: {
-    node: process.env.RUNKO_NODE_URL, // 本节点地址，与租约的 holder 相同
+    node: process.env.RUNKO_NODE_URL, // 本节点地址，与上面的 holder 相同
+    releaseSeq: Number(process.env.RUNKO_RELEASE_SEQ), // 发布序号：每次发布递增，回滚也递增
     nodes: nodeRegistry(db, { flavor: "postgres" }),
     // 请对方节点执行 runtime.takeOver(ids)——HTTP、RPC 都行，由你来写
     requestTakeover: (node, conversationIds) => askPeerToTakeOver(node, conversationIds),
@@ -110,7 +112,7 @@ createAgentRuntime({
 
 ## 不是只有这一条路
 
-**你的 schema 跟这四张表对不上？那就自己实现那三个接口**——那是[头等路径，不是降级方案](../../docs/host/contract/features/persistence.md)。
+**你的 schema 跟这七张表对不上？那就自己实现持久化接口**（三个必需的，外加可选的 `tails`）——那是[头等路径，不是降级方案](../../docs/host/contract/features/persistence.md)。
 一共十来个方法，架在你**已有的表**上通常比迁就本包的表更省事。
 
 自己实现的话，装上 [`@runko/conformance`](../conformance/README.md) 自测：

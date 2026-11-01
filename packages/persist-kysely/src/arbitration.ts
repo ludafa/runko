@@ -13,9 +13,10 @@
  *    （它只会拒绝，不会放行）；心跳管「卡住的能被接管」。只有令牌没有心跳 = 崩溃的会话
  *    永久卡死；只有心跳没有令牌 = 误判时两个持有者都能写，静默损坏。
  *
- * ③ **所有条件写都是「条件 UPDATE + 读回确认」两步**，不看 affectedRows。原因是 MySQL：
- *    它把「匹配到了但值没变」也报成 0 行，跟「没匹配到」分不开（本仓在幂等插入那里已经
- *    踩过一次）。读回来比对令牌是三个方言都一样的判据。
+ * ③ **决定归属的条件写（`acquire` 的 CAS、心跳、取号）都是「条件 UPDATE + 读回确认」两步**，
+ *    不看 affectedRows。原因是 MySQL：它把「匹配到了但值没变」也报成 0 行，跟「没匹配到」
+ *    分不开。读回来比对令牌是三个方言都一样的判据。`releaseTo` 例外：它命中时值一定会变，
+ *    所以可以直接看 `numUpdatedRows`（理由见那里的注释）。
  *
  * ⚠️ **心跳与自我围栏那一段在 `@runko/persist-mongo/src/arbitration.ts` 有一份刻意的复制，
  * 改一处必须同步另一处。** 不抽公共包的三条理由见[技术方案 §4.3](../../../docs/host/node/tech/multi-replica.md)。
@@ -533,7 +534,7 @@ export function leaseArbitration(db: Kysely<RunkoDatabase>, opts: LeaseArbitrati
      * 待接手标记）的那些。真正需要回捞推一把的队列，框架会在崩溃恢复、下线交接时主动打上
      * 待接手标记，不需要这里再兜底扫队列。
      *
-     * 分两批查（候选 id 集合、租约行、预留行各一次），不是一个会话一个会话地查——候选
+     * 一共三次查询：先查候选 id，再并行查租约行与预留行。不是一个会话一个会话地查——候选
      * 通常远小于全库规模，`limit` 也约束了返回量，没必要为它专门加索引。
      */
     async listSweepCandidates(sweepOpts: { limit: number }): Promise<string[]> {

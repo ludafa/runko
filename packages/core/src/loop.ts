@@ -445,7 +445,7 @@ function completeToolTiming(message: RunkoUIMessage, toolCallId: string): RunkoC
  *
  * - 无界缓冲是刻意的——单个工具结算产出的 chunk 数量很小（状态迁移 + timing
  *   + 至多几条派生数据），不值得为背压引入复杂度。
- * - 共享的 `derivedData` 收集器在并行下理论上会串味（drain 交错），但只读
+ * - 共享的 `derivedData` 收集器在并行下理论上会串味（取出时交错），但只读
  *   工具按 `Tool.readOnly` 契约不产生任何派生数据，此路径下收集器恒空。
  * - 任一分支抛错（settleToolCall 把工具错误都收敛为 output-error chunk，真
  *   抛出意味着 bug）：先把已产出的 chunk 放完、等全部分支停机，再重抛第一
@@ -1459,7 +1459,7 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<RunkoChunk,
     }
     // 结清之后这条消息里还有悬空调用（一步里有多个同时挂起，或者刚结清的这个执行时又挂起了）：
     // **不能调模型**——还有不配对的 tool_use，provider 会 400。直接以 suspended 收尾，人答下一个
-    // 再开一轮（技术方案 §5.2）。理由沿用：这次又挂起了就用这次的，否则沿用上一轮挂起时记下的。
+    // 再开一轮（挂起与恢复 · 技术方案 §5.2）。理由沿用：这次又挂起了就用这次的，否则沿用上一轮挂起时记下的。
     const remaining = pendingCallIds([resumeTarget.message]);
     if (remaining.length > 0) {
       const reason = (resuspended?.kind === "suspended" ? resuspended.reason : undefined) ?? resumeTarget.message.metadata?.suspended?.reason;
@@ -1497,13 +1497,13 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<RunkoChunk,
     }
 
     // Checkpoint H（交权）：两步之间是干净边界，直接以 `handed-over` 收尾，接手的一方从账本接着调模型。
-    // **不 drain steer**：没交给模型的插话留给宿主转进待发队列（取出来就没了）。
+    // **不取出插话**（不调 `drainSteers`）：没交给模型的插话留给宿主转进待发队列（取出来就没了）。
     if (handedOverNow(handover)) {
       yield finalizeTurn({ messages: opts.messages, lastAssistantMessage: lastIfAssistant(opts.messages, lastAssistantMessage), turn: opts.session.turn, turnStartedAt, turnMessagesStart, usage, status: "handed-over", handedOver: { callIds: [] } });
       return handedOverResult(finalResponse, usage, [], undefined);
     }
 
-    // Checkpoint A：先 drain steer 队列再估算上下文，保证注入的消息计入预算。
+    // Checkpoint A：先取出插话（`drainSteers`）再估算上下文，保证注入的消息计入预算。
     yield* drainSteerMessages(opts.drainSteers, opts.messages);
 
     if (opts.maxContextTokens !== undefined) {
@@ -1633,7 +1633,7 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<RunkoChunk,
     // 不拦就会往下走进 `continue`，拿着一份「有 tool_use、没有对应 tool_result」的历史去调
     // 模型，两家 provider 都会 400。
     //
-    // **不 drain steer 队列**：那是「取出来就没了」的动作，而挂起不清空待发队列——排队的消息
+    // **不取出插话**（不调 `drainSteers`）：那是「取出来就没了」的动作，而挂起不清空待发队列——排队的消息
     // 留给下一轮（恢复轮或新轮）自然消费。这与 `turn-abort` 的停止语义刻意不同，停止会清空。
     if (stepOutcome.suspended !== undefined) {
       yield finalizeTurn({
@@ -1655,7 +1655,7 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<RunkoChunk,
     }
 
     if (stepOutcome.finishReason !== "tool-calls") {
-      // Checkpoint B：turn 即将收尾——先 drain，保证排队中的 steer 不被吞掉。
+      // Checkpoint B：turn 即将收尾——先取出插话，保证还没注入的插话不被吞掉。
       const drainedAtFinish = yield* drainSteerMessages(opts.drainSteers, opts.messages);
       if (drainedAtFinish.length === 0) {
         yield finalizeTurn({ messages: opts.messages, lastAssistantMessage, turn: opts.session.turn, turnStartedAt, turnMessagesStart, usage, status: "completed" });
@@ -1685,10 +1685,10 @@ export async function* runTurn(opts: RunTurnOptions): AsyncGenerator<RunkoChunk,
     // finishReason === "tool-calls"：本步全部工具调用已经在 runOneStep 内部
     // 结算完毕（settleToolCall 在 runOneStep 返回前跑完，账本里不会留下任何
     // "in_progress" 占位——即便下面判定预算耗尽，工具调用本身也已正常完成，
-    // 不是"到达上限就拒绝执行最后一步的工具调用"，docs/logic/engine/tech/core-sdk.md §4.8 的既有语义
-    // 保持不变，只是不再需要在这里另起一段"先执行完再判定"的特殊分支）。
+    // 不是"到达上限就拒绝执行最后一步的工具调用"（docs/logic/engine/tech/core-sdk.md §4.8），所以这里
+    // 不用另起一段"先执行完再判定"的分支）。
     if (stepIndex === opts.maxTurnsPerRun) {
-      // STEER-1F：预算耗尽、即将失败之前也要 drain 一次——工具执行期间
+      // 预算耗尽、即将失败之前也要取出一次插话——工具执行期间
       // （settleToolCall 运行时）调用的 steer() 不能被这里静默吞掉。
       yield* drainSteerMessages(opts.drainSteers, opts.messages);
       const error: RunkoError = {

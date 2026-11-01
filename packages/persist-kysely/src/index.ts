@@ -17,7 +17,7 @@
  *
  * **为什么是 Kysely**：这跟 better-auth 是同一个答案（它的内置适配器也是 kysely）。
  * 上一版手搓了一个方言层，在「MySQL 不支持 RETURNING」这类差异上已经开始长分支；换成
- * 现成的之后，三个方言真正的差异只剩三处（见 `flavor.ts`）。
+ * 现成的之后，三个方言真正的差异只剩五处（见 `flavor.ts`）。
  *
  * **它同时出租约版[归属仲裁机制](../../../docs/terms.md)**（心跳 + 租期标识 + CAS）：
  * `leaseArbitration(db, { flavor, holder })`，多进程 / 多副本共享一个库时用它。单进程不必装
@@ -48,9 +48,9 @@ export { DECISIONS_TABLE, LEDGER_TABLE, QUEUE_TABLE } from "./schema.js";
 
 export interface KyselyPersistenceOptions {
   /**
-   * 你这个 Kysely 实例接的是哪一家。三处方言差异靠它分派（见 `flavor.ts`）——Kysely
-   * 抹平了绝大部分，但**列类型**、**幂等插入写法**、**JSON 读回来是不是已解析**这三样
-   * 它故意不抹，因为三家的语义本来就不同。
+   * 你这个 Kysely 实例接的是哪一家。五处方言差异靠它分派（见 `flavor.ts`）——Kysely
+   * 抹平了绝大部分，但**列类型**、**幂等插入写法**、**JSON 读回来是不是已解析**、
+   * **主键字符串列的排序规则**它故意不抹，因为三家的语义本来就不同。
    */
   flavor: Flavor;
 }
@@ -58,15 +58,15 @@ export interface KyselyPersistenceOptions {
 /**
  * 把一个 Kysely 实例装成 `Persistence`。
  *
- * 库的类型只要**包含** `RunkoDatabase` 那四张表就行——你自己的表照常在同一个实例里，
+ * 库的类型只要**包含** `RunkoDatabase` 那七张表就行——你自己的表照常在同一个实例里，
  * 两边互不干扰。
  */
 export function kyselyPersistence<DB extends RunkoDatabase>(
   db: Kysely<DB>,
   opts: KyselyPersistenceOptions,
 ): Persistence {
-  // 收窄到本包认识的那四张表。`DB extends RunkoDatabase` 已经保证宿主的库类型是
-  // `RunkoDatabase` 的超集，而本包的查询只碰这四张表——所以这个收窄是安全的。
+  // 收窄到本包认识的那七张表。`DB extends RunkoDatabase` 已经保证宿主的库类型是
+  // `RunkoDatabase` 的超集，而本包的查询只碰这七张表——所以这个收窄是安全的。
   // 之所以要写出来，是 Kysely 的 `Kysely<DB>` 在 DB 上不变（invariant），泛型子类型
   // 关系传不过去；这是对接三方泛型容器的边界，隔离在这一行里。
   const scoped = db as unknown as Kysely<RunkoDatabase>;

@@ -117,28 +117,30 @@ export interface Arbitration {
   inspect(conversationId: string): Promise<OwnershipInfo>;
   /**
    * 扫出**没人管了**的[起轮标记](../../../docs/terms.md)——[孤儿轮](../../../docs/terms.md)
-   * 的**直接判据**（取代旧的「事件行以 chunk 收尾」那条间接判据）。
+   * 的**直接判据**。
    *
    * 内存版恒返回空数组：标记跟进程同生共死，进程一没标记也没了，所以它**看不到**
-   * 自己上次崩溃的残留——那需要一个跨进程的落地实现（宿主提供，见
-   * `apps/node-server` 的 drizzle 版）。
+   * 自己上次崩溃的残留——那需要一个跨进程的落地实现（比如 `@runko/persist-kysely` 的
+   * `leaseArbitration`）。
    */
   listStale(): Promise<StaleOwnership[]>;
   /** 清掉一条陈旧标记（补完收尾之后）。 */
   clearStale(conversationId: string): Promise<void>;
   /**
-   * 给对话打上[待接手](../../../docs/terms.md)标记：它有活没干完、而此刻可能没人会去推（交权时没挑到
-   * 接手节点；工具收尾有了结果；下线期间有人答了卡片）。[定时回捞](../../../docs/terms.md)与新进程的启动
-   * 扫描据此推一把。幂等。
+   * 给对话打上[待接手](../../../docs/terms.md)标记：它有活没干完、而此刻可能没人会去推。
+   * 打标记的时机：每次交权；工具收尾写回结果；节点下线期间来了消息或有人答了卡片；
+   * 崩溃恢复后队列里还有消息；接着跑的那一轮装配失败。
+   * [定时回捞](../../../docs/terms.md)与新进程的启动扫描据此推一把。幂等。
    *
-   * 下面三个方法**可选，要么都实现、要么都不实现**；没实现时没有定时回捞，交权只靠指定交接。
+   * 下面三个方法**可选，要么都实现、要么都不实现**。没实现时没有定时回捞；
+   * 节点下线又挑不到接手节点时，在干活的轮照旧[中止](../../../docs/terms.md)（交权 · 技术方案 §10.4）。
    */
   markAwaitingTakeover?(conversationId: string): Promise<void>;
   /** 撤掉待接手标记（推过了）。幂等。 */
   clearAwaitingTakeover?(conversationId: string): Promise<void>;
   /**
-   * [定时回捞](../../../docs/terms.md)的输入：**没人持有、也没有有效的交接预留**，但有活没干完的对话——
-   * 打了待接手标记的，以及[待发队列](../../../docs/terms.md)不空的（实现看得到队列表时）。
+   * [定时回捞](../../../docs/terms.md)的输入：**没人持有、也没有有效的交接预留**，而且打了待接手标记的对话。
+   * 不看[待发队列](../../../docs/terms.md)是否为空（交权 · 技术方案 §10.3）。
    *
    * 它只碰「预留已过期或根本没有预留」的对话，所以不会跟指定交接抢。
    */

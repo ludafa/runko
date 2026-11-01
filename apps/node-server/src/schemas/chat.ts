@@ -4,7 +4,7 @@ import type { RunkoChunk, RunkoUIMessage } from '@runko/core';
 // ---------------------------------------------------------------------------
 // chat 应用的 wire 词汇表：[直播流](../../../../docs/terms.md)与回放端点上传什么形状。
 //
-// 一共四种帧，**靠「带了哪个字段」区分**，没有统一的 type 字段：
+// 一共五种帧，**靠「带了哪个字段」区分**，没有统一的 type 字段：
 //
 // | 帧 | 形状 | 出现在哪 |
 // |---|---|---|
@@ -12,6 +12,7 @@ import type { RunkoChunk, RunkoUIMessage } from '@runko/core';
 // | `MessageFrame`   | `{ seq, message }` | 回放的全部；直播里每轮只有一帧（起轮那条用户消息） |
 // | `QueueFrame`     | `{ queue }`        | 待发队列快照 |
 // | `TurnStateFrame` | `{ turnActive }`   | 这个会话有没有轮在跑 |
+// | `ReconnectFrame` | `{ reconnect }`    | 直播流的最后一帧：本节点在下线，客户端立刻重连 |
 //
 // **回放不需要重放 chunk**：`RunkoUIMessage` 本身就是聊天界面消息列表要的形状，客户端
 // 把 `MessageFrame` 直接拼进去即可。只有进行中那一轮要把它的 `ChunkEnvelope` 喂给增量
@@ -124,8 +125,9 @@ export const turnStateFrameSchema = z
 export type TurnStateFrame = z.infer<typeof turnStateFrameSchema>;
 
 /**
- * [请重连帧](../../../../docs/terms.md)：本节点在下线，这份对话已经交给别的节点。它是这条流的**最后一帧**，
- * 客户端收到就立刻重连（不走退避），落到新的持有者上（docs/logic/orchestration/tech/handover.md §8）。
+ * [请重连帧](../../../../docs/terms.md)：本节点在下线。这份对话已经交出去了，或者它本来就没有轮在本节点上跑。
+ * 它是这条流的**最后一帧**。客户端收到就[快速重连](../../../../docs/terms.md)（不走退避），落到新的持有者上
+ * （docs/logic/orchestration/tech/handover.md §8）。
  */
 export const reconnectFrameSchema = z
   .object({ reconnect: z.literal(true) })
@@ -134,8 +136,8 @@ export const reconnectFrameSchema = z
 export type ReconnectFrame = z.infer<typeof reconnectFrameSchema>;
 
 /**
- * 四种帧的并集。**没有共同的判别字段**，靠「带了 `chunk` / `message` / `queue` /
- * `turnActive` 里的哪一个」区分——四个键不会同时出现在一帧上，结构上就够分。
+ * 五种帧的并集。**没有共同的判别字段**，靠「带了 `chunk` / `message` / `queue` /
+ * `turnActive` / `reconnect` 里的哪一个」区分——五个键不会同时出现在一帧上，结构上就够分。
  *
  * 一个容易担心的点：`chunkEnvelopeSchema` 的 `chunk: z.any()` 会不会把别的帧吞进来？
  * **不会**——zod v4 把「对象缺这个键」判为失败，哪怕那个键的类型是 `z.any()`。

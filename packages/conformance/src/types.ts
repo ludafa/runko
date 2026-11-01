@@ -88,7 +88,7 @@ export interface TakeoverConformanceSetup extends MultiNodeConformanceSetup {
  *
  * 只对实现了 `Grant.releaseTo` / `Arbitration.markAwaitingTakeover` 等一整套可选方法的
  * 实现成立——跟 `TakeoverConformanceSetup` 一样单独成组，不把字段设成可选然后在用例里判
- * `undefined`（理由见本文件头）。
+ * `undefined`（理由见 `MultiNodeConformanceSetup` 的注释）。
  */
 export interface HandoverConformanceSetup extends MultiNodeConformanceSetup {
   /** `arbitration` 对应的 holder 名字——用例要拿它去跟 `busy` 的 `holder` 字段核对。 */
@@ -96,9 +96,11 @@ export interface HandoverConformanceSetup extends MultiNodeConformanceSetup {
   /** `other` 对应的 holder 名字。 */
   otherNode: string;
   /**
-   * 待发队列不空那条用例要用到的持久化——**可选**：不是所有跑这一组的实现都同时
-   * 装了持久化（比如只测仲裁本身）。不提供时那一条用例直接跳过（`run` 里判 `undefined`
-   * 后 `return`，不是「假装测过」）。
+   * 「[待发队列](../../../docs/terms.md)不空」那条用例要用的持久化。**可选**：只测仲裁本身的
+   * 实现可以不给。
+   *
+   * ⚠️ 这是上面那条纪律的一个例外：不给时那条用例会**静默跳过、显示为通过**。
+   * 能给就给；给不了的，要在消费方的测试里写明这一条没覆盖。
    */
   persistence?: Persistence;
 }

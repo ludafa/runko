@@ -46,7 +46,7 @@ export function createAskUserTool(
       "(the approval chain handles that automatically; you never need to ask for it yourself). `options`, if " +
       "given, are quick-reply suggestions shown to the user — they can still answer freely instead of picking one.",
     inputSchema: askUserInputSchema,
-    // 等多久由内存窗口说了算（到点挂起），不能被工具最长执行时间截断；交权时也由宿主挂起，不交出去。
+    // 等多久由内存窗口说了算（到点挂起），不能被工具最长执行时间截断；交权时由轮编排挂起，不交出去。
     waitsForPerson: true,
     execute: async (input, ctx) => {
       const outcome = await ask({

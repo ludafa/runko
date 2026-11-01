@@ -42,8 +42,9 @@ export interface ChatWsOptions {
 }
 
 /**
- * WebSocket 标准关闭码「服务重启」。[请重连帧](../../../../docs/terms.md)之后用它关：本节点在下线、
- * 这份对话已经交出去了，前端立刻重连（docs/logic/orchestration/tech/handover.md §8）。
+ * WebSocket 标准关闭码「服务重启」。[请重连帧](../../../../docs/terms.md)之后用它关：本节点在下线，
+ * 这份对话已经交出去了，或者它本来就没有轮在本节点上跑。前端收到就[快速重连](../../../../docs/terms.md)
+ * （docs/logic/orchestration/tech/handover.md §8）。
  */
 const CLOSE_SERVICE_RESTART = 1012;
 

@@ -39,7 +39,7 @@ function jsonValueEquals(a: JsonValue, b: JsonValue): boolean {
   if (a === b) {return true;}
   if (Array.isArray(a) || Array.isArray(b)) {
     if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {return false;}
-    // `noUncheckedIndexedAccess` 下按下标取值会带 `undefined`——用 `entry` 拿到确定存在的那个。
+    // 用 `b.at(index)` 取值再判 `undefined`。`JsonValue` 不含 `undefined`，所以它只表示越界。
     return a.every((item, index) => {
       const other = b.at(index);
       return other !== undefined && jsonValueEquals(item, other);

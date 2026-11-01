@@ -762,7 +762,9 @@ describe.skipIf(!RUN)(
       }
     }, 300_000);
 
-    it('§4.9 排队的下一轮：持有者不放手、接着跑，非持有者上的同一条直播连接一路看完整个队列', async () => {
+    // 设计见 docs/logic/orchestration/tech/single-ledger.md §6.1 与
+    // docs/logic/orchestration/tech/steer-and-queue.md §8.3。
+    it('排队的下一轮：持有者不放手、接着跑，非持有者上的同一条直播连接一路看完整个队列', async () => {
       const id = await createConversation(node(1));
       expect(mode(await send(node(1), id, textFor('第一件', 6_000)))).toBe(
         'started',
@@ -775,7 +777,7 @@ describe.skipIf(!RUN)(
         expect(mode(await send(node(2), id, textFor('第二件', 4_000)))).toBe(
           'queued',
         );
-        step('4.9', '1 号在跑、2 号收的排队消息、3 号上连着直播', {
+        step('queue', '1 号在跑、2 号收的排队消息、3 号上连着直播', {
           conversationId: id,
         });
 
@@ -806,7 +808,7 @@ describe.skipIf(!RUN)(
         const inactive = watcher.frames.filter(
           (frame) => field(frame, 'turnActive') === false,
         );
-        step('4.9', '3 号那条连接看到的收尾', {
+        step('queue', '3 号那条连接看到的收尾', {
           conversationId: id,
           endings: endings.join(','),
           inactive: inactive.length,
@@ -1121,6 +1123,12 @@ describe.skipIf(!RUN)(
 
     it('§4.5 副本数 1 → 5：缩到一个照样跑；扩回来的新副本转得动、也接得了管', async () => {
       step('4.5', '缩到 1 个副本');
+      // 先把 2–5 号删掉再缩：compose 缩容时留下哪一个不固定，下面认定留下的是 1 号。
+      await docker([
+        'rm',
+        '-f',
+        ...[2, 3, 4, 5].map((index) => node(index).container),
+      ]);
       await scaleTo(1);
       await discover([1]);
       await waitHealthy(node(1));

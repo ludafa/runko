@@ -1,10 +1,10 @@
 /**
  * **[交接预留 / 待接手 / 定时回捞](../../../docs/terms.md)的一致性套件。**
  *
- * 只对实现了整套可选的交权方法（`Grant.releaseTo`、`Arbitration.markAwaitingTakeover` /
- * `clearAwaitingTakeover` / `listSweepCandidates`）的实现成立——跟 `arbitrationTakeoverCases`
- * 一样单独成组，接口注释里写明这几个方法「要么都实现、要么都不实现」，所以这里一律用
- * `assert.defined` 当场钉住，而不是悄悄 `?.` 跳过。
+ * 只对实现了整套可选交权方法的实现成立，跟 `arbitrationTakeoverCases` 一样单独成组。
+ * 接口要求待接手三个方法（`markAwaitingTakeover` / `clearAwaitingTakeover` /
+ * `listSweepCandidates`）要么都实现、要么都不实现；`Grant.releaseTo` 另外单独可选。
+ * 这组用例要求四个都有，所以一律用 `assert.defined` 当场钉住，而不是悄悄 `?.` 跳过。
  */
 import * as assert from "./assert.js";
 import type { ConformanceCase, HandoverConformanceSetup } from "./types.js";
@@ -160,7 +160,7 @@ export const handoverCases: readonly ConformanceCase<HandoverConformanceSetup>[]
     name: "待发队列不空，但没打待接手标记 → 不出现在回捞候选里",
     async run(setup) {
       assert.defined(setup.arbitration.listSweepCandidates);
-      // 没提供持久化的实现跳过这条——不是「假装测过」，是这条用例本来就依赖它。
+      // 没提供持久化时静默跳过（见 `HandoverConformanceSetup.persistence` 的注释）。
       if (setup.persistence === undefined) {return;}
 
       await setup.persistence.queue.enqueue("c-sweep-4", { text: "还没发出去" }, { max: 5, onFull: "reject" });

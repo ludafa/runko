@@ -1,10 +1,10 @@
 /**
- * [节点下线](../../../../docs/terms.md)信号触发时，WebSocket 直播要以 1012（服务重启）关掉，
- * 前端据此退避重连（docs/host/node/tech/cluster-console.md §4.2）。
+ * [交权](../../../../docs/terms.md)之后，WebSocket 直播先收到[请重连帧](../../../../docs/terms.md)，
+ * 再以 1012（服务重启）关掉。前端收到就[快速重连](../../../../docs/terms.md)，不走退避
+ * （docs/host/node/tech/cluster-console.md §4.2）。
  *
  * 起真服务器的理由与 `test/routes/chat-ws.test.ts` 一样：WebSocket 升级发生在服务器那一层，
- * `app.request()` 那种进程内调用走不到。这里的装配也照抄那份文件的 `startServer`，只多接一个
- * 我们自己控制的 `offlineSignal`。
+ * `app.request()` 那种进程内调用走不到。这里的装配也照抄那份文件的 `startServer`。
  */
 import type { AddressInfo } from 'node:net';
 

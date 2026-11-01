@@ -350,7 +350,7 @@ sequenceDiagram
 ## 6. 前端要点
 
 - `use-chat-messages.ts` 新增 `queuedMessages` 状态：初值来自会话详情 DTO，之后由 `QueueFrame` 覆盖，删除/清空的 HTTP 响应快照也直接覆盖（服务端始终是权威，前端不做乐观合并——沿用审批「不做乐观翻转」的同一姿态）。
-- **轮收尾后若队列非空**：`turnInProgressRef` 保持 `true`、`status` 保持 `streaming`、继续走已有的退避重连，接住服务端起的下一轮（避免 idle→streaming 的闪烁，也避免用户以为卡住）。已有 5 次退避（1/2/4/8/16s，共 31s）足够覆盖沙盒恢复；耗尽后安静停止，刷新即恢复。
+- **轮收尾后若队列非空**：`turnInProgressRef` 保持 `true`、`status` 保持 `streaming`（避免 idle→streaming 的闪烁，也避免用户以为卡住）。服务端通常不放手、在同一条流上接着起下一轮（§8.3），下一轮的帧直接到；少数情况服务端放手、关流（恢复轮、节点下线等），这时靠已有的 5 次退避重连（1/2/4/8/16s，共 31s）兜底，耗尽后安静停止，刷新即恢复。
 - `MessageComposer`：`Enter` = 排队（流式中）/ 起轮（idle），`Alt+Enter` = 插话，右侧插话按钮只在流式中出现；上方 `QueuedMessages` 面板负责列出/删除/清空。
 
 ## 7. 边界与已知限制

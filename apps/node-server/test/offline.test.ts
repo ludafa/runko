@@ -1,5 +1,5 @@
 /**
- * `createNodeOffline` —— [节点下线](../../../docs/terms.md)的闸门（docs/logic/orchestration/tech/handover.md §3.3）。
+ * `createNodeOffline` —— [节点下线](../../../docs/terms.md)的闸门（docs/host/node/tech/cluster-console.md §4.1）。
  *
  * 下线之后浏览器来的请求一律 503；别的节点转发来的在交接完成之前照常放行（对话还在本节点手上），之后也 503。
  */
