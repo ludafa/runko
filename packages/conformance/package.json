@@ -39,16 +39,15 @@
     "lint:fix": "eslint . --fix",
     "test": "vitest run"
   },
+  "dependencies": {
+    "@runko/agent": "workspace:^"
+  },
   "devDependencies": {
-    "@runko/agent": "workspace:^",
     "@runko/core": "workspace:^",
     "@types/node": "catalog:",
     "tsdown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
-  },
-  "peerDependencies": {
-    "@runko/agent": "workspace:^"
   },
   "engines": {
     "node": ">=24"

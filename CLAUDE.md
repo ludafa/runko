@@ -22,7 +22,7 @@ pnpm workspace 三组成员（见 [pnpm-workspace.yaml](./pnpm-workspace.yaml)�
 | `@runko/persist-mysql`      | 薄壳：吃 mysql2 连接池                                                       | agent, persist-kysely       |
 | `@runko/persist-mongo`      | **非** 薄壳：MongoDB 直接实现三个领域接口 + 租约版仲裁（Kysely 是 SQL，用不上） | agent, core（peer mongodb） |
 | `@runko/stream-redis`       | 流分发实现：Redis 发布/订阅广播，多副本时直播流连哪个副本都能看（peer `redis`）  | agent, core                |
-| `@runko/conformance`        | 契约一致性套件：持久化 / 归属仲裁的用例数据（`{ name, run }`），**不依赖任何测试框架** | agent（peer）、core（dev） |
+| `@runko/conformance`        | 契约一致性套件：持久化 / 归属仲裁的用例数据（`{ name, run }`），**不依赖任何测试框架** | agent（普通依赖，代码只引它的类型）、core（dev） |
 | `@runko/sdk`                | 主包门面：re-export core + virtual-fs + mini-bash，不放实现                  | core, virtual-fs, mini-bash |
 
 **依赖方向单向**：`core` 是根，其余全部指向它。`agent` 建在 `core` 之上、**不依赖 `sdk`**——`sdk` 是门面包（re-export core + virtual-fs + mini-bash），让逻辑层反过来依赖门面会把依赖图从一棵树变成有回边；代价是 `agent` 自己写了一份与 sdk 同款的文件工具默认装配（`runtime/session-factory.ts`，改 sdk 的默认装配时要同步）。`core` 反向持有 `mini-bash`/`virtual-fs` 的是 **devDependencies**（自测用）——这条循环 devDep 正是「跨包类型解析指向 dist、必须先 `build` 再 `typecheck`」的原因，别改成 dependencies。
