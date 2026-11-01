@@ -1,6 +1,6 @@
 {
   "name": "@runko/persist-postgres",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "持久化实现：PostgreSQL（pg）—— 你只有一个连接池时装这个",
   "type": "module",
   "license": "ISC",
