@@ -35,8 +35,10 @@ jobs:
         options: >-
           --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -prunko"
           --health-interval 5s --health-timeout 5s --health-retries 30
+      # MongoDB 8.x 在 Linux 6.19 ~ 7.0.13 的内核上启动即退出（SERVER-121912 / SERVER-125742），
+      # ubuntu-latest 的 runner 正落在这一段；9.0 全系列不受影响。
       mongo:
-        image: mongo:8
+        image: mongo:9
         ports: ['27017:27017']
         options: >-
           --health-cmd "mongosh --quiet --eval 'db.adminCommand({ping:1})'"
