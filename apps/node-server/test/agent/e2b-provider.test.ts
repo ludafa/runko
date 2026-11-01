@@ -84,7 +84,7 @@ function createParams(
   return {
     name: 'runko-chat-conv-1',
     cloneUrl: 'https://github.com/acme/demo.git',
-    githubPat: 'PAT123',
+    githubToken: 'PAT123',
     timeoutMs: 1000,
     keepAlive: { idleTimeoutMs: 1000 },
     ...overrides,
@@ -115,7 +115,7 @@ afterEach(() => {
 });
 
 describe('createE2bProvider', () => {
-  it('create(): creates from our own template with pause-on-timeout lifecycle + GH_TOKEN env, clones the repo into the workspace root, returns sandboxId as the resume token', async () => {
+  it('create(): creates from our own template with pause-on-timeout lifecycle (no sandbox-level GH_TOKEN env), clones the repo into the workspace root with the token only on that one command, returns sandboxId as the resume token', async () => {
     const fake = fakeE2bSandbox('sbx_abc');
     createMock.mockResolvedValue(fake);
 
@@ -128,14 +128,17 @@ describe('createE2bProvider', () => {
       template: DEFAULT_E2B_TEMPLATE_NAME,
       timeoutMs: 1000,
       lifecycle: { onTimeout: 'pause', autoResume: true },
-      envs: { GH_TOKEN: 'PAT123' },
       metadata: { name: 'runko-chat-conv-1' },
     });
+    // 沙盒级不再设 GH_TOKEN——令牌过期后改不了，还会误导 agent（docs/ingress/tech/github-repo-access.md §4）。
+    expect(createMock.mock.calls[0]?.[0]).not.toHaveProperty('envs');
 
     const cloneCmd = fake.runCalls.find((c) => c.cmd.includes('git clone'));
     expect(cloneCmd?.cmd).toBe(
       'git clone --depth 1 https://x-access-token:$GH_TOKEN@github.com/acme/demo.git /home/user/repo',
     );
+    // 令牌只在这一条命令自己的 envs 里出现，只存在于这一次调用。
+    expect(cloneCmd?.opts).toMatchObject({ envs: { GH_TOKEN: 'PAT123' } });
     expect(provisioned.resumeToken).toBe('sbx_abc');
 
     // 保活转发到适配器：补足语义下第一次必定真的打一次 setTimeout。

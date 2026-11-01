@@ -29,13 +29,33 @@ import { createLogger } from '../../src/logger.js';
 // answer with a stubbed default-branch ref.
 // ---------------------------------------------------------------------------
 
-function rejectingFs(): VercelFileSystemLike {
+/**
+ * `readFile`/`readdir`/`stat`/`rm`/`rmdir` 仍然不该被 sandbox-manager 碰到——保持拒绝。
+ * `writeFile`/`mkdir` 现在会被每次 `acquire()` 用到（覆写令牌文件，见
+ * docs/ingress/tech/github-repo-access.md §4），改成真的记录下来，供需要断言写入内容的
+ * 用例使用；`writes` 数组由调用方传入并共享。
+ */
+function fakeFs(
+  writes: { path: string; data: string }[],
+  writeError: () => Error | undefined = () => undefined,
+): VercelFileSystemLike {
   const notUsed = (): Promise<never> =>
     Promise.reject(new Error('fs not used by sandbox-manager tests'));
   return {
     readFile: notUsed,
-    writeFile: notUsed,
-    mkdir: notUsed,
+    async writeFile(path, data) {
+      const error = writeError();
+      if (error !== undefined) {
+        throw error;
+      }
+      writes.push({
+        path,
+        data: typeof data === 'string' ? data : new TextDecoder().decode(data),
+      });
+    },
+    async mkdir() {
+      return undefined;
+    },
     readdir: notUsed,
     stat: notUsed,
     rm: notUsed,
@@ -46,8 +66,12 @@ function rejectingFs(): VercelFileSystemLike {
 interface FakeProvisioned extends ProvisionedSandbox {
   readonly commands: string[];
   readonly ensureLifetimeCalls: number[];
+  /** 每次 `writeGithubToken` 写了什么——断言令牌文件确实被覆写用。 */
+  readonly writes: { path: string; data: string }[];
   /** 设成一个 Error 后，之后每次 `ensureLifetime` 都抛它——模拟「句柄背后的沙盒已经没了」。 */
   ensureLifetimeError?: Error;
+  /** 设成一个 Error 后，之后每次写文件都抛它——同上，只是发生在写令牌文件那一步。 */
+  writeError?: Error;
 }
 
 function createFakeProvisioned(
@@ -56,8 +80,9 @@ function createFakeProvisioned(
 ): FakeProvisioned {
   const commands: string[] = [];
   const ensureLifetimeCalls: number[] = [];
+  const writes: { path: string; data: string }[] = [];
   const sandbox: VercelSandboxLike = {
-    fs: rejectingFs(),
+    fs: fakeFs(writes, () => provisioned.writeError),
     async runCommand(params) {
       const script = params.args?.[1] ?? '';
       commands.push(script);
@@ -73,7 +98,9 @@ function createFakeProvisioned(
     resumeToken: name,
     commands,
     ensureLifetimeCalls,
+    writes,
     ensureLifetimeError: undefined,
+    writeError: undefined,
     async ensureLifetime(targetMs) {
       if (provisioned.ensureLifetimeError !== undefined) {
         throw provisioned.ensureLifetimeError;
@@ -131,7 +158,7 @@ function acquireInput(overrides: Partial<AcquireInput> = {}): AcquireInput {
     repoCloneUrl: 'https://github.com/acme/demo.git',
     repoOwner: 'acme',
     repoName: 'demo',
-    githubPat: 'test-pat',
+    githubToken: 'test-token',
     ...overrides,
   };
 }
@@ -225,7 +252,7 @@ describe('sandbox-manager', () => {
       {
         name: input.sandboxName,
         cloneUrl: input.repoCloneUrl,
-        githubPat: input.githubPat,
+        githubToken: input.githubToken,
         timeoutMs: 1000,
         // 保活配置也一并交给 provider（内容由专门的用例断言）
         keepAlive: { idleTimeoutMs: 1000 },
@@ -603,6 +630,15 @@ describe('sandbox-manager', () => {
 describe('resolveDefaultProvider (docs/host/contract/tech/sandbox-provider.md §6)', () => {
   const ORIGINAL = process.env.SANDBOX_PROVIDER;
 
+  /** 云沙盒还要配了 GitHub App 才会出现在可选清单里（docs/ingress/tech/github-repo-access.md §5）。 */
+  const GITHUB_APP_ENV = {
+    GITHUB_APP_ID: '123',
+    GITHUB_APP_SLUG: 'test-app',
+    GITHUB_APP_PRIVATE_KEY: 'test-key',
+    GITHUB_CLIENT_ID: 'client-id',
+    GITHUB_CLIENT_SECRET: 'client-secret',
+  };
+
   afterEach(() => {
     if (ORIGINAL === undefined) {
       delete process.env.SANDBOX_PROVIDER;
@@ -611,9 +647,11 @@ describe('resolveDefaultProvider (docs/host/contract/tech/sandbox-provider.md §
     }
   });
 
-  it('没点名时挑这台服务端真配得起的第一档：配了 Vercel 就是 vercel', () => {
+  it('没点名时挑这台服务端真配得起的第一档：配了 Vercel（且配了 GitHub App）就是 vercel', () => {
     delete process.env.SANDBOX_PROVIDER;
-    expect(resolveDefaultProvider({ VERCEL_TOKEN: 'tok' })).toBe('vercel');
+    expect(
+      resolveDefaultProvider({ VERCEL_TOKEN: 'tok', ...GITHUB_APP_ENV }),
+    ).toBe('vercel');
   });
 
   it('**什么 key 都没配 → local**，于是零配置也建得了会话', () => {
@@ -622,27 +660,59 @@ describe('resolveDefaultProvider (docs/host/contract/tech/sandbox-provider.md §
     expect(availableProviders({})).toEqual(['local']);
   });
 
-  it('只配了 E2B → e2b 排在前面', () => {
-    expect(resolveDefaultProvider({ E2B_API_KEY: 'k' })).toBe('e2b');
-    expect(availableProviders({ E2B_API_KEY: 'k' })).toEqual(['e2b', 'local']);
+  it('配了 Vercel/E2B 的 key 但没配 GitHub App → 云沙盒不出现，只剩 local', () => {
+    delete process.env.SANDBOX_PROVIDER;
+    expect(
+      availableProviders({ VERCEL_TOKEN: 'tok', E2B_API_KEY: 'k' }),
+    ).toEqual(['local']);
   });
 
-  it('点名 e2b 就用 e2b', () => {
-    process.env.SANDBOX_PROVIDER = 'e2b';
-    expect(resolveDefaultProvider()).toBe('e2b');
+  it('只配了 E2B（且配了 GitHub App）→ e2b 排在前面', () => {
+    expect(
+      resolveDefaultProvider({ E2B_API_KEY: 'k', ...GITHUB_APP_ENV }),
+    ).toBe('e2b');
+    expect(availableProviders({ E2B_API_KEY: 'k', ...GITHUB_APP_ENV })).toEqual(
+      ['e2b', 'local'],
+    );
+  });
+
+  it('点名 e2b、而且配得起 e2b，就用 e2b', () => {
+    expect(
+      resolveDefaultProvider({
+        SANDBOX_PROVIDER: 'e2b',
+        VERCEL_TOKEN: 'tok',
+        E2B_API_KEY: 'k',
+        ...GITHUB_APP_ENV,
+      }),
+    ).toBe('e2b');
   });
 
   it('is case-insensitive and trims surrounding whitespace ("E2B", " e2b ")', () => {
-    process.env.SANDBOX_PROVIDER = 'E2B';
-    expect(resolveDefaultProvider()).toBe('e2b');
+    const env = { E2B_API_KEY: 'k', VERCEL_TOKEN: 'tok', ...GITHUB_APP_ENV };
+    expect(resolveDefaultProvider({ ...env, SANDBOX_PROVIDER: 'E2B' })).toBe(
+      'e2b',
+    );
+    expect(resolveDefaultProvider({ ...env, SANDBOX_PROVIDER: ' e2b ' })).toBe(
+      'e2b',
+    );
+  });
 
-    process.env.SANDBOX_PROVIDER = ' e2b ';
-    expect(resolveDefaultProvider()).toBe('e2b');
+  it('点名了但配不起（比如 `.env.template` 缺省的 vercel、却没配 GitHub App）→ 回落到配得起的第一档', () => {
+    expect(
+      resolveDefaultProvider({
+        SANDBOX_PROVIDER: 'vercel',
+        VERCEL_TOKEN: 'tok',
+      }),
+    ).toBe('local');
   });
 
   it('认不出来的值（"foo"、空串）当没点名，回落到配得起的第一档', () => {
     expect(
-      resolveDefaultProvider({ SANDBOX_PROVIDER: 'foo', VERCEL_TOKEN: 'tok' }),
+      resolveDefaultProvider({
+        SANDBOX_PROVIDER: 'foo',
+        VERCEL_TOKEN: 'tok',
+        ...GITHUB_APP_ENV,
+      }),
     ).toBe('vercel');
     expect(resolveDefaultProvider({ SANDBOX_PROVIDER: '' })).toBe('local');
   });
@@ -779,5 +849,172 @@ describe('sandbox-manager: 保活的可观测性', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// -------------------------------------------------------------------------
+// GitHub 令牌文件（docs/ingress/tech/github-repo-access.md §4）：写令牌、配凭据助手、
+// 重置远端地址、以及「每次 acquire 都覆写为新令牌」。
+// -------------------------------------------------------------------------
+
+describe('sandbox-manager: GitHub 令牌文件覆写', () => {
+  it('create()：令牌写进 .git/runko-github-token；凭据助手按 --absolute-git-dir 定位；远端地址重置为不带令牌的地址；令牌不出现在任何命令字符串里', async () => {
+    const fake = createFakeProvider({
+      resumeResult: async () => ({ kind: 'unavailable' }),
+    });
+    const manager = managerWith(fake);
+    const input = acquireInput({ githubToken: 'secret-token-abc' });
+
+    await manager.acquire(input);
+    const sandbox = fake.createdSandboxes[0];
+    expect(sandbox).toBeDefined();
+    if (sandbox === undefined) {
+      return;
+    }
+
+    expect(sandbox.writes).toEqual([
+      {
+        path: '/vercel/sandbox/.git/runko-github-token',
+        data: 'secret-token-abc',
+      },
+    ]);
+
+    const credentialHelperCmd = sandbox.commands.find((c) =>
+      c.includes('credential.helper'),
+    );
+    expect(credentialHelperCmd).toBeDefined();
+    expect(credentialHelperCmd).toContain('--absolute-git-dir');
+    expect(credentialHelperCmd).toContain('x-access-token');
+    // `store`/`erase` 被忽略，`get` 才真正读令牌文件——凭据助手自己不吐出令牌明文。
+    expect(credentialHelperCmd).not.toContain('secret-token-abc');
+
+    const resetRemoteCmd = sandbox.commands.find((c) =>
+      c.startsWith('git remote set-url origin'),
+    );
+    expect(resetRemoteCmd).toBe(
+      `git remote set-url origin "https://github.com/${input.repoOwner}/${input.repoName}.git"`,
+    );
+
+    // 令牌本身不该出现在任何一条 exec 命令字符串里——它只经 writeFile 落地，
+    // 命令一律靠凭据助手在沙盒里现读现 cat。
+    expect(sandbox.commands.some((c) => c.includes('secret-token-abc'))).toBe(
+      false,
+    );
+  });
+
+  it('缓存命中的 acquire()：每一次都覆写成传入的新令牌', async () => {
+    const fake = createFakeProvider({
+      resumeResult: async () => ({ kind: 'unavailable' }),
+    });
+    const manager = managerWith(fake);
+
+    await manager.acquire(acquireInput({ githubToken: 'token-1' }));
+    const sandbox = fake.createdSandboxes[0];
+    expect(sandbox).toBeDefined();
+    if (sandbox === undefined) {
+      return;
+    }
+
+    await manager.acquire(acquireInput({ githubToken: 'token-2' })); // 同一个 conversationId → 内存缓存命中
+    expect(fake.createCalls).toHaveLength(1); // 确认走的确实是缓存命中，不是又建了一个
+    expect(fake.resumeCalls).toHaveLength(1); // 首次 acquire 带默认 resumeToken，先试 resume（失败）再落到 create
+    expect(sandbox.writes.map((w) => w.data)).toEqual(['token-1', 'token-2']);
+    expect(
+      sandbox.writes.every(
+        (w) => w.path === '/vercel/sandbox/.git/runko-github-token',
+      ),
+    ).toBe(true);
+  });
+
+  it('缓存命中但沙盒其实已经没了（写令牌文件报 gone）：踢掉缓存，照恢复 / 新建往下走，不把错误抛给这一轮', async () => {
+    const fake = createFakeProvider({
+      resumeResult: async () => ({ kind: 'unavailable' }),
+    });
+    const manager = managerWith(fake);
+
+    await manager.acquire(acquireInput({ githubToken: 'token-1' }));
+    const first = fake.createdSandboxes[0];
+    expect(first).toBeDefined();
+    if (first === undefined) {
+      return;
+    }
+    first.writeError = fakeGoneError();
+
+    const acquired = await manager.acquire(
+      acquireInput({ githubToken: 'token-2' }),
+    );
+    expect(acquired.mode).toBe('create');
+    expect(fake.createCalls).toHaveLength(2);
+    expect(fake.createdSandboxes[1]?.writes.map((w) => w.data)).toEqual([
+      'token-2',
+    ]);
+  });
+
+  it('缓存命中时写令牌文件报的不是 gone：原样抛出', async () => {
+    const fake = createFakeProvider({
+      resumeResult: async () => ({ kind: 'unavailable' }),
+    });
+    const manager = managerWith(fake);
+
+    await manager.acquire(acquireInput({ githubToken: 'token-1' }));
+    const first = fake.createdSandboxes[0];
+    if (first === undefined) {
+      throw new Error('expected a created sandbox');
+    }
+    first.writeError = new Error('disk full');
+
+    await expect(
+      manager.acquire(acquireInput({ githubToken: 'token-2' })),
+    ).rejects.toThrow('disk full');
+  });
+
+  it('resume 恢复的 acquire()：同样覆写成新令牌', async () => {
+    const resumed = createFakeProvisioned('runko-chat-session-1');
+    const fake = createFakeProvider({
+      resumeResult: async () => ({ kind: 'ok', sandbox: resumed }),
+    });
+    const manager = managerWith(fake);
+
+    await manager.acquire(acquireInput({ githubToken: 'resumed-token' }));
+
+    expect(resumed.writes).toEqual([
+      {
+        path: '/vercel/sandbox/.git/runko-github-token',
+        data: 'resumed-token',
+      },
+    ]);
+  });
+
+  it('令牌为空/undefined（本地沙盒式）：不写令牌文件——create、缓存命中都一样', async () => {
+    const fake = createFakeProvider({
+      resumeResult: async () => ({ kind: 'unavailable' }),
+    });
+    const manager = managerWith(fake);
+
+    await manager.acquire(acquireInput({ githubToken: undefined }));
+    const sandbox = fake.createdSandboxes[0];
+    expect(sandbox).toBeDefined();
+    if (sandbox === undefined) {
+      return;
+    }
+    expect(sandbox.writes).toEqual([]);
+
+    await manager.acquire(acquireInput({ githubToken: undefined })); // 缓存命中路径
+    expect(sandbox.writes).toEqual([]);
+  });
+
+  it('令牌是空字符串：同样视为「没有令牌」，不写文件', async () => {
+    const fake = createFakeProvider({
+      resumeResult: async () => ({ kind: 'unavailable' }),
+    });
+    const manager = managerWith(fake);
+
+    await manager.acquire(acquireInput({ githubToken: '' }));
+    const sandbox = fake.createdSandboxes[0];
+    expect(sandbox).toBeDefined();
+    if (sandbox === undefined) {
+      return;
+    }
+    expect(sandbox.writes).toEqual([]);
   });
 });

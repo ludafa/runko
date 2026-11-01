@@ -73,7 +73,7 @@ pnpm chat:web
 | 想要 | 配什么 | 效果 |
 |---|---|---|
 | 真 AI | `DEEPSEEK_API_BASE_URL` + `DEEPSEEK_API_TOKEN` | 「演示模型」标记消失，换成真模型回答 |
-| 云沙盒 | Vercel 或 E2B 的 key，外加 `GITHUB_REPO` + `GITHUB_PAT` | 新建会话时能选 Vercel / E2B，沙盒里拉你的仓库、开工作分支 |
+| 云沙盒 | Vercel 或 E2B 的 key，外加一个 GitHub App（`GITHUB_APP_*` 与它的 `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`） | 新建会话时能选 Vercel / E2B，并从用户授权过的仓库里挑一个拉进沙盒、开工作分支（见[按用户授权加载 GitHub 仓库](./github-repo-access.md)） |
 | GitHub 登录 | `GITHUB_CLIENT_ID` + `GITHUB_CLIENT_SECRET` | 登录页出现「用 GitHub 登录」按钮（没配时不显示） |
 | 推送通知、联网搜索 | 跟现在一样 | 没配就不开 |
 

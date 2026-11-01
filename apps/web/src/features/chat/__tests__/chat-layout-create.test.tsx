@@ -16,11 +16,15 @@ const {
   createConversationMock,
   listConversationsMock,
   fetchChatConfigMock,
+  fetchGithubStatusMock,
+  fetchGithubReposMock,
   navigateMock,
 } = vi.hoisted(() => ({
   createConversationMock: vi.fn(),
   listConversationsMock: vi.fn(),
   fetchChatConfigMock: vi.fn(),
+  fetchGithubStatusMock: vi.fn(),
+  fetchGithubReposMock: vi.fn(),
   navigateMock: vi.fn(),
 }));
 
@@ -28,6 +32,8 @@ vi.mock('@/features/chat/api', () => ({
   createConversation: (...args: unknown[]) => createConversationMock(...args),
   listConversations: (...args: unknown[]) => listConversationsMock(...args),
   fetchChatConfig: (...args: unknown[]) => fetchChatConfigMock(...args),
+  fetchGithubStatus: (...args: unknown[]) => fetchGithubStatusMock(...args),
+  fetchGithubRepos: (...args: unknown[]) => fetchGithubReposMock(...args),
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -83,13 +89,21 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-/** 打开新建表单并提交。 */
+/**
+ * 打开新建表单并提交。默认 provider 是云沙盒（见 `chatConfig()`），提交钮要等
+ * 仓库这一栏拿到默认选中的仓库才会解锁——`waitFor` 等的就是这一步。
+ */
 async function submitCreate(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('button', { name: '新建会话' }));
   await user.type(
     screen.getByPlaceholderText('这次要做什么？（可选）'),
     '重构登录页',
   );
+  await waitFor(() => {
+    expect(
+      screen.getByRole('button', { name: '建会话并开分支' }),
+    ).toBeEnabled();
+  });
   await user.click(screen.getByRole('button', { name: '建会话并开分支' }));
 }
 
@@ -97,9 +111,28 @@ beforeEach(() => {
   createConversationMock.mockReset();
   listConversationsMock.mockReset();
   fetchChatConfigMock.mockReset();
+  fetchGithubStatusMock.mockReset();
+  fetchGithubReposMock.mockReset();
   navigateMock.mockReset();
   listConversationsMock.mockResolvedValue([]);
   fetchChatConfigMock.mockResolvedValue(chatConfig());
+  // 默认已连接、有一个仓库——这批用例测的是建会话这条通用流程，不是仓库选择
+  // 本身（那部分见 `github-repo-picker.test.tsx`），给一个能立刻选中的仓库，
+  // 省得每条用例都要再走一遍连接/选仓库的交互。
+  fetchGithubStatusMock.mockResolvedValue({
+    configured: true,
+    linked: true,
+    installUrl: 'https://github.com/apps/demo-app/installations/new',
+  });
+  fetchGithubReposMock.mockResolvedValue([
+    {
+      installationId: 1,
+      repoId: 1,
+      fullName: 'acme/demo',
+      private: false,
+      defaultBranch: 'main',
+    },
+  ]);
   navigateMock.mockResolvedValue(undefined);
 });
 
@@ -397,5 +430,68 @@ describe('ChatLayout — 新建会话弹窗的 provider 选项', () => {
     expect(
       within(dialog).getByRole('button', { name: /本地/, pressed: true }),
     ).toBeInTheDocument();
+  });
+});
+
+/** 把 mock 调用参数（类型是 `any`，因为 `createConversationMock` 是裸 `vi.fn()`）
+ * 圈进 `unknown` 再收窄，不让它未经检查就被当成某个具体形状使用
+ * （docs/ingress/tech/github-repo-access.md §5：`repo` 云沙盒必填、本地沙盒不能带）。 */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+describe('ChatLayout — createConversation 收到的 repo 参数（docs/ingress/tech/github-repo-access.md §5）', () => {
+  it('云沙盒：请求体带 repo: {installationId, repoId}', async () => {
+    createConversationMock.mockResolvedValue(conversation());
+    const user = userEvent.setup();
+    render(
+      <ChatLayout activeSessionId={undefined}>
+        <p>之前的会话内容</p>
+      </ChatLayout>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '新建会话' })).toBeEnabled();
+    });
+    await submitCreate(user);
+
+    expect(createConversationMock).toHaveBeenCalledTimes(1);
+    const [input]: unknown[] = createConversationMock.mock.calls[0] ?? [];
+    expect(isRecord(input)).toBe(true);
+    if (!isRecord(input)) {
+      return;
+    }
+    expect('repo' in input).toBe(true);
+    // 默认夹具里唯一的仓库（见文件顶部 `fetchGithubReposMock.mockResolvedValue`）
+    expect(input.repo).toEqual({ installationId: 1, repoId: 1 });
+  });
+
+  it('本地沙盒：请求体里完全没有 repo 这个 key（不是 repo: undefined）', async () => {
+    createConversationMock.mockResolvedValue(
+      conversation({ provider: 'local', repo: null, branchName: null }),
+    );
+    const user = userEvent.setup();
+    render(
+      <ChatLayout activeSessionId={undefined}>
+        <p>之前的会话内容</p>
+      </ChatLayout>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '新建会话' })).toBeEnabled();
+    });
+    await user.click(screen.getByRole('button', { name: '新建会话' }));
+    const dialog = await screen.findByRole('dialog');
+    // 本地沙盒不需要仓库，切过去之后按钮立刻可用，不用等任何 GitHub 请求
+    await user.click(within(dialog).getByRole('button', { name: /本地/ }));
+    await user.click(
+      within(dialog).getByRole('button', { name: '建会话并开分支' }),
+    );
+
+    expect(createConversationMock).toHaveBeenCalledTimes(1);
+    const [input]: unknown[] = createConversationMock.mock.calls[0] ?? [];
+    expect(isRecord(input)).toBe(true);
+    if (!isRecord(input)) {
+      return;
+    }
+    expect('repo' in input).toBe(false);
   });
 });

@@ -30,7 +30,7 @@ Seed 骨架：https://github.com/ludafa/hono-mono-starter （Hono + zod-openapi 
 ## 用户可见行为与交互
 
 1. **注册 / 登录**：seed 自带 better-auth。登录后进入 chat 界面。
-2. **新建会话即绑定一个沙盒**：新建 [session（会话）](../../terms.md)时，服务端为它开一个 Vercel [沙盒](../../terms.md)——clone 配置好的 `GITHUB_REPO`、装好 `frontend-design` [skill](../../terms.md)、建一条会话专属分支。此后这个会话固定在这条分支上工作，多轮改动在同一分支上累积。
+2. **新建会话即绑定一个沙盒**：新建 [session（会话）](../../terms.md)时，服务端为它开一个 Vercel [沙盒](../../terms.md)——clone 用户选中的仓库（当初是全局配置的 `GITHUB_REPO`，现在按用户授权选，见[按用户授权加载 GitHub 仓库](./github-repo-access.md)）、装好 `frontend-design` [skill](../../terms.md)、建一条会话专属分支。此后这个会话固定在这条分支上工作，多轮改动在同一分支上累积。
 3. **每条消息驱动一轮 agent loop，实时流式渲染**：用户每发一条消息触发 agent 的一次完整 [turn（轮）](../../terms.md)。这一轮内部的过程（工具调用状态流转、文件改动、文本打字机、推理折叠）通过 [直播流](../../terms.md)边跑边推到页面——就是 07 示例时间线的 React 版。每个工具调用卡片上还标注它的启动时间、完成时间与耗时（**真实执行口径**：启动时间是真正开始执行的时刻，耗时不含排队与审批等待）：调用还在排队/等审批时徽标显示「等待中」并逐秒跳动已等待时长，开始执行后从零起跳执行耗时，结算后定格；被拒绝的调用因从未执行而显示「未执行」。同一步发出的一批工具调用**全部只读**（读文件/列目录/glob/grep）时并行执行，混有写操作则按顺序执行。每条 assistant 回复末尾有一枚「统计」按钮，点开「本轮统计」弹窗——概览里领头显示**本轮总耗时**，并拆分**工具总耗时 / agent 总耗时**（工具 = 本轮所有工具执行时段的并集，agent = 其余的模型思考/往返时间；纯文本轮不显示拆分），token 数字带千分位分组（如 `耗时 1m 23s · 工具 33.0s · agent 50.0s · 输入 149,326 · …`）。弹窗下半区是[遥测](../../terms.md)明细：逐次模型调用的响应/首 token 耗时、输入输出吞吐（tok/s）、token 三分（输入含缓存、输出含推理、共计）、finishReason、模型名，以及逐个工具执行的耗时与失败标记——遥测未开启时明细区显示「无遥测数据」，概览不受影响（遥测的完整产品说明见 [features/telemetry](./telemetry.md)）。
 4. **[排队](../../terms.md)与[中途插话](../../terms.md)**：一轮还在跑时用户又发一条消息，有两条路——默认**排队**（存进会话的待发队列，本轮收尾后自动作为下一轮发出，可查看/删除/清空），显式（Alt+Enter 或插话按钮）**steer 插话**（注入当前这一轮，在下一个 step checkpoint 真实注入点生效）。完整说明见 [features/steer-and-queue](../../logic/orchestration/features/steer-and-queue.md)。
 5. **人在回路（[human-in-the-loop](../../terms.md)）**：
@@ -67,7 +67,7 @@ Seed 骨架：https://github.com/ludafa/hono-mono-starter （Hono + zod-openapi 
 
 ## 范围与非目标
 
-- **单仓库**：仓库由 env `GITHUB_REPO` 配置，一个部署服务一个仓库。多仓库是产品化下一步，本期不做。
+- **单仓库**：本期仓库由 env `GITHUB_REPO` 配置，一个部署服务一个仓库。多仓库已由[按用户授权加载 GitHub 仓库](./github-repo-access.md)做掉，`GITHUB_REPO` 随之删除。
 - **单模型**：DeepSeek 直连（`RUNKO_MODEL` 可覆盖），不做多模型选择。
 - **部署走 Git 集成 preview**：沿 07 定案，PR 即部署（Vercel Git 集成），不在应用内自建部署编排。
 - **非目标**：不做多租户配额/计费；不做移动端。
@@ -86,7 +86,7 @@ Seed 骨架：https://github.com/ludafa/hono-mono-starter （Hono + zod-openapi 
 
 全部配置收进**仓库根 `.env`**（唯一事实来源，`.env.template` 全量列出）：
 
-`DEEPSEEK_API_BASE_URL` / `DEEPSEEK_API_TOKEN` / `RUNKO_MODEL?` / `GITHUB_REPO` / `GITHUB_PAT` / `SANDBOX_IDLE_TIMEOUT_MS?=300000` / `VERCEL_TOKEN` / `VERCEL_TEAM_ID` / `VERCEL_PROJECT_ID` / `BETTER_AUTH_SECRET`。
+`DEEPSEEK_API_BASE_URL` / `DEEPSEEK_API_TOKEN` / `RUNKO_MODEL?` / `GITHUB_REPO` / `GITHUB_PAT`（这两个已删除，换成 GitHub App 的配置，见[按用户授权加载 GitHub 仓库](./github-repo-access.md)） / `SANDBOX_IDLE_TIMEOUT_MS?=300000` / `VERCEL_TOKEN` / `VERCEL_TEAM_ID` / `VERCEL_PROJECT_ID` / `BETTER_AUTH_SECRET`。
 
 人在回路相关可调项：`CHAT_APPROVAL_MODE`（`dangerous`（默认）/ `all` / `off`）；`CHAT_SUSPEND_MEMORY_WINDOW?=300000`（等人先在内存里等多久才[挂起](../../terms.md)，毫秒；`0` = 一等人就挂起）。原来的 `CHAT_APPROVAL_TIMEOUT_MS` / `CHAT_ASK_USER_TIMEOUT_MS` 早就没有代码在读，已从模板删掉。
 

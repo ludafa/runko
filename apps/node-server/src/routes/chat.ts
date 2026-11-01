@@ -13,8 +13,12 @@ import type { Context, MiddlewareHandler } from 'hono';
 import { streamSSE } from 'hono/streaming';
 
 import { grantConversationApproval } from '../agent/conversation-grants.js';
-import type { GitHubRepoRef } from '../agent/github-repo.js';
-import { resolveGithubPat, resolveRepo } from '../agent/github-repo.js';
+import type { GithubApp, GithubRepoRef } from '../agent/github-app.js';
+import {
+  classifyGithubError,
+  defaultGithubApp,
+  splitFullName,
+} from '../agent/github-app.js';
 import { createLocalProvider } from '../agent/local-sandbox.js';
 import { hasRealModel, resolveModel } from '../agent/model.js';
 import {
@@ -136,6 +140,11 @@ export interface ChatRouteDeps {
   forwardStream?: boolean;
   sandboxManager: SandboxManager;
   resolveModel: () => LanguageModel;
+  /**
+   * GitHub App 客户端（docs/ingress/tech/github-repo-access.md §6）：建会话时核对仓库、
+   * 签安装令牌。缺省用生产单例（`defaultGithubApp`）——测试注入一个假的，零网络零凭证。
+   */
+  githubApp?: GithubApp;
   /**
    * Injectable so integration tests can stand in a fixed-`userId` stub
    * instead of exercising real better-auth (which is hardwired to the
@@ -325,6 +334,7 @@ function generateBranchName(conversationId: string): string {
 
 export function createChatApp(deps: ChatRouteDeps) {
   const app = new OpenAPIHono<ChatEnv>();
+  const githubApp = deps.githubApp ?? defaultGithubApp;
 
   // 副本间令牌闸门。**只拦转发进来的请求**——终端用户的请求不带这个头，也不该被要求带。
   // 它防的是「伪造转发标记、逼这个副本在本地答」，越不过登录（用户身份仍走 cookie）。
@@ -406,9 +416,26 @@ export function createChatApp(deps: ChatRouteDeps) {
         content: { 'application/json': { schema: ConversationSchema } },
         description: 'Created',
       },
+      400: {
+        content: { 'application/json': { schema: ErrorSchema } },
+        description:
+          '云沙盒 provider 没带 `repo`，或本地沙盒带了 `repo`（docs/ingress/tech/github-repo-access.md §5）',
+      },
       401: {
         content: { 'application/json': { schema: ErrorSchema } },
         description: 'Unauthorized',
+      },
+      403: {
+        content: { 'application/json': { schema: ErrorSchema } },
+        description: '`github_repo_forbidden`——这个安装里核对不到这个仓库',
+      },
+      404: {
+        content: { 'application/json': { schema: ErrorSchema } },
+        description: '`github_not_configured`——服务端没配 GitHub App',
+      },
+      409: {
+        content: { 'application/json': { schema: ErrorSchema } },
+        description: '`github_not_linked`——这个用户还没连接 GitHub',
       },
       500: {
         content: { 'application/json': { schema: ErrorSchema } },
@@ -424,18 +451,51 @@ export function createChatApp(deps: ChatRouteDeps) {
     const conversationId = randomUUID();
     const sandboxName = generateSandboxName(conversationId);
     const provider = input.provider ?? resolveDefaultProvider();
-    // [本地沙盒](../../../../docs/terms.md)没有 git，也就没有仓库与工作分支——GitHub 那两个
-    // 配置这一档根本不读，零配置才起得来。
+    // [本地沙盒](../../../../docs/terms.md)没有 git，也就没有仓库与工作分支——这一档
+    // 不接受 `repo`，零配置才起得来。
     const usesGit = provider !== 'local';
     const branchName = usesGit ? generateBranchName(conversationId) : null;
 
-    let repoRef: GitHubRepoRef | undefined;
-    let githubPat: string | undefined;
-    if (usesGit) {
+    if (usesGit && input.repo === undefined) {
+      return c.json(
+        { error: 'repo is required for cloud sandbox providers' },
+        400,
+      );
+    }
+    if (!usesGit && input.repo !== undefined) {
+      return c.json(
+        { error: 'repo is not allowed for the local sandbox provider' },
+        400,
+      );
+    }
+
+    let repoRef: GithubRepoRef | undefined;
+    let githubToken: string | undefined;
+    let repoFullName: string | undefined;
+    if (usesGit && input.repo !== undefined) {
+      const selector = {
+        userId,
+        installationId: input.repo.installationId,
+        repoId: input.repo.repoId,
+      };
       try {
-        repoRef = resolveRepo();
-        githubPat = resolveGithubPat();
+        // 用用户令牌核对这个安装里真有这个仓库，再签一把只对它有效的安装令牌
+        // （docs/ingress/tech/github-repo-access.md §3.2）——两步都在 `getRepoToken` 里。
+        const access = await githubApp.getRepoToken(selector);
+        repoFullName = access.repo.fullName;
+        repoRef = splitFullName(access.repo.fullName);
+        githubToken = access.token;
       } catch (error) {
+        const kind = classifyGithubError(error);
+        if (kind === 'not-configured') {
+          return c.json({ error: 'github_not_configured' }, 404);
+        }
+        if (kind === 'not-linked') {
+          return c.json({ error: 'github_not_linked' }, 409);
+        }
+        if (kind === 'forbidden') {
+          return c.json({ error: 'github_repo_forbidden' }, 403);
+        }
         return c.json({ error: describeError(error) }, 500);
       }
     }
@@ -456,7 +516,7 @@ export function createChatApp(deps: ChatRouteDeps) {
             repoName: repoRef.repo,
           }
         : {}),
-        ...(githubPat !== undefined ? { githubPat } : {}),
+        ...(githubToken !== undefined ? { githubToken } : {}),
       });
     } catch (error) {
       return c.json({ error: describeError(error) }, 500);
@@ -466,12 +526,14 @@ export function createChatApp(deps: ChatRouteDeps) {
       id: conversationId,
       userId,
       title: input.title ?? 'New chat',
-      repo: repoRef === undefined ? null : `${repoRef.owner}/${repoRef.repo}`,
+      repo: repoFullName ?? null,
       branchName,
       sandboxName,
       provider,
       // E2B's resume token is the server-assigned sandboxId (known only after create); Vercel resumes by name, so there's nothing to store.
       sandboxId: provider === 'e2b' ? acquired.resumeToken : null,
+      githubInstallationId: input.repo?.installationId ?? null,
+      githubRepoId: input.repo?.repoId ?? null,
     });
 
     // [skill 清单](../../../../docs/terms.md)首次填充（docs/ingress/tech/composer-skill-mention.md §2.1）：

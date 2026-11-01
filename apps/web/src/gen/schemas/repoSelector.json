@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "installationId": { "type": "integer", "exclusiveMinimum": 0 },
+    "repoId": { "type": "integer", "exclusiveMinimum": 0 }
+  },
+  "required": ["installationId", "repoId"],
+  "x-readme-ref-name": "RepoSelector"
+}

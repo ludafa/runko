@@ -1,6 +1,6 @@
 {
   "name": "@runko/conformance",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "runko 宿主能力的契约一致性套件——写了持久化或归属仲裁实现，拿它验合不合契约",
   "license": "ISC",
   "repository": {
@@ -39,16 +39,15 @@
     "lint:fix": "eslint . --fix",
     "test": "vitest run"
   },
+  "dependencies": {
+    "@runko/agent": "workspace:^"
+  },
   "devDependencies": {
-    "@runko/agent": "workspace:^",
     "@runko/core": "workspace:^",
     "@types/node": "catalog:",
     "tsdown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
-  },
-  "peerDependencies": {
-    "@runko/agent": "workspace:^"
   },
   "engines": {
     "node": ">=24"

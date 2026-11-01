@@ -16,9 +16,29 @@ export const postApiChatConversations201Schema = z.lazy(
 );
 
 /**
+ * @description 云沙盒 provider 没带 `repo`，或本地沙盒带了 `repo`（docs/ingress/tech/github-repo-access.md §5）
+ */
+export const postApiChatConversations400Schema = z.lazy(() => apiErrorSchema);
+
+/**
  * @description Unauthorized
  */
 export const postApiChatConversations401Schema = z.lazy(() => apiErrorSchema);
+
+/**
+ * @description `github_repo_forbidden`——这个安装里核对不到这个仓库
+ */
+export const postApiChatConversations403Schema = z.lazy(() => apiErrorSchema);
+
+/**
+ * @description `github_not_configured`——服务端没配 GitHub App
+ */
+export const postApiChatConversations404Schema = z.lazy(() => apiErrorSchema);
+
+/**
+ * @description `github_not_linked`——这个用户还没连接 GitHub
+ */
+export const postApiChatConversations409Schema = z.lazy(() => apiErrorSchema);
 
 /**
  * @description Repo/sandbox configuration or provisioning error

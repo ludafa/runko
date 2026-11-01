@@ -84,10 +84,14 @@ function runCases<S extends { cleanup?: () => Promise<void> | void }>(
 }
 
 /**
- * **心跳调到 40ms / 判死 200ms**（仍满足「阈值 ≥ 3× 心跳」那条硬规矩）：默认的 5s/60s
- * 让「心跳自己发现被接管」那条用例要等一分钟。语义不变，只是把时间轴压扁。
+ * **心跳 40ms**：默认的 5s 让「心跳自己发现被接管」那条用例要等很久。
+ *
+ * **判死阈值留足 2s**（远超「阈值 ≥ 3× 心跳」的下限）。CI 上多个包并发跑，一拍心跳
+ * 拖过几百毫秒才落库并不稀奇；阈值太紧，活着的持有者就会被判成死的（比如出现在
+ * 回捞候选里）。放宽它不拖慢任何用例：要「看起来死了」的用例都走 `expire`，
+ * 把时钟拨到阈值的 10 倍之前，不真等。
  */
-const TIMINGS = { heartbeatMs: 40, takeoverMs: 200 };
+const TIMINGS = { heartbeatMs: 40, takeoverMs: 2_000 };
 
 /** 一档的完整装配：两个「副本」+ 一个让持有者看起来死掉的钩子。 */
 function setupFor(db: Db): TakeoverConformanceSetup & RestartConformanceSetup {

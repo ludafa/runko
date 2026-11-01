@@ -30,8 +30,11 @@ describe('零配置（本地沙盒 + 演示模型）', () => {
       'DEEPSEEK_API_TOKEN',
       'VERCEL_TOKEN',
       'E2B_API_KEY',
-      'GITHUB_REPO',
-      'GITHUB_PAT',
+      'GITHUB_APP_ID',
+      'GITHUB_APP_SLUG',
+      'GITHUB_APP_PRIVATE_KEY',
+      'GITHUB_CLIENT_ID',
+      'GITHUB_CLIENT_SECRET',
       'SANDBOX_PROVIDER',
     ]) {
       vi.stubEnv(name, '');

@@ -239,7 +239,7 @@ sequenceDiagram
 
 ### 4.3 GitHub 可选，加一个配置接口
 
-- `GITHUB_REPO` / `GITHUB_PAT` 只在用云沙盒时必需。建会话选 `local` 时不读它们，`repo`、`branch_name` 留空。
+- 云沙盒要配 GitHub App，仓库由用户建会话时从自己授权过的仓库里选（[按用户授权加载 GitHub 仓库 · 技术方案](./github-repo-access.md)）。建会话选 `local` 时不涉及 GitHub，`repo`、`branch_name` 留空。
 - 缺省 provider 的规则：`SANDBOX_PROVIDER` 点名了就听它的；没点名就挑这台服务端**真配得起**的第一档（Vercel → E2B → 本地），什么都没配时就是本地沙盒。
 - 新增 `GET /api/chat/config`（要登录），告诉前端这台服务端的能力：
 

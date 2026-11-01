@@ -10,6 +10,7 @@ import type { LanguageModel } from 'ai';
 import type { MiddlewareHandler } from 'hono';
 import { createMiddleware } from 'hono/factory';
 
+import type { GithubApp } from '../../src/agent/github-app.js';
 import { createChatPersistence } from '../../src/agent/persistence.js';
 import { createChatRuntime } from '../../src/agent/runtime.js';
 import type { SandboxManager } from '../../src/agent/sandbox-manager.js';
@@ -46,6 +47,8 @@ export interface BuildChatAppOptions {
   sessionFactory?: SessionFactory;
   /** 应用层转发；传了才会认转发标记（`x-runko-forwarded`）。 */
   forwarder?: Forwarder;
+  /** 建会话核对仓库、起轮签令牌都要用；不传就是生产单例（真环境变量、零测试用途下大多是「未配置」）。 */
+  githubApp?: GithubApp;
 }
 
 export function buildChatApp(opts: BuildChatAppOptions) {
@@ -61,6 +64,7 @@ export function buildChatApp(opts: BuildChatAppOptions) {
     ...(opts.sessionFactory !== undefined ?
       { sessionFactory: opts.sessionFactory }
     : {}),
+    ...(opts.githubApp !== undefined ? { githubApp: opts.githubApp } : {}),
   });
   const app = createChatApp({
     db: opts.db,
@@ -74,6 +78,7 @@ export function buildChatApp(opts: BuildChatAppOptions) {
       { telemetryStore: opts.telemetryStore }
     : {}),
     ...(opts.forwarder !== undefined ? { forwarder: opts.forwarder } : {}),
+    ...(opts.githubApp !== undefined ? { githubApp: opts.githubApp } : {}),
   });
   return { app, runtime };
 }

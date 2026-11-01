@@ -1,6 +1,6 @@
 {
   "name": "@runko/stream-redis",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "流分发实现：Redis 发布/订阅 —— 多副本共享直播内容",
   "type": "module",
   "license": "ISC",

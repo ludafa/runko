@@ -1,5 +1,16 @@
 # @runko/sandbox-e2b
 
+## 0.1.3
+
+### Patch Changes
+
+- Updated dependencies [e00ae29]
+- Updated dependencies [4a936b9]
+- Updated dependencies [a933c31]
+- Updated dependencies [a933c31]
+  - @runko/core@0.2.0
+  - @runko/virtual-fs@0.1.3
+
 ## 0.1.2
 
 ### Patch Changes

@@ -8,6 +8,8 @@ export default defineConfig({
     name: "persist-kysely",
     environment: "node",
     include: ["test/**/*.test.ts"],
+    // 真库的表在这里串行建一次，见文件头注释。
+    globalSetup: ["test/global-setup.ts"],
     // **默认的 5s 在这个包里不够用，必须调大。** 两条理由，都不是「测试写慢了」：
     //
     // 1. 一致性套件里「**心跳自己发现被接管**」那条自带一个 3 秒的等待窗口（它就是

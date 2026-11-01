@@ -75,9 +75,13 @@ function runCases<S extends { cleanup?: () => Promise<void> | void }>(
 /** 一档的完整装配：两个「节点」+ 一个让持有者看起来死掉的钩子。 */
 function setupFor(db: Kysely<RunkoDatabase>, flavor: Flavor): TakeoverConformanceSetup & RestartConformanceSetup {
   const traits = traitsOf(flavor);
-  // **心跳调到 40ms / 判死 200ms**（仍满足「阈值 ≥ 3× 心跳」那条硬规矩）：默认的
-  // 5s/60s 让「心跳自己发现被接管」那条用例要等一分钟。语义不变，只是把时间轴压扁。
-  const timings = { heartbeatMs: 40, takeoverMs: 200 };
+  // **心跳 40ms**：默认的 5s 让「心跳自己发现被接管」那条用例要等很久。
+  //
+  // **判死阈值留足 2s**（远超「阈值 ≥ 3× 心跳」的下限）。CI 上多个包并发跑，一拍心跳
+  // 拖过几百毫秒才落库并不稀奇；阈值太紧，活着的持有者就会被判成死的（比如出现在
+  // 回捞候选里）。放宽它不拖慢任何用例：要「看起来死了」的用例都走 `expire`，
+  // 把时钟拨到阈值的 10 倍之前，不真等。
+  const timings = { heartbeatMs: 40, takeoverMs: 2_000 };
 
   // 持有者那一侧的时钟。`expire` 把它拨到很久以前并**留在那儿**——于是持有者后面每一拍
   // 心跳写进 `heartbeat_at` 的都是过期的时刻，另一个节点稳定地看到它已死。
@@ -187,17 +191,11 @@ async function clearLeases(db: Kysely<RunkoDatabase>): Promise<void> {
 
 /**
  * **两个真库档也共用一个连接池，用例之间清租约表**——共用为什么安全，理由与 pglite
- * 那档同款（见上）；这里还多一条硬理由：
+ * 那档同款（见上）。连接在整个文件跑完后由 `afterAll` 统一销毁。
  *
- * `migrate()` 是一串 `CREATE TABLE IF NOT EXISTS`，而 **Postgres 上并发跑它会撞
- * `pg_type` 的唯一索引**（见 [schema.sql](../schema.sql) 顶部的告警：幂等 ≠ 可并发）。
- * 原来是一条用例一次 `new Pool()` + 一次 `migrate()`，两档各 18 条用例就是各 18 次；
- * `pnpm -r` 又默认并发跑多个包，而 `persist-postgres` 连的是同一个库、也在 migrate。
- * 两边一撞就卡在 schema 锁上等到 30s 超时——**2026-09-08 的正式发布就挂在这条上**
- * （前一天的演练侥幸错开了，所以这是条会看人下菜碟的不稳定测试）。
- *
- * 共用之后每档只 migrate 一次，撞锁窗口从 18 次缩到 1 次。连接不再由 `closing()`
- * 一条一关，改为整个文件跑完在 `afterAll` 里统一销毁。
+ * **这里不建表**：表由 `global-setup.ts` 在所有测试文件开跑前建好。这个文件和
+ * `conformance.test.ts` 并行连同一个库，各自建表会在 Postgres 上撞 `pg_type` 的唯一
+ * 索引（见 [schema.sql](../schema.sql) 顶部的告警：幂等 ≠ 可并发）。
  */
 let realPostgres: Promise<Kysely<RunkoDatabase>> | undefined;
 let realMysql: Promise<Kysely<RunkoDatabase>> | undefined;
@@ -206,9 +204,7 @@ function sharedRealPostgres(url: string): Promise<Kysely<RunkoDatabase>> {
   realPostgres ??= (async () => {
     const { Pool } = await import("pg");
     const pool = new Pool({ connectionString: url });
-    const db = new Kysely<RunkoDatabase>({ dialect: new PostgresDialect({ pool }) });
-    await migrate(db, { flavor: "postgres" });
-    return db;
+    return new Kysely<RunkoDatabase>({ dialect: new PostgresDialect({ pool }) });
   })();
   return realPostgres;
 }
@@ -217,9 +213,7 @@ function sharedRealMysql(url: string): Promise<Kysely<RunkoDatabase>> {
   realMysql ??= (async () => {
     const { createPool } = await import("mysql2");
     const pool = createPool(url);
-    const db = new Kysely<RunkoDatabase>({ dialect: new MysqlDialect({ pool }) });
-    await migrate(db, { flavor: "mysql" });
-    return db;
+    return new Kysely<RunkoDatabase>({ dialect: new MysqlDialect({ pool }) });
   })();
   return realMysql;
 }
@@ -277,13 +271,10 @@ function handoverSetupFor(
   flavor: Flavor,
   opts: { withPersistence: boolean },
 ): HandoverConformanceSetup {
-  // 这组用例用不到「让持有者死掉」，时间轴不用压扁：40ms/200ms 那档在 pglite（和测试同一个线程）
-  // 上一卡事件循环，活着的持有者就会被当成已死。
-  const traits = traitsOf(flavor);
-  const timings = { heartbeatMs: 1_000, takeoverMs: 5_000 };
+  const base = setupFor(db, flavor);
   return {
-    arbitration: leaseArbitration(db, { flavor: traits, holder: "node-a", ...timings }),
-    other: leaseArbitration(db, { flavor: traits, holder: "node-b", ...timings }),
+    arbitration: base.arbitration,
+    other: base.other,
     self: "node-a",
     otherNode: "node-b",
     ...(opts.withPersistence ? { persistence: kyselyPersistence(db, { flavor }) } : {}),

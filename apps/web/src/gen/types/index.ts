@@ -115,6 +115,20 @@ export type {
   GetApiConsoleOverviewQueryResponse,
 } from './GetApiConsoleOverview.ts';
 export type {
+  GetApiGithubRepos200,
+  GetApiGithubRepos401,
+  GetApiGithubRepos404,
+  GetApiGithubRepos409,
+  GetApiGithubReposQuery,
+  GetApiGithubReposQueryResponse,
+} from './GetApiGithubRepos.ts';
+export type {
+  GetApiGithubStatus200,
+  GetApiGithubStatus401,
+  GetApiGithubStatusQuery,
+  GetApiGithubStatusQueryResponse,
+} from './GetApiGithubStatus.ts';
+export type {
   GetApiNotes200,
   GetApiNotes401,
   GetApiNotesQuery,
@@ -126,11 +140,18 @@ export type {
   GetApiPushConfigQuery,
   GetApiPushConfigQueryResponse,
 } from './GetApiPushConfig.ts';
+export type { GithubRepoSummary } from './GithubRepoSummary.ts';
+export type { GithubReposResponse } from './GithubReposResponse.ts';
+export type { GithubStatus } from './GithubStatus.ts';
 export type { Note } from './Note.ts';
 export type { PostAnswerInput } from './PostAnswerInput.ts';
 export type {
   PostApiChatConversations201,
+  PostApiChatConversations400,
   PostApiChatConversations401,
+  PostApiChatConversations403,
+  PostApiChatConversations404,
+  PostApiChatConversations409,
   PostApiChatConversations500,
   PostApiChatConversationsMutation,
   PostApiChatConversationsMutationRequest,
@@ -248,6 +269,7 @@ export type { PushConfig } from './PushConfig.ts';
 export type { PushSubscribeInput } from './PushSubscribeInput.ts';
 export type { PushUnsubscribeInput } from './PushUnsubscribeInput.ts';
 export type { QueuedMessage } from './QueuedMessage.ts';
+export type { RepoSelector } from './RepoSelector.ts';
 export type { SkillSummary } from './SkillSummary.ts';
 export type {
   StartTurnAck,

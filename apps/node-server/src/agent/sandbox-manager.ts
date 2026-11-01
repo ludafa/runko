@@ -21,7 +21,7 @@
  *      分支与 skill 都还在
  *   3. 还没有 `resumeToken`（全新会话），或 `resume()` 报 `unavailable`（快照过期/没了）
  *      → `provider.create()`（仓库已经 clone 在工作区根）+ 重跑一遍初始化脚本
- *      （装 skill、配 git 身份、配远端鉴权、写 exclude）+ 恢复会话分支（推送过就
+ *      （装 skill、配 git 身份、配凭据助手、写 exclude）+ 恢复会话分支（推送过就
  *      `git fetch && checkout`，没推送过就 `git checkout -b` 新建）。「全新」与「过期」
  *      两种子情况走的是同一段代码。
  *
@@ -67,6 +67,7 @@ import { Sandbox as E2bSandbox } from 'e2b';
 import type { Logger } from '../logger.js';
 import { logger as defaultLogger } from '../logger.js';
 import { resolveE2bTemplate } from './e2b-template.js';
+import { isGithubAppConfigured } from './github-app.js';
 
 const LOG_SCOPE = 'sandbox-manager';
 
@@ -87,15 +88,20 @@ export function resolveIdleTimeoutMs(): number {
 
 export type SandboxProviderId = 'vercel' | 'e2b' | 'local';
 
-/** 这台服务端能用哪几档[沙盒 provider](docs/terms.md)：云沙盒要 key，[本地沙盒](docs/terms.md)永远能用。 */
+/**
+ * 这台服务端能用哪几档[沙盒 provider](docs/terms.md)：云沙盒要**自己的 key 并且配了
+ * GitHub App**——没有 App 就没法给沙盒签仓库令牌，选了也建不成会话
+ * （docs/ingress/tech/github-repo-access.md §5）。[本地沙盒](docs/terms.md)永远能用。
+ */
 export function availableProviders(
   env: NodeJS.ProcessEnv = process.env,
 ): SandboxProviderId[] {
   const ids: SandboxProviderId[] = [];
-  if ((env.VERCEL_TOKEN?.trim() ?? '').length > 0) {
+  const githubReady = isGithubAppConfigured(env);
+  if (githubReady && (env.VERCEL_TOKEN?.trim() ?? '').length > 0) {
     ids.push('vercel');
   }
-  if ((env.E2B_API_KEY?.trim() ?? '').length > 0) {
+  if (githubReady && (env.E2B_API_KEY?.trim() ?? '').length > 0) {
     ids.push('e2b');
   }
   ids.push('local');
@@ -105,24 +111,24 @@ export function availableProviders(
 /**
  * 建会话的请求没指定 provider 时用哪一档。
  *
- * `SANDBOX_PROVIDER` 点名了就听它的；没点名就挑**这台服务端真配得起**的第一档——
- * 什么 key 都没配时那就是[本地沙盒](docs/terms.md)，于是零配置也能建会话。
+ * `SANDBOX_PROVIDER` 点名了、而且这台服务端真配得起它，就听它的；否则挑配得起的第一档——
+ * 什么 key 都没配时那就是[本地沙盒](docs/terms.md)，于是零配置也能建会话。云沙盒还要配了
+ * GitHub App 才算配得起（`availableProviders`），点名了却没配齐的不能硬给。
  */
 export function resolveDefaultProvider(
   env: NodeJS.ProcessEnv = process.env,
 ): SandboxProviderId {
   const named = env.SANDBOX_PROVIDER?.trim().toLowerCase();
   const available = availableProviders(env);
-  if (named === 'e2b' || named === 'vercel' || named === 'local') {
-    return named;
-  }
-  return available[0] ?? 'local';
+  const match = available.find((id) => id === named);
+  return match ?? available[0] ?? 'local';
 }
 
 export interface CreateSandboxParams {
   name: string;
   cloneUrl: string;
-  githubPat: string;
+  /** 只对**这一个仓库**有效、1 小时过期的[安装令牌](../../../../docs/terms.md)（docs/ingress/tech/github-repo-access.md）。 */
+  githubToken: string;
   timeoutMs: number;
   /** 交给适配器的[保活](../../../../docs/terms.md)配置，见 `keepAliveOptionsFor`。 */
   keepAlive: KeepAliveOptions;
@@ -268,10 +274,12 @@ export function createVercelProvider(): SandboxProvider {
           type: 'git',
           url: params.cloneUrl,
           username: 'x-access-token',
-          password: params.githubPat,
+          password: params.githubToken,
           depth: 1,
         },
-        env: { GH_TOKEN: params.githubPat },
+        // 不设沙盒级 `GH_TOKEN`：它建盒时定死、过期后改不了，还会误导 agent 去用一把
+        // 失效的令牌（docs/ingress/tech/github-repo-access.md §4）。令牌只在这次 `source`
+        // 里过一道，随后靠 git 凭据助手读令牌文件（`installSkillAndConfigureGit`）。
       });
       return vercelProvisioned(sandbox, params.keepAlive);
     },
@@ -347,7 +355,7 @@ function e2bProvisioned(
   };
 }
 
-/** 把 `https://github.com/owner/repo.git` 改写成 `https://x-access-token:$GH_TOKEN@github.com/...`。`$GH_TOKEN` 保持字面量不展开——由沙盒里的 shell 从 `Sandbox.create` 的 `envs` 设进去的环境变量展开，绝不把 PAT 拼进命令字符串（与 `remoteAuth` 同一套纪律）。 */
+/** 把 `https://github.com/owner/repo.git` 改写成 `https://x-access-token:$GH_TOKEN@github.com/...`。`$GH_TOKEN` 保持字面量不展开——由这一条 `commands.run` 调用自己的 `envs`（只在这一次调用里存在）展开，绝不把令牌拼进命令字符串本身。 */
 function withTokenAuth(cloneUrl: string): string {
   return cloneUrl.replace(/^https:\/\//, 'https://x-access-token:$GH_TOKEN@');
 }
@@ -367,13 +375,14 @@ export function createE2bProvider(): SandboxProvider {
         timeoutMs: params.timeoutMs,
         // 与 Vercel 的 `persistent` 对齐：闲置超时自动暂停 + 来流量自动恢复（整份内存快照）。docs/host/contract/tech/sandbox-provider.md §5。
         lifecycle: { onTimeout: 'pause', autoResume: true },
-        envs: { GH_TOKEN: params.githubPat },
+        // 不设沙盒级 `envs`——理由同 Vercel 那边（见上）。令牌只在下面这一条克隆命令的
+        // `envs` 里出现，那是这条命令自己的环境变量，不影响这个沙盒之后的任何一次调用。
         metadata: { name: params.name },
       });
       // E2B 创建时没法指定 git 源——现在把仓库 clone 进工作区根目录。
       const clone = await sandbox.commands.run(
         `git clone --depth 1 ${withTokenAuth(params.cloneUrl)} ${E2B_WORKSPACE_ROOT}`,
-        { timeoutMs: 2 * 60_000 },
+        { timeoutMs: 2 * 60_000, envs: { GH_TOKEN: params.githubToken } },
       );
       if (clone.exitCode !== 0) {
         throw new Error(
@@ -417,15 +426,27 @@ export function createE2bProvider(): SandboxProvider {
 
 // ---- 宿主侧初始化脚本（装 skill + 配 git），只在（重新）创建时跑 ----
 
+/**
+ * git 凭据助手读的那个令牌文件：在 `.git/` 下，不会被提交、也不会被推送。路径相对工作区根（= 仓库根）。
+ * 写它经 `RunkoFS.writeFile`，不经命令行（docs/ingress/tech/github-repo-access.md §4）。
+ */
+const GIT_TOKEN_FILE_NAME = 'runko-github-token';
+const GIT_TOKEN_RELATIVE_PATH = `.git/${GIT_TOKEN_FILE_NAME}`;
+
 interface InitScripts {
   installSkill: string;
   cloneFallback: string;
   gitIdentity: string;
-  remoteAuth: string;
+  gitCredentialHelper: string;
+  resetRemoteUrl: string;
   gitExclude: string;
 }
 
-/** 与 examples/12 的 `buildInitPlan` 同样那六条命令（docs/host/contract/tech/sandbox.md §2.3/§2.4），不含默认分支探测——那一步单独放在 `detectDefaultBranch` 里。 */
+/**
+ * 建沙盒之后的初始化命令：装 skill、配 git 身份、配凭据助手、把远端地址改回不带令牌的、
+ * 排除 skill 目录（docs/ingress/tech/github-repo-access.md §4）。不含默认分支探测——那一步单独放在
+ * `detectDefaultBranch` 里。
+ */
 function buildInitScripts(owner: string, repo: string): InitScripts {
   return {
     installSkill:
@@ -436,8 +457,12 @@ function buildInitScripts(owner: string, repo: string): InitScripts {
       'mkdir -p .agents/skills && cp -r /tmp/runko-skills-src/skills/frontend-design .agents/skills/)',
     gitIdentity:
       'git config user.name "runko-agent" && git config user.email "runko-agent@users.noreply.github.com"',
-    // PAT 由沙盒自己的 $GH_TOKEN 环境变量（创建时设进去的）提供，绝不在这里拼进字符串。
-    remoteAuth: `git remote set-url origin "https://x-access-token:$GH_TOKEN@github.com/${owner}/${repo}.git"`,
+    // git 要密码（`get`）时才 cat 令牌文件——令牌本身从不出现在这条命令、也不出现在 git 配置里。
+    // 按 `--absolute-git-dir` 定位：agent 在仓库子目录里跑 `git push` 时，凭据助手的工作目录就是那个子目录。
+    // `store` / `erase` 直接忽略：令牌只由服务端写进文件。
+    gitCredentialHelper: `git config credential.helper '!f() { test "$1" = get || exit 0; echo username=x-access-token; echo "password=$(cat "$(git rev-parse --absolute-git-dir)/${GIT_TOKEN_FILE_NAME}" 2>/dev/null)"; }; f'`,
+    // 远端地址不带令牌——克隆时（E2B）临时拼进去过的令牌，这里改回干净的地址。
+    resetRemoteUrl: `git remote set-url origin "https://github.com/${owner}/${repo}.git"`,
     gitExclude: "printf '%s\\n' '.agents/' '.skills/' >> .git/info/exclude",
   };
 }
@@ -482,14 +507,39 @@ async function installSkillAndConfigureGit(
     );
   }
 
-  const remoteAuth = await runScript(workspace, scripts.remoteAuth);
-  if (remoteAuth.exitCode !== 0) {
+  const credentialHelper = await runScript(
+    workspace,
+    scripts.gitCredentialHelper,
+  );
+  if (credentialHelper.exitCode !== 0) {
     throw new Error(
-      `git remote set-url failed (exit ${String(remoteAuth.exitCode)}).`,
+      `git credential.helper setup failed (exit ${String(credentialHelper.exitCode)}).`,
+    );
+  }
+
+  const resetRemoteUrl = await runScript(workspace, scripts.resetRemoteUrl);
+  if (resetRemoteUrl.exitCode !== 0) {
+    throw new Error(
+      `git remote set-url failed (exit ${String(resetRemoteUrl.exitCode)}).`,
     );
   }
 
   await runScript(workspace, scripts.gitExclude); // 尽力而为，失败也不致命
+}
+
+/**
+ * 覆写令牌文件——**每次 `acquire()` 都要做**（缓存命中、恢复、新建三条路，
+ * docs/ingress/tech/github-repo-access.md §4）：令牌 1 小时过期，沙盒一开就是好几个小时。
+ * 没带令牌（[本地沙盒](../../../../docs/terms.md)）时什么都不做。
+ */
+async function writeGithubToken(
+  workspace: RunkoFS,
+  githubToken: string | undefined,
+): Promise<void> {
+  if (githubToken === undefined || githubToken.length === 0) {
+    return;
+  }
+  await workspace.writeFile(`/${GIT_TOKEN_RELATIVE_PATH}`, githubToken);
 }
 
 /** 恢复会话分支：之前推送过就 `git fetch && checkout`，没推送过就新建一条。全新会话与快照过期两种情况都走这里（见文件头）。 */
@@ -550,7 +600,8 @@ export interface AcquireInput {
   repoCloneUrl?: string;
   repoOwner?: string;
   repoName?: string;
-  githubPat?: string;
+  /** 只对这一个仓库有效的[安装令牌](../../../../docs/terms.md)——每次都写进令牌文件（见 `writeGithubToken`），覆盖缓存命中/恢复/新建三条路。 */
+  githubToken?: string;
   /** 之前落库的[重连令牌](docs/terms.md)：Vercel 是 sandboxName，E2B 是存下来的 sandboxId。全新会话是 `undefined`，直接走创建。 */
   resumeToken?: string;
 }
@@ -802,7 +853,27 @@ export function createSandboxManager(
     // 在高高兴兴复用那个句柄」。
     const cached = liveEntry(input.conversationId);
     if (cached !== undefined) {
-      return toAcquired(cached, 'cache');
+      if (!cached.provider.usesGit) {
+        return toAcquired(cached, 'cache');
+      }
+      try {
+        await writeGithubToken(cached.provisioned.workspace, input.githubToken);
+        return toAcquired(cached, 'cache');
+      } catch (error) {
+        // 平台在本地到期时刻之前就把它停了：写令牌是缓存命中时唯一的一次远程调用，它失败说明句柄死了。
+        // 踢掉缓存，照恢复 / 新建往下走。
+        if (!cached.provider.isGone(error)) {
+          throw error;
+        }
+        log.warn(
+          LOG_SCOPE,
+          'cached sandbox vanished while refreshing the token',
+          {
+            conversationId: input.conversationId,
+          },
+        );
+        active.delete(input.conversationId);
+      }
     }
 
     const provider = resolveProvider(input.provider);
@@ -831,6 +902,9 @@ export function createSandboxManager(
           });
           return await createAndRegister(input, provider);
         }
+        if (provider.usesGit) {
+          await writeGithubToken(resumed.sandbox.workspace, input.githubToken);
+        }
         const defaultBranch =
           provider.usesGit ?
             await detectDefaultBranch(resumed.sandbox.workspace)
@@ -858,13 +932,16 @@ export function createSandboxManager(
     const provisioned = await provider.create({
       name: input.sandboxName,
       cloneUrl: input.repoCloneUrl ?? '',
-      githubPat: input.githubPat ?? '',
+      githubToken: input.githubToken ?? '',
       timeoutMs: idleTimeoutMs,
       keepAlive: keepAliveOptionsFor(input.conversationId),
     });
-    // 没有 git 的档（本地沙盒）跳过这三步：它们都要联网，而那一档没有仓库可拉。
+    // 没有 git 的档（本地沙盒）跳过这几步：它们都要联网，而那一档没有仓库可拉。
     let defaultBranch = '';
     if (provider.usesGit) {
+      // 先写令牌文件，再配 git/凭据助手——`recoverSessionBranch` 的 `git fetch` 要联网，
+      // 必须在它之前就绪（docs/ingress/tech/github-repo-access.md §4）。
+      await writeGithubToken(provisioned.workspace, input.githubToken);
       await installSkillAndConfigureGit(
         provisioned.workspace,
         input.repoOwner ?? '',

@@ -8,6 +8,8 @@ export { getApiChatConversationsIdMessages } from './getApiChatConversationsIdMe
 export { getApiChatConversationsIdStream } from './getApiChatConversationsIdStream.ts';
 export { getApiChatConversationsIdTurnsTurnTelemetry } from './getApiChatConversationsIdTurnsTurnTelemetry.ts';
 export { getApiConsoleOverview } from './getApiConsoleOverview.ts';
+export { getApiGithubRepos } from './getApiGithubRepos.ts';
+export { getApiGithubStatus } from './getApiGithubStatus.ts';
 export { getApiNotes } from './getApiNotes.ts';
 export { getApiPushConfig } from './getApiPushConfig.ts';
 export { postApiChatConversations } from './postApiChatConversations.ts';

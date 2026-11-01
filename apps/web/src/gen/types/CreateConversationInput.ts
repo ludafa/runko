@@ -3,6 +3,8 @@
  * Do not edit manually.
  */
 
+import type { RepoSelector } from './RepoSelector.ts';
+
 export const createConversationInputProviderEnum = {
   vercel: 'vercel',
   e2b: 'e2b',
@@ -23,4 +25,8 @@ export type CreateConversationInput = {
    * @type string | undefined
    */
   provider?: CreateConversationInputProviderEnumKey;
+  /**
+   * @type object | undefined
+   */
+  repo?: RepoSelector;
 };

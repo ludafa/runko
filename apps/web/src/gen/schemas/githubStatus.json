@@ -1,0 +1,19 @@
+{
+  "type": "object",
+  "properties": {
+    "configured": {
+      "type": "boolean",
+      "description": "服务端是否配了 GitHub App。false 时新建会话弹窗里没有云沙盒可选"
+    },
+    "linked": {
+      "type": "boolean",
+      "description": "这个用户是否连接过 GitHub（better-auth 的 account 表里有一条 github）"
+    },
+    "installUrl": {
+      "type": ["string", "null"],
+      "description": "安装页地址（`https://github.com/apps/<slug>/installations/new`）；未配置时为 null"
+    }
+  },
+  "required": ["configured", "linked", "installUrl"],
+  "x-readme-ref-name": "GithubStatus"
+}

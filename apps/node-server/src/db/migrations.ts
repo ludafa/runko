@@ -16,13 +16,13 @@ import type { Migration, MigrationProvider } from 'kysely/migration';
 
 import type { ChatDatabase } from './schema.js';
 
-/** 毫秒时间戳的列类型。 */
-function timestampType(flavor: Flavor): 'integer' | 'bigint' {
+/** 放得下大整数的列类型：毫秒时间戳、GitHub 的 installation id / repo id。SQLite 的 integer 本来就是 64 位。 */
+function bigIntType(flavor: Flavor): 'integer' | 'bigint' {
   return flavor === 'sqlite' ? 'integer' : 'bigint';
 }
 
 function createInitialMigration(flavor: Flavor): Migration {
-  const ts = timestampType(flavor);
+  const ts = bigIntType(flavor);
   return {
     async up(db: Kysely<ChatDatabase>): Promise<void> {
       await db.schema
@@ -94,7 +94,7 @@ function createInitialMigration(flavor: Flavor): Migration {
  * - 新表 `local_workspaces`：本地沙盒每轮收尾存一份文件快照。
  */
 function createLocalSandboxMigration(flavor: Flavor): Migration {
-  const ts = timestampType(flavor);
+  const ts = bigIntType(flavor);
   return {
     async up(db: Kysely<ChatDatabase>): Promise<void> {
       if (flavor === 'sqlite') {
@@ -149,7 +149,7 @@ function createLocalSandboxMigration(flavor: Flavor): Migration {
 
 /** 第三条：[在场](../../../../docs/terms.md)从进程内存挪进库，多副本才读得到。 */
 function createPresenceMigration(flavor: Flavor): Migration {
-  const ts = timestampType(flavor);
+  const ts = bigIntType(flavor);
   return {
     async up(db: Kysely<ChatDatabase>): Promise<void> {
       await db.schema
@@ -166,6 +166,28 @@ function createPresenceMigration(flavor: Flavor): Migration {
   };
 }
 
+/**
+ * 第四条：[按用户授权加载 GitHub 仓库](docs/ingress/features/github-repo-access.md)
+ * 给 `conversations` 加两列——签[安装令牌](docs/terms.md)要用的安装 id 与仓库 id，
+ * 都可空（本地沙盒、以及这条上线前建的会话）。两列都是新加的，SQLite 原生支持
+ * `ALTER TABLE ... ADD COLUMN`，不需要像 002 那样建新表搬数据。
+ */
+function createGithubRepoMigration(flavor: Flavor): Migration {
+  const idType = bigIntType(flavor);
+  return {
+    async up(db: Kysely<ChatDatabase>): Promise<void> {
+      await db.schema
+        .alterTable('conversations')
+        .addColumn('github_installation_id', idType)
+        .execute();
+      await db.schema
+        .alterTable('conversations')
+        .addColumn('github_repo_id', idType)
+        .execute();
+    },
+  };
+}
+
 /** 迁移表自己的名字——跟 Kysely 的缺省一致，写出来是为了别处（旧库体检）能引用它。 */
 export const MIGRATION_TABLE = 'kysely_migration';
 
@@ -174,6 +196,7 @@ export function appMigrationProvider(flavor: Flavor): MigrationProvider {
     '001_initial': createInitialMigration(flavor),
     '002_local_sandbox': createLocalSandboxMigration(flavor),
     '003_presence': createPresenceMigration(flavor),
+    '004_github_repo': createGithubRepoMigration(flavor),
   };
   return {
     getMigrations: () => Promise.resolve(migrations),

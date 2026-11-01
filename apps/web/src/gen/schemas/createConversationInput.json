@@ -2,7 +2,16 @@
   "type": "object",
   "properties": {
     "title": { "type": "string", "minLength": 1, "maxLength": 255 },
-    "provider": { "type": "string", "enum": ["vercel", "e2b", "local"] }
+    "provider": { "type": "string", "enum": ["vercel", "e2b", "local"] },
+    "repo": {
+      "type": "object",
+      "properties": {
+        "installationId": { "type": "integer", "exclusiveMinimum": 0 },
+        "repoId": { "type": "integer", "exclusiveMinimum": 0 }
+      },
+      "required": ["installationId", "repoId"],
+      "x-readme-ref-name": "RepoSelector"
+    }
   },
   "x-readme-ref-name": "CreateConversationInput"
 }

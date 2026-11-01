@@ -24,7 +24,10 @@
     "docs:dev": "pnpm --filter @runko/docs run dev",
     "docs:build": "pnpm --filter @runko/docs run build",
     "docs:preview": "pnpm --filter @runko/docs run preview",
-    "docs:check": "pnpm --filter @runko/docs run check"
+    "docs:check": "pnpm --filter @runko/docs run check",
+    "db:up": "docker compose up -d --wait",
+    "db:down": "docker compose down",
+    "test:db": "RUNKO_TEST_POSTGRES_URL=postgres://runko:runko@127.0.0.1:5433/runko RUNKO_TEST_MYSQL_URL=mysql://root:runko@127.0.0.1:3307/runko RUNKO_TEST_MONGO_URL=mongodb://127.0.0.1:27018 pnpm test"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.1",

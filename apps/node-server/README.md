@@ -30,10 +30,11 @@ pnpm chat:web       # 另开一个终端
 | 想要 | 配什么 |
 | --- | --- |
 | 真 AI | `DEEPSEEK_API_BASE_URL` + `DEEPSEEK_API_TOKEN` |
-| 云沙盒（跑你自己的仓库） | Vercel 或 E2B 的 key，外加 `GITHUB_REPO` + `GITHUB_PAT` |
-| GitHub 登录 | `GITHUB_CLIENT_ID` + `GITHUB_CLIENT_SECRET` |
+| 云沙盒（按用户授权加载仓库，见 [技术方案](../../docs/ingress/tech/github-repo-access.md)） | Vercel 或 E2B 的 key，外加一个 GitHub App：`GITHUB_APP_ID` + `GITHUB_APP_SLUG` + `GITHUB_APP_PRIVATE_KEY` + `GITHUB_CLIENT_ID` + `GITHUB_CLIENT_SECRET` |
 | 推送通知 | `VAPID_*` |
 | 联网搜索 | `EXA_API_KEY` |
+
+登录与「连接 GitHub」用的是同一对 `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET`（GitHub App 自带的 OAuth 客户端），不用单独配。
 
 模型与沙盒是两件独立的事：真 AI 配本地沙盒、演示模型配云沙盒，都行。
 
