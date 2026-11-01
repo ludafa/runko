@@ -87,9 +87,11 @@ jobs:
       # 上面 `pnpm -r test` 里它们跑的是「几个进程共用一个 SQLite 文件」那一档——核心路径
       # 一样，但跨机器部署只能用 Postgres，两档都跑过才算数。
       # 副本启动时不建 Postgres 的表（多个副本同时建会撞），得先显式建一次。
+      # 只点名这两个文件，不扫整个 test/e2e：那里还有进程内跑 SQLite 的集成测试，
+      # 设了 DATABASE_URL 会让应用按 Postgres 读写一个 SQLite 库。
       - run: pnpm --filter @runko-chat/node-server db:migrate
         env:
           DATABASE_URL: postgres://runko:runko@127.0.0.1:5432/runko
-      - run: pnpm --filter @runko-chat/node-server exec vitest run test/e2e
+      - run: pnpm --filter @runko-chat/node-server exec vitest run test/e2e/multi-replica.e2e.test.ts test/e2e/suspend-resume.e2e.test.ts
         env:
           DATABASE_URL: postgres://runko:runko@127.0.0.1:5432/runko
