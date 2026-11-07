@@ -20,6 +20,8 @@
     "chat:bootstrap": "pnpm --filter @runko-chat/shared run build && pnpm --filter @runko-chat/node-server run db:migrate && pnpm --filter @runko-chat/node-server run generate:openapi && pnpm --filter @runko-chat/web run generate:api",
     "chat:server": "pnpm --filter @runko-chat/shared run build && pnpm --filter @runko-chat/node-server run dev",
     "chat:web": "pnpm --filter @runko-chat/web run dev",
+    "cf:dev": "pnpm --filter @runko-chat/shared run build && SERVER_URL= pnpm --filter @runko-chat/web run build && pnpm --filter @runko-chat/cloudflare-server run dev",
+    "cf:deploy": "pnpm --filter @runko-chat/cloudflare-server run deploy",
     "prepare": "husky",
     "docs:dev": "pnpm --filter @runko/docs run dev",
     "docs:build": "pnpm --filter @runko/docs run build",

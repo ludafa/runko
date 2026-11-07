@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "lib": ["ES2024"],
+    "types": [
+      "@cloudflare/workers-types/latest",
+      "@cloudflare/vitest-pool-workers/types"
+    ]
+  },
+  "include": ["src", "test"],
+  "exclude": ["node_modules", "dist", "scripts"]
+}

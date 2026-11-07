@@ -1,0 +1,29 @@
+// 测试与 `build` 用的配置。vitest-pool-workers 按它起 workerd；`build` 用它打一次包，只验 Worker
+// 打得出来。`build` 的 `--outdir` 写绝对路径：写相对路径时，产物和它附带的 README 会落到两个不同的目录。
+// 与 ../wrangler.jsonc 的差别是没有容器和静态资源：测试池跑不了容器，`build` 也就不要
+// 前端产物、不要 Docker（CI 里两样都没有）。演示模型调慢一点，好让「一轮在跑」的状态测得到。
+{
+  "name": "runko-chat-test",
+  "main": "../src/index.ts",
+  "compatibility_date": "2026-07-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "runko-chat-test",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../migrations",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "CONVERSATION", "class_name": "ConversationObject" },
+    ],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ConversationObject"] }],
+  "vars": {
+    "LOG_LEVEL": "error",
+    "BETTER_AUTH_SECRET": "test-only-secret-0123456789abcdef0123456789",
+    "CHAT_DEMO_DELAY_MS": "20",
+  },
+}

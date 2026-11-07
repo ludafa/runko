@@ -1,0 +1,56 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // chat 应用 Cloudflare 版：一个 Worker 装下前端、接口、D1、会话对象与 Cloudflare 沙盒
+  // （docs/host/cloudflare/tech/chat-on-cloudflare.md）。
+  "name": "runko-chat",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  // 前端：apps/web 打包的产物。`/api/*` 先进 Worker，其余由静态资源答；
+  // 单页应用回退让 `/chat/xxx` 这种前端路由刷新不 404。
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/health"]
+  },
+
+  // 部署脚本（scripts/deploy.mjs）建好库后把 database_id 写回这里；本地开发不看它。
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "runko-chat",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "durable_objects": {
+    "bindings": [
+      { "name": "CONVERSATION", "class_name": "ConversationObject" },
+      { "name": "Sandbox", "class_name": "Sandbox" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ConversationObject", "Sandbox"] }
+  ],
+
+  // Cloudflare 沙盒的容器。缺省 standard-1（1/2 核、4 GB 内存、8 GB 磁盘）：
+  // basic 只有 1 GB，npm install 容易爆内存。镜像 tag 必须与 @cloudflare/sandbox 的版本一致。
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "./Dockerfile",
+      "instance_type": "standard-1",
+      "max_instances": 10
+    }
+  ],
+
+  // 非密钥的配置。密钥（BETTER_AUTH_SECRET、DEEPSEEK_API_TOKEN、GITHUB_*）用 `wrangler secret put`，
+  // 本地写进 .dev.vars。
+  "vars": {
+    "LOG_LEVEL": "info"
+  }
+}
