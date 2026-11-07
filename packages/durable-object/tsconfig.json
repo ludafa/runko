@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": ".",
+    // 源码只靠 Web 标准全局（ReadableStream、AbortController、crypto……），不碰任何 Cloudflare 类型：
+    // 这里用 DOM 库给它们类型，Cloudflare 的那一套只在 test/tsconfig.json 里出现。
+    "lib": ["ES2022", "DOM"],
+    "types": []
+  },
+  "include": ["src/**/*.ts"]
+}

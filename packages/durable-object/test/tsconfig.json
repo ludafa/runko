@@ -1,0 +1,10 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    // 测试跑在真的 workerd 里，类型也用 Cloudflare 那一套；src 一起编进来，
+    // 顺带验证手写的结构接口与真的 `DurableObjectState` 兼容。
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-pool-workers/types"]
+  },
+  "include": ["../src/**/*.ts", "./**/*.ts"]
+}
