@@ -22,6 +22,7 @@ pnpm workspace 三组成员（见 [pnpm-workspace.yaml](./pnpm-workspace.yaml)�
 | `@runko/persist-mysql`      | 薄壳：吃 mysql2 连接池                                                       | agent, persist-kysely       |
 | `@runko/persist-mongo`      | **非** 薄壳：MongoDB 直接实现三个领域接口 + 租约版仲裁（Kysely 是 SQL，用不上） | agent, core（peer mongodb） |
 | `@runko/stream-redis`       | 流分发实现：Redis 发布/订阅广播，多副本时直播流连哪个副本都能看（peer `redis`）  | agent, core                |
+| `@runko/durable-object`     | 把 agent 运行时装进 Cloudflare Durable Object：对象 SQLite 的 Kysely 方言、起轮标记落 SQLite 的归属仲裁、直播帧跨 RPC 的字节流、定时唤醒（alarm）。测试在真 workerd 里跑（vitest-pool-workers），所以根 `vitest.config.ts` 排除了它 | agent, persist-kysely      |
 | `@runko/conformance`        | 契约一致性套件：持久化 / 归属仲裁的用例数据（`{ name, run }`），**不依赖任何测试框架** | agent（普通依赖，代码只引它的类型）、core（dev） |
 | `@runko/sdk`                | 主包门面：re-export core + virtual-fs + mini-bash，不放实现                  | core, virtual-fs, mini-bash |
 
@@ -31,7 +32,9 @@ pnpm workspace 三组成员（见 [pnpm-workspace.yaml](./pnpm-workspace.yaml)�
 
 | 成员                                   | 是什么                                                                               | workspace 依赖                                |
 | -------------------------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------- |
-| `@runko-chat/node-server`              | chat 应用服务端（**仓库唯一的 demo**）：Hono + zod-openapi + Kysely（SQLite / Postgres）+ better-auth，SSE 流式；零配置可跑（演示模型 + 本地沙盒），可开多副本 | agent, core, sdk, persist-kysely, sandbox-e2b, sandbox-vercel, just-bash, virtual-fs |
+| `@runko-chat/shared`                   | chat 应用两个服务端的**共用层**：接口 schema、数据访问、提示词、审批规则、GitHub App、沙盒管理、Hono 路由（只依赖「会话后端」接口）。从 `dist` 导出，所以 `chat:server` / `cf:dev` 都先编译它 | agent, core, sdk, persist-kysely, just-bash, virtual-fs |
+| `@runko-chat/node-server`              | chat 应用服务端 Node 版（**仓库唯一的 demo**）：会话后端的 Node 实现（运行时 + 转发 + 节点下线）、Kysely（SQLite / Postgres）、better-auth、集群控制台、推送；零配置可跑（演示模型 + 本地沙盒），可开多副本 | shared, agent, core, sdk, persist-kysely, sandbox-e2b, sandbox-vercel, stream-redis, just-bash, virtual-fs |
+| `@runko-chat/cloudflare-server`        | 同一个 chat 应用的 Cloudflare 版：一个 Worker 装下前端、接口、D1、每个会话一个会话对象（Durable Object）、Cloudflare 沙盒。`cf:dev` 本地起、`cf:deploy` 部署；测试在真 workerd 里跑 | shared, durable-object, sandbox-cloudflare, agent, core, sdk, persist-kysely, just-bash, virtual-fs |
 | `@runko-chat/web`                      | chat 应用前端：Vite + React + TanStack Router + shadcn(base-ui) + Tailwind           | core                                          |
 | `@runko-chat/cloudflare-worker-server` | 双角色 Worker：进程内直连真实 CF Sandbox，同时对外提供 BYO 网关端点                  | sdk, sandbox-cloudflare                       |
 | `@runko/examples`                      | 示例集（实验田），`pnpm example <编号>` 即跑；只有 typecheck，无 build/test          | sdk, just-bash, sandbox-e2b/vercel/cloudflare |
@@ -44,14 +47,14 @@ pnpm workspace 三组成员（见 [pnpm-workspace.yaml](./pnpm-workspace.yaml)�
 ### 命令边界（容易踩）
 
 - 根 `pnpm build` / `typecheck` / `test` 只 filter `./packages/*`，**不覆盖 apps、examples 与 docs**；动了 apps 要进对应目录跑它自己的 `typecheck`/`lint`/`test`。
-- CI（`.github/workflows/ci.yml`）跑的是 `pnpm -r build|typecheck|test`，覆盖**全部** 20 个成员——本地只跑根脚本会漏掉 apps/examples/docs 的问题。
-- 集群端到端（`test:cluster` / `test:cluster-handover` / `test:cluster-console` / `test:lab`，真 Docker 起多节点）单独一个 workflow `.github/workflows/cluster-e2e.yml`：四套并行，只在改到 core / agent / persist-* / stream-redis / node-server 时、合入 main 时和手动触发时跑；失败时上传 `apps/node-server/logs/`。用的是演示模型，不需要也不会用任何密钥。
+- CI（`.github/workflows/ci.yml`）跑的是 `pnpm -r build|typecheck|test`，覆盖**全部** 24 个成员——本地只跑根脚本会漏掉 apps/examples/docs 的问题。
+- 集群端到端（`test:cluster` / `test:cluster-handover` / `test:cluster-console` / `test:lab`，真 Docker 起多节点）单独一个 workflow `.github/workflows/cluster-e2e.yml`：四套并行，只在改到 core / agent / persist-* / stream-redis / node-server / chat-shared 时、合入 main 时和手动触发时跑；失败时上传 `apps/node-server/logs/`。用的是演示模型，不需要也不会用任何密钥。
 - **文档站的死链检查藏在 `pnpm -r build` 里**（`docs` 的 build 就是 `vitepress build`，构建时会校验全站链接）；`typecheck` 查的是 `.vitepress/` 下的配置。但 **front matter 体检（`docs:check`）不在 `-r` 的三个脚本里**，CI 单列了一步。
-- chat 应用另有根级 `chat:bootstrap`（建库 + 生成 OpenAPI 与前端 client）、`chat:server`、`chat:web`；文档站有 `docs:dev` / `docs:build` / `docs:preview` / `docs:check`（都是 `--filter @runko/docs` 的快捷方式）。
+- chat 应用另有根级 `chat:bootstrap`（建库 + 生成 OpenAPI 与前端 client）、`chat:server`、`chat:web`，Cloudflare 版是 `cf:dev`（本地 `wrangler dev`，常驻）与 `cf:deploy`（加 `--dry-run` 只做本地那几步）；文档站有 `docs:dev` / `docs:build` / `docs:preview` / `docs:check`（都是 `--filter @runko/docs` 的快捷方式）。
 - **本地真库**在根目录 `compose.yaml`（Postgres 5433 · MySQL 3307 · MongoDB 27018 · Redis 6380，镜像与 CI 一致）：`db:up` 起、`db:down` 停，`test:db` 带上三个真库跑 `packages/*` 的测试。不起它时，`pnpm test` 里需要真库的那几档全是 skip。Postgres 里 `runko` 是测试库（测试会清表），chat 应用开发用 `runko_dev`。
-- **lint 跟其余三个根脚本不一样：`pnpm lint` / `pnpm lint:fix` 走的是 `pnpm -r`，覆盖全部 19 个有 lint 脚本的成员**（`packages/*` 十五个 + `examples` + 三个 app；只有 `docs` 没配——它的源码里没有可 lint 的 JS/TS，`.vitepress/cache` 全是构建缓存）。规则分两套：`packages/*`、`examples` 与 `cloudflare-worker-server` 引根目录的 `eslint.config.base.js`（共享基线，目前只有「花括号强制」一条）；`web` 与 `node-server` 各有自己的完整配置（prettier + import 排序 + react-hooks），不引基线。
-- **给 app 的配置加规则时，位置很关键**：两个 app 的配置最后一项是 `eslint-config-prettier`，它会把 `curly` 这类「特殊规则」直接关掉。新规则若被它覆盖，必须写在它**后面**的配置块里（`curly: ['error', 'all']` 就是这么加的——`all` 档只加括号、不动折行，与 prettier 不冲突）。
-- **根 `package.json` 的 `typescript` 是 `^6.0.3`，跟 catalog 的 `^7.0.2` 不一致，这是故意的**：`typescript-eslint` 至今（8.67）的 peer 范围是 `>=4.8.4 <6.1.0`，装在 TS 7 上一 import 就崩（`Cannot read properties of undefined (reading 'Cjs')`）。根上这份 TS 6 只给 lint 工具链用；`packages/*` 各自的 `typescript: catalog:` 仍是 7.0.2，编译不受影响（两个 app 早就为同一原因把自己钉在 `^6.0.3`）。**typescript-eslint 支持 TS 7 后可以撤掉这个钉子。**
+- **lint 跟其余三个根脚本不一样：`pnpm lint` / `pnpm lint:fix` 走的是 `pnpm -r`，覆盖全部 23 个有 lint 脚本的成员**（`packages/*` 十七个 + `examples` + 五个 app；只有 `docs` 没配——它的源码里没有可 lint 的 JS/TS，`.vitepress/cache` 全是构建缓存）。规则分两套：`packages/*`、`examples` 与 `cloudflare-worker-server` 引根目录的 `eslint.config.base.js`（共享基线，目前只有「花括号强制」一条）；`web`、`node-server`、`chat-shared`、`cloudflare-server` 各有自己的完整配置（prettier + import 排序，`web` 另有 react-hooks），不引基线。
+- **给 app 的配置加规则时，位置很关键**：这四个 app 的配置最后一项是 `eslint-config-prettier`，它会把 `curly` 这类「特殊规则」直接关掉。新规则若被它覆盖，必须写在它**后面**的配置块里（`curly: ['error', 'all']` 就是这么加的——`all` 档只加括号、不动折行，与 prettier 不冲突）。
+- **根 `package.json` 的 `typescript` 是 `^6.0.3`，跟 catalog 的 `^7.0.2` 不一致，这是故意的**：`typescript-eslint` 至今（8.67）的 peer 范围是 `>=4.8.4 <6.1.0`，装在 TS 7 上一 import 就崩（`Cannot read properties of undefined (reading 'Cjs')`）。根上这份 TS 6 只给 lint 工具链用；`packages/*` 各自的 `typescript: catalog:` 仍是 7.0.2，编译不受影响（四个 app 早就为同一原因把自己钉在 `^6.0.3`）。**typescript-eslint 支持 TS 7 后可以撤掉这个钉子。**
 
 ### dev server 归我自己管（硬性规范）
 

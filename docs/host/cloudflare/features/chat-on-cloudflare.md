@@ -45,14 +45,15 @@ chat 应用现在只能跑在 Node 上：要自己准备一台常开的机器、
 | 什么时候 | 用户看到什么 | 为什么 |
 |---|---|---|
 | 新会话第一次用 Cloudflare 沙盒，或者沙盒闲置后再用 | 「正在准备…」多等几秒 | 容器要启动。打开会话时会提前把沙盒叫醒，大多数时候用户发第一条消息时它已经好了 |
+| Cloudflare 沙盒闲置休眠后再用 | 工作区回到 GitHub 上工作分支的样子，没推送的改动不见了 | 容器磁盘是临时的，休眠就清空。新建会话时选 Cloudflare 那一项下面写着这一条；要留住改动就让 agent 推分支 |
 | 部署新版本那一刻，正好有一轮在跑 | 这一轮显示「服务重启，这一轮已中断」，接着发消息即可继续 | Cloudflare 部署时会重启所有会话对象。部署是部署的人主动做的、频率低 |
 | 沙盒里内存吃紧的操作 | 和 Node 版用云沙盒一样 | 沙盒规格缺省 4 GB 内存，`npm install` 这类操作够用 |
 
 ## 3. 部署的人要做什么
 
 1. 有一个 Cloudflare 账号，开通 **Workers 付费档（每月 5 美元）**——Durable Object、容器沙盒、宽松的 CPU 额度都在这一档里。
-2. 在仓库里跑一遍部署脚本（[技术方案 §9](../tech/chat-on-cloudflare.md)）：它建好 D1 数据库、建表、上传前端、部署 Worker 和沙盒镜像。
-3. 用 `wrangler secret put` 填几个密钥：登录用的 `BETTER_AUTH_SECRET`；要真模型就填 `DEEPSEEK_API_TOKEN`（不填就用[演示模型](../../../terms.md)）；要 GitHub 登录与选仓库就填 GitHub App 那几项。
+2. 在仓库里跑一遍部署脚本 `pnpm cf:deploy`（[技术方案 §9](../tech/chat-on-cloudflare.md)，一步步的说明见 [apps/cloudflare-server/README.md](../../../../apps/cloudflare-server/README.md)）：它建好 D1 数据库、建表、上传前端、部署 Worker 和沙盒镜像，并生成登录用的 `BETTER_AUTH_SECRET`。
+3. 按需用 `wrangler secret put` 填密钥：要真模型就填 `DEEPSEEK_API_BASE_URL` 与 `DEEPSEEK_API_TOKEN`（不填就用[演示模型](../../../terms.md)）；要 GitHub 登录、选仓库、Cloudflare 沙盒就填 GitHub App 那几项和对外地址 `SERVER_URL`。**没配 GitHub App 时新建会话只有本地沙盒**：Cloudflare 沙盒的工作区就是一个克隆下来的仓库。
 4. 在 Cloudflare 后台设一个**用量提醒**：超出 5 美元包含的额度时发邮件。
 
 ### 3.1 5 美元里含什么、超了怎么办

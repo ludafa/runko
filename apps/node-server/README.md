@@ -78,11 +78,14 @@ pnpm chat:bootstrap                                # 建表 + 重新生成 OpenA
 
 ```
 src/
-  db/          表类型、建表、建连（三拨表共用一个 Kysely 实例）
-  agent/       起轮装配、沙盒（Vercel / E2B / 本地）、模型、审批策略、skill
-  routes/      HTTP 与 SSE
+  db/          建表、建连（三拨表共用一个 Kysely 实例）
+  agent/       运行时装配、云沙盒（Vercel / E2B）、流分发
+  routes/      会话后端的 Node 实现（转发、节点下线）、登录、集群控制台、推送
   push/        推送通知
 ```
+
+和 [Cloudflare 版](../cloudflare-server/README.md)共用的部分（接口 schema、表类型、提示词、审批规则、模型、本地沙盒、
+沙盒管理、GitHub App、会话路由）在 [`apps/chat-shared`](../chat-shared)。
 
 轮的生命周期（排队、插话、停止、挂起与恢复、崩溃恢复、多副本归属）都在 `@runko/agent` 里，
 这个应用一行都不写——它只负责「这一轮用哪个模型、哪个沙盒、什么提示词」。

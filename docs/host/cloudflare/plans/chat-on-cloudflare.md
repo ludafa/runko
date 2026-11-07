@@ -17,15 +17,15 @@ related: ["host/cloudflare/features/chat-on-cloudflare.md", "host/cloudflare/tec
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | C0 | 三份文档、术语表（会话对象） | ✅ |
-| C1a | **本地可行性实测**（`wrangler dev`，不要账号）：技术方案 §11 的 3、4、5 条 + 一个最小会话对象跑通 agent | 待做 |
-| C1b | **线上可行性实测**（要 Cloudflare 付费档账号）：技术方案 §11 的 1、2、6 条 | 待做 |
-| C2 | `@runko/durable-object`：会话对象 SQLite 的 Kysely 方言 + 运行时装配；持久化一致性用例在 workerd 里全过 | 待做 |
-| C3 | 抽共用层 `apps/chat-shared`：Node 版行为不变 | 待做 |
-| C4 | `apps/cloudflare-server` 骨架：Worker、静态资源、D1、better-auth、会话列表与建会话 | 待做 |
-| C5 | 会话对象：发消息、直播（SSE / WebSocket）、停止、队列、审批与挂起、重启后恢复 | 待做 |
-| C6 | 沙盒：本地沙盒、Cloudflare 沙盒（规格、提前唤醒）、GitHub 选仓库 | 待做 |
-| C7 | 部署脚本与部署说明、用量提醒 | 待做 |
-| C8 | 测试补齐、清理旧注释、代码审查、端到端（`wrangler dev` + 浏览器）、真部署验收 | 待做 |
+| C1a | **本地可行性实测**（`wrangler dev`，不要账号）：技术方案 §11 的 3、4、5 条 + 一个最小会话对象跑通 agent | ✅ 全部成立（见[实测结果](#实测结果)） |
+| C1b | **线上可行性实测**（要 Cloudflare 付费档账号）：技术方案 §11 的 1、2、6 条 | 待做（要账号，挡上线） |
+| C2 | `@runko/durable-object`：会话对象 SQLite 的 Kysely 方言 + 运行时装配；持久化一致性用例在 workerd 里全过 | ✅ |
+| C3 | 抽共用层 `apps/chat-shared`：Node 版行为不变 | ✅ |
+| C4 | `apps/cloudflare-server` 骨架：Worker、静态资源、D1、better-auth、会话列表与建会话 | ✅ |
+| C5 | 会话对象：发消息、直播（SSE / WebSocket）、停止、队列、审批与挂起、重启后恢复 | ✅ |
+| C6 | 沙盒：本地沙盒、Cloudflare 沙盒（规格、提前唤醒）、GitHub 选仓库 | ✅ 本地验完；真 GitHub App 选私有仓库、推分支要账号，留给真部署验收 |
+| C7 | 部署脚本与部署说明、用量提醒 | ✅ 脚本与说明写完、`--dry-run` 走通；在全新账号上真部署要等 C1b |
+| C8 | 测试补齐、清理旧注释、代码审查、端到端（`wrangler dev` + 浏览器）、真部署验收 | ✅ 除真部署验收（要人、要账号） |
 
 **顺序**：
 
@@ -107,11 +107,41 @@ flowchart LR
 
 ## 实测结果
 
-（C1 回填。）
+### C1a · 本地（2026-11-07，wrangler 4.112、workerd 1.20260714、本机 Docker 为 OrbStack）
+
+| # | 结论 | 怎么验的 |
+|---|---|---|
+| 3 | ✅ better-auth 在 Workers + D1 上能用 | 自己写的 D1 Kysely 方言接 better-auth（`{ db, type: 'sqlite' }`），注册、登录、拿登录态都通；限流存 D1。GitHub 回调没有真连 GitHub |
+| 4 | ✅ D1 建表 | better-auth 的 `getMigrations` 与应用的 Kysely 迁移在内存 SQLite 上跑一遍、导出成 `migrations/0001_init.sql`，`wrangler d1 migrations apply --local` 建表成功；测试里用 `applyD1Migrations` 跑同一份 |
+| 5 | ✅ 会话对象里调沙盒、克隆时带环境变量 | 一次性测试 Worker 里起 `standard-1` 沙盒：`exec(cmd, { env: { GH_TOKEN } })` 拿得到环境变量、命令行里没有令牌；克隆公开仓库 1.8 秒；共用层完整初始化（写令牌文件、凭据助手、改回 origin、切分支、装 skill）连冷启动 23 秒 |
+| — | ✅ 会话对象跑通 agent | 不是最小版，直接是整个 chat 应用：演示模型、本地沙盒，发消息、SSE 与 WebSocket 直播、排队、插话、停止、审批、提问（挂起后恢复）都通 |
+| — | 本地模拟器不回收会话对象 | 一轮跑了约 3 分钟，期间没有任何连接，日志里一直在跑、正常收尾（见下） |
+
+几条顺带发现的：
+
+- **本地 workerd 只认到 2026-07-21 的兼容日期**，`compatibility_date` 写更新的会起不来，所以定在 `2026-07-01`。
+- **`just-bash` 的浏览器构建缺 `unsafeBytesFromLatin1`**，Worker 打包时报错。`@runko/just-bash` 改成自己转字节串（带 changeset）。
+- **框架的「一轮收尾了」通知排在放手之前**，那一刻读活动状态还是「在跑」，列表状态副本于是停在「在跑」。改成收尾后隔一小会儿复查再回写（技术方案 §4.5）。
+- **跨 RPC 的 cancel 是懒的**：对象那一侧要到下一次往流里写才发现对面走了，所以直播流加了保活空行（`@runko/durable-object` 的 `framesToStream`）。
+- **`wrangler dev` 每断一条 WebSocket 打一行 `Uncaught Error: Network connection lost.`**：一个只做 accept / send / close 的最小 Worker 也一样，是本地模拟器的噪音，不是应用的错。
+- **`evictDurableObject()` 测不到中断**：它会等对象里的定时器走完（演示模型一直在设定时器），这一轮就跑完了。测重启用 `abortAllDurableObjects()`。
+
+### C1b · 线上
+
+（要付费档账号，未做。）
 
 ## 验证方案
 
-（完成后回填：怎么跑、预期、实际结果。）
+| 验什么 | 怎么跑 | 实际结果（2026-11-07） |
+|---|---|---|
+| 框架包 | `pnpm --filter @runko/durable-object test` | 98 条全过（workerd 里跑，含 `@runko/conformance` 持久化用例） |
+| Node 版行为不变 | `pnpm --filter @runko-chat/node-server test` | 全过 |
+| Cloudflare 版 | `pnpm --filter @runko-chat/cloudflare-server test` | 先查 D1 迁移没有没导出的改动，再在 workerd 里跑 35 条：D1 方言、快照分块、能力开关、路由全流程（注册、建会话、点名没开的沙盒 400、发消息、排队、删排队、停止、审批、提问、别人的会话 404、WebSocket）、重启后靠定时唤醒恢复（身后有排队的接着跑；没有的，列表状态也回写成「没在跑」） |
+| Cloudflare 沙盒 | `wrangler dev` + 本机 Docker 起一次性测试 Worker 直接调 provider | 见上面 C1a 第 5 条 |
+| 端到端 | `pnpm cf:dev`，agent-browser 走一遍 | 注册 → 首页 → 建会话 → `run:` 命令（bash 卡片）→ 刷新回放 → 长回复中途刷新续上 → 跑完；集群控制台入口不出现 |
+| 部署脚本 | `pnpm cf:deploy --dry-run` | 编译依赖、打包前端、`wrangler deploy --dry-run`（含构建沙盒镜像）都过；建 D1、远程迁移、填密钥三步只打印 |
+| 全仓 | `pnpm -r build`、`pnpm -r typecheck`、`pnpm -r test`、`pnpm lint`、`pnpm check:doc-links`、`pnpm docs:check`、`pnpm docs:build` | 都过。唯一的例外是 `apps/web` 的 59 条测试，与本期无关、早就挂着：Node 26 下 `window.localStorage` 是 undefined，把本期改动拿掉也是同样 59 条 |
+| 真部署 | 全新账号上 `pnpm cf:deploy`，按[功能手册 §5](../features/chat-on-cloudflare.md) 逐条走 | 未做：要人、要付费档账号 |
 
 ## 变更记录
 
@@ -119,3 +149,5 @@ flowchart LR
 |---|---|
 | 2026-10-01 | C0：三份文档、术语表一条（会话对象）。决策：Cloudflare 付费档（否决免费档、Vercel、自己的虚拟机，只从用户体验比，见功能手册附录 A）；一个会话一个会话对象，框架的表复用 `@runko/persist-kysely`；跨会话的数据放 D1；先抽共用层再做 Cloudflare 版；本期不做推送通知与部署时无感续跑 |
 | 2026-10-01 | C1 拆成 C1a（本地，`wrangler dev`）与 C1b（线上，付费档账号）：本地模拟器不回收会话对象、也不限制 CPU，长轮、CPU、部署重启这三条只有线上看得到。C1b 不挡 C2–C6 的开发，挡 C7 上线 |
+| 2026-11-07 | C1a、C2–C8 做完（真部署与 C1b 除外，要账号）。和技术方案初稿不同的几处：归属仲裁用 `durableObjectArbitration`（起轮标记落对象 SQLite，否则重启后扫不出没收尾的轮），不是进程内版；方言的影响行数查 `changes()`，不用 `rowsWritten`；列表状态单独一张 `conversation_live`，不是 `conversations` 上的一列；首页的笔记示例路由挪进共用层，两边都挂。顺手：`@runko/just-bash` 不再依赖 just-bash 浏览器构建里没有的导出（patch）；根目录加 `cf:dev`、`cf:deploy`，`chat:server`、`chat:bootstrap` 先编译共用层 |
+| 2026-11-07 | 代码审查后的修正：D1 迁移改成只追加（重放已有文件、导出增量，迁移记录表也建在 D1；`conversation_live` 也改成一段 Kysely 迁移，改它同样能导出增量）；会话对象把会话 id 记进对象存储，重启后补「已中断」时也回写列表状态（之前身后没排队的消息就一直显示「在跑」）；列表读 D1 时 `IN` 按 100 个一批（D1 的参数上限）；建会话点名这台服务端没开的沙盒回 400（两边都是）；部署脚本把 `BETTER_AUTH_SECRET` 随第一次部署一起上传，不再部署之后才补（认 wrangler 4.112 的「Worker 不存在」文案；Ctrl-C 也会删掉临时密钥文件）；本地沙盒快照太大存不下时记 error，并改正提示文案；快照切块在块大小为 1 时不再原地打转；Cloudflare 沙盒的说明写明休眠会清空磁盘；技术方案 §12 补「一条账本消息最多 2 MB」 |
