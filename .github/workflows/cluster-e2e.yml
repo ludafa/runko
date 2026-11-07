@@ -15,6 +15,7 @@ on:
       - 'packages/persist-*/src/**'
       - 'packages/stream-redis/src/**'
       - 'apps/node-server/**'
+      - 'apps/chat-shared/**'
       - 'pnpm-lock.yaml'
       - '.github/workflows/cluster-e2e.yml'
   pull_request:
@@ -24,6 +25,7 @@ on:
       - 'packages/persist-*/src/**'
       - 'packages/stream-redis/src/**'
       - 'apps/node-server/**'
+      - 'apps/chat-shared/**'
       - 'pnpm-lock.yaml'
       - '.github/workflows/cluster-e2e.yml'
   workflow_dispatch:
