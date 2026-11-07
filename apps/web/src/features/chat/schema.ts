@@ -260,8 +260,13 @@ export const conversationStatusSchema = z.enum([
 
 export type ConversationStatus = z.infer<typeof conversationStatusSchema>;
 
-/** 沙盒 provider（docs/host/contract/tech/sandbox-provider.md）——这次会话跑在哪个[沙盒](../../../../../docs/terms.md)上，建会话时选定、1:1 绑定。`local` 是[本地沙盒](../../../../../docs/terms.md)：跑在服务端进程内存里，没有仓库、没有分支。 */
-export const conversationProviderSchema = z.enum(['vercel', 'e2b', 'local']);
+/** 沙盒 provider（docs/host/contract/tech/sandbox-provider.md）——这次会话跑在哪个[沙盒](../../../../../docs/terms.md)上，建会话时选定、1:1 绑定。`local` 是[本地沙盒](../../../../../docs/terms.md)：跑在服务端内存里，没有仓库、没有分支。`cloudflare` 只有 Cloudflare 版服务端才有。 */
+export const conversationProviderSchema = z.enum([
+  'vercel',
+  'e2b',
+  'local',
+  'cloudflare',
+]);
 
 export type ConversationProvider = z.infer<typeof conversationProviderSchema>;
 
@@ -356,6 +361,11 @@ export const chatConfigSchema = z.object({
   defaultProvider: conversationProviderSchema,
   /** `'demo'` = 没配模型 key，用的是[演示模型](../../../../../docs/terms.md)。 */
   model: z.enum(['deepseek', 'demo']),
+  /**
+   * 有没有[集群控制台](../../../../../docs/terms.md)（`/console`）：Node 版有，Cloudflare 版没有。
+   * 可选是为了让前端也能对着不报这一项的服务端跑——缺省按「有」处理。
+   */
+  clusterConsole: z.boolean().optional(),
 });
 
 export type ChatConfig = z.infer<typeof chatConfigSchema>;

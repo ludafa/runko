@@ -8,7 +8,7 @@ import { z } from 'zod/v4';
 
 export const createConversationInputSchema = z.object({
   title: z.optional(z.string().min(1).max(255)),
-  provider: z.optional(z.enum(['vercel', 'e2b', 'local'])),
+  provider: z.optional(z.enum(['vercel', 'e2b', 'local', 'cloudflare'])),
   get repo() {
     return repoSelectorSchema.optional();
   },

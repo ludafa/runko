@@ -9,6 +9,7 @@ export const createConversationInputProviderEnum = {
   vercel: 'vercel',
   e2b: 'e2b',
   local: 'local',
+  cloudflare: 'cloudflare',
 } as const;
 
 export type CreateConversationInputProviderEnumKey =

@@ -6,7 +6,10 @@
     "repo": { "type": ["string", "null"] },
     "branchName": { "type": ["string", "null"] },
     "sandboxName": { "type": "string" },
-    "provider": { "type": "string", "enum": ["vercel", "e2b", "local"] },
+    "provider": {
+      "type": "string",
+      "enum": ["vercel", "e2b", "local", "cloudflare"]
+    },
     "status": { "type": "string", "enum": ["active", "sleeping", "expired"] },
     "lastActiveAt": { "type": "string" },
     "queuedMessages": {

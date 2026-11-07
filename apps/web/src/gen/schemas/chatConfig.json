@@ -3,11 +3,18 @@
   "properties": {
     "providers": {
       "type": "array",
-      "items": { "type": "string", "enum": ["vercel", "e2b", "local"] }
+      "items": {
+        "type": "string",
+        "enum": ["vercel", "e2b", "local", "cloudflare"]
+      }
     },
-    "defaultProvider": { "type": "string", "enum": ["vercel", "e2b", "local"] },
-    "model": { "type": "string", "enum": ["deepseek", "demo"] }
+    "defaultProvider": {
+      "type": "string",
+      "enum": ["vercel", "e2b", "local", "cloudflare"]
+    },
+    "model": { "type": "string", "enum": ["deepseek", "demo"] },
+    "clusterConsole": { "type": "boolean" }
   },
-  "required": ["providers", "defaultProvider", "model"],
+  "required": ["providers", "defaultProvider", "model", "clusterConsole"],
   "x-readme-ref-name": "ChatConfig"
 }

@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 import { createContext, useContext, useState } from 'react';
@@ -6,6 +7,7 @@ import { createPortal } from 'react-dom';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Button } from '@/components/ui/button';
 import { SidebarTrigger } from '@/components/ui/sidebar';
+import { fetchChatConfig } from '@/features/chat/api';
 import { NotificationBell } from '@/features/notifications/notification-bell';
 
 import { authClient } from '../lib/auth-client';
@@ -53,6 +55,16 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const { data: session } = authClient.useSession();
   const [headerSlot, setHeaderSlot] = useHeaderLeadingSlot();
+  // 控制台入口只在服务端有控制台时显示（Cloudflare 版没有）。拿到答案之前、以及请求
+  // 失败时都照常显示：Node 版是常见情形，别让入口闪一下才出来。
+  const { data: chatConfig } = useQuery({
+    queryKey: ['chat-config'],
+    queryFn: ({ signal }) => fetchChatConfig(signal),
+    enabled: session?.user !== undefined,
+    staleTime: Infinity,
+    retry: false,
+  });
+  const showConsole = chatConfig?.clusterConsole !== false;
 
   async function handleSignOut() {
     await authClient.signOut();
@@ -110,12 +122,14 @@ export function AppLayout({ children }: { children: ReactNode }) {
             </Link>
             {/* [集群控制台](../../../../docs/terms.md)：demo 项目不设管理员，登录了就有入口
                 （docs/host/node/features/cluster-console.md §2）。 */}
-            <Link
-              to="/console"
-              className="text-muted-foreground hover:text-foreground [&.active]:text-foreground transition-colors"
-            >
-              集群控制台
-            </Link>
+            {showConsole && (
+              <Link
+                to="/console"
+                className="text-muted-foreground hover:text-foreground [&.active]:text-foreground transition-colors"
+              >
+                集群控制台
+              </Link>
+            )}
           </nav>
           <div className="flex items-center gap-2 sm:gap-3">
             {session?.user && (

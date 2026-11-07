@@ -13,7 +13,7 @@ import type { CreateConversationInput } from './CreateConversationInput.ts';
 export type PostApiChatConversations201 = Conversation;
 
 /**
- * @description 云沙盒 provider 没带 `repo`，或本地沙盒带了 `repo`（docs/ingress/tech/github-repo-access.md §5）
+ * @description 这台服务端没开这种沙盒；云沙盒 provider 没带 `repo`，或本地沙盒带了 `repo`（docs/ingress/tech/github-repo-access.md §5）
  */
 export type PostApiChatConversations400 = ApiError;
 

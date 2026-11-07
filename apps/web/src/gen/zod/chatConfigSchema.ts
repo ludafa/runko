@@ -6,7 +6,8 @@
 import { z } from 'zod/v4';
 
 export const chatConfigSchema = z.object({
-  providers: z.array(z.enum(['vercel', 'e2b', 'local'])),
-  defaultProvider: z.enum(['vercel', 'e2b', 'local']),
+  providers: z.array(z.enum(['vercel', 'e2b', 'local', 'cloudflare'])),
+  defaultProvider: z.enum(['vercel', 'e2b', 'local', 'cloudflare']),
   model: z.enum(['deepseek', 'demo']),
+  clusterConsole: z.boolean(),
 });

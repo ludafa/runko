@@ -7,6 +7,7 @@ export const chatConfigProvidersEnum = {
   vercel: 'vercel',
   e2b: 'e2b',
   local: 'local',
+  cloudflare: 'cloudflare',
 } as const;
 
 export type ChatConfigProvidersEnumKey =
@@ -16,6 +17,7 @@ export const chatConfigDefaultProviderEnum = {
   vercel: 'vercel',
   e2b: 'e2b',
   local: 'local',
+  cloudflare: 'cloudflare',
 } as const;
 
 export type ChatConfigDefaultProviderEnumKey =
@@ -42,4 +44,8 @@ export type ChatConfig = {
    * @type string
    */
   model: ChatConfigModelEnumKey;
+  /**
+   * @type boolean
+   */
+  clusterConsole: boolean;
 };

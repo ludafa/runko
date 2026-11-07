@@ -47,7 +47,11 @@ const PROVIDER_COPY: Record<
   e2b: { label: 'E2B', hint: '空闲自动暂停，下条消息唤醒' },
   local: {
     label: '本地',
-    hint: '跑在服务端进程内存里，没有 git、不联网，不需要任何云账号',
+    hint: '跑在服务端内存里，没有 git、不联网，不需要任何云账号',
+  },
+  cloudflare: {
+    label: 'Cloudflare',
+    hint: '空闲自动休眠，醒来重新克隆仓库：没推送的改动不保留',
   },
 };
 
@@ -58,9 +62,9 @@ const FALLBACK_CHAT_CONFIG: ChatConfig = {
   model: 'demo',
 };
 
-/** 只有这两档跑在云沙盒里、需要挑一个仓库（docs/ingress/features/github-repo-access.md §2.4：本地沙盒没有 git，这一栏不出现）。 */
+/** 除本地沙盒外都跑在云沙盒里、需要挑一个仓库（docs/ingress/features/github-repo-access.md §2.4：本地沙盒没有 git，这一栏不出现）。 */
 function isCloudProvider(provider: ConversationProvider): boolean {
-  return provider === 'e2b' || provider === 'vercel';
+  return provider !== 'local';
 }
 
 export function SessionList({

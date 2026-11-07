@@ -4,7 +4,7 @@ import type { ConversationProvider } from '../schema';
 
 /**
  * 沙盒 provider 标记（docs/host/contract/features/sandbox-provider.md）——让用户一眼看清这次
- * 会话跑在哪家云沙盒上。
+ * 会话跑在哪家沙盒上。
  *
  * 改版后不再是描边药丸：这是**恒定不变的一项事实**（会话创建时选定即固定），
  * 不是状态，不该有徽标那种「值得一看」的分量。降成一段小号等宽文字 + 一个品牌
@@ -17,6 +17,7 @@ const PROVIDER_META: Record<
   vercel: { label: 'vercel', dotClassName: 'bg-foreground/70' },
   e2b: { label: 'e2b', dotClassName: 'bg-orange-500' },
   local: { label: 'local', dotClassName: 'bg-emerald-500' },
+  cloudflare: { label: 'cloudflare', dotClassName: 'bg-amber-500' },
 };
 
 export function ProviderBadge({
