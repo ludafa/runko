@@ -261,6 +261,18 @@ describe("createFsAdapter: optional members (readFileBytes / readdirWithFileType
     expect(roundTripped).toEqual([0, 1, 2, 253, 254, 255]);
   });
 
+  it("readFileBytes keeps every byte of a file larger than one conversion chunk", async () => {
+    // 100 KB：跨过 `toByteString` 的分块边界（32K），且 0–255 每个值都出现。
+    const data = Uint8Array.from({ length: 100_000 }, (_, i) => i % 256);
+    const fs = fromMemory({ "/big.bin": data });
+    const adapter = createFsAdapter(fs);
+    const bytes = await adapter.readFileBytes?.("/big.bin");
+    if (bytes === undefined) {throw new Error("unreachable");}
+    const latin1 = latin1FromBytes(bytes);
+    expect(latin1.length).toBe(data.length);
+    expect(Uint8Array.from(latin1, (ch) => ch.charCodeAt(0))).toEqual(data);
+  });
+
   it("readdirWithFileTypes reports file/dir kinds without a separate stat() per entry", async () => {
     const fs = fromMemory({ "/dir/a.txt": "a" });
     await fs.mkdir("/dir/sub");

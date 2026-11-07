@@ -35,22 +35,34 @@
  *     错误文本"，适配器不需要特殊处理。
  *
  * 可选成员的裁量（工单："是否实现裁量并报告"）：两个都实现了。
- *   - `readFileBytes`：just-bash 包顶层**没有**导出 `bytesFromUint8Array`
- *     （只有 `encoding.ts` 内部用；`dist/index.d.ts` 的重导出列表里没有它，
- *     实测确认）。改用同样导出的 `unsafeBytesFromLatin1(latin1String)`：把
- *     `Uint8Array` 转成"每字符一字节"的 latin1 字符串再打标签成
- *     `ByteString`——语义等价，只是绕过了一个未导出的内部辅助函数。
+ *   - `readFileBytes`：见下面 `toByteString` 的注释。
  *   - `readdirWithFileTypes`：`RunkoFS.readdir()` 的 `DirEntry` 本来就带
  *     `type` 字段，直接映射成 `DirentEntry` 是免费的（避免解释器退化到
  *     `readdir` + 逐条 `stat` 的慢路径）。
  */
 import type { DirEntry, FileStat, RunkoFS } from "@runko/core";
-import type { CpOptions, FsStat, IFileSystem, RmOptions } from "just-bash";
-import { unsafeBytesFromLatin1 } from "just-bash";
+import type { ByteString, CpOptions, FsStat, IFileSystem, RmOptions } from "just-bash";
 import { dirnameOf, normalizePath, resolvePath as resolveVirtualPath } from "./path.js";
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
+
+/**
+ * `Uint8Array` → just-bash 的 `ByteString`（每个字符一个字节的 latin1 串，加一层不透明的类型标签）。
+ *
+ * 不用 just-bash 自己的 `unsafeBytesFromLatin1`：它的浏览器构建（Workers、Vite 打包时选中的那份）
+ * 不导出这个函数，一 import 就打包失败。它在 3.1.0 里的实现就是 `return s`——标签只存在于类型上，
+ * 所以这里同样只做类型上的那一步。也不用 `Buffer`：浏览器里没有。
+ */
+function toByteString(bytes: Uint8Array): ByteString {
+  let latin1 = "";
+  // 分块拼：`String.fromCharCode(...大数组)` 会撑爆参数个数上限。
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    latin1 += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return latin1 as unknown as ByteString;
+}
 
 const FILE_MODE = 0o644;
 const DIR_MODE = 0o755;
@@ -186,7 +198,7 @@ export function createFsAdapter(fs: RunkoFS): JustBashFsAdapter {
 
     async readFileBytes(path) {
       const bytes = await fs.readFile(normalizePath(path));
-      return unsafeBytesFromLatin1(Buffer.from(bytes).toString("latin1"));
+      return toByteString(bytes);
     },
 
     async readFileBuffer(path) {
