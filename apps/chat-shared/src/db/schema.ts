@@ -21,6 +21,7 @@
  * 设计见 docs/ingress/tech/unified-demo.md §2.2。
  */
 import type { RunkoDatabase } from '@runko/persist-kysely';
+import type { Kysely } from 'kysely';
 
 /**
  * better-auth 的用户表——**它建的，不是我们建的**，这里只声明本应用会碰到的那几列：
@@ -53,7 +54,7 @@ export interface AccountTable {
 }
 
 /** 沙盒 provider（docs/host/contract/tech/sandbox-provider.md）：这次会话跑在哪一档沙盒上，建会话时选定、1:1 绑定、运行中不切换。 */
-export type ConversationProvider = 'vercel' | 'e2b' | 'local';
+export type ConversationProvider = 'vercel' | 'e2b' | 'local' | 'cloudflare';
 
 export type ConversationStatus = 'active' | 'sleeping' | 'expired';
 
@@ -169,3 +170,9 @@ export interface ChatDatabase extends RunkoDatabase {
   local_workspaces: LocalWorkspacesTable;
   chat_presence: ChatPresenceTable;
 }
+
+/**
+ * 全应用共用的连接类型。Node 版接 SQLite 文件或 Postgres，Cloudflare 版接 D1——查询代码
+ * 同一份（Kysely），差别只在宿主建实例的那一处。
+ */
+export type Db = Kysely<ChatDatabase>;

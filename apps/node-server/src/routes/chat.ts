@@ -1,26 +1,46 @@
-import { randomUUID } from 'node:crypto';
-
-import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
-import type {
-  AgentRuntime,
-  DecisionStore,
-  Frame,
-  QueuedInput,
-} from '@runko/agent';
+/**
+ * chat 路由的 Node 版装配。路由本身两个服务端共用（`@runko-chat/shared/routes/chat`）；这里把
+ * 进程内的 `@runko/agent` 运行时包成会话后端，再接上只有 Node 才有的三样：多副本转发、
+ * 推送的[在场](../../../../docs/terms.md)、遥测库。
+ */
+import type { AgentRuntime, DecisionStore } from '@runko/agent';
 import type { SessionTelemetry } from '@runko/core';
+import type { GithubApp } from '@runko-chat/shared/agent/github-app';
+import { createLocalProvider } from '@runko-chat/shared/agent/local-sandbox';
+import { hasRealModel, resolveModel } from '@runko-chat/shared/agent/model';
+import type {
+  SandboxManager,
+  SandboxProviderId,
+} from '@runko-chat/shared/agent/sandbox-manager';
+import {
+  createSandboxManager,
+  resolveIdleTimeoutMs,
+} from '@runko-chat/shared/agent/sandbox-manager';
+import type { Db } from '@runko-chat/shared/agent/store';
+import { getConversation } from '@runko-chat/shared/agent/store';
+import { logger as defaultLogger } from '@runko-chat/shared/logger';
+import type {
+  ChatEnv,
+  ChatHostHooks,
+  ConversationBackend,
+  HeldByOtherOutcome,
+} from '@runko-chat/shared/routes/chat';
+import {
+  createChatRoutes,
+  provisionWithSandboxManager,
+  readRuntimeLiveState,
+} from '@runko-chat/shared/routes/chat';
+import { StartTurnAckSchema } from '@runko-chat/shared/schemas/chat';
 import type { LanguageModel } from 'ai';
 import type { Context, MiddlewareHandler } from 'hono';
-import { streamSSE } from 'hono/streaming';
 
-import { grantConversationApproval } from '../agent/conversation-grants.js';
-import type { GithubApp, GithubRepoRef } from '../agent/github-app.js';
 import {
-  classifyGithubError,
-  defaultGithubApp,
-  splitFullName,
-} from '../agent/github-app.js';
-import { createLocalProvider } from '../agent/local-sandbox.js';
-import { hasRealModel, resolveModel } from '../agent/model.js';
+  availableProviders,
+  createE2bProvider,
+  createVercelProvider,
+  resolveDefaultProvider,
+} from '../agent/cloud-sandboxes.js';
+import { defaultGithubApp } from '../agent/github.js';
 import {
   createChatNodeRegistry,
   createChatPersistence,
@@ -29,66 +49,12 @@ import {
 } from '../agent/persistence.js';
 import { countPendingDecisions } from '../agent/runko-tables.js';
 import { createChatRuntime } from '../agent/runtime.js';
-import type {
-  AcquiredSandbox,
-  SandboxManager,
-} from '../agent/sandbox-manager.js';
-import {
-  availableProviders,
-  createE2bProvider,
-  createSandboxManager,
-  createVercelProvider,
-  resolveDefaultProvider,
-  resolveIdleTimeoutMs,
-} from '../agent/sandbox-manager.js';
-import {
-  loadSkillsFromWorkspace,
-  resolveSkillCatalog,
-  toSkillSummaries,
-} from '../agent/skill-catalog.js';
-import type { ConversationRow, Db } from '../agent/store.js';
-import {
-  createConversation,
-  getConversation,
-  listConversations,
-  parseAvailableSkills,
-  syncAvailableSkills,
-} from '../agent/store.js';
 import { createChatStream } from '../agent/stream.js';
 import { db as defaultDb } from '../db/instance.js';
-import { logger as defaultLogger } from '../logger.js';
 import { requireAuth } from '../middleware/auth.js';
 import { createNodeOffline } from '../offline.js';
 import { createChatNotifier } from '../push/notifier.js';
 import { clearPresent, markPresent } from '../push/presence.js';
-import { ErrorSchema } from '../schemas/api.js';
-import type {
-  ChatReplayFrame,
-  ConversationDto,
-  QueuedMessage,
-} from '../schemas/chat.js';
-import {
-  AbortTurnAckSchema,
-  ActivitySchema,
-  ApprovalAckSchema,
-  ChatApprovalParamsSchema,
-  ChatConfigSchema,
-  ChatQueueParamsSchema,
-  chatReplayFrameSchema,
-  ConversationMessagesListSchema,
-  ConversationParamsSchema,
-  ConversationReplayQuerySchema,
-  ConversationSchema,
-  CreateConversationInputSchema,
-  PostAnswerInputSchema,
-  PostApprovalInputSchema,
-  PostChatMessageInputSchema,
-  PresenceInputSchema,
-  queueFrameSchema,
-  StartTurnAckSchema,
-  TurnTelemetryParamsSchema,
-  TurnTelemetrySchema,
-} from '../schemas/chat.js';
 import type { TelemetryStore } from '../telemetry.js';
 import { getChatTelemetry, getChatTelemetryStore } from '../telemetry.js';
 import type { Forwarder } from './forward.js';
@@ -97,31 +63,19 @@ import {
   resolveNodeIdentity,
   RESULT_UNKNOWN_STATUS,
   RETRY_AFTER_SECONDS,
-  RETRY_LATER_STATUS,
 } from './forward.js';
 import { createTakeoverApp, createTakeoverRequester } from './takeover.js';
-
-// ---------------------------------------------------------------------------
-// docs/ingress/tech/chat-webapp.md §2.2 `routes/chat.ts` (+ §2.2c（审批链）'s
-// `POST .../approvals/:callId` and `POST .../questions/:callId`, + the queue
-// endpoints of docs/logic/orchestration/tech/steer-and-queue.md §4.2, + `POST .../abort` of
-// docs/logic/orchestration/tech/turn-abort.md §3.2) — login required on all of them (same
-// `requireAuth` middleware as `routes/example.ts`).
-// ---------------------------------------------------------------------------
-
-type ChatEnv = { Variables: { userId: string } };
 
 export interface ChatRouteDeps {
   db: Db;
   /**
    * [轮编排](../../../../docs/terms.md)运行时（`@runko/agent`）——一轮的一生、
    * [排队](../../../../docs/terms.md)、[停止](../../../../docs/terms.md)、人在回路全归它。
-   * 本文件只做 HTTP：把请求翻译成 `runtime.*` 的一次调用，把 `Frame` 序列化成 SSE。
    */
   runtime: AgentRuntime;
   /**
    * 框架的[裁决表](../../../../docs/terms.md)读口。**只为一件事**：用户点「会话内都允许」
-   * 时，本文件要拿这次调用的 tool + 原始入参去记一条[会话级授权](../../../../docs/terms.md)
+   * 时，路由要拿这次调用的 tool + 原始入参去记一条[会话级授权](../../../../docs/terms.md)
    * ——而路由手上只有 `callId`。裁决表是框架唯一知道这两样的地方。
    */
   decisions: DecisionStore;
@@ -146,76 +100,22 @@ export interface ChatRouteDeps {
    */
   githubApp?: GithubApp;
   /**
-   * Injectable so integration tests can stand in a fixed-`userId` stub
-   * instead of exercising real better-auth (which is hardwired to the
-   * singleton `db`/`auth` in `middleware/auth.ts`/`auth.ts`, not whatever
-   * `Db` a test passes in) — the default export below wires in the real
-   * `requireAuth`, so production behavior is unchanged.
+   * 可注入，集成测试才能塞一个固定 `userId` 的桩，不必走真的 better-auth（它绑死在单例
+   * `db`/`auth` 上，不认测试传进来的 `Db`）。生产装配见文件底部，用的是真的 `requireAuth`。
    */
   authMiddleware: MiddlewareHandler<ChatEnv>;
-  /** telemetry 事件集成（`@runko/core` `SessionTelemetry`，docs/ingress/tech/chat-webapp.md §11.4）——注入后逐 turn 的模型调用事件落 SQLite；缺省 undefined = 不采集。生产默认装配见文件底部（`getChatTelemetry`）。 */
+  /** telemetry 事件集成（`@runko/core` `SessionTelemetry`，docs/ingress/tech/chat-webapp.md §11.4）——交给运行时，逐 turn 的模型调用事件落 SQLite；缺省 = 不采集。 */
   telemetry?: SessionTelemetry;
   /**
-   * 同一个遥测库的另一个口，两处在用：turn 遥测明细端点用它**查数**
-   * （`TelemetryStore.list`），`agent/runtime.ts` 的钩子用它**写**起轮装配事件
-   * （docs/ingress/tech/telemetry.md §2.4，声明在 `TurnLauncherDeps` 上）。缺省 undefined =
-   * 端点恒返回空数组、装配事件不采集。
+   * 同一个遥测库的读口：turn 遥测明细端点用它查数（`TelemetryStore.list`）。缺省 =
+   * 端点恒返回空数组。
    */
   telemetryStore?: TelemetryStore;
-}
-
-function describeError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-/**
- * 一个会话 DTO 里有三样不在会话表上：排队消息、有没有轮在跑、几处在等人答。
- * 它们都归框架管，所以由调用方查好了传进来。
- */
-interface ConversationLiveState {
-  queuedMessages: QueuedMessage[];
-  turnInProgress: boolean;
-  pendingDecisions: number;
-}
-
-const IDLE_LIVE_STATE: ConversationLiveState = {
-  queuedMessages: [],
-  turnInProgress: false,
-  pendingDecisions: 0,
-};
-
-function toConversationDto(
-  row: ConversationRow,
-  live: ConversationLiveState,
-): ConversationDto {
-  // `sleeping` is derived at read time, never stored: hibernation happens on
-  // Vercel's side when the idle timeout elapses (no server-side timer to flip
-  // the row — docs/ingress/tech/chat-webapp.md §2.2), so a stored `active` whose idle window has passed
-  // is presented as `sleeping`. P12-3 live verification caught the stored
-  // status going stale exactly this way. The next message's `acquire` resumes
-  // the sandbox and `touch` refreshes `lastActiveAt`, flipping it back.
-  const idleElapsed =
-    Date.now() - row.lastActiveAt.getTime() > resolveIdleTimeoutMs();
-  return {
-    id: row.id,
-    title: row.title,
-    repo: row.repo,
-    branchName: row.branchName,
-    sandboxName: row.sandboxName,
-    provider: row.provider,
-    status: row.status === 'active' && idleElapsed ? 'sleeping' : row.status,
-    lastActiveAt: row.lastActiveAt.toISOString(),
-    queuedMessages: live.queuedMessages,
-    // 同上，[skill 清单](../../../../docs/terms.md)缓存（docs/ingress/tech/composer-skill-mention.md §2.1）
-    // ——读的是库里的快照，这条路径**不碰沙盒**，休眠会话也能列菜单。缓存为空时
-    // 退到兜底清单（本功能上线前建的会话就是这一档），否则用户打 `/` 什么都没有。
-    availableSkills: resolveSkillCatalog(
-      parseAvailableSkills(row.availableSkillsJson, row.id),
-    ),
-    turnInProgress: live.turnInProgress,
-    pendingDecisions: live.pendingDecisions,
-    createdAt: row.createdAt.toISOString(),
-  };
+  /**
+   * 这台服务端开了哪几档沙盒：`GET /api/chat/config` 报它，建会话只收它里面的。缺省按环境变量算
+   * （`availableProviders`）；集成测试的假沙盒不看环境变量，由测试按自己注册的那几档给。
+   */
+  availableProviders?: () => SandboxProviderId[];
 }
 
 /**
@@ -247,116 +147,18 @@ async function forwardToHolder(
   return await forwarder.forward(c, activity.holder);
 }
 
-/**
- * 把一个会话的实时状态问出来：[待发队列](../../../../docs/terms.md)与「有没有轮在跑」
- * 都归框架管，答案在框架的表与内存里，不在会话表上。
- *
- * 「有没有轮在跑」问的是 `getActivity`：它先看本进程的登记册，再看库里的归属——**这是
- * 权威答案**，多副本时别的副本正在跑也算。
- */
-async function readLiveState(
-  runtime: AgentRuntime,
-  conversationId: string,
-  pendingDecisions: number,
-): Promise<ConversationLiveState> {
-  const [queue, activity] = await Promise.all([
-    runtime.listQueue(conversationId),
-    runtime.getActivity(conversationId),
-  ]);
-  return {
-    queuedMessages: toQueueDto(queue),
-    turnInProgress: activity.active,
-    pendingDecisions,
-  };
-}
-
-/**
- * 框架的 `QueuedInput` → wire 上的 `QueuedMessage`。
- *
- * 两个形状**刻意不合并**：框架那个是通用的（`input` 里可以带宿主自定义的 `meta`），
- * wire 这个是 chat 应用自己的契约（前端与 OpenAPI 都钉着它）。在这里翻译一次，比让
- * 其中一边迁就另一边划算。
- */
-function toQueueDto(queue: readonly QueuedInput[]): QueuedMessage[] {
-  return queue.map((item) => ({
-    id: item.id,
-    text: item.input.text,
-    userId: item.input.userId ?? '',
-    createdAt: item.createdAt,
-  }));
-}
-
-/**
- * 框架的 `Frame` → 本应用的 wire 帧。五种帧一一对应，只有队列那种要翻译一下形状。
- *
- * [进行中草稿](../../../../docs/terms.md)在内存里，所以 `chunk` 帧**一律没有 `seq`**：
- * 它们只直播、不落库、不参与 `after=` 续传。
- */
-/** 框架的 `Frame` → wire 帧。**导出**是因为 WebSocket 那条通道要用同一个函数（见 `chat-ws.ts`）。 */
-export function toWireFrame(frame: Frame): ChatReplayFrame {
-  switch (frame.kind) {
-    case 'message':
-      return { seq: frame.seq, message: frame.message };
-    case 'chunk':
-      return { chunk: frame.chunk };
-    case 'queue':
-      return { queue: toQueueDto(frame.queue) };
-    case 'activity':
-      return { turnActive: frame.active };
-    case 'reconnect':
-      return { reconnect: true };
+function createNodeHostHooks(deps: ChatRouteDeps): ChatHostHooks {
+  const forwarder = deps.forwarder;
+  if (forwarder === undefined) {
+    return {};
   }
-}
-
-/** The SSE `event:` name for a wire frame — structural, not a shared literal field: the five frame kinds are told apart by which of `chunk`/`queue`/`reconnect`/`turnActive`/`message` they actually carry (`schemas/chat.ts`'s own doc comment). */
-function frameEventName(
-  frame: ChatReplayFrame,
-): 'chunk' | 'message' | 'queue' | 'turn-state' | 'reconnect' {
-  if ('chunk' in frame) {
-    return 'chunk';
-  }
-  if ('queue' in frame) {
-    return 'queue';
-  }
-  if ('reconnect' in frame) {
-    return 'reconnect';
-  }
-  return 'turnActive' in frame ? 'turn-state' : 'message';
-}
-
-function generateSandboxName(conversationId: string): string {
-  return `runko-chat-${conversationId}`;
-}
-
-function generateBranchName(conversationId: string): string {
-  return `runko/chat-${conversationId}`;
-}
-
-export function createChatApp(deps: ChatRouteDeps) {
-  const app = new OpenAPIHono<ChatEnv>();
-  const githubApp = deps.githubApp ?? defaultGithubApp;
-
-  // 副本间令牌闸门。**只拦转发进来的请求**——终端用户的请求不带这个头，也不该被要求带。
-  // 它防的是「伪造转发标记、逼这个副本在本地答」，越不过登录（用户身份仍走 cookie）。
-  app.use('/api/chat/*', async (c, next) => {
-    const rejected = deps.forwarder?.reject(c);
-    if (rejected !== undefined) {
-      return rejected;
-    }
-    await next();
-    return undefined;
-  });
-
-  app.use('/api/chat/*', deps.authMiddleware);
 
   /**
    * **要在持有者那边办的事，先转过去。**
    *
    * 写成中间件而不是写在各个处理器里：处理器的返回类型由 OpenAPI 路由定义钉死，而转发
-   * 返回的是上游那条原样的响应（含 SSE 流）。
-   *
-   * 会话归属（这条会话是不是你的）由持有者再查一遍——它跑的是同一份代码，转过去的请求
-   * 和用户直连的请求在它眼里没有区别。
+   * 返回的是上游那条原样的响应（含 SSE 流）。会话归属由持有者再查一遍——它跑的是同一份
+   * 代码，转过去的请求和用户直连的请求在它眼里没有区别。
    */
   const forwardToHolderMiddleware: MiddlewareHandler<ChatEnv> = async (
     c,
@@ -373,995 +175,107 @@ export function createChatApp(deps: ChatRouteDeps) {
     return undefined;
   };
 
-  // 这几条的状态在持有者的进程内存里：那一轮的 `AbortController`、正在等人的那个 promise、
-  // 以及改完队列要广播的那帧快照。
-  //
-  // `…/messages` 在列表里只因为它的 **POST**（起轮/插话/排队要在持有者那边发生）；它的
-  // GET 是纯回放、哪个副本都能答，但转过去也只是多一跳，不值得为此再拆一条路由。
-  //
-  // 直播流（`…/stream` 与 WebSocket 那条）单独一档：配了 Redis 广播就不转，见 `forwardStream`。
-  const forwardedPaths = [
-    '/api/chat/conversations/:id/messages',
-    '/api/chat/conversations/:id/abort',
-    '/api/chat/conversations/:id/queue',
-    '/api/chat/conversations/:id/queue/:messageId',
-    '/api/chat/conversations/:id/approvals/:callId',
-    '/api/chat/conversations/:id/questions/:callId',
-    ...(deps.forwardStream === false ?
-      []
-    : ['/api/chat/conversations/:id/stream']),
-  ];
-  for (const path of forwardedPaths) {
-    app.use(path, forwardToHolderMiddleware);
-  }
-
-  // ---- POST /api/chat/conversations ----
-
-  const createSessionRoute = createRoute({
-    method: 'post',
-    path: '/api/chat/conversations',
-    tags: ['Chat'],
-    summary:
-      'Create a chat session (provisions a Vercel sandbox + a dedicated git branch)',
-    request: {
-      body: {
-        content: {
-          'application/json': { schema: CreateConversationInputSchema },
-        },
-        required: true,
-      },
-    },
-    responses: {
-      201: {
-        content: { 'application/json': { schema: ConversationSchema } },
-        description: 'Created',
-      },
-      400: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description:
-          '云沙盒 provider 没带 `repo`，或本地沙盒带了 `repo`（docs/ingress/tech/github-repo-access.md §5）',
-      },
-      401: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Unauthorized',
-      },
-      403: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: '`github_repo_forbidden`——这个安装里核对不到这个仓库',
-      },
-      404: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: '`github_not_configured`——服务端没配 GitHub App',
-      },
-      409: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: '`github_not_linked`——这个用户还没连接 GitHub',
-      },
-      500: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Repo/sandbox configuration or provisioning error',
-      },
-    },
-  });
-
-  app.openapi(createSessionRoute, async (c) => {
-    const userId = c.get('userId');
-    const input = c.req.valid('json');
-
-    const conversationId = randomUUID();
-    const sandboxName = generateSandboxName(conversationId);
-    const provider = input.provider ?? resolveDefaultProvider();
-    // [本地沙盒](../../../../docs/terms.md)没有 git，也就没有仓库与工作分支——这一档
-    // 不接受 `repo`，零配置才起得来。
-    const usesGit = provider !== 'local';
-    const branchName = usesGit ? generateBranchName(conversationId) : null;
-
-    if (usesGit && input.repo === undefined) {
-      return c.json(
-        { error: 'repo is required for cloud sandbox providers' },
-        400,
-      );
-    }
-    if (!usesGit && input.repo !== undefined) {
-      return c.json(
-        { error: 'repo is not allowed for the local sandbox provider' },
-        400,
-      );
-    }
-
-    let repoRef: GithubRepoRef | undefined;
-    let githubToken: string | undefined;
-    let repoFullName: string | undefined;
-    if (usesGit && input.repo !== undefined) {
-      const selector = {
-        userId,
-        installationId: input.repo.installationId,
-        repoId: input.repo.repoId,
-      };
-      try {
-        // 用用户令牌核对这个安装里真有这个仓库，再签一把只对它有效的安装令牌
-        // （docs/ingress/tech/github-repo-access.md §3.2）——两步都在 `getRepoToken` 里。
-        const access = await githubApp.getRepoToken(selector);
-        repoFullName = access.repo.fullName;
-        repoRef = splitFullName(access.repo.fullName);
-        githubToken = access.token;
-      } catch (error) {
-        const kind = classifyGithubError(error);
-        if (kind === 'not-configured') {
-          return c.json({ error: 'github_not_configured' }, 404);
-        }
-        if (kind === 'not-linked') {
-          return c.json({ error: 'github_not_linked' }, 409);
-        }
-        if (kind === 'forbidden') {
-          return c.json({ error: 'github_repo_forbidden' }, 403);
-        }
-        return c.json({ error: describeError(error) }, 500);
+  return {
+    // 副本间令牌闸门。**只拦转发进来的请求**——终端用户的请求不带这个头，也不该被要求带。
+    // 它防的是「伪造转发标记、逼这个副本在本地答」，越不过登录（用户身份仍走 cookie）。
+    beforeAuth: async (c, next) => {
+      const rejected = forwarder.reject(c);
+      if (rejected !== undefined) {
+        return rejected;
       }
-    }
-
-    let acquired: AcquiredSandbox;
-    try {
-      acquired = await deps.sandboxManager.acquire({
-        conversationId,
-        provider,
-        sandboxName,
-        // Vercel resumes by its upfront-known name (keeps today's get()→404→create on the first acquire); E2B has no sandboxId yet → straight to create.
-        resumeToken: provider === 'e2b' ? undefined : sandboxName,
-        ...(branchName !== null ? { branchName } : {}),
-        ...(repoRef !== undefined ?
-          {
-            repoCloneUrl: repoRef.cloneUrl,
-            repoOwner: repoRef.owner,
-            repoName: repoRef.repo,
-          }
-        : {}),
-        ...(githubToken !== undefined ? { githubToken } : {}),
-      });
-    } catch (error) {
-      return c.json({ error: describeError(error) }, 500);
-    }
-
-    const row = await createConversation(deps.db, {
-      id: conversationId,
-      userId,
-      title: input.title ?? 'New chat',
-      repo: repoFullName ?? null,
-      branchName,
-      sandboxName,
-      provider,
-      // E2B's resume token is the server-assigned sandboxId (known only after create); Vercel resumes by name, so there's nothing to store.
-      sandboxId: provider === 'e2b' ? acquired.resumeToken : null,
-      githubInstallationId: input.repo?.installationId ?? null,
-      githubRepoId: input.repo?.repoId ?? null,
-    });
-
-    // [skill 清单](../../../../docs/terms.md)首次填充（docs/ingress/tech/composer-skill-mention.md §2.1）：
-    // 沙盒此刻刚 clone 完、刚装完 frontend-design，就地扫一次写库——否则新会话要等
-    // 第一轮跑完才有菜单可用。`loadSkillsFromWorkspace` 自身不抛（扫不到就是空数组），
-    // 所以这一步不会让建会话失败。
-    const availableSkillsJson = await syncAvailableSkills(
-      deps.db,
-      conversationId,
-      row.availableSkillsJson,
-      toSkillSummaries(
-        await loadSkillsFromWorkspace(acquired.workspace, defaultLogger),
-      ),
-    );
-
-    // 刚建好的会话：没有排队消息，也还没有轮在跑。
-    return c.json(
-      toConversationDto({ ...row, availableSkillsJson }, IDLE_LIVE_STATE),
-      201,
-    );
-  });
-
-  // ---- GET /api/chat/conversations ----
-
-  const listSessionsRoute = createRoute({
-    method: 'get',
-    path: '/api/chat/conversations',
-    tags: ['Chat'],
-    summary: 'List the current user’s chat sessions',
-    responses: {
-      200: {
-        content: {
-          'application/json': { schema: z.array(ConversationSchema) },
-        },
-        description: 'Sessions',
-      },
-      401: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Unauthorized',
-      },
+      await next();
+      return undefined;
     },
-  });
-
-  app.openapi(listSessionsRoute, async (c) => {
-    const userId = c.get('userId');
-    const rows = await listConversations(deps.db, userId);
-    // 「等你答」一次分组查询数完；队列与「有没有轮在跑」按会话问框架。
-    const pending = await countPendingDecisions(
-      deps.db,
-      rows.map((row) => row.id),
-    );
-    const dtos = await Promise.all(
-      rows.map(async (row) =>
-        toConversationDto(
-          row,
-          await readLiveState(deps.runtime, row.id, pending.get(row.id) ?? 0),
-        ),
-      ),
-    );
-    return c.json(dtos, 200);
-  });
-
-  // ---- GET /api/chat/conversations/{id} ----
-
-  const getSessionRoute = createRoute({
-    method: 'get',
-    path: '/api/chat/conversations/{id}',
-    tags: ['Chat'],
-    summary: 'Get one chat session’s detail (including status)',
-    request: { params: ConversationParamsSchema },
-    responses: {
-      200: {
-        content: { 'application/json': { schema: ConversationSchema } },
-        description: 'Session',
-      },
-      401: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Unauthorized',
-      },
-      404: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Not found',
-      },
+    // 直播流（`…/stream` 与 WebSocket 那条）单独一档：配了 Redis 广播就不转，见 `forwardStream`。
+    holderGate: {
+      handler: forwardToHolderMiddleware,
+      coversStream: deps.forwardStream !== false,
     },
-  });
-
-  app.openapi(getSessionRoute, async (c) => {
-    const userId = c.get('userId');
-    const { id } = c.req.valid('param');
-    const row = await getConversation(deps.db, id, userId);
-    if (row === undefined) {
-      return c.json({ error: 'Not found' }, 404);
-    }
-    const pending = await countPendingDecisions(deps.db, [row.id]);
-    const live = await readLiveState(
-      deps.runtime,
-      row.id,
-      pending.get(row.id) ?? 0,
-    );
-    return c.json(toConversationDto(row, live), 200);
-  });
-
-  // ---- GET /api/chat/conversations/{id}/messages?after=<seq> ----
-
-  const listMessagesRoute = createRoute({
-    method: 'get',
-    path: '/api/chat/conversations/{id}/messages',
-    tags: ['Chat'],
-    summary: '回放一个会话落盘的成品消息（历史 / 断线续传）',
-    request: {
-      params: ConversationParamsSchema,
-      query: ConversationReplayQuerySchema,
-    },
-    responses: {
-      200: {
-        content: {
-          'application/json': { schema: ConversationMessagesListSchema },
-        },
-        description: 'Messages, in seq order',
-      },
-      401: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Unauthorized',
-      },
-      404: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Not found',
-      },
-    },
-  });
-
-  app.openapi(listMessagesRoute, async (c) => {
-    const userId = c.get('userId');
-    const { id } = c.req.valid('param');
-    const { after } = c.req.valid('query');
-    const row = await getConversation(deps.db, id, userId);
-    if (row === undefined) {
-      return c.json({ error: 'Not found' }, 404);
-    }
-
-    // [账本](../../../../docs/terms.md)现在只有成品消息——[进行中草稿](../../../../docs/terms.md)
-    // 在内存里，只走[直播流](../../../../docs/terms.md)。所以这个端点回放出来的必然全是
-    // `MessageFrame`，前端拿到就能直接拼进消息列表。
-    const entries = await deps.runtime.readLedger(
-      id,
-      after !== undefined ? { afterSeq: after } : {},
-    );
-    const frames: ChatReplayFrame[] = entries.map((entry) => ({
-      seq: entry.seq,
-      message: entry.message,
-    }));
-    return c.json({ frames }, 200);
-  });
-
-  // ---- GET /api/chat/conversations/{id}/turns/{turn}/telemetry (docs/ingress/tech/chat-webapp.md §11.4) ----
-
-  const turnTelemetryRoute = createRoute({
-    method: 'get',
-    path: '/api/chat/conversations/{id}/turns/{turn}/telemetry',
-    tags: ['Chat'],
-    summary:
-      'One turn’s telemetry events (model-call metrics, tool executions) for the stats detail panel — empty when telemetry is disabled or the turn predates it',
-    request: { params: TurnTelemetryParamsSchema },
-    responses: {
-      200: {
-        content: { 'application/json': { schema: TurnTelemetrySchema } },
-        description: 'Telemetry events for this turn, in write order',
-      },
-      401: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Unauthorized',
-      },
-      404: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Not found',
-      },
-    },
-  });
-
-  app.openapi(turnTelemetryRoute, async (c) => {
-    const userId = c.get('userId');
-    const { id, turn } = c.req.valid('param');
-    const row = await getConversation(deps.db, id, userId);
-    if (row === undefined) {
-      return c.json({ error: 'Not found' }, 404);
-    }
-
-    // 遥测按 runko 会话 id（functionId 的前半段）落库。迁移到 `@runko/agent` 之后
-    // **会话 id 就是 conversationId**（框架从账本重建 `SessionState` 时直接拿它当
-    // session id，见 `buildResumeState`），所以这里查的就是 `row.id`。
-    //
-    // 代价：迁移**之前**那些轮的遥测行是按旧的随机 agent session id 落的，从此查不回来
-    // ——遥测是耗材（无持久承诺），换来的是一个跨轮稳定、无需额外落库的关联键。
-    const store = deps.telemetryStore;
-    if (store === undefined) {
-      return c.json({ events: [] }, 200);
-    }
-    const events = store
-      .list(row.id, turn)
-      .map(({ eventType, ts, payloadJson }) => ({
-        eventType,
-        ts,
-        payloadJson,
-      }));
-    return c.json({ events }, 200);
-  });
-
-  // ---- POST /api/chat/conversations/{id}/messages (starts a turn, docs/ingress/tech/chat-webapp.md §2.2b) ----
-
-  const postMessageRoute = createRoute({
-    method: 'post',
-    path: '/api/chat/conversations/{id}/messages',
-    tags: ['Chat'],
-    summary:
-      'Start a turn, queue this message for the next one, or steer the in-progress turn (docs/logic/orchestration/tech/steer-and-queue.md §4.1): with no turn running this acquires the sandbox, builds the session and hands off to the in-process turn runner (mode "started"); with one running it either queues `text` onto the conversation’s 待发队列 (mode "queued", the default) or injects it into the running turn via `Session.steer()` (mode "steered", `intent: "steer"`). Either way, events arrive over `GET .../stream`, not this response',
-    request: {
-      params: ConversationParamsSchema,
-      body: {
-        content: { 'application/json': { schema: PostChatMessageInputSchema } },
-        required: true,
-      },
-    },
-    responses: {
-      202: {
-        content: { 'application/json': { schema: StartTurnAckSchema } },
-        description:
-          'Accepted — see `mode` ("started" | "steered" | "queued"); poll/stream `GET .../stream` for its events. Stopping a turn while it is still being assembled still works, but the ack for that message is "started" — the stopped-turn frames arrive on the stream like any other outcome',
-      },
-      401: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Unauthorized',
-      },
-      404: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Not found',
-      },
-      409: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description:
-          'Either the 待发队列 is full (docs/logic/orchestration/features/steer-and-queue.md §2.3 — nothing is ever silently dropped), or a turn was already in progress and could not be steered either (narrow race — the turn ended between the steer attempt and the fallback start)',
-      },
-      500: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Model/sandbox configuration or provisioning error',
-      },
-      503: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description:
-          'Nothing was done; safe to resend. Either the node is going offline and the message could not be queued (queueing is disabled — with queueing on, messages sent during handover are queued and answered 202, docs/logic/orchestration/tech/handover.md §10.2), or the holder of this conversation could not be reached (see `Retry-After`)',
-      },
-      504: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description:
-          'Forwarded to the holder, but it did not answer in time — the message may or may not have been accepted. Check the conversation before resending',
-      },
-    },
-  });
-
-  app.openapi(postMessageRoute, async (c) => {
-    const userId = c.get('userId');
-    const { id } = c.req.valid('param');
-    const { text, intent } = c.req.valid('json');
-
-    const row = await getConversation(deps.db, id, userId);
-    if (row === undefined) {
-      return c.json({ error: 'Not found' }, 404);
-    }
-
-    // **三路分流全在框架里判一次**（`runtime.enqueue`）：有没有轮在跑、装配中还是真在
-    // 跑、该排队还是该插话、以及「查完队列没活儿了到真正释放归属之间用户又发了一条」
-    // 那个竞态的兜底。这里只负责把结果翻成 HTTP。
-    const outcome = await deps.runtime.enqueue(
-      id,
-      { text, userId },
-      { intent: intent === 'steer' ? 'steer' : 'queue' },
-    );
-
-    if (outcome.mode === 'started') {
-      return c.json({ ok: true as const, mode: 'started' as const }, 202);
-    }
-    if (outcome.mode === 'steered') {
-      try {
-        await deps.sandboxManager.ensureLifetime(id); // 与新起一轮一样，把沙盒空闲计时往后推
-      } catch (error) {
-        // **刻意吞掉，与下面 `queued` 那支同一个理由**：走到这里时插话已经注入进正在跑
-        // 的那一轮了，回 500 会让用户以为没发出去、再发一遍——同一句话进去两次。续期
-        // 失败只是沙盒可能提前睡，真正的可用性问题会在这一轮里以一条 failed 收尾帧浮现。
-        defaultLogger.warn(
-          'chat',
-          'failed to extend sandbox lifetime after steer',
-          { conversationId: id, error: describeError(error) },
-        );
-      }
-      return c.json({ ok: true as const, mode: 'steered' as const }, 202);
-    }
-    if (outcome.mode === 'queued') {
-      try {
-        await deps.sandboxManager.ensureLifetime(id); // 用户还在场，沙盒别在这一轮跑完前睡掉
-      } catch {
-        // 刻意吞掉：消息已经入队了，续期失败不该让这次请求失败——真正的沙盒可用性
-        // 问题会在出队起轮时以一条 failed 收尾帧浮现。
-      }
-      return c.json({ ok: true as const, mode: 'queued' as const }, 202);
-    }
-
-    // 四种拒绝的处置各不相同（`@runko/agent` 的 `EnqueueRejection`）。
-    if (outcome.reason === 'shutting_down') {
-      // 节点在[交权](docs/terms.md)，而队列关着、排不进去，只能拒。回 503，客户端重发即可。
-      // 队列开着时，下线期间的消息照常排队（docs/logic/orchestration/tech/handover.md §10.2）。
-      // 不能报 409（那是「你已经有一轮在跑」，会误导）。
-      return c.json({ error: '服务正在重启，请稍后重试' }, 503);
-    }
-    if (outcome.reason === 'queue_full' || outcome.reason === 'busy') {
-      return c.json({ error: outcome.message }, 409);
-    }
-    // `held_by_other`：归属在别的副本手上。**框架把地址放在 `holder` 字段里**（不是那句
-    // 文案里），照着转就行；已经转过一次的不再转，回 503 让客户端稍后重试。
-    if (outcome.reason === 'held_by_other') {
-      // 走到这里说明归属**刚刚**易了主：前面那道转发中间件问的时候还在本地，等框架真去抢
-      // 的时候已经不在了。两个人同时发消息就会撞上，所以不能简单回「稍后再试」——
-      // **就地转过去**，把持有者的回执原样交回。
-      //
-      // 这条路不能复用那道中间件：它返回的是上游那条原样的响应，而这个处理器的返回类型
-      // 被 OpenAPI 路由定义钉死。回执只有几十字节、没有流，读出来再照着回一次就行。
-      const forwarder = deps.forwarder;
-      if (
-        outcome.holder !== undefined &&
-        forwarder !== undefined &&
-        !forwarder.isForwarded(c)
-      ) {
-        const upstream = await forwarder.forward(c, outcome.holder);
-        // 结果未知就照实说：回 503 的话 nginx 会把这条消息换节点再发一遍。
+    // 走到这里说明归属**刚刚**易了主：转发中间件问的时候还在本地，等框架真去抢的时候
+    // 已经不在了。两个人同时发消息就会撞上，所以不能简单回「稍后再试」——**就地转过去**，
+    // 把持有者的回执原样交回。回执只有几十字节、没有流，读出来再照着回一次就行。
+    onHeldByOther: async (c, holder): Promise<HeldByOtherOutcome> => {
+      if (holder !== undefined && !forwarder.isForwarded(c)) {
+        const upstream = await forwarder.forward(c, holder);
         if (upstream.status === RESULT_UNKNOWN_STATUS) {
-          return c.json({ error: outcome.message }, RESULT_UNKNOWN_STATUS);
+          return { kind: 'unknown' };
         }
         const ack = StartTurnAckSchema.safeParse(await upstream.json());
         if (ack.success) {
-          return c.json(ack.data, 202);
+          return { kind: 'ack', ack: ack.data };
         }
       }
-      c.header('retry-after', RETRY_AFTER_SECONDS);
-      return c.json({ error: outcome.message }, RETRY_LATER_STATUS);
-    }
-    return c.json({ error: outcome.message }, 500);
-  });
-
-  // ---- POST /api/chat/conversations/{id}/abort (docs/logic/orchestration/tech/turn-abort.md §3.2) ----
-
-  const abortTurnRoute = createRoute({
-    method: 'post',
-    path: '/api/chat/conversations/{id}/abort',
-    tags: ['Chat'],
-    summary:
-      '[停止](docs/terms.md)这个会话进行中的那一轮（docs/logic/orchestration/tech/turn-abort.md）：中止当前轮并清空[待发队列](docs/terms.md)。200 只表示「停止已请求」——真正停下的时刻取决于 agent 当时在做什么（最坏情况是一条 bash 命令响应中断信号的时间），「已停止」这个结果走 `GET .../stream` 上那条 `status: "interrupted"` 的 `message-metadata` chunk 送达',
-    request: { params: ConversationParamsSchema },
-    responses: {
-      200: {
-        content: { 'application/json': { schema: AbortTurnAckSchema } },
-        description:
-          'Stop requested — `queue` is the (now empty) 待发队列 snapshot',
-      },
-      401: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Unauthorized',
-      },
-      404: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Not found',
-      },
-      409: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description:
-          'No turn in progress on this conversation (nothing to stop) — also covers the narrow race where the turn finished on its own between the check and the abort. Nothing is changed in this case, the 待发队列 included',
-      },
+      return { kind: 'retry', retryAfterSeconds: RETRY_AFTER_SECONDS };
     },
-  });
+  };
+}
 
-  app.openapi(abortTurnRoute, async (c) => {
-    const userId = c.get('userId');
-    const { id } = c.req.valid('param');
-
-    const row = await getConversation(deps.db, id, userId);
-    if (row === undefined) {
-      return c.json({ error: 'Not found' }, 404);
-    }
-
-    // 「先判有没有轮在跑、再清队列、最后 abort」这套顺序在框架里（`runtime.abort`）——
-    // 没有轮在跑时它**不动队列**（否则一次误点就是一次丢消息），有轮在跑时它保证清队列
-    // 排在 abort 之前（否则 abort 解开挂起的审批后这一轮可能立刻收尾、把队首那条发出去，
-    // 而用户刚按的是「停止」）。
-    if (!(await deps.runtime.abort(id))) {
-      return c.json({ error: 'no turn in progress' }, 409);
-    }
-    return c.json({ ok: true as const, queue: [] }, 200);
-  });
-
-  // ---- DELETE /api/chat/conversations/{id}/queue/{messageId} (docs/logic/orchestration/tech/steer-and-queue.md §4.2) ----
-
-  const deleteQueuedMessageRoute = createRoute({
-    method: 'delete',
-    path: '/api/chat/conversations/{id}/queue/{messageId}',
-    tags: ['Chat'],
-    summary:
-      '从[待发队列](docs/terms.md)里删掉一条还没发出的消息——返回变更后的完整队列快照（调用方一次往返拿到权威状态，不必删完再查）',
-    request: { params: ChatQueueParamsSchema },
-    responses: {
-      200: {
-        content: { 'application/json': { schema: queueFrameSchema } },
-        description: 'Queue after the removal',
-      },
-      401: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Unauthorized',
-      },
-      404: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description:
-          'Not found — either this conversation doesn’t exist (or isn’t the caller’s), or `messageId` isn’t in its queue anymore (already dequeued into a turn, already deleted, or never existed)',
-      },
-    },
-  });
-
-  app.openapi(deleteQueuedMessageRoute, async (c) => {
-    const userId = c.get('userId');
-    const { id, messageId } = c.req.valid('param');
-
-    const row = await getConversation(deps.db, id, userId);
-    if (row === undefined) {
-      return c.json({ error: 'Not found' }, 404);
-    }
-
-    // 广播新快照归框架（多标签同步）——这里只翻形状。
-    const { removed, queue } = await deps.runtime.removeQueued(id, messageId);
-    if (!removed) {
-      return c.json({ error: 'Not found' }, 404);
-    }
-
-    return c.json({ queue: toQueueDto(queue) }, 200);
-  });
-
-  // ---- DELETE /api/chat/conversations/{id}/queue (docs/logic/orchestration/tech/steer-and-queue.md §4.2) ----
-
-  const clearQueueRoute = createRoute({
-    method: 'delete',
-    path: '/api/chat/conversations/{id}/queue',
-    tags: ['Chat'],
-    summary:
-      '清空[待发队列](docs/terms.md)——已经出队起轮的消息不受影响（那已经是一条正常的用户消息了）',
-    request: { params: ConversationParamsSchema },
-    responses: {
-      200: {
-        content: { 'application/json': { schema: queueFrameSchema } },
-        description: 'Queue after clearing (always empty)',
-      },
-      401: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Unauthorized',
-      },
-      404: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Not found',
-      },
-    },
-  });
-
-  app.openapi(clearQueueRoute, async (c) => {
-    const userId = c.get('userId');
-    const { id } = c.req.valid('param');
-
-    const row = await getConversation(deps.db, id, userId);
-    if (row === undefined) {
-      return c.json({ error: 'Not found' }, 404);
-    }
-
-    const queue = await deps.runtime.clearQueue(id);
-    return c.json({ queue: toQueueDto(queue) }, 200);
-  });
-
-  // ---- GET /api/chat/conversations/{id}/stream?after=<seq> (resumable live tail, docs/ingress/tech/chat-webapp.md §2.2b) ----
-
-  const streamTurnRoute = createRoute({
-    method: 'get',
-    path: '/api/chat/conversations/{id}/stream',
-    tags: ['Chat'],
-    summary:
-      'Resumable live tail of a session’s in-progress turn (docs/ingress/tech/chat-webapp.md §2.2b): replays persisted frames after `after`, then forwards the turn’s live chunks until it ends — reconnect-safe (page refresh/HMR/network blip never lose events)',
-    request: {
-      params: ConversationParamsSchema,
-      query: ConversationReplayQuerySchema,
-    },
-    responses: {
-      200: {
-        content: { 'text/event-stream': { schema: chatReplayFrameSchema } },
-        description:
-          'SSE stream of `ChatReplayFrame`s (`{seq,message}` or `{seq?,chunk}`): replay, then live tail (closes once the turn ends, or immediately after replay if no turn is in progress). Live `chunk` frames omit `seq` when ephemeral (docs/logic/orchestration/tech/single-ledger.md §5 单-3 — `text-delta`/`reasoning-delta`/`transient` data parts), never persisted and never replayed; every other frame always carries one',
-      },
-      401: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Unauthorized',
-      },
-      404: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Not found',
-      },
-    },
-  });
-
-  app.openapi(streamTurnRoute, async (c) => {
-    const userId = c.get('userId');
-    const { id } = c.req.valid('param');
-    const { after } = c.req.valid('query');
-
-    const row = await getConversation(deps.db, id, userId);
-    if (row === undefined) {
-      return c.json({ error: 'Not found' }, 404);
-    }
-
-    return streamSSE(c, async (stream) => {
-      // 断线续传、[进行中草稿](../../../../docs/terms.md)快照、队列与
-      // [轮状态](../../../../docs/terms.md)两帧权威快照、以及「先挂订阅再回放，中间不留
-      // 缝」那套顺序，全在 `runtime.subscribe` 里。本文件只做序列化——框架不碰 HTTP。
-      const abort = new AbortController();
-      stream.onAbort(() => {
-        abort.abort();
-      });
-      // [节点下线](../../../../docs/terms.md)时这条流由框架结束：这份对话交接完，最后一帧是请重连帧
-      // （`reconnect`），前端收到就立刻重连，落到新的持有者上。
-      const signal = abort.signal;
-
-      for await (const frame of deps.runtime.subscribe(id, {
-        ...(after !== undefined ? { after } : {}),
-        signal,
-      })) {
-        const wire = toWireFrame(frame);
-        await stream.writeSSE({
-          event: frameEventName(wire),
-          data: JSON.stringify(wire),
-        });
-      }
-    });
-  });
-
-  // ---- GET /api/chat/conversations/{id}/activity ----
-
-  const activityRoute = createRoute({
-    method: 'get',
-    path: '/api/chat/conversations/{id}/activity',
-    tags: ['Chat'],
-    summary: '这条会话此刻有没有轮在跑、归哪个副本跑（多副本运维与验证用）',
-    request: { params: ConversationParamsSchema },
-    responses: {
-      200: {
-        content: { 'application/json': { schema: ActivitySchema } },
-        description: 'Activity',
-      },
-      401: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Unauthorized',
-      },
-      404: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Not found',
-      },
-    },
-  });
-
-  app.openapi(activityRoute, async (c) => {
-    const userId = c.get('userId');
-    const { id } = c.req.valid('param');
-    const row = await getConversation(deps.db, id, userId);
-    if (row === undefined) {
-      return c.json({ error: 'Not found' }, 404);
-    }
-    const activity = await deps.runtime.getActivity(id);
-    return c.json(
-      {
-        active: activity.active,
-        local: activity.local,
-        ...(activity.holder !== undefined ? { holder: activity.holder } : {}),
-      },
-      200,
-    );
-  });
-
-  // ---- GET /api/chat/config ----
-
-  const chatConfigRoute = createRoute({
-    method: 'get',
-    path: '/api/chat/config',
-    tags: ['Chat'],
-    summary:
-      '这台服务端能做什么：能选哪几档沙盒、用的是真模型还是演示模型（docs/ingress/tech/unified-demo.md §4.3）',
-    responses: {
-      200: {
-        content: { 'application/json': { schema: ChatConfigSchema } },
-        description: 'Capabilities',
-      },
-      401: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Unauthorized',
-      },
-    },
-  });
-
-  app.openapi(chatConfigRoute, (c) =>
-    c.json(
-      {
-        providers: availableProviders(),
-        defaultProvider: resolveDefaultProvider(),
-        model: hasRealModel() ? ('deepseek' as const) : ('demo' as const),
-      },
-      200,
-    ),
-  );
-
-  // ---- POST /api/chat/conversations/{id}/presence (在场心跳, docs/ingress/tech/push-notification.md §5.2) ----
-
-  const presenceRoute = createRoute({
-    method: 'post',
-    path: '/api/chat/conversations/{id}/presence',
-    tags: ['Chat'],
-    summary:
-      '上报在场（见 docs/terms.md「在场」）：这条会话此刻是否正在调用者眼前（docs/ingress/tech/push-notification.md §5.2）。在场期间不向这个人推送本会话的通知',
-    request: {
-      params: ConversationParamsSchema,
-      body: {
-        content: { 'application/json': { schema: PresenceInputSchema } },
-        required: true,
-      },
-    },
-    responses: {
-      200: {
-        content: { 'application/json': { schema: ApprovalAckSchema } },
-        description: 'Recorded',
-      },
-      401: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Unauthorized',
-      },
-      404: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Not found —— 会话不存在，或不属于调用者',
-      },
-    },
-  });
-
-  app.openapi(presenceRoute, async (c) => {
-    const userId = c.get('userId');
-    const { id } = c.req.valid('param');
-    const { focused } = c.req.valid('json');
-
-    // 属主校验与本文件其它会话级接口一致（不存在与不属于自己都回 404，不泄露
-    // 存在性）。刻意**不** `touch()` 沙盒：心跳每 20 秒一次，让"盯着页面发呆"
-    // 无限续沙盒的命，既烧钱又把空闲休眠这套机制架空。
-    const row = await getConversation(deps.db, id, userId);
-    if (row === undefined) {
-      return c.json({ error: 'Not found' }, 404);
-    }
-
-    // 在场**只用于推送的前台抑制**，不喂给框架的 `reportPresence`（那会把等人的内存窗口往后推）。
-    // 沙盒为等人续命只续到审批保活预算（5 分钟）为止；窗口要是被在场一直推着，沙盒会先睡着，
-    // 这时点「允许」是在一个睡着的沙盒上跑命令。挂起再恢复则会走起轮装配、先把沙盒叫醒
-    // （docs/ingress/tech/chat-webapp.md §6.3）。
-    if (focused) {
-      await markPresent(deps.db, userId, id);
-    } else {
-      await clearPresent(deps.db, userId, id);
-    }
-
-    return c.json({ ok: true as const }, 200);
-  });
-
-  // ---- POST /api/chat/conversations/{id}/approvals/{callId} (resolve a pending approval, docs/ingress/tech/chat-webapp.md §2.2c（审批链）) ----
-
-  const postApprovalRoute = createRoute({
-    method: 'post',
-    path: '/api/chat/conversations/{id}/approvals/{callId}',
-    tags: ['Chat'],
-    summary:
-      '批准或拒绝一个待处理的工具调用审批请求（docs/ingress/tech/chat-webapp.md §2.2c（审批链），docs/logic/orchestration/tech/single-ledger.md §6）：结果通过 `GET .../stream` 的 `tool-approval-response` chunk 送达，本响应只是一个 ack',
-    request: {
-      params: ChatApprovalParamsSchema,
-      body: {
-        content: { 'application/json': { schema: PostApprovalInputSchema } },
-        required: true,
-      },
-    },
-    responses: {
-      200: {
-        content: { 'application/json': { schema: ApprovalAckSchema } },
-        description: 'Resolved',
-      },
-      401: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Unauthorized',
-      },
-      404: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description:
-          'Not found — either this session doesn’t exist (or isn’t the caller’s), or `callId` has no pending approval on it (already resolved, timed out, or never existed)',
-      },
-    },
-  });
-
-  app.openapi(postApprovalRoute, async (c) => {
-    const userId = c.get('userId');
-    const { id, callId } = c.req.valid('param');
-    const { behavior, message } = c.req.valid('json');
-
-    const row = await getConversation(deps.db, id, userId);
-    if (row === undefined) {
-      return c.json({ error: 'Not found' }, 404);
-    }
-
-    if (behavior !== 'deny') {
-      // 把沙盒空闲计时往后推，同其它 in-turn 触点——但**绝不能拦住裁决本身**：
-      // `ensureLifetime` 抛了（沙盒已经没了、临时错误），这条挂起的工具调用照样需要被
-      // 结掉，否则它一直挂到审批超时才被自动拒绝，比让 `exec()` 自己把沙盒可用性问题
-      // 报成一次普通的工具失败更糟。
-      try {
-        await deps.sandboxManager.ensureLifetime(id);
-      } catch {
-        // 见上，刻意吞掉
-      }
-    }
-
-    // 「会话内都允许」= 本次放行 + 记一条[会话级授权](docs/terms.md)。授权是 chat 层
-    // 自己的产品概念（core 只认 allow/deny），所以由这里落库；框架侧只在裁决表里记一个
-    // `scope: 'conversation'`——那是**范围**，框架记而不执行，放行与否看本层的授权表。
-    //
-    // 这次调用的 tool + 入参从**框架的裁决表**里取（路由手上只有 callId）。**先读、后
-    // 落库**：读要在 `submitDecision` 之前（结清之后这条就不在待定清单里了），但**写必须
-    // 在它之后**——`listPending` 读的是库、`submitDecision` 走的是内存里那条挂起 promise，
-    // 进程重启会让两者分家（库里的行永远停在 `decidedAt=null`，内存里什么都没有）。顺序
-    // 反了的话，用户在没刷新的标签页上点一下会拿到 404，却已经留下一条永久放行规则。
-    const grant =
-      behavior === 'allow-session' ?
-        (await deps.decisions.listPending(id)).find(
-          (entry) => entry.toolCallId === callId,
-        )
-      : undefined;
-
-    const resolved = await deps.runtime.submitDecision(id, callId, {
-      outcome: behavior === 'deny' ? 'deny' : 'allow',
-      scope: behavior === 'allow-session' ? 'conversation' : 'once',
-      decidedBy: userId,
-      ...(message !== undefined ? { message } : {}),
-    });
-    if (!resolved) {
-      return c.json({ error: 'Not found' }, 404);
-    }
-
-    if (grant?.toolName !== undefined) {
-      await grantConversationApproval(
-        deps.db,
-        id,
-        userId,
-        grant.toolName,
-        grant.payload ?? null,
+/** 进程内运行时 → 会话后端。 */
+function createNodeBackend(deps: ChatRouteDeps): ConversationBackend {
+  return {
+    runtime: deps.runtime,
+    listPendingDecisions: (conversationId) =>
+      deps.decisions.listPending(conversationId),
+    async liveStates(conversationIds) {
+      // 「等你答」一次分组查询数完；队列与「有没有轮在跑」按会话问框架。「有没有轮在跑」
+      // 问的是 `getActivity`：它先看本进程的登记册，再看库里的归属——多副本时别的副本
+      // 正在跑也算。
+      const pending = await countPendingDecisions(deps.db, [
+        ...conversationIds,
+      ]);
+      const entries = await Promise.all(
+        conversationIds.map(
+          async (id) =>
+            [
+              id,
+              await readRuntimeLiveState(
+                deps.runtime,
+                id,
+                pending.get(id) ?? 0,
+              ),
+            ] as const,
+        ),
       );
-    }
-
-    return c.json({ ok: true as const }, 200);
-  });
-
-  // ---- POST /api/chat/conversations/{id}/questions/{callId} (answer a pending ask-user question, docs/ingress/tech/chat-webapp.md §2.2c（审批链）) ----
-
-  const postAnswerRoute = createRoute({
-    method: 'post',
-    path: '/api/chat/conversations/{id}/questions/{callId}',
-    tags: ['Chat'],
-    summary:
-      '回答一个待处理的 ask-user 提问（docs/ingress/tech/chat-webapp.md §2.2c（审批链））：结果通过 `GET .../stream` 的 `tool-ask-user` 部件 output-available 状态送达，本响应只是一个 ack',
-    request: {
-      params: ChatApprovalParamsSchema,
-      body: {
-        content: { 'application/json': { schema: PostAnswerInputSchema } },
-        required: true,
-      },
+      return new Map(entries);
     },
-    responses: {
-      200: {
-        content: { 'application/json': { schema: ApprovalAckSchema } },
-        description: 'Resolved',
-      },
-      401: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description: 'Unauthorized',
-      },
-      404: {
-        content: { 'application/json': { schema: ErrorSchema } },
-        description:
-          'Not found — either this session doesn’t exist (or isn’t the caller’s), or `callId` has no pending question on it (already answered, timed out, or never existed)',
-      },
+    provision: (input) =>
+      provisionWithSandboxManager(deps.sandboxManager, input, defaultLogger),
+    extendSandboxLifetime: (conversationId) =>
+      deps.sandboxManager.ensureLifetime(conversationId),
+  };
+}
+
+export function createChatApp(deps: ChatRouteDeps) {
+  return createChatRoutes({
+    db: deps.db,
+    backend: createNodeBackend(deps),
+    authMiddleware: deps.authMiddleware,
+    githubApp: deps.githubApp ?? defaultGithubApp,
+    capabilities: () => ({
+      providers: (deps.availableProviders ?? availableProviders)(),
+      defaultProvider: resolveDefaultProvider(),
+      model: hasRealModel() ? ('deepseek' as const) : ('demo' as const),
+      clusterConsole: true,
+    }),
+    sandboxIdleTimeoutMs: resolveIdleTimeoutMs(),
+    ...(deps.telemetryStore !== undefined ?
+      { telemetry: deps.telemetryStore }
+    : {}),
+    presence: {
+      mark: (userId, conversationId) =>
+        markPresent(deps.db, userId, conversationId),
+      clear: (userId, conversationId) =>
+        clearPresent(deps.db, userId, conversationId),
+    },
+    host: createNodeHostHooks(deps),
+    onSwallowedError: (where, conversationId, error) => {
+      defaultLogger.warn('chat', 'failed to extend sandbox lifetime', {
+        where,
+        conversationId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     },
   });
-
-  app.openapi(postAnswerRoute, async (c) => {
-    const userId = c.get('userId');
-    const { id, callId } = c.req.valid('param');
-    const { answer } = c.req.valid('json');
-
-    const row = await getConversation(deps.db, id, userId);
-    if (row === undefined) {
-      return c.json({ error: 'Not found' }, 404);
-    }
-
-    // Unconditional (unlike the approval route's `allow`-only branch —
-    // answering a question always lets the turn continue, there is no "deny"
-    // analog here): must never block the answer itself, same rationale as
-    // the approval route's own touch-failure comment above.
-    try {
-      await deps.sandboxManager.ensureLifetime(id);
-    } catch {
-      // intentionally swallowed — see comment above
-    }
-
-    const resolved = await deps.runtime.submitAnswer(id, callId, answer, {
-      decidedBy: userId,
-    });
-    if (!resolved) {
-      return c.json({ error: 'Not found' }, 404);
-    }
-
-    return c.json({ ok: true as const }, 200);
-  });
-
-  return app;
 }
 
 /**

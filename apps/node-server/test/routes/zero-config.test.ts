@@ -6,14 +6,15 @@
  * [演示模型](../../../../docs/terms.md)。只有「云沙盒」和「真 AI」不在场——而这正是要验的：
  * 没有它们，这个应用照样能用。
  */
+import { createLocalProvider } from '@runko-chat/shared/agent/local-sandbox';
+import { resolveModel } from '@runko-chat/shared/agent/model';
+import { createSandboxManager } from '@runko-chat/shared/agent/sandbox-manager';
+import { ConversationSchema } from '@runko-chat/shared/schemas/chat';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createLocalProvider } from '../../src/agent/local-sandbox.js';
-import { resolveModel } from '../../src/agent/model.js';
+import { availableProviders } from '../../src/agent/cloud-sandboxes.js';
 import { createChatPersistence } from '../../src/agent/persistence.js';
-import { createSandboxManager } from '../../src/agent/sandbox-manager.js';
 import type { Db } from '../../src/db/instance.js';
-import { ConversationSchema } from '../../src/schemas/chat.js';
 import { buildChatApp } from '../helpers/chat-app.js';
 import { silentLogger } from '../helpers/silent-logger.js';
 import { createTestDb, seedUser } from '../helpers/test-db.js';
@@ -50,7 +51,14 @@ describe('零配置（本地沙盒 + 演示模型）', () => {
       { local: createLocalProvider({ db, logger: silentLogger }) },
       { logger: silentLogger },
     );
-    return buildChatApp({ db, sandboxManager, resolveModel, userId: USER_ID });
+    // 这一组问的就是「按环境变量算出来的」能力，所以用生产那份。
+    return buildChatApp({
+      db,
+      sandboxManager,
+      resolveModel,
+      userId: USER_ID,
+      availableProviders,
+    });
   }
 
   async function createConversation(
@@ -103,6 +111,26 @@ describe('零配置（本地沙盒 + 演示模型）', () => {
       providers: ['local'],
       defaultProvider: 'local',
       model: 'demo',
+      // Node 版有集群控制台（`/console`）；Cloudflare 版没有，前端据此藏起入口。
+      clusterConsole: true,
+    });
+  });
+
+  it('点名一档没配的云沙盒：400，不去碰 GitHub 和沙盒', async () => {
+    const { app } = build();
+    const response = await app.request('/api/chat/conversations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: '没配 Vercel',
+        provider: 'vercel',
+        repo: { installationId: 1, repoId: 2 },
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: 'sandbox provider "vercel" is not available on this server',
     });
   });
 

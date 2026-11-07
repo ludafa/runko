@@ -5,7 +5,7 @@
  * wire 上是一串 `ChatReplayFrame`，两支：`ChunkEnvelope`（`{ seq?, chunk }`，带
  * `seq` ⇔ 可持久、可回放）与 `MessageFrame`（`{ seq, message }`，只出现在回放里，
  * 是一条已完成的 `RunkoUIMessage` 原文）。完整理由见
- * `apps/node-server/src/schemas/chat.ts` 自己的文件头。
+ * `apps/chat-shared/src/schemas/chat.ts` 自己的文件头。
  *
  * 这里的帧形状是那份服务端 zod 的**手写镜像**，不是 kubb 生成的
  * `gen/zod/chatChunkEnvelopeSchema.ts`/`chatMessageFrameSchema.ts`。原因：
@@ -36,7 +36,7 @@ export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
 // ---- ChatReplayFrame（`apps/node-server` 的 `schemas/chat.ts`） ----
 
 /**
- * 受控例外，理由与 `apps/node-server/src/schemas/chat.ts` 自己那份
+ * 受控例外，理由与 `apps/chat-shared/src/schemas/chat.ts` 自己那份
  * `runkoChunkSchema`/`runkoUIMessageSchema` 相同。
  *
  * `RunkoChunk`/`RunkoUIMessage`（ai 的 `UIMessageChunk`/`UIMessage`，在

@@ -6,8 +6,8 @@
 import { hostname } from 'node:os';
 
 import { serve } from '@hono/node-server';
+import { logger } from '@runko-chat/shared/logger';
 
-import { logger } from '../logger.js';
 import { createOpsApp } from './app.js';
 import {
   createDockerClient,

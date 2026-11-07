@@ -41,7 +41,7 @@ RUN --mount=type=cache,id=runko-pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile --filter "@runko-chat/node-server..."
 
 # 只拷编译要用的源码，不拷整个仓库：改 docs、apps/web 这些不相干的文件，不会让下面的编译重做。
-COPY --parents tsconfig.base.json packages apps/node-server ./
+COPY --parents tsconfig.base.json packages apps/chat-shared apps/node-server ./
 
 # 编译 node-server 和它依赖的 @runko/*（`...` = 连同依赖，按依赖顺序）。tsc 顺带做类型检查：
 # 类型错了，镜像就构建失败。

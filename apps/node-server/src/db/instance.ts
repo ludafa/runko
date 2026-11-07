@@ -23,12 +23,11 @@
  *    省得每个取值点都要记得转一次。
  */
 import type { Flavor } from '@runko/persist-kysely';
+import type { ChatDatabase } from '@runko-chat/shared/db/schema';
+import { logger } from '@runko-chat/shared/logger';
 import type Database from 'better-sqlite3';
 import { Kysely, PostgresDialect, SqliteDialect } from 'kysely';
 import type pg from 'pg';
-
-import { logger } from '../logger.js';
-import type { ChatDatabase } from './schema.js';
 
 const LOG_SCOPE = 'db';
 

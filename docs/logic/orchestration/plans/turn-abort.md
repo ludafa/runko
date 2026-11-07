@@ -81,7 +81,7 @@ pnpm --filter @runko-chat/web test                # 249 全绿
 - 框架的 `EnqueueResult` 只有 `started` / `queued` / `steered` / `rejected` 四种（`packages/agent/src/types.ts`），没有 `aborted`；
 - 根因是语义变了——[起轮占位](../../../terms.md)现在是装配的**第一件事**，所以 `POST .../messages` 一登记就返回 `started`，不再等装配走完；老实现是 ack 卡在装配里，才有机会把它改判成 `aborted`。
 
-**但 `StartTurnAckSchema` 与 OpenAPI 描述里那一档还留着**（`apps/node-server/src/schemas/chat.ts`、`routes/chat.ts` 的 202 描述），是一段死契约。
+**但 `StartTurnAckSchema` 与 OpenAPI 描述里那一档还留着**（`apps/chat-shared/src/schemas/chat.ts`、`routes/chat.ts` 的 202 描述），是一段死契约。
 
 行为本身没退化：装配窗口里按停止，这一轮照样停、「已停止」照样走[直播流](../../../terms.md)送达——变的只是那条 ack 说什么。所以 B6 要么按新语义重述标准 8（ack 是 `started`，判定看流上的收尾帧），要么先把死契约摘掉。**两条都还没做。**
 

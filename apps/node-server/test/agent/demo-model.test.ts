@@ -5,9 +5,11 @@
  * 工具结果**——一轮可能被[挂起](../../../../docs/terms.md)、几小时后在另一个进程里恢复，
  * 那时模型是新造的，按「第几次调用」记数一定会再调一次工具，把人已经批准过的命令又跑一遍。
  */
+import {
+  demoStreamFor,
+  parseDemoCommand,
+} from '@runko-chat/shared/agent/demo-model';
 import { describe, expect, it } from 'vitest';
-
-import { demoStreamFor, parseDemoCommand } from '../../src/agent/demo-model.js';
 
 /** 把一次输出收成数组。 */
 async function stream(

@@ -6,7 +6,8 @@
  * 是"哪一类是噪音"现在纯靠猜，先全开跑一阵）。这个环境变量是给"确实被某一类吵
  * 到了"的人留的口子，改配置重启即生效。
  */
-import type { Logger } from '../logger.js';
+import type { Logger } from '@runko-chat/shared/logger';
+
 import type { PushKind } from './types.js';
 import { isPushKind, PUSH_KINDS } from './types.js';
 

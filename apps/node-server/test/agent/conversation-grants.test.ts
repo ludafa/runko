@@ -3,14 +3,14 @@
  * `conversation_grants`，按 (会话, 用户, tool, 入参指纹) 记账——同用户同调用才命中、
  * 换命令不命中、**按用户隔离**、按会话隔离、键序无关、可清空。每个用例一张全新内存库。
  */
-import { beforeEach, describe, expect, it } from 'vitest';
-
 import {
   clearConversationGrants,
   grantConversationApproval,
   hasConversationGrant,
-} from '../../src/agent/conversation-grants.js';
-import { createConversation } from '../../src/agent/store.js';
+} from '@runko-chat/shared/agent/conversation-grants';
+import { createConversation } from '@runko-chat/shared/agent/store';
+import { beforeEach, describe, expect, it } from 'vitest';
+
 import type { Db } from '../../src/db/instance.js';
 import { createTestDb, seedUser } from '../helpers/test-db.js';
 

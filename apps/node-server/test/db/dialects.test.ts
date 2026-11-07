@@ -9,6 +9,17 @@
  * Postgres 一模一样**，只有「怎么把 SQL 送出去」那一层不同。
  */
 import { PGlite } from '@electric-sql/pglite';
+import {
+  grantConversationApproval,
+  hasConversationGrant,
+} from '@runko-chat/shared/agent/conversation-grants';
+import {
+  createConversation,
+  getConversation,
+  listConversations,
+  updateConversation,
+} from '@runko-chat/shared/agent/store';
+import type { ChatDatabase } from '@runko-chat/shared/db/schema';
 import Database from 'better-sqlite3';
 import type {
   DatabaseConnection,
@@ -27,19 +38,8 @@ import {
 } from 'kysely';
 import { describe, expect, it } from 'vitest';
 
-import {
-  grantConversationApproval,
-  hasConversationGrant,
-} from '../../src/agent/conversation-grants.js';
-import {
-  createConversation,
-  getConversation,
-  listConversations,
-  updateConversation,
-} from '../../src/agent/store.js';
 import type { Db } from '../../src/db/instance.js';
 import { migrateDatabase } from '../../src/db/migrate.js';
-import type { ChatDatabase } from '../../src/db/schema.js';
 import {
   listSubscriptions,
   markSent,

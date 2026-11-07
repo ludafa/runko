@@ -207,7 +207,7 @@ sequenceDiagram
 ### 5.1 服务端新增
 
 ```ts
-// apps/node-server/src/agent/skill-catalog.ts（新文件）
+// apps/chat-shared/src/agent/skill-catalog.ts（新文件）
 
 /** 沙盒里 skill 的安装目录——与 sandbox-manager.ts 的安装脚本同一约定。 */
 export const SKILLS_DIR = '/.agents/skills';

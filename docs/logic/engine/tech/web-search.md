@@ -21,7 +21,7 @@ related: ["logic/engine/features/web-search.md", "logic/engine/plans/web-search.
 
 | | `ask-user` | `web-search` |
 |---|---|---|
-| 定义在 | `apps/node-server/src/agent/chat-agent.ts` | `apps/node-server/src/agent/web-search.ts` |
+| 定义在 | `apps/chat-shared/src/agent/chat-agent.ts` | `apps/chat-shared/src/agent/web-search.ts` |
 | 注册条件 | `BuildSessionOptions.onAskUser` 存在 | `EXA_API_KEY` 有值（或显式注入 `webSearchTool`） |
 | 注册方式 | `defineAgent({ tools: { ... } })` | 同左 |
 | core 改动 | 无 | 无 |

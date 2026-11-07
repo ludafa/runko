@@ -9,11 +9,11 @@
  * 登记表有时差）。
  */
 import type { AgentRuntime } from '@runko/agent';
+import type { Logger } from '@runko-chat/shared/logger';
+import { logger as defaultLogger } from '@runko-chat/shared/logger';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
-import type { Logger } from '../logger.js';
-import { logger as defaultLogger } from '../logger.js';
 import type { NodeIdentity } from './forward.js';
 import {
   FORWARDED_HEADER,

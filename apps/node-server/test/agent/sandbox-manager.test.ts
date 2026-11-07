@@ -3,21 +3,21 @@ import type {
   VercelSandboxLike,
 } from '@runko/sandbox-vercel';
 import { vercelWorkspace } from '@runko/sandbox-vercel';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
 import type {
   AcquireInput,
   CreateSandboxParams,
   ProvisionedSandbox,
   ResumeResult,
   SandboxProvider,
-} from '../../src/agent/sandbox-manager.js';
+} from '@runko-chat/shared/agent/sandbox-manager';
+import { createSandboxManager } from '@runko-chat/shared/agent/sandbox-manager';
+import { createLogger } from '@runko-chat/shared/logger';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
 import {
   availableProviders,
-  createSandboxManager,
   resolveDefaultProvider,
-} from '../../src/agent/sandbox-manager.js';
-import { createLogger } from '../../src/logger.js';
+} from '../../src/agent/cloud-sandboxes.js';
 
 // ---------------------------------------------------------------------------
 // A structurally-injected fake SandboxProvider (no @vercel/sandbox import, no

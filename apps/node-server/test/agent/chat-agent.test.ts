@@ -15,13 +15,12 @@
  */
 import type { ExecRequest, ExecResult, RunkoExec, RunkoFS } from '@runko/core';
 import { MemoryFS } from '@runko/sdk';
-import type { Mock } from 'vitest';
-import { describe, expect, it, vi } from 'vitest';
-
 import {
   buildInstructions,
   gateWorkspace,
-} from '../../src/agent/chat-agent.js';
+} from '@runko-chat/shared/agent/chat-agent';
+import type { Mock } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 interface SpyWorkspace {
   workspace: RunkoFS & RunkoExec;

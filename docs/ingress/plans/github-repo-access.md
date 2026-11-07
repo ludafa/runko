@@ -31,7 +31,7 @@ related: ["ingress/features/github-repo-access.md", "ingress/tech/github-repo-ac
 
 ### G1 · GitHub App 客户端与路由 ✅
 
-- **文件**：`apps/node-server/src/agent/github-app.ts`（新）、`src/routes/github.ts`（新）、`src/app.ts`（挂路由）、`src/schemas/github.ts`（新）。
+- **文件**：`apps/chat-shared/src/agent/github-app.ts`（新）、`src/routes/github.ts`（新）、`src/app.ts`（挂路由）、`src/schemas/github.ts`（新）。
 - **产出**：技术方案 §5 的两个接口；`createGithubApp({ env, fetch, getUserToken, now })` 全部可注入（测试用假 GitHub、假用户令牌源，零网络零凭证）；JWT 用 `node:crypto` RS256 现签，已用一对测试 RSA 密钥手动验过签名。
 - **偏差（已在 G7 审查后收回）**：起初建会话时「核对」与「签令牌」各调一次，同一次建会话里核对了两遍；审查后改成 `getRepoToken` 一步完成、连同仓库信息返回。
 

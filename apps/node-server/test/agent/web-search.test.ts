@@ -9,15 +9,14 @@
  */
 import type { JsonValue, RunkoFS, ToolContext } from '@runko/core';
 import { MemoryFS } from '@runko/sdk';
-import type { Mock } from 'vitest';
-import { describe, expect, it, vi } from 'vitest';
-import { z } from 'zod';
-
 import {
   createWebSearchTool,
   createWebSearchToolFromEnv,
   resolveWebSearchConfig,
-} from '../../src/agent/web-search.js';
+} from '@runko-chat/shared/agent/web-search';
+import type { Mock } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
 const API_KEY = 'exa-test-key';
 

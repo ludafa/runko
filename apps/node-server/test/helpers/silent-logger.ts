@@ -6,6 +6,6 @@
  * 要**断言**日志内容时不要用它，用 `createLogger({ sink })` 注入一个收集数组的
  * 假 sink（`test/logger.test.ts` 的用法）。
  */
-import { createLogger } from '../../src/logger.js';
+import { createLogger } from '@runko-chat/shared/logger';
 
 export const silentLogger = createLogger({ sink: () => {} });

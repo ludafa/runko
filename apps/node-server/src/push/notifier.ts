@@ -15,12 +15,12 @@
  * `agent/store.ts` 取数据——那是数据访问层，`push/store.ts` 也从那里拿 `Db` 类型。
  */
 import type { JsonValue } from '@runko/core';
+import type { Db } from '@runko-chat/shared/agent/store';
+import { getConversation } from '@runko-chat/shared/agent/store';
+import type { Logger } from '@runko-chat/shared/logger';
+import { logger as defaultLogger } from '@runko-chat/shared/logger';
 
 import { countQueued } from '../agent/runko-tables.js';
-import type { Db } from '../agent/store.js';
-import { getConversation } from '../agent/store.js';
-import type { Logger } from '../logger.js';
-import { logger as defaultLogger } from '../logger.js';
 import { isEventEnabled } from './events.js';
 import { isPresent } from './presence.js';
 import type { PushTransport } from './sender.js';

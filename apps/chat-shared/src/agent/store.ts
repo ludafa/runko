@@ -10,11 +10,11 @@
 import type { Updateable } from 'kysely';
 import { z } from 'zod';
 
-import type { Db } from '../db/instance.js';
 import type {
   ConversationProvider,
   ConversationsTable,
   ConversationStatus,
+  Db,
 } from '../db/schema.js';
 import type { Logger } from '../logger.js';
 import { logger as defaultLogger } from '../logger.js';

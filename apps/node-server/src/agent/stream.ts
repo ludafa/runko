@@ -17,9 +17,8 @@
 import type { StreamFanout } from '@runko/agent';
 import type { RedisPublisher, RedisSubscriber } from '@runko/stream-redis';
 import { redisFanout } from '@runko/stream-redis';
-
-import type { Logger } from '../logger.js';
-import { logger as defaultLogger } from '../logger.js';
+import type { Logger } from '@runko-chat/shared/logger';
+import { logger as defaultLogger } from '@runko-chat/shared/logger';
 
 const LOG_SCOPE = 'stream';
 

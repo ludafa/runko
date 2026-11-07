@@ -52,7 +52,7 @@ E2B 还有个硬上限：**Pro 账户最长 24 小时，Hobby 最长 1 小时**�
 
 接口叫 `ensureLifetime(targetMs)`：**把剩余存活时间补到至少 targetMs，够了就什么都不做。**
 
-这修掉一个现存 bug。`apps/node-server/src/agent/sandbox-manager.ts:157` 现在是：
+这修掉一个现存 bug。`apps/chat-shared/src/agent/sandbox-manager.ts:157` 现在是：
 
 ```ts
 extendIdle: (idleTimeoutMs) => sandbox.extendTimeout(idleTimeoutMs),   // Vercel
@@ -327,7 +327,7 @@ E2B 没有对应属性，只能靠本地记账。但因为它是重置语义，�
 
 ## 6. 宿主侧（chat 应用）的迁移
 
-`apps/node-server/src/agent/sandbox-manager.ts` 的改动：
+`apps/chat-shared/src/agent/sandbox-manager.ts` 的改动：
 
 | 现状 | 改成 |
 |---|---|
@@ -404,7 +404,7 @@ ensureLifetime: (ms) => {
 | 续期闸门 | `packages/core/src/keepalive.ts`（`createKeepAlive` / `KeepAliveDriver`） |
 | E2B driver + 接线 | `packages/sandbox-e2b/src/keepalive.ts` / `workspace.ts` / `exec.ts` |
 | Vercel driver + 差额计算 | `packages/sandbox-vercel/src/keepalive.ts`（含导出的 `extensionFor`） / `index.ts` / `exec.ts` |
-| chat 应用接线 | `apps/node-server/src/agent/sandbox-manager.ts`（`keepAliveOptionsFor` / `forwardKeepAlive`） |
+| chat 应用接线 | `apps/chat-shared/src/agent/sandbox-manager.ts`（`keepAliveOptionsFor` / `forwardKeepAlive`） |
 
 施工中与本文档原稿的三处偏差（闸门落点、`expiresAt` vs `timeout`、判定线取 3/4）已就地订正在上面对应小节，来龙去脉见 [施工进展](../plans/sandbox-keepalive.md)的变更记录。
 

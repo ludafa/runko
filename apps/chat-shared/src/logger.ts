@@ -1,14 +1,16 @@
 /**
- * 零依赖分级日志（本工单：runko chat server 的 step / tool call 级别可观测性）。
- * 不引第三方日志库——内网 registry 装依赖有坑（见
- * `docs/tech/*` 的既有教训），而这里要的能力（分级、单行结构化、可注入
- * sink）用 `process.stdout.write` + 几个纯函数就够。
+ * 零依赖分级日志：分级、单行结构化、可注入 sink，几个纯函数就够，不引第三方日志库。
+ *
+ * 两个服务端共用：Node 版写 `process.stdout`；Workers 里没有它，退到 `console.log`
+ * （Workers 的日志面板收的就是 console 输出）。
  *
  * 用法：`agent/`、`routes/` 等调用方经 `createLogger()` 拿一个 `Logger`，或直接
  * 用默认单例 `logger`（未显式注入时的兜底——现有调用方不传 logger 也能跑）。
  * 测试要断言具体输出时，用 `createLogger({ sink })` 注入一个收集数组的假
  * sink，不用碰 `process.stdout`。
  */
+
+import { processEnv } from './env.js';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -62,15 +64,29 @@ function isLogLevel(value: string): value is LogLevel {
 }
 
 function resolveLevelFromEnv(): LogLevel {
-  const raw = process.env.LOG_LEVEL?.trim().toLowerCase();
+  const raw = processEnv().LOG_LEVEL?.trim().toLowerCase();
   if (raw !== undefined && isLogLevel(raw)) {
     return raw;
   }
   return 'info';
 }
 
+/** Workers 的 `navigator.userAgent` 固定是这个值；那里的 `process.stdout` 即使有也不进日志面板。 */
+const WORKERS_USER_AGENT = 'Cloudflare-Workers';
+
 function defaultSink(line: string): void {
-  process.stdout.write(`${line}\n`);
+  const inWorkers =
+    typeof navigator !== 'undefined' &&
+    navigator.userAgent === WORKERS_USER_AGENT;
+  if (
+    !inWorkers &&
+    typeof process !== 'undefined' &&
+    typeof process.stdout?.write === 'function'
+  ) {
+    process.stdout.write(`${line}\n`);
+    return;
+  }
+  console.log(line);
 }
 
 /**
@@ -115,7 +131,7 @@ function formatLine(
 ): string {
   return formatLogLine({
     at: new Date(),
-    node: process.env.RUNKO_NODE_URL === undefined ? '' : nodeName(),
+    node: processEnv().RUNKO_NODE_URL === undefined ? '' : nodeName(),
     level,
     scope,
     message,
@@ -125,7 +141,7 @@ function formatLine(
 
 /** 多副本时日志里带上副本名（从可达地址取主机名），单进程时不带。 */
 function nodeName(): string {
-  const url = process.env.RUNKO_NODE_URL?.trim() ?? '';
+  const url = processEnv().RUNKO_NODE_URL?.trim() ?? '';
   try {
     return new URL(url).hostname;
   } catch {

@@ -20,6 +20,9 @@ import type { Tool, ToolContext } from '@runko/sdk';
 import { defineTool } from '@runko/sdk';
 import { z } from 'zod';
 
+import type { EnvLike } from '../env.js';
+import { processEnv } from '../env.js';
+
 const EXA_SEARCH_ENDPOINT = 'https://api.exa.ai/search';
 
 /** 模型没指定条数时取几条——够用又不撑爆上下文（docs/logic/engine/features/web-search.md §6 成功标准 4）。 */
@@ -117,7 +120,7 @@ export interface CreateWebSearchToolOptions extends WebSearchConfig {
  * 未配（缺席/空串/纯空白）返回 `undefined` = 这个工具根本不注册。
  */
 export function resolveWebSearchConfig(
-  env: NodeJS.ProcessEnv = process.env,
+  env: EnvLike = processEnv(),
 ): WebSearchConfig | undefined {
   const apiKey = env.EXA_API_KEY?.trim();
   if (apiKey === undefined || apiKey.length === 0) {
@@ -128,7 +131,7 @@ export function resolveWebSearchConfig(
 
 /** `resolveWebSearchConfig` + `createWebSearchTool` 的便利组合：没配 key 就返回 `undefined`（`chat-agent.ts` 据此决定注不注册）。 */
 export function createWebSearchToolFromEnv(
-  env: NodeJS.ProcessEnv = process.env,
+  env: EnvLike = processEnv(),
 ): Tool | undefined {
   const config = resolveWebSearchConfig(env);
   return config === undefined ? undefined : createWebSearchTool(config);

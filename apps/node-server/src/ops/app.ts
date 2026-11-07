@@ -6,10 +6,10 @@
  * 环境变量——那是 `index.ts` 的事，这里只管把依赖拼成一个 Hono app，方便
  * 测试时塞假的 `DockerClient` 与固定时钟。
  */
+import type { Logger } from '@runko-chat/shared/logger';
+import { logger as defaultLogger } from '@runko-chat/shared/logger';
 import { Hono } from 'hono';
 
-import type { Logger } from '../logger.js';
-import { logger as defaultLogger } from '../logger.js';
 import type { DockerClient, DockerContainerSummary } from './docker.js';
 import { DOCKER_STATE_RUNNING } from './docker.js';
 import type { OpsNode, OpsNodeState } from './schema.js';

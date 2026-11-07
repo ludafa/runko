@@ -9,8 +9,6 @@
  *    （tech §5.1 那张表就是下面的用例）。
  */
 import { MemoryFS } from '@runko/sdk';
-import { describe, expect, it } from 'vitest';
-
 import {
   buildModelText,
   extractMentionedSkills,
@@ -18,8 +16,10 @@ import {
   loadSkillsFromWorkspace,
   resolveSkillCatalog,
   toSkillSummaries,
-} from '../../src/agent/skill-catalog.js';
-import { createLogger } from '../../src/logger.js';
+} from '@runko-chat/shared/agent/skill-catalog';
+import { createLogger } from '@runko-chat/shared/logger';
+import { describe, expect, it } from 'vitest';
+
 import { silentLogger } from '../helpers/silent-logger.js';
 
 function skillMarkdown(description: string, title: string): string {

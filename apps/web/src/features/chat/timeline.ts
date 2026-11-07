@@ -119,7 +119,7 @@ const askUserInputSchema = z.object({
 
 export type AskUserInput = z.infer<typeof askUserInputSchema>;
 
-/** `ask-user` 自己的入参形状（`apps/node-server/src/agent/chat-agent.ts` 的 `askUserInputSchema`）：`{ question, options？ }`。 */
+/** `ask-user` 自己的入参形状（`apps/chat-shared/src/agent/chat-agent.ts` 的 `askUserInputSchema`）：`{ question, options？ }`。 */
 export function askUserInputFrom(input: unknown): AskUserInput | undefined {
   const result = askUserInputSchema.safeParse(input);
   return result.success ? result.data : undefined;

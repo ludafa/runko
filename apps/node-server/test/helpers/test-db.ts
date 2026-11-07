@@ -1,9 +1,9 @@
+import type { ChatDatabase } from '@runko-chat/shared/db/schema';
 import Database from 'better-sqlite3';
 import { Kysely, sql, SqliteDialect } from 'kysely';
 
 import type { Db } from '../../src/db/instance.js';
 import { migrateDatabase } from '../../src/db/migrate.js';
-import type { ChatDatabase } from '../../src/db/schema.js';
 import { silentLogger } from './silent-logger.js';
 
 /**

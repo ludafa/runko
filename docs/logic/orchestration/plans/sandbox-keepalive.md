@@ -148,7 +148,7 @@ related: ["logic/orchestration/features/sandbox-keepalive.md", "logic/orchestrat
 
 **涉及文件**：
 
-- `apps/node-server/src/agent/sandbox-manager.ts`：删 `startHeartbeat` / `heartbeats` / `heartbeatIntervalMs`；`extendIdle` → `ensureLifetime`；`touch` → `ensureLifetime`；建盒时传 `keepAlive` 配置；`markAlive` 改由 `onRenew` 驱动。
+- `apps/chat-shared/src/agent/sandbox-manager.ts`：删 `startHeartbeat` / `heartbeats` / `heartbeatIntervalMs`；`extendIdle` → `ensureLifetime`；`touch` → `ensureLifetime`；建盒时传 `keepAlive` 配置；`markAlive` 改由 `onRenew` 驱动。
 - `apps/node-server/src/agent/turn-launcher.ts`：删三处心跳起停（起、`onTurnSettled` 停、busy 分支就地停）。
 - `apps/node-server/src/routes/chat.ts`：`touch` 的四处调用改名。
 - `apps/node-server/src/agent/turn-runner.ts`：`DEFAULT_APPROVAL_TIMEOUT_MS` 的注释去掉「赶在沙盒死前」的耦合说明（**数值不动**）。

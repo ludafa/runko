@@ -11,13 +11,12 @@
  * comment promises.
  */
 import type { JsonValue } from '@runko/core';
-import { describe, expect, it } from 'vitest';
-
 import {
   classifyApproval,
   commandNeedsHumanApproval,
   resolveApprovalMode,
-} from '../../src/agent/approval-policy.js';
+} from '@runko-chat/shared/agent/approval-policy';
+import { describe, expect, it } from 'vitest';
 
 describe('agent/approval-policy: resolveApprovalMode', () => {
   it('falls back to "dangerous" when CHAT_APPROVAL_MODE is unset', () => {

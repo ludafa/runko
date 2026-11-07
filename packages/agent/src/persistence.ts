@@ -70,7 +70,7 @@ export interface DecisionRecord {
    * **框架只记，不执行**——它不会在后续轮里查这张表替宿主自动放行。记账粒度
    * （按整条调用的入参指纹？按[命令段](../../../docs/terms.md)拆？按用户分账？）
    * 是宿主的产品决策，框架不该替它定。宿主自己的实现见
-   * `apps/node-server/src/agent/conversation-grants.ts`。
+   * `apps/chat-shared/src/agent/conversation-grants.ts`。
    */
   scope?: "once" | "conversation";
   /** 谁批的（不透明字符串）。 */

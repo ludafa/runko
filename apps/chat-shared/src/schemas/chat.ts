@@ -42,6 +42,18 @@ const runkoChunkSchema: z.ZodType<RunkoChunk> = z.any();
 const runkoUIMessageSchema: z.ZodType<RunkoUIMessage> = z.any();
 
 /**
+ * [沙盒 provider](../../../../docs/terms.md)：这个会话跑在哪一档沙盒上。哪台服务端配得起哪几档由
+ * `GET /api/chat/config` 回答——`cloudflare` 只有 Cloudflare 版有，`vercel`/`e2b` 只有 Node 版有，
+ * `local` 两边都有。
+ */
+export const conversationProviderSchema = z.enum([
+  'vercel',
+  'e2b',
+  'local',
+  'cloudflare',
+]);
+
+/**
  * `{ seq?, chunk }`——**`seq` 在不在，就是这条 chunk 落没落库**：在 = 可回放（判据是
  * `@runko/agent` 的 `isDurableChunk`）；不在 = 一过性的（`text-delta`、`reasoning-delta`、
  * `transient: true` 的 data part）。
@@ -196,7 +208,7 @@ export const ConversationSchema = z
     branchName: z.string().nullable(),
     sandboxName: z.string(),
     /** 沙盒 provider——前端据此渲染 provider 徽标。 */
-    provider: z.enum(['vercel', 'e2b', 'local']),
+    provider: conversationProviderSchema,
     status: z.enum(['active', 'sleeping', 'expired']),
     lastActiveAt: z.string(),
     /** 这个会话的[待发队列](../../../../docs/terms.md)——页面加载时的初始快照，之后由 `QueueFrame` 或队列端点响应刷新。列表端点也带（侧边栏可显示「N 条待发」）。 */
@@ -245,7 +257,7 @@ export const CreateConversationInputSchema = z
   .object({
     title: z.string().min(1).max(255).optional(),
     /** 这次会话用哪家沙盒；省略时落服务端默认 `SANDBOX_PROVIDER`（未配则挑这台服务端配得起的第一档）。 */
-    provider: z.enum(['vercel', 'e2b', 'local']).optional(),
+    provider: conversationProviderSchema.optional(),
     repo: RepoSelectorSchema.optional(),
   })
   .openapi('CreateConversationInput');
@@ -404,10 +416,15 @@ export const PostAnswerInputSchema = z
 export const ChatConfigSchema = z
   .object({
     /** 这台服务端配得起的[沙盒 provider](../../../../docs/terms.md)，至少有 `local`。 */
-    providers: z.array(z.enum(['vercel', 'e2b', 'local'])),
-    defaultProvider: z.enum(['vercel', 'e2b', 'local']),
+    providers: z.array(conversationProviderSchema),
+    defaultProvider: conversationProviderSchema,
     /** `demo` = 没配模型 key，用的是[演示模型](../../../../docs/terms.md)。 */
     model: z.enum(['deepseek', 'demo']),
+    /**
+     * 有没有[集群控制台](../../../../docs/terms.md)。Node 版有；Cloudflare 版没有「节点」这回事，
+     * 前端据此藏起入口。
+     */
+    clusterConsole: z.boolean(),
   })
   .openapi('ChatConfig');
 

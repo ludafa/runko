@@ -5,20 +5,18 @@
  *
  * - **用户令牌**：better-auth 的 `account` 表管，本文件只管拿到手之后怎么用——问 GitHub
  *   「这个用户能看到哪些装了 App 的仓库」（`listUserInstallations`/`listInstallationRepos`）。
- * - **安装令牌**：本文件自己签发。用私钥签一张 App JWT（RS256，Node 自带 `crypto`，
- *   不引新依赖），拿它换一把只对**一个仓库**有效、1 小时过期的安装令牌
+ * - **安装令牌**：本文件自己签发。用私钥签一张 App JWT（RS256，WebCrypto——Node 与
+ *   Workers 都有，不引新依赖），拿它换一把只对**一个仓库**有效、1 小时过期的安装令牌
  *   （`mintInstallationToken`）。
  *
  * `createGithubApp()` 把两者接起来：`getRepoToken()` 是每一轮真正调用的那个入口——
  * 缓存命中直接给；没命中就先用用户令牌核对一次权限，权限还在才签新的（§3.3）。
  * `fetch`/`getUserToken`/`now` 都是可注入的（测试用假 GitHub、假用户令牌源）。
  */
-import { createSign } from 'node:crypto';
-
-import { isAPIError } from 'better-auth/api';
 import { z } from 'zod';
 
-import { auth } from '../auth.js';
+import type { EnvLike } from '../env.js';
+import { processEnv } from '../env.js';
 
 const DEFAULT_GITHUB_API_URL = 'https://api.github.com';
 const GITHUB_API_VERSION = '2022-11-28';
@@ -60,7 +58,7 @@ function normalizePrivateKey(raw: string): string {
  * 少了 client id/secret，用户根本连不上 GitHub，App 也就没法用。
  */
 export function loadGithubAppConfig(
-  env: NodeJS.ProcessEnv = process.env,
+  env: EnvLike = processEnv(),
 ): GithubAppConfig | undefined {
   const appId = env.GITHUB_APP_ID?.trim();
   const appSlug = env.GITHUB_APP_SLUG?.trim();
@@ -95,9 +93,7 @@ export function loadGithubAppConfig(
   };
 }
 
-export function isGithubAppConfigured(
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
+export function isGithubAppConfigured(env: EnvLike = processEnv()): boolean {
   return loadGithubAppConfig(env) !== undefined;
 }
 
@@ -170,33 +166,159 @@ export function classifyGithubError(error: unknown): GithubErrorKind {
 }
 
 // ---------------------------------------------------------------------------
-// App JWT（RS256，node:crypto）
+// App JWT（RS256，WebCrypto）
 // ---------------------------------------------------------------------------
 
-function base64url(input: string | Uint8Array): string {
-  const buf = typeof input === 'string' ? Buffer.from(input) : input;
-  return buf.toString('base64url');
+const textEncoder = new TextEncoder();
+
+function base64url(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+function base64urlJson(value: unknown): string {
+  return base64url(textEncoder.encode(JSON.stringify(value)));
+}
+
+function decodeBase64(text: string): Uint8Array {
+  const binary = atob(text);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+/** DER 的长度字段：短格式一个字节，长格式 `0x80 | 字节数` 后跟大端长度。 */
+function derLength(length: number): Uint8Array {
+  if (length < 0x80) {
+    return Uint8Array.of(length);
+  }
+  const bytes: number[] = [];
+  for (let rest = length; rest > 0; rest = Math.floor(rest / 256)) {
+    bytes.unshift(rest % 256);
+  }
+  return Uint8Array.of(0x80 | bytes.length, ...bytes);
+}
+
+function derNode(tag: number, content: Uint8Array): Uint8Array {
+  const length = derLength(content.length);
+  const out = new Uint8Array(1 + length.length + content.length);
+  out[0] = tag;
+  out.set(length, 1);
+  out.set(content, 1 + length.length);
+  return out;
+}
+
+function concatBytes(...parts: Uint8Array[]): Uint8Array {
+  const out = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
+  let offset = 0;
+  for (const part of parts) {
+    out.set(part, offset);
+    offset += part.length;
+  }
+  return out;
+}
+
+/** `AlgorithmIdentifier { rsaEncryption, NULL }` 的 DER 编码（OID 1.2.840.113549.1.1.1）。 */
+const RSA_ALGORITHM_IDENTIFIER = Uint8Array.of(
+  0x30,
+  0x0d,
+  0x06,
+  0x09,
+  0x2a,
+  0x86,
+  0x48,
+  0x86,
+  0xf7,
+  0x0d,
+  0x01,
+  0x01,
+  0x01,
+  0x05,
+  0x00,
+);
+
+/**
+ * PKCS#1（`BEGIN RSA PRIVATE KEY`）→ PKCS#8 的 DER。
+ *
+ * GitHub 下发的 App 私钥是 PKCS#1，WebCrypto 的 `importKey` 只收 PKCS#8。两者差的只是一层外壳：
+ * `SEQUENCE { INTEGER 0, AlgorithmIdentifier, OCTET STRING { PKCS#1 } }`。
+ */
+function pkcs1ToPkcs8(pkcs1: Uint8Array): Uint8Array {
+  const version = Uint8Array.of(0x02, 0x01, 0x00);
+  const wrapped = derNode(0x04, pkcs1);
+  return derNode(0x30, concatBytes(version, RSA_ALGORITHM_IDENTIFIER, wrapped));
+}
+
+/** PEM 私钥 → WebCrypto 能导入的 PKCS#8 字节。两种标签都认，别的标签直接报错。 */
+function privateKeyToPkcs8(pem: string): Uint8Array {
+  const match =
+    /-----BEGIN ((?:RSA )?PRIVATE KEY)-----([\s\S]*?)-----END \1-----/.exec(
+      pem,
+    );
+  if (match === null) {
+    throw new Error(
+      'GITHUB_APP_PRIVATE_KEY 不是 PEM 格式的 RSA 私钥（要 BEGIN RSA PRIVATE KEY 或 BEGIN PRIVATE KEY）',
+    );
+  }
+  const der = decodeBase64((match[2] ?? '').replace(/\s+/g, ''));
+  return match[1] === 'RSA PRIVATE KEY' ? pkcs1ToPkcs8(der) : der;
+}
+
+/**
+ * WebCrypto 的密钥类型。不直接写 `CryptoKey`：Node 的类型里它只是个值，Workers 的类型里
+ * 才同时是类型——从 `importKey` 的返回值推出来，两边都认。
+ */
+type SigningKey = Awaited<ReturnType<typeof crypto.subtle.importKey>>;
+
+/** 导入过的私钥按 PEM 文本缓存：每签一次都重新解析 DER 没有必要。 */
+const signingKeys = new Map<string, Promise<SigningKey>>();
+
+function importSigningKey(pem: string): Promise<SigningKey> {
+  const cached = signingKeys.get(pem);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const imported = crypto.subtle.importKey(
+    'pkcs8',
+    privateKeyToPkcs8(pem),
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  // 导入失败别留在缓存里：下一次换了正确的私钥（或修好了格式）应该重新试。
+  imported.catch(() => signingKeys.delete(pem));
+  signingKeys.set(pem, imported);
+  return imported;
 }
 
 /** App 自己的身份令牌：签给 `POST /app/installations/:id/access_tokens` 用，别处不需要它。 */
-export function mintAppJwt(
+export async function mintAppJwt(
   config: GithubAppConfig,
   now: () => number = Date.now,
-): string {
+): Promise<string> {
   const nowSeconds = Math.floor(now() / 1000);
-  const header = base64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
-  const payload = base64url(
-    JSON.stringify({
-      iat: nowSeconds - APP_JWT_ISSUED_AT_SKEW_SECONDS,
-      exp: nowSeconds + APP_JWT_TTL_SECONDS,
-      iss: config.appId,
-    }),
-  );
+  const header = base64urlJson({ alg: 'RS256', typ: 'JWT' });
+  const payload = base64urlJson({
+    iat: nowSeconds - APP_JWT_ISSUED_AT_SKEW_SECONDS,
+    exp: nowSeconds + APP_JWT_TTL_SECONDS,
+    iss: config.appId,
+  });
   const signingInput = `${header}.${payload}`;
-  const signature = createSign('RSA-SHA256')
-    .update(signingInput)
-    .sign(config.privateKey);
-  return `${signingInput}.${base64url(signature)}`;
+  const key = await importSigningKey(config.privateKey);
+  const signature = await crypto.subtle.sign(
+    'RSASSA-PKCS1-v1_5',
+    key,
+    textEncoder.encode(signingInput),
+  );
+  return `${signingInput}.${base64url(new Uint8Array(signature))}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -423,7 +545,7 @@ export async function mintInstallationToken(
   fetchImpl: typeof fetch = globalThis.fetch,
   now: () => number = Date.now,
 ): Promise<GithubRepoToken> {
-  const jwt = mintAppJwt(config, now);
+  const jwt = await mintAppJwt(config, now);
   const raw = await callGithubApi(
     config,
     fetchImpl,
@@ -473,43 +595,25 @@ export interface GithubApp {
 }
 
 export interface CreateGithubAppOptions {
-  env?: NodeJS.ProcessEnv;
+  env?: EnvLike;
   fetch?: typeof fetch;
-  /** 拿一个用户当前有效的 GitHub 用户令牌；没连接过返回 `undefined`。缺省接 better-auth。 */
-  getUserToken?: (userId: string) => Promise<string | undefined>;
+  /**
+   * 拿一个用户当前有效的 GitHub 用户令牌；没连接过返回 `undefined`。
+   *
+   * **必须由宿主给**：用户令牌在 better-auth 的 `account` 表里，而 better-auth 的实例是宿主建的
+   * （Node 版与 Cloudflare 版接的库不一样）。契约见 `requireUserToken`：返回 `undefined` = 没连接；
+   * 抛错 = 基础设施故障，原样透出。
+   */
+  getUserToken: (userId: string) => Promise<string | undefined>;
   now?: () => number;
 }
 
-/**
- * 生产默认的用户令牌来源：better-auth 管着 `account` 表与刷新逻辑，这里只是原样转发
- * （`auth.api.getAccessToken` 直接服务端调用，不带 headers 时按传入的 `userId` 解析，
- * 见 better-auth `resolveUserId`）。
- *
- * better-auth 以 `APIError` 报的（账号没连过 GitHub、刷新令牌失效）= 没连接，返回 `undefined`；
- * 别的错误（库连不上之类）原样抛——见 `requireUserToken` 的契约。
- */
-async function defaultGetUserToken(
-  userId: string,
-): Promise<string | undefined> {
-  try {
-    const result = await auth.api.getAccessToken({
-      body: { providerId: 'github', userId },
-    });
-    return result.accessToken;
-  } catch (error) {
-    if (isAPIError(error)) {
-      return undefined;
-    }
-    throw error;
-  }
-}
-
-export function createGithubApp(opts: CreateGithubAppOptions = {}): GithubApp {
-  const env = opts.env ?? process.env;
+export function createGithubApp(opts: CreateGithubAppOptions): GithubApp {
+  const env = opts.env ?? processEnv();
   const fetchImpl = opts.fetch ?? globalThis.fetch;
   // 每次现取：不在构造时把 `Date.now` 的引用定死。
   const now = opts.now ?? ((): number => Date.now());
-  const getUserToken = opts.getUserToken ?? defaultGetUserToken;
+  const getUserToken = opts.getUserToken;
   const config = loadGithubAppConfig(env);
   /**
    * 按「用户 + 安装 + 仓库」缓存安装令牌（§2/§3.3）。键里必须有用户：同一个仓库两个人都能用时，
@@ -596,6 +700,3 @@ export function createGithubApp(opts: CreateGithubAppOptions = {}): GithubApp {
     },
   };
 }
-
-/** 生产单例：env 懒读、构造本身零 I/O，`routes/chat.ts`/`routes/github.ts` 共用（令牌缓存也共享）。 */
-export const defaultGithubApp: GithubApp = createGithubApp();

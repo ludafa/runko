@@ -7,10 +7,9 @@
  * - **拒绝组**：§3.4 拒绝清单**逐条**一个用例，断言返回 `undefined`。这组是安全用例——
  *   它守的是「漏看一条命令」这个唯一要防的失效模式，不是可选的覆盖率装饰。
  */
+import type { CommandSegment } from '@runko-chat/shared/agent/split-command';
+import { splitCommand } from '@runko-chat/shared/agent/split-command';
 import { describe, expect, it } from 'vitest';
-
-import type { CommandSegment } from '../../src/agent/split-command.js';
-import { splitCommand } from '../../src/agent/split-command.js';
 
 /** 只关心 argv 时的简写：redirects 断言为空。 */
 function seg(...argv: string[]): CommandSegment {

@@ -1,9 +1,9 @@
 /** 推送订阅的四个接口（docs/ingress/tech/push-notification.md §3.1）。 */
+import type { Db } from '@runko-chat/shared/agent/store';
 import type { MiddlewareHandler } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type { Db } from '../../src/agent/store.js';
 import { listSubscriptions } from '../../src/push/store.js';
 import { createPushApp } from '../../src/routes/push.js';
 import { silentLogger } from '../helpers/silent-logger.js';

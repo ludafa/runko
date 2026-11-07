@@ -15,7 +15,7 @@ related: ["logic/engine/features/web-search.md", "logic/engine/tech/web-search.m
 
 ## 设计定案摘要（主线程拍板，2026-07-26）
 
-1. **落点在 chat 应用**：`apps/node-server/src/agent/web-search.ts`，经 `chat-agent.ts` 的 `defineAgent({ tools })` 条件注册，与 `ask-user` 同构；core 零改动（理由见[技术方案 §1](../tech/web-search.md)）。
+1. **落点在 chat 应用**：`apps/chat-shared/src/agent/web-search.ts`，经 `chat-agent.ts` 的 `defineAgent({ tools })` 条件注册，与 `ask-user` 同构；core 零改动（理由见[技术方案 §1](../tech/web-search.md)）。
 2. **对模型的工具名 `web-search`**，配置项照实叫 `EXA_API_KEY`。
 3. **`fetch` 直调 `POST https://api.exa.ai/search`** + zod 宽松 schema 校验响应，不装 SDK。
 4. **输入四字段**：`query`（必填）/ `numResults`(1–10，默认 5) / `category` / `includeDomains`；输出为格式化纯文本。
@@ -27,8 +27,8 @@ related: ["logic/engine/features/web-search.md", "logic/engine/tech/web-search.m
 | # | 内容 | 落点 | 状态 |
 |---|---|---|---|
 | 1 | 文档三件套 + 术语表词条 + `.env.template` | `docs/{features,tech,plans}/web-search.md`、`docs/terms.md`、`.env.template` | ✅ 已完成 |
-| 2 | 工具实现：配置解析 + 请求构造 + 响应校验 + 结果格式化 + 错误分档 | `apps/node-server/src/agent/web-search.ts` | ✅ 已完成 |
-| 3 | 接线：`BuildSessionOptions.webSearchTool` + 条件注册 + instructions 补一句 | `apps/node-server/src/agent/chat-agent.ts` | ✅ 已完成 |
+| 2 | 工具实现：配置解析 + 请求构造 + 响应校验 + 结果格式化 + 错误分档 | `apps/chat-shared/src/agent/web-search.ts` | ✅ 已完成 |
+| 3 | 接线：`BuildSessionOptions.webSearchTool` + 条件注册 + instructions 补一句 | `apps/chat-shared/src/agent/chat-agent.ts` | ✅ 已完成 |
 | 4 | 测试：工具单测（注入假 `fetch`，零网络）+ `buildSession` 注册/缺席两态 | `apps/node-server/test/agent/web-search.test.ts`、`test/agent/chat-agent.test.ts` | ✅ 已完成（web-search 32 例、chat-agent +3 例） |
 | 5 | 质量门：`typecheck` / `lint` / `test` | `apps/node-server` | ✅ 已完成（见验收结论） |
 

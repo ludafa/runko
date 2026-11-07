@@ -1,5 +1,6 @@
 /** `pnpm db:migrate` 的入口：建表，然后退出。跑完即退，不起服务。 */
-import { logger } from '../logger.js';
+import { logger } from '@runko-chat/shared/logger';
+
 import { db, flavor } from './instance.js';
 import { migrateDatabase } from './migrate.js';
 

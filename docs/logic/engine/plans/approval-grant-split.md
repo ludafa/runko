@@ -42,7 +42,7 @@ related: ["logic/engine/features/approval-grant-split.md", "logic/engine/tech/ap
 
 ### G-1 拆分器（依赖 G-0）
 
-- **目标**：`apps/node-server/src/agent/split-command.ts` —— `splitCommand(command): CommandSegment[] | undefined`，纯函数、零依赖、无 I/O。
+- **目标**：`apps/chat-shared/src/agent/split-command.ts` —— `splitCommand(command): CommandSegment[] | undefined`，纯函数、零依赖、无 I/O。
 - **涉及文件**：`src/agent/split-command.ts`（新增）、`test/agent/split-command.test.ts`（新增）。
 - **对应 spec**：技术方案 §3（§3.2 接受形状、§3.4 拒绝清单 14 条）。
 - **验收标准**：

@@ -27,7 +27,7 @@ related: ["ingress/features/chat-webapp.md", "ingress/plans/chat-webapp.md", "ar
 
 ## 2. 业务数据领域图
 
-两张应用表（`apps/node-server/src/db/schema.ts`），外加 better-auth 的 `user` 表。字段与 P13-5 后的形态一致：`conversations` 携带 **runko 标量 header**（`agent_session_id`/`agent_session_created_at`/`agent_session_turn`，取代旧的 `nimbo_state_json` 整块 JSON），`conversation_events` 用 **`kind`** 区分 `message`/`chunk` 两类条目、共享一条按会话单调递增的 `seq`。
+两张应用表（`apps/chat-shared/src/db/schema.ts`），外加 better-auth 的 `user` 表。字段与 P13-5 后的形态一致：`conversations` 携带 **runko 标量 header**（`agent_session_id`/`agent_session_created_at`/`agent_session_turn`，取代旧的 `nimbo_state_json` 整块 JSON），`conversation_events` 用 **`kind`** 区分 `message`/`chunk` 两类条目、共享一条按会话单调递增的 `seq`。
 
 ```mermaid
 erDiagram
@@ -444,7 +444,7 @@ div.h-screen.flex.flex-col.overflow-hidden   ← 文档永不滚动
 
 **动机**：turn/step/工具调用的过程此前只有界面能看，运维排障缺服务端结构化日志；同时用户在工具卡片上感受不到「这次调用花了多久」（尤其是走了人审的调用，等待时长完全不可见）。两件事分头解决，但共享同一个约束：`finalizeTurnPersistence` 落盘的 message 必须与 `session.toJSON().messages` 字节一致（§6），**server 不能私自往 message 里塞时间戳**——所以工具起止时间必须由 core 的 loop 在写账本时就地产生，作为一个持久 data 部件随消息存档（见 [tech/single-ledger](../../logic/orchestration/tech/single-ledger.md) §3.2 的 `data-tool-timing`），刷新/回放不丢；server 日志只是这个部件的一个只读消费方。
 
-### 11.1 零依赖分级 logger（`apps/node-server/src/logger.ts`）
+### 11.1 零依赖分级 logger（`apps/chat-shared/src/logger.ts`）
 
 - `createLogger(opts)`：支持 `level`（`debug`/`info`/`warn`/`error`）与注入 `sink`（测试用，捕获行而非写 stdout）；默认单例写 stdout，`LOG_LEVEL` 环境变量覆盖默认级别（未设为 `info`）。
 - 单行格式：ISO 时间戳 + 级别 + `[scope]` + 消息 + 结构化字段（对象 JSON 化；长字符串走截断助手，如 turn 文本预览 120 字符、工具 input 预览 200 字符）。

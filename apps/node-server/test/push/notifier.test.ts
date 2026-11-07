@@ -2,10 +2,10 @@
  * 通知决策层（docs/ingress/tech/push-notification.md §5、§6.1）——三道闸门的真值表、文案
  * 截断、以及最要紧的那条：**抛错绝不影响一轮**。
  */
+import type { Db } from '@runko-chat/shared/agent/store';
+import { createConversation } from '@runko-chat/shared/agent/store';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type { Db } from '../../src/agent/store.js';
-import { createConversation } from '../../src/agent/store.js';
 import { createChatNotifier } from '../../src/push/notifier.js';
 import { markPresent } from '../../src/push/presence.js';
 import type { PushTransport } from '../../src/push/sender.js';

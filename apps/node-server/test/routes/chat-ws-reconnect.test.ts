@@ -10,18 +10,17 @@ import type { AddressInfo } from 'node:net';
 
 import { serve } from '@hono/node-server';
 import { createNodeWebSocket } from '@hono/node-ws';
+import { createLocalProvider } from '@runko-chat/shared/agent/local-sandbox';
+import { resolveModel } from '@runko-chat/shared/agent/model';
+import { createSandboxManager } from '@runko-chat/shared/agent/sandbox-manager';
+import { createConversation } from '@runko-chat/shared/agent/store';
+import { createChatWsApp } from '@runko-chat/shared/routes/chat-ws';
 import { Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 
-import { createLocalProvider } from '../../src/agent/local-sandbox.js';
-import { resolveModel } from '../../src/agent/model.js';
-import { createSandboxManager } from '../../src/agent/sandbox-manager.js';
-import { createConversation } from '../../src/agent/store.js';
 import type { Db } from '../../src/db/instance.js';
-import { toWireFrame } from '../../src/routes/chat.js';
-import { createChatWsApp } from '../../src/routes/chat-ws.js';
 import { buildChatApp } from '../helpers/chat-app.js';
 import type { FakeSessions } from '../helpers/fake-turn-session.js';
 import { createFakeSessions } from '../helpers/fake-turn-session.js';
@@ -49,7 +48,6 @@ function startServer(
         await next();
       }),
       upgradeWebSocket,
-      toWire: toWireFrame,
       logger: silentLogger,
     }),
   );

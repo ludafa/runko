@@ -12,7 +12,8 @@
  * `resolveApprovalTimeoutMs` 同一姿态：读三个环境变量比维护一份缓存 + 一个测试用
  * 的重置入口便宜得多。
  */
-import type { Logger } from '../logger.js';
+import type { Logger } from '@runko-chat/shared/logger';
+
 import { resolveEnabledEvents } from './events.js';
 
 const LOG_SCOPE = 'push';

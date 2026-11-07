@@ -22,6 +22,9 @@
  */
 import type { ApprovalOutcome, JsonValue } from '@runko/core';
 
+import type { EnvLike } from '../env.js';
+import { processEnv } from '../env.js';
+
 export type ChatApprovalMode = 'dangerous' | 'all' | 'off';
 
 const APPROVAL_MODES: readonly ChatApprovalMode[] = ['dangerous', 'all', 'off'];
@@ -32,7 +35,7 @@ function isChatApprovalMode(value: string): value is ChatApprovalMode {
 
 /** 读 `CHAT_APPROVAL_MODE`。认不出来的值（没设、拼错、空串）一律回落到 `'dangerous'`——它是既安全、又还能让日常只读 bash 命令无人值守通过的那个默认档。 */
 export function resolveApprovalMode(
-  env: NodeJS.ProcessEnv = process.env,
+  env: EnvLike = processEnv(),
 ): ChatApprovalMode {
   const raw = env.CHAT_APPROVAL_MODE?.trim();
   return raw !== undefined && isChatApprovalMode(raw) ? raw : 'dangerous';

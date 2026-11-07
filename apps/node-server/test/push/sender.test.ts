@@ -2,9 +2,9 @@
  * 投递层（docs/ingress/tech/push-notification.md §6）——注入假 transport，不 mock 整个
  * `web-push` 模块，也就不需要真的发网络。
  */
+import type { Db } from '@runko-chat/shared/agent/store';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import type { Db } from '../../src/agent/store.js';
 import type {
   PushTransport,
   TransportOptions,

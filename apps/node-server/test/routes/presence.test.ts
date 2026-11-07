@@ -2,10 +2,10 @@
  * [在场](../../../../docs/terms.md)心跳接口（docs/ingress/tech/push-notification.md §5.2）
  * ——`POST .../presence`。
  */
+import type { Db } from '@runko-chat/shared/agent/store';
+import { createConversation } from '@runko-chat/shared/agent/store';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import type { Db } from '../../src/agent/store.js';
-import { createConversation } from '../../src/agent/store.js';
 import { isPresent } from '../../src/push/presence.js';
 import { buildChatApp } from '../helpers/chat-app.js';
 import { createFakeSandboxManager } from '../helpers/fake-sandbox-manager.js';

@@ -27,10 +27,9 @@
  * 和用户直连的请求在它眼里没有区别。副本间令牌只防「伪造转发标记、逼副本在本地答」，
  * 越不过登录。
  */
+import type { Logger } from '@runko-chat/shared/logger';
+import { logger as defaultLogger } from '@runko-chat/shared/logger';
 import type { Context } from 'hono';
-
-import type { Logger } from '../logger.js';
-import { logger as defaultLogger } from '../logger.js';
 
 const LOG_SCOPE = 'forward';
 

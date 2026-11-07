@@ -7,10 +7,10 @@
  */
 import { defaultSessionFactory } from '@runko/agent';
 import { MemoryFS } from '@runko/sdk';
+import { buildInstructions } from '@runko-chat/shared/agent/chat-agent';
+import { loadSkillsFromWorkspace } from '@runko-chat/shared/agent/skill-catalog';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { buildInstructions } from '../src/agent/chat-agent.js';
-import { loadSkillsFromWorkspace } from '../src/agent/skill-catalog.js';
 import {
   createSqliteTelemetry,
   createTelemetryStore,

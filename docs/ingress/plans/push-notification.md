@@ -92,7 +92,7 @@ PN-9 独立，任何时候都能做，但要在 PN-10 之前定
 
 **涉及文件**：
 
-- `apps/node-server/src/db/schema.ts`：新增表（字段见[技术方案 §2](../tech/push-notification.md)）
+- `apps/chat-shared/src/db/schema.ts`：新增表（字段见[技术方案 §2](../tech/push-notification.md)）
 - `drizzle/`：`pnpm -F @runko-chat/node-server db:generate` 产出的迁移
 - `apps/node-server/src/push/store.ts`（新建）
 
@@ -118,7 +118,7 @@ PN-9 独立，任何时候都能做，但要在 PN-10 之前定
 
 **涉及文件**：
 
-- `apps/node-server/src/schemas/push.ts`（新建）：四个接口的 zod schema
+- `apps/chat-shared/src/schemas/push.ts`（新建）：四个接口的 zod schema
 - `apps/node-server/src/routes/push.ts`（新建）
 - `apps/node-server/src/app.ts`：挂载
 - 重新生成 OpenAPI 与前端 client（根 `pnpm chat:bootstrap`）
@@ -238,7 +238,7 @@ PN-9 独立，任何时候都能做，但要在 PN-10 之前定
 - `apps/node-server/src/push/notifier.ts`（新建）
 - `apps/node-server/src/agent/turn-runner.ts`：新增 `TurnSettledInfo`，`driveTurn` 返回它，`onTurnSettled` 多带一个参数
 - `apps/node-server/src/agent/turn-launcher.ts`：`onReview` / `onAskUser` / `onTurnSettled` 三处包一层
-- `apps/node-server/src/agent/store.ts`：若无现成的"队列空不空"读取器则补一个
+- `apps/chat-shared/src/agent/store.ts`：若无现成的"队列空不空"读取器则补一个
 
 **产出物**：
 
@@ -299,7 +299,7 @@ PN-9 独立，任何时候都能做，但要在 PN-10 之前定
 **涉及文件**：
 
 - `apps/node-server/src/agent/turn-runner.ts`：`DEFAULT_APPROVAL_TIMEOUT_MS` / `DEFAULT_ASK_USER_TIMEOUT_MS` 240000 → 900000，并改掉注释里那段已失效的理由（"80% of sandbox idle timeout"——那个心跳已经不存在了）
-- `apps/node-server/src/agent/sandbox-manager.ts`：`keepAliveOptionsFor` 显式传 `approvalBudgetMs`（≥ 上面那个超时），不再吃 core 的 5 分钟默认
+- `apps/chat-shared/src/agent/sandbox-manager.ts`：`keepAliveOptionsFor` 显式传 `approvalBudgetMs`（≥ 上面那个超时），不再吃 core 的 5 分钟默认
 - `.env.template`、[技术方案附录 A](../tech/push-notification.md)
 
 **验收标准**：

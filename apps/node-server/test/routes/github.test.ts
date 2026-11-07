@@ -4,22 +4,22 @@
  * `githubApp` 全部注入假实现——零网络零凭证；`linked` 直接查 `account` 表
  * （`test/helpers/test-db.ts` 的 `linkGithubAccount`），不经 better-auth 真流程。
  */
-import { beforeEach, describe, expect, it } from 'vitest';
-
 import type {
   GithubApp,
   GithubRepoSummary,
-} from '../../src/agent/github-app.js';
+} from '@runko-chat/shared/agent/github-app';
 import {
   GithubNotConfiguredError,
   GithubNotLinkedError,
-} from '../../src/agent/github-app.js';
-import type { Db } from '../../src/agent/store.js';
-import { createGithubRoutes } from '../../src/routes/github.js';
+} from '@runko-chat/shared/agent/github-app';
+import type { Db } from '@runko-chat/shared/agent/store';
+import { createGithubRoutes } from '@runko-chat/shared/routes/github';
 import type {
   GithubReposResponseDto,
   GithubStatusDto,
-} from '../../src/schemas/github.js';
+} from '@runko-chat/shared/schemas/github';
+import { beforeEach, describe, expect, it } from 'vitest';
+
 import {
   fakeAuthMiddleware,
   unauthorizedMiddleware,

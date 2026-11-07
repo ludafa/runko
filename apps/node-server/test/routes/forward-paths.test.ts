@@ -11,14 +11,14 @@
  * 清单值得单独钉住。见 docs/host/node/tech/cluster-lab.md §5。
  */
 import type { AgentRuntime } from '@runko/agent';
+import { createLocalProvider } from '@runko-chat/shared/agent/local-sandbox';
+import { resolveModel } from '@runko-chat/shared/agent/model';
+import { createSandboxManager } from '@runko-chat/shared/agent/sandbox-manager';
+import { createConversation } from '@runko-chat/shared/agent/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createLocalProvider } from '../../src/agent/local-sandbox.js';
-import { resolveModel } from '../../src/agent/model.js';
 import { createChatPersistence } from '../../src/agent/persistence.js';
 import { createChatRuntime } from '../../src/agent/runtime.js';
-import { createSandboxManager } from '../../src/agent/sandbox-manager.js';
-import { createConversation } from '../../src/agent/store.js';
 import type { Db } from '../../src/db/instance.js';
 import { createChatApp } from '../../src/routes/chat.js';
 import { createForwarder } from '../../src/routes/forward.js';

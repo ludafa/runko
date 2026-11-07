@@ -8,12 +8,12 @@
  * **永不 reject**：`sendToUser` 内部 `Promise.allSettled` + 全程 try/catch。一条
  * 通知发不出去，绝不能让一轮跑不下去（docs/ingress/tech/push-notification.md §9 不变量 1）。
  */
+import type { Db } from '@runko-chat/shared/agent/store';
+import type { Logger } from '@runko-chat/shared/logger';
+import { logger as defaultLogger } from '@runko-chat/shared/logger';
 import type { Urgency } from 'web-push';
 import webpush from 'web-push';
 
-import type { Db } from '../agent/store.js';
-import type { Logger } from '../logger.js';
-import { logger as defaultLogger } from '../logger.js';
 import {
   deleteSubscription,
   listSubscriptions,

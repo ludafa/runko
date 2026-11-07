@@ -7,10 +7,10 @@
  * into the workspace root, sandboxId as the resume token, and `setTimeout`
  * keepalive — plus resume-by-id error mapping and the missing-key guard.
  */
+import type { CreateSandboxParams } from '@runko-chat/shared/agent/sandbox-manager';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_E2B_TEMPLATE_NAME } from '../../src/agent/e2b-template.js';
-import type { CreateSandboxParams } from '../../src/agent/sandbox-manager.js';
 
 const { createMock, connectMock } = vi.hoisted(() => ({
   createMock: vi.fn(),
@@ -26,7 +26,7 @@ vi.mock('e2b', () => ({
 
 // Imported after the mock is registered (vi.mock is hoisted above imports).
 const { createE2bProvider } =
-  await import('../../src/agent/sandbox-manager.js');
+  await import('../../src/agent/cloud-sandboxes.js');
 
 interface FakeE2bSandbox {
   sandboxId: string;

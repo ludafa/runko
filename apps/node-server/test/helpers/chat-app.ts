@@ -6,15 +6,18 @@
  * 假沙盒接上——每个测试文件各拼一遍必然漂，所以收在这里。
  */
 import type { DrivenSession, SessionFactory } from '@runko/agent';
+import type { GithubApp } from '@runko-chat/shared/agent/github-app';
+import type {
+  SandboxManager,
+  SandboxProviderId,
+} from '@runko-chat/shared/agent/sandbox-manager';
+import type { Db } from '@runko-chat/shared/agent/store';
 import type { LanguageModel } from 'ai';
 import type { MiddlewareHandler } from 'hono';
 import { createMiddleware } from 'hono/factory';
 
-import type { GithubApp } from '../../src/agent/github-app.js';
 import { createChatPersistence } from '../../src/agent/persistence.js';
 import { createChatRuntime } from '../../src/agent/runtime.js';
-import type { SandboxManager } from '../../src/agent/sandbox-manager.js';
-import type { Db } from '../../src/agent/store.js';
 import type { ChatNotifier } from '../../src/push/notifier.js';
 import { createChatApp } from '../../src/routes/chat.js';
 import type { Forwarder } from '../../src/routes/forward.js';
@@ -49,6 +52,8 @@ export interface BuildChatAppOptions {
   forwarder?: Forwarder;
   /** 建会话核对仓库、起轮签令牌都要用；不传就是生产单例（真环境变量、零测试用途下大多是「未配置」）。 */
   githubApp?: GithubApp;
+  /** 这台服务端开了哪几档沙盒。缺省三档全开：测试的假沙盒不看环境变量。 */
+  availableProviders?: () => SandboxProviderId[];
 }
 
 export function buildChatApp(opts: BuildChatAppOptions) {
@@ -79,6 +84,8 @@ export function buildChatApp(opts: BuildChatAppOptions) {
     : {}),
     ...(opts.forwarder !== undefined ? { forwarder: opts.forwarder } : {}),
     ...(opts.githubApp !== undefined ? { githubApp: opts.githubApp } : {}),
+    availableProviders:
+      opts.availableProviders ?? (() => ['vercel', 'e2b', 'local']),
   });
   return { app, runtime };
 }

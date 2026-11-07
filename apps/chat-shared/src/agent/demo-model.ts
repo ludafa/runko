@@ -16,11 +16,12 @@
  * 几小时后在另一个进程里[恢复](../../../../docs/terms.md)，那时模型是新造的，计数从零开始。
  * 看提示词的最后一条就没有这个问题——是工具结果就收尾，不会又调一次工具。
  */
-import { randomUUID } from 'node:crypto';
-
 import type { LanguageModel } from 'ai';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
+
+import type { EnvLike } from '../env.js';
+import { processEnv } from '../env.js';
 
 /** 假的用量数字：账本里那一行 metadata 要有值，看起来才像一次真的调用。 */
 const USAGE = {
@@ -34,8 +35,8 @@ const USAGE = {
 } as const;
 
 /** 复述时每小段之间的间隔（毫秒）。留着可调是为了让一轮能跑得足够久——多副本测试要在中途杀进程。 */
-function chunkDelayMs(): number {
-  const raw = process.env.CHAT_DEMO_DELAY_MS?.trim();
+function chunkDelayMs(env: EnvLike): number {
+  const raw = env.CHAT_DEMO_DELAY_MS?.trim();
   if (raw === undefined || raw.length === 0) {
     return 30;
   }
@@ -117,7 +118,7 @@ function chunksOf(text: string, size = 12): string[] {
   return pieces.length > 0 ? pieces : [''];
 }
 
-function textStream(text: string): ReadableStream {
+function textStream(text: string, delayMs: number): ReadableStream {
   const deltas = chunksOf(text).map((delta) => ({
     type: 'text-delta' as const,
     id: 't1',
@@ -136,7 +137,7 @@ function textStream(text: string): ReadableStream {
       },
     ],
     initialDelayInMs: null,
-    chunkDelayInMs: chunkDelayMs(),
+    chunkDelayInMs: delayMs,
   });
 }
 
@@ -151,7 +152,7 @@ function toolCallStream(
       { type: 'stream-start' as const, warnings: [] },
       {
         type: 'tool-call' as const,
-        toolCallId: `call-${randomUUID()}`,
+        toolCallId: `call-${crypto.randomUUID()}`,
         toolName: tool,
         input: JSON.stringify(input),
       },
@@ -175,22 +176,27 @@ const HINT =
  */
 export function demoStreamFor(
   prompt: readonly { role: string; content: unknown }[],
+  env: EnvLike = processEnv(),
 ): ReadableStream {
+  const delayMs = chunkDelayMs(env);
   // 上一条是工具结果 = 这次调用已经有人答过了：说一句收尾，别再调一次工具。
   if (prompt.at(-1)?.role === 'tool') {
-    return textStream('好了，上面那步的结果我拿到了。');
+    return textStream('好了，上面那步的结果我拿到了。', delayMs);
   }
   const text = lastUserText(prompt);
   const command = parseDemoCommand(text);
   if (command !== undefined) {
     return toolCallStream(command.tool, command.argument);
   }
-  return textStream(text.length > 0 ? `你说：${text}\n\n${HINT}` : HINT);
+  return textStream(
+    text.length > 0 ? `你说：${text}\n\n${HINT}` : HINT,
+    delayMs,
+  );
 }
 
-export function createDemoModel(): LanguageModel {
+export function createDemoModel(env: EnvLike = processEnv()): LanguageModel {
   return new MockLanguageModelV4({
     doStream: ({ prompt }) =>
-      Promise.resolve({ stream: demoStreamFor(prompt) }),
+      Promise.resolve({ stream: demoStreamFor(prompt, env) }),
   });
 }

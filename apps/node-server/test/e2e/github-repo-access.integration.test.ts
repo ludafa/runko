@@ -27,6 +27,21 @@ import type {
   VercelSandboxLike,
 } from '@runko/sandbox-vercel';
 import { vercelWorkspace } from '@runko/sandbox-vercel';
+import { createGithubApp } from '@runko-chat/shared/agent/github-app';
+import type {
+  CreateSandboxParams,
+  ProvisionedSandbox,
+  ResumeResult,
+  SandboxProvider,
+} from '@runko-chat/shared/agent/sandbox-manager';
+import { createSandboxManager } from '@runko-chat/shared/agent/sandbox-manager';
+import type { Db } from '@runko-chat/shared/agent/store';
+import { createGithubRoutes } from '@runko-chat/shared/routes/github';
+import { ConversationSchema } from '@runko-chat/shared/schemas/chat';
+import type {
+  GithubReposResponseDto,
+  GithubStatusDto,
+} from '@runko-chat/shared/schemas/github';
 import {
   afterAll,
   afterEach,
@@ -37,22 +52,7 @@ import {
   vi,
 } from 'vitest';
 
-import { createGithubApp } from '../../src/agent/github-app.js';
 import { createChatPersistence } from '../../src/agent/persistence.js';
-import type {
-  CreateSandboxParams,
-  ProvisionedSandbox,
-  ResumeResult,
-  SandboxProvider,
-} from '../../src/agent/sandbox-manager.js';
-import { createSandboxManager } from '../../src/agent/sandbox-manager.js';
-import type { Db } from '../../src/agent/store.js';
-import { createGithubRoutes } from '../../src/routes/github.js';
-import { ConversationSchema } from '../../src/schemas/chat.js';
-import type {
-  GithubReposResponseDto,
-  GithubStatusDto,
-} from '../../src/schemas/github.js';
 import { buildChatApp, fakeAuthMiddleware } from '../helpers/chat-app.js';
 import type { FakeGithubHttpServer } from '../helpers/fake-github-http.js';
 import { startFakeGithubHttp } from '../helpers/fake-github-http.js';

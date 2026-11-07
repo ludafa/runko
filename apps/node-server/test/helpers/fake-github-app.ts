@@ -10,12 +10,12 @@ import type {
   GithubRepoAccess,
   GithubRepoSelector,
   GithubRepoSummary,
-} from '../../src/agent/github-app.js';
+} from '@runko-chat/shared/agent/github-app';
 import {
   GithubNotConfiguredError,
   GithubNotLinkedError,
   GithubRepoForbiddenError,
-} from '../../src/agent/github-app.js';
+} from '@runko-chat/shared/agent/github-app';
 
 export const FAKE_GITHUB_REPO: GithubRepoSummary = {
   installationId: 1,

@@ -16,7 +16,7 @@ related: ["logic/engine/features/approval-grant-split.md", "logic/engine/plans/a
 
 ## 1. 改造对象与改动面
 
-现状（`apps/node-server/src/agent/conversation-grants.ts`）：
+现状（`apps/chat-shared/src/agent/conversation-grants.ts`）：
 
 ```
 grantKey = `${toolName} ${稳定序列化(整个 input)}`

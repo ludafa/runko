@@ -7,12 +7,12 @@
  * `test/console/ops-client.test.ts` 的事），只测路由自己怎么把
  * `OpsClientResult` 翻成响应、以及会话/节点怎么从库里拼出来。
  */
+import type { Db } from '@runko-chat/shared/agent/store';
+import { createConversation } from '@runko-chat/shared/agent/store';
 import type { MiddlewareHandler } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import type { Db } from '../../src/agent/store.js';
-import { createConversation } from '../../src/agent/store.js';
 import type {
   OpsClient,
   OpsClientResult,

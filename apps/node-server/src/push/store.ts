@@ -3,10 +3,10 @@
  * `agent/store.ts` 同一姿态：一组吃注入 `Db` 的纯函数，测试可以指向内存库而不必
  * 碰 `db/instance.ts` 的单例。
  */
+import type { PushSubscriptionsTable } from '@runko-chat/shared/db/schema';
 import type { Selectable } from 'kysely';
 
 import type { Db } from '../db/instance.js';
-import type { PushSubscriptionsTable } from '../db/schema.js';
 
 /** 对外的领域类型：驼峰字段、时间用 `Date`。列名 snake_case、时间是毫秒整数，转换见 `toRow`。 */
 export interface PushSubscriptionRow {

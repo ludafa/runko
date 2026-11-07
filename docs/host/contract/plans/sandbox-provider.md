@@ -93,7 +93,7 @@ related: ["host/contract/features/sandbox-provider.md", "host/contract/tech/sand
 - e2b 源码：`Sandbox <id> not found` = `SandboxNotFoundError`（name 匹配）。
 - **根因**：`createE2bProvider().resume()` 原本单次 `connect`——撞上「刚 auto-pause、快照落定前」的瞬时 404 窗口，就把一个其实活着的盒判失败、裸抛错误。**是 resume 缺重试韧性，非平台限制。**（见 lantie correction）
 
-**修复**（`apps/node-server/src/agent/sandbox-manager.ts`）：`resume()` 对 `connect` 做有限退避重试（`E2B_RESUME_ATTEMPTS=4`、退避 `500ms×attempt`，总窗 ~3s）——瞬时 404 重试即重连回原盒（保住未 push 的 WIP），只有**持续** not-found 才 `unavailable`→重建；`isE2bSandboxGone` 加 message 兜底（`/sandbox.*not found/i`），"Invalid sandbox ID"(400) 不算 gone。
+**修复**（`apps/chat-shared/src/agent/sandbox-manager.ts`）：`resume()` 对 `connect` 做有限退避重试（`E2B_RESUME_ATTEMPTS=4`、退避 `500ms×attempt`，总窗 ~3s）——瞬时 404 重试即重连回原盒（保住未 push 的 WIP），只有**持续** not-found 才 `unavailable`→重建；`isE2bSandboxGone` 加 message 兜底（`/sandbox.*not found/i`），"Invalid sandbox ID"(400) 不算 gone。
 
 **验证**：
 - 单测：`e2b-provider.test.ts` 用 fake timers 加 3 例——瞬时 404 重试后 `ok`（重连原盒、不重建）、持续 not-found 耗尽重试后 `unavailable`、持续非-gone 错误照抛。全量 `vitest run` **243 全绿**、typecheck/lint 干净。

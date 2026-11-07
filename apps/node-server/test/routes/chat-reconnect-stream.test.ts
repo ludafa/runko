@@ -4,17 +4,17 @@
  *
  * 闸门本身（挡不挡新请求）在 `test/offline.test.ts` 里测；这里只测**既有连接**。
  */
-import { beforeEach, describe, expect, it } from 'vitest';
-
-import { createLocalProvider } from '../../src/agent/local-sandbox.js';
-import { resolveModel } from '../../src/agent/model.js';
-import { createSandboxManager } from '../../src/agent/sandbox-manager.js';
-import type { Db } from '../../src/db/instance.js';
-import type { ChatReplayFrame } from '../../src/schemas/chat.js';
+import { createLocalProvider } from '@runko-chat/shared/agent/local-sandbox';
+import { resolveModel } from '@runko-chat/shared/agent/model';
+import { createSandboxManager } from '@runko-chat/shared/agent/sandbox-manager';
+import type { ChatReplayFrame } from '@runko-chat/shared/schemas/chat';
 import {
   chatReplayFrameSchema,
   ConversationSchema,
-} from '../../src/schemas/chat.js';
+} from '@runko-chat/shared/schemas/chat';
+import { beforeEach, describe, expect, it } from 'vitest';
+
+import type { Db } from '../../src/db/instance.js';
 import { buildChatApp } from '../helpers/chat-app.js';
 import type { FakeSessions } from '../helpers/fake-turn-session.js';
 import { createFakeSessions } from '../helpers/fake-turn-session.js';

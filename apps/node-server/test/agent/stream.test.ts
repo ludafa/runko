@@ -8,9 +8,8 @@
  * `redis` 模块整个换成替身：`createChatStream` 是懒连接的，真去连会在测试进程里留下一个
  * 后台重连的句柄。
  */
+import { createLogger } from '@runko-chat/shared/logger';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-import { createLogger } from '../../src/logger.js';
 
 const { createClientMock } = vi.hoisted(() => ({ createClientMock: vi.fn() }));
 

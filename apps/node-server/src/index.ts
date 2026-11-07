@@ -1,9 +1,9 @@
 import { serve } from '@hono/node-server';
+import { logger } from '@runko-chat/shared/logger';
 
 import { app, injectWebSocket } from './app.js';
 import { db, flavor } from './db/instance.js';
 import { migrateDatabase } from './db/migrate.js';
-import { logger } from './logger.js';
 import { logPushStartup } from './push/vapid.js';
 import { chatRuntime, chatStream, nodeOffline } from './routes/chat.js';
 

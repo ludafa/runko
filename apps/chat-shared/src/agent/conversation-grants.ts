@@ -43,7 +43,7 @@
  */
 import type { JsonValue } from '@runko/core';
 
-import type { Db } from '../db/instance.js';
+import type { Db } from '../db/schema.js';
 import { splitCommand } from './split-command.js';
 
 /**

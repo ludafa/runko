@@ -68,8 +68,8 @@ pnpm --filter @runko-chat/web add \
 **目标**：`buildSession` 从「硬读 `/.agents/skills/frontend-design` 一个」改成「扫描 `.agents/skills/*` 全部加载」。这是整个功能的前置条件——用户选的 skill 不在 `agent.skills` 里，模型调 `load-skill` 必然失败。
 
 **涉及文件**：
-- `apps/node-server/src/agent/skill-catalog.ts` **（新）** —— `SKILLS_DIR`、`loadSkillsFromWorkspace`、`toSkillSummaries`
-- `apps/node-server/src/agent/chat-agent.ts` —— 删掉 `FRONTEND_DESIGN_SKILL_PATH` 硬编码，改调 `loadSkillsFromWorkspace`
+- `apps/chat-shared/src/agent/skill-catalog.ts` **（新）** —— `SKILLS_DIR`、`loadSkillsFromWorkspace`、`toSkillSummaries`
+- `apps/chat-shared/src/agent/chat-agent.ts` —— 删掉 `FRONTEND_DESIGN_SKILL_PATH` 硬编码，改调 `loadSkillsFromWorkspace`
 - `apps/node-server/test/agent/chat-agent.test.ts` —— 现有假 workspace 的 skill 目录形状要跟着调
 - `apps/node-server/test/agent/skill-catalog.test.ts` **（新）**
 
@@ -94,12 +94,12 @@ pnpm --filter @runko-chat/web add \
 **目标**：前端能从已有的会话接口拿到 skill 清单，且不触发沙盒唤醒（技术方案 §2.1）。
 
 **涉及文件**：
-- `apps/node-server/src/db/schema.ts` —— `conversations` 加 `availableSkillsJson`
+- `apps/chat-shared/src/db/schema.ts` —— `conversations` 加 `availableSkillsJson`
 - `apps/node-server/drizzle/0008_*.sql` **（新，`pnpm db:generate` 生成）**
-- `apps/node-server/src/agent/store.ts` —— 读写 + zod `safeParse` 反序列化边界
-- `apps/node-server/src/schemas/chat.ts` —— `SkillSummarySchema` + `ConversationSchema.availableSkills`
+- `apps/chat-shared/src/agent/store.ts` —— 读写 + zod `safeParse` 反序列化边界
+- `apps/chat-shared/src/schemas/chat.ts` —— `SkillSummarySchema` + `ConversationSchema.availableSkills`
 - `apps/node-server/src/routes/chat.ts` —— 两个会话端点的响应组装带上它
-- `apps/node-server/src/agent/sandbox-manager.ts` —— 初始化装完 skill 后扫一次写库
+- `apps/chat-shared/src/agent/sandbox-manager.ts` —— 初始化装完 skill 后扫一次写库
 - `apps/node-server/src/agent/turn-launcher.ts` —— 每轮起轮顺手刷新
 - `apps/node-server/openapi.yml` + `apps/web/src/lib/api/**` —— `pnpm chat:bootstrap` 重新生成
 - 对应测试
@@ -124,7 +124,7 @@ pnpm --filter @runko-chat/web add \
 **目标**：起轮时扫出被提及的 skill，拼出给模型的提示行，且**界面/账本仍是用户原话**（技术方案 §2.2）。
 
 **涉及文件**：
-- `apps/node-server/src/agent/skill-catalog.ts` —— 追加 `extractMentionedSkills`、`buildModelText`
+- `apps/chat-shared/src/agent/skill-catalog.ts` —— 追加 `extractMentionedSkills`、`buildModelText`
 - `apps/node-server/src/agent/turn-runner.ts` —— `driveTurn` 的 `text` 参数拆成 `displayText` / `modelText`；`startTurn` 同步透传
 - `apps/node-server/src/agent/turn-launcher.ts` —— 调用两个纯函数，把 `modelText` 传下去
 - `apps/node-server/test/agent/skill-catalog.test.ts` —— 补纯函数用例

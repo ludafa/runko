@@ -16,15 +16,12 @@
  * 少数几条走真模型 mock，验证「框架 + core + 文件工具」这条真装配是通的。
  */
 import type { RunkoChunk, RunkoUIMessage } from '@runko/core';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import { createChatPersistence } from '../../src/agent/persistence.js';
-import type { Db } from '../../src/agent/store.js';
+import type { Db } from '@runko-chat/shared/agent/store';
 import {
   createConversation,
   getConversation,
   updateConversation,
-} from '../../src/agent/store.js';
+} from '@runko-chat/shared/agent/store';
 import type {
   ChatReplayFrame,
   ChunkEnvelope,
@@ -32,12 +29,15 @@ import type {
   MessageFrame,
   QueueFrame,
   TurnStateFrame,
-} from '../../src/schemas/chat.js';
+} from '@runko-chat/shared/schemas/chat';
 import {
   chatReplayFrameSchema,
   ConversationMessagesListSchema,
   ConversationSchema,
-} from '../../src/schemas/chat.js';
+} from '@runko-chat/shared/schemas/chat';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { createChatPersistence } from '../../src/agent/persistence.js';
 import { createTelemetryStore } from '../../src/telemetry.js';
 import { buildChatApp, unauthorizedMiddleware } from '../helpers/chat-app.js';
 import { createFakeGithubApp } from '../helpers/fake-github-app.js';
@@ -895,7 +895,7 @@ describe('routes/chat', () => {
       await expect(pending).resolves.toEqual({ behavior: 'allow' });
 
       const { hasConversationGrant } =
-        await import('../../src/agent/conversation-grants.js');
+        await import('@runko-chat/shared/agent/conversation-grants');
       expect(
         await hasConversationGrant(db, created.id, USER_ID, 'bash', {
           command: 'rm -rf build',

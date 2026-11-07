@@ -1,6 +1,8 @@
 import { createDeepSeek } from '@ai-sdk/deepseek';
 import type { LanguageModel } from 'ai';
 
+import type { EnvLike } from '../env.js';
+import { processEnv } from '../env.js';
 import { createDemoModel } from './demo-model.js';
 
 // DeepSeek direct-connect (docs/ingress/tech/chat-webapp.md §2.2 `model.ts` /
@@ -23,7 +25,7 @@ export class ModelConfigError extends Error {
 }
 
 /** 配没配真模型。前端据此在会话页上标「演示模型」（`GET /api/chat/config`）。 */
-export function hasRealModel(env: NodeJS.ProcessEnv = process.env): boolean {
+export function hasRealModel(env: EnvLike = processEnv()): boolean {
   const baseURL = env.DEEPSEEK_API_BASE_URL?.trim();
   const apiKey = env.DEEPSEEK_API_TOKEN?.trim();
   return (
@@ -38,12 +40,12 @@ export function hasRealModel(env: NodeJS.ProcessEnv = process.env): boolean {
  * 这一轮用哪个模型。**没配 key 就用[演示模型](../../../../docs/terms.md)**，不抛错——
  * 零配置跑起来是这个应用的第一条承诺，没有 key 时最该发生的事是「能用，只是不聪明」。
  */
-export function resolveModel(): LanguageModel {
-  if (!hasRealModel()) {
-    return createDemoModel();
+export function resolveModel(env: EnvLike = processEnv()): LanguageModel {
+  if (!hasRealModel(env)) {
+    return createDemoModel(env);
   }
-  const baseURL = process.env.DEEPSEEK_API_BASE_URL?.trim();
-  const apiKey = process.env.DEEPSEEK_API_TOKEN?.trim();
+  const baseURL = env.DEEPSEEK_API_BASE_URL?.trim();
+  const apiKey = env.DEEPSEEK_API_TOKEN?.trim();
   if (
     baseURL === undefined ||
     baseURL.length === 0 ||
@@ -55,7 +57,7 @@ export function resolveModel(): LanguageModel {
     );
   }
   const deepseek = createDeepSeek({ baseURL, apiKey });
-  const modelId = process.env.RUNKO_MODEL?.trim();
+  const modelId = env.RUNKO_MODEL?.trim();
   return deepseek(
     modelId === undefined || modelId.length === 0 ? DEFAULT_MODEL_ID : modelId,
   );

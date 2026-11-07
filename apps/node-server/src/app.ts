@@ -1,6 +1,8 @@
 import { createNodeWebSocket } from '@hono/node-ws';
 import { swaggerUI } from '@hono/swagger-ui';
 import { OpenAPIHono } from '@hono/zod-openapi';
+import { createChatWsApp } from '@runko-chat/shared/routes/chat-ws';
+import { createExampleRoutes } from '@runko-chat/shared/routes/example';
 import { cors } from 'hono/cors';
 
 import { db } from './db/instance.js';
@@ -11,11 +13,8 @@ import {
   chatRuntime,
   nodeOffline,
   takeoverApp,
-  toWireFrame,
 } from './routes/chat.js';
-import { createChatWsApp } from './routes/chat-ws.js';
 import { consoleApp } from './routes/console.js';
-import { exampleApp } from './routes/example.js';
 import { githubRoutes } from './routes/github.js';
 import { pushApp } from './routes/push.js';
 
@@ -70,10 +69,9 @@ app.route(
     runtime: chatRuntime,
     authMiddleware: requireAuth,
     upgradeWebSocket,
-    toWire: toWireFrame,
   }),
 );
-app.route('/', exampleApp);
+app.route('/', createExampleRoutes(requireAuth));
 app.route('/', chatApp);
 app.route('/', githubRoutes);
 app.route('/', pushApp);

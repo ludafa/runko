@@ -4,10 +4,9 @@
  * `process.stdout`）、单行格式（时间戳/级别/scope/message/结构化字段）、
  * `truncate` 截断助手、默认单例仍写 `process.stdout`。
  */
+import type { LogFields } from '@runko-chat/shared/logger';
+import { createLogger, logger, truncate } from '@runko-chat/shared/logger';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import type { LogFields } from '../src/logger.js';
-import { createLogger, logger, truncate } from '../src/logger.js';
 
 function collectingSink(): { lines: string[]; sink: (line: string) => void } {
   const lines: string[] = [];

@@ -29,10 +29,10 @@ import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
+import { formatLogLine } from '@runko-chat/shared/logger';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { LOGS_ROOT, mergeTimeline } from '../../scripts/lab-logs.js';
-import { formatLogLine } from '../../src/logger.js';
 
 const RUN = process.env.RUNKO_TEST_CLUSTER === '1';
 const PROJECT = 'runko-cluster-handover-e2e';

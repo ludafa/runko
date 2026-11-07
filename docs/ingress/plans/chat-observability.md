@@ -22,7 +22,7 @@ chat server 目前只有界面能看到 turn/step/工具调用的过程，运维
 核心约束（决定了架构）：`apps/node-server` 的 `finalizeTurnPersistence`（`turn-runner.ts`）落盘的 message 必须与 `session.toJSON().messages` 字节一致——**server 不能私自往 message 里塞时间戳**。所以工具起止时间必须由 `@runko/core` 的 loop 在写账本时就地产生，作为一个**持久 data 部件**随消息存档，刷新/回放不丢。
 
 1. **core**：`RunkoDataParts` 新增持久部件 `tool-timing`（`{ toolCallId, startedAt, completedAt? }`，epoch ms），`id = toolCallId`，同 id 覆盖，物化方式照 `data-plan-update` 先例。`tool-input-available` 后立刻打 `startedAt`；每个结算 chunk（`tool-output-available`/`tool-output-error`/`tool-output-denied`，含审批 deny 分支）后立刻补 `completedAt`。**耗时含审批等待**——这是 chat 界面上用户真实感受到的等待时长；审批本身单独等了多久在 server 日志里另外可见。
-2. **server**：零依赖分级 logger（`apps/node-server/src/logger.ts`，不引第三方）+ `turn-runner.ts` 打点（纯旁路 tap，绝不改变 chunk 流转/持久化行为）；`tool-output-available` 日志的耗时读 `data-tool-timing` chunk（单一来源），不另掐计时器。
+2. **server**：零依赖分级 logger（`apps/chat-shared/src/logger.ts`，不引第三方）+ `turn-runner.ts` 打点（纯旁路 tap，绝不改变 chunk 流转/持久化行为）；`tool-output-available` 日志的耗时读 `data-tool-timing` chunk（单一来源），不另掐计时器。
 3. **web**：`schema.ts`/`use-chat-messages.ts` 同步 wire 形状与 upsert；`timeline.ts` 把 `data-tool-timing` join 进对应工具调用条目（不独立成卡片）；`tool-call-card.tsx` 展示启动/完成时间与人性化耗时，运行中逐秒跳动、崩溃残留态显示「—」。
 
 **术语纪律核查**：未引入新术语——`data-tool-timing` 沿用既有「data 部件」概念（与 `file-change`/`plan-update` 等同级，均未单独立词条），「日志分级」为通用工程词汇，不登记进 `docs/terms.md`。

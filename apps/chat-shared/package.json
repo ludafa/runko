@@ -1,0 +1,54 @@
+{
+  "name": "@runko-chat/shared",
+  "version": "0.0.0",
+  "private": true,
+  "description": "chat 应用两个服务端（Node 版、Cloudflare 版）共用的层：接口 schema、数据访问、提示词、审批规则、GitHub App、路由",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "default": "./dist/*.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
+    "lint:fix": "eslint . --fix",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ai-sdk/deepseek": "^3.0.7",
+    "@hono/zod-openapi": "^1.3.0",
+    "@runko/agent": "workspace:*",
+    "@runko/core": "workspace:*",
+    "@runko/just-bash": "workspace:*",
+    "@runko/persist-kysely": "workspace:*",
+    "@runko/sdk": "workspace:*",
+    "@runko/virtual-fs": "workspace:*",
+    "ai": "catalog:",
+    "hono": "^4.12.16",
+    "kysely": "catalog:",
+    "zod": "^4.4.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "catalog:",
+    "better-sqlite3": "^12.9.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "eslint": "^10.3.0",
+    "eslint-config-prettier": "~10.1.8",
+    "eslint-plugin-import": "~2.32.0",
+    "eslint-plugin-prettier": "^5.5.5",
+    "eslint-plugin-simple-import-sort": "~13.0.0",
+    "globals": "^17.6.0",
+    "prettier": "^3.8.3",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.59.1",
+    "vitest": "^4.1.5"
+  }
+}

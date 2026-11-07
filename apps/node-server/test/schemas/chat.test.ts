@@ -9,14 +9,13 @@
  * `{frames}` response envelope — NOT a bare array, `events` was the retired
  * field name).
  */
-import { describe, expect, it } from 'vitest';
-
 import {
   chatReplayFrameSchema,
   chunkEnvelopeSchema,
   ConversationMessagesListSchema,
   messageFrameSchema,
-} from '../../src/schemas/chat.js';
+} from '@runko-chat/shared/schemas/chat';
+import { describe, expect, it } from 'vitest';
 
 const sampleChunk = { type: 'text-delta', id: 't1', delta: 'hi' };
 const sampleMessage = {

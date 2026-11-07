@@ -8,8 +8,6 @@
  */
 import { createVerify, generateKeyPairSync } from 'node:crypto';
 
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-
 import {
   classifyGithubError,
   createGithubApp,
@@ -24,7 +22,9 @@ import {
   mintInstallationToken,
   splitFullName,
   userCanAccessRepo,
-} from '../../src/agent/github-app.js';
+} from '@runko-chat/shared/agent/github-app';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+
 import type { FakeGithubHttpServer } from '../helpers/fake-github-http.js';
 import { startFakeGithubHttp } from '../helpers/fake-github-http.js';
 
@@ -34,11 +34,18 @@ import { startFakeGithubHttp } from '../helpers/fake-github-http.js';
 
 const APP_ID = 'test-app-id';
 
-function generateRsaKeyPair(): { publicKey: string; privateKey: string } {
+/**
+ * GitHub 下发的 App 私钥是 PKCS#1（`BEGIN RSA PRIVATE KEY`）；WebCrypto 只吃 PKCS#8，
+ * 由 `github-app.ts` 自己转。两种都要能签。
+ */
+function generateRsaKeyPair(privateKeyType: 'pkcs1' | 'pkcs8' = 'pkcs8'): {
+  publicKey: string;
+  privateKey: string;
+} {
   const { publicKey, privateKey } = generateKeyPairSync('rsa', {
     modulusLength: 2048,
     publicKeyEncoding: { type: 'spki', format: 'pem' },
-    privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+    privateKeyEncoding: { type: privateKeyType, format: 'pem' },
   });
   return { publicKey, privateKey };
 }
@@ -154,46 +161,62 @@ describe('splitFullName', () => {
 // ---------------------------------------------------------------------------
 
 describe('mintAppJwt', () => {
-  it('产出的 JWT 可用配套公钥验签，iss/iat/exp 都对', () => {
-    const { publicKey, privateKey } = generateRsaKeyPair();
-    const fixedNowMs = 1_700_000_000_000;
-    const config = {
-      appId: APP_ID,
-      appSlug: 'slug',
-      privateKey,
-      clientId: 'c',
-      clientSecret: 's',
-      apiUrl: 'https://api.github.com',
-    };
+  it.each(['pkcs8', 'pkcs1'] as const)(
+    '产出的 JWT 可用配套公钥验签，iss/iat/exp 都对（私钥 %s）',
+    async (privateKeyType) => {
+      const { publicKey, privateKey } = generateRsaKeyPair(privateKeyType);
+      const fixedNowMs = 1_700_000_000_000;
+      const config = {
+        appId: APP_ID,
+        appSlug: 'slug',
+        privateKey,
+        clientId: 'c',
+        clientSecret: 's',
+        apiUrl: 'https://api.github.com',
+      };
 
-    const token = mintAppJwt(config, () => fixedNowMs);
-    const parts = token.split('.');
-    expect(parts).toHaveLength(3);
-    const [headerPart, payloadPart, signaturePart] = parts;
-    expect(headerPart).toBeDefined();
-    expect(payloadPart).toBeDefined();
-    expect(signaturePart).toBeDefined();
-    if (
-      headerPart === undefined ||
-      payloadPart === undefined ||
-      signaturePart === undefined
-    ) {
-      return;
-    }
+      const token = await mintAppJwt(config, () => fixedNowMs);
+      const parts = token.split('.');
+      expect(parts).toHaveLength(3);
+      const [headerPart, payloadPart, signaturePart] = parts;
+      expect(headerPart).toBeDefined();
+      expect(payloadPart).toBeDefined();
+      expect(signaturePart).toBeDefined();
+      if (
+        headerPart === undefined ||
+        payloadPart === undefined ||
+        signaturePart === undefined
+      ) {
+        return;
+      }
 
-    expect(decodeJwtPart(headerPart)).toEqual({ alg: 'RS256', typ: 'JWT' });
-    const payload = decodeJwtPart(payloadPart);
-    const expectedNowSeconds = fixedNowMs / 1000;
-    expect(payload).toEqual({
-      iss: APP_ID,
-      iat: expectedNowSeconds - 60,
-      exp: expectedNowSeconds + 9 * 60,
-    });
+      expect(decodeJwtPart(headerPart)).toEqual({ alg: 'RS256', typ: 'JWT' });
+      const payload = decodeJwtPart(payloadPart);
+      const expectedNowSeconds = fixedNowMs / 1000;
+      expect(payload).toEqual({
+        iss: APP_ID,
+        iat: expectedNowSeconds - 60,
+        exp: expectedNowSeconds + 9 * 60,
+      });
 
-    const verified = createVerify('RSA-SHA256')
-      .update(`${headerPart}.${payloadPart}`)
-      .verify(publicKey, Buffer.from(signaturePart, 'base64url'));
-    expect(verified).toBe(true);
+      const verified = createVerify('RSA-SHA256')
+        .update(`${headerPart}.${payloadPart}`)
+        .verify(publicKey, Buffer.from(signaturePart, 'base64url'));
+      expect(verified).toBe(true);
+    },
+  );
+
+  it('私钥不是 PEM → 报出能看懂的错', async () => {
+    await expect(
+      mintAppJwt({
+        appId: APP_ID,
+        appSlug: 'slug',
+        privateKey: 'not-a-pem',
+        clientId: 'c',
+        clientSecret: 's',
+        apiUrl: 'https://api.github.com',
+      }),
+    ).rejects.toThrow(/PEM/);
   });
 });
 
@@ -555,7 +578,11 @@ describe('github-app · 对假 GitHub HTTP 服务', () => {
   });
 
   it('未配置 GitHub App → GithubNotConfiguredError（installUrl 为 undefined）', async () => {
-    const app = createGithubApp({ env: {}, fetch });
+    const app = createGithubApp({
+      env: {},
+      fetch,
+      getUserToken: async () => undefined,
+    });
     expect(app.configured).toBe(false);
     expect(app.installUrl).toBeUndefined();
     await expect(app.listAccessibleRepos('user-x')).rejects.toThrow(/未配置/);

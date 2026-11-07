@@ -4,12 +4,12 @@
  * 守的是**接线**：这三个值配了却没传给框架，故障会很隐蔽——验证环境按「秒级接管」写的
  * 场景会莫名其妙等满一分钟，而日志里一切正常。
  */
+import type { ChatDatabase } from '@runko-chat/shared/db/schema';
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect } from 'kysely';
 import { describe, expect, it } from 'vitest';
 
 import { createChatArbitration } from '../../src/agent/persistence.js';
-import type { ChatDatabase } from '../../src/db/schema.js';
 
 function db(): Kysely<ChatDatabase> {
   return new Kysely<ChatDatabase>({

@@ -15,14 +15,14 @@
  */
 import type { Flavor } from '@runko/persist-kysely';
 import { migrate as migrateRunkoTables } from '@runko/persist-kysely';
+import { appMigrationProvider } from '@runko-chat/shared/db/migrations';
+import type { Logger } from '@runko-chat/shared/logger';
+import { logger as defaultLogger } from '@runko-chat/shared/logger';
 import { getMigrations } from 'better-auth/db/migration';
 import { Migrator } from 'kysely/migration';
 
 import { authOptions } from '../auth.js';
-import type { Logger } from '../logger.js';
-import { logger as defaultLogger } from '../logger.js';
 import type { Db } from './instance.js';
-import { appMigrationProvider } from './migrations.js';
 
 const LOG_SCOPE = 'db';
 

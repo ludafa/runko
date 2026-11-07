@@ -4,13 +4,13 @@
  * 这里守的就是那份快照：存得下、换个进程读得回、别的副本改过之后自己手上那份要作废。
  * 不守的话故障是静默的——用户回来发现自己上一轮写的文件没了，而日志里什么都没有。
  */
-import { describe, expect, it } from 'vitest';
-
-import { createLocalProvider } from '../../src/agent/local-sandbox.js';
+import { createLocalProvider } from '@runko-chat/shared/agent/local-sandbox';
 import type {
   CreateSandboxParams,
   SandboxProvider,
-} from '../../src/agent/sandbox-manager.js';
+} from '@runko-chat/shared/agent/sandbox-manager';
+import { describe, expect, it } from 'vitest';
+
 import type { Db } from '../../src/db/instance.js';
 import { silentLogger } from '../helpers/silent-logger.js';
 import { createTestDb } from '../helpers/test-db.js';

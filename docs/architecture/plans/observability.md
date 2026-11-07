@@ -35,7 +35,7 @@ related: ["architecture/features/observability.md", "architecture/tech/observabi
 | core 替 AI SDK 补发工具开始 / 结束 | `loop.ts` 的 `notifyToolExecution*` | `tool.*` 事件与 `wrap` 落在同一位置 |
 | 接管补收尾、`AcquireResult.takeover` | `packages/agent/src/runtime/queue.ts` · `persist-kysely/src/arbitration.ts` | `turn.displaced-settled` · `lease.taken-over` 的触发点 |
 | 多副本验证环境（compose · 八个场景 · 日志收集） | `apps/node-server/docker/` · `test/e2e/lab.e2e.test.ts` · `scripts/lab-logs.ts` | 加 Jaeger 与调用链断言 |
-| 应用的文本 logger | `apps/node-server/src/logger.ts` | 改由事件订阅者驱动 |
+| 应用的文本 logger | `apps/chat-shared/src/logger.ts` | 改由事件订阅者驱动 |
 
 ## 2. 拆单总表
 

@@ -7,8 +7,10 @@
  *
  * ## 文件存哪
  *
- * 内存里的东西进程一死就没了，所以**每轮收尾存一份快照进库**（`local_workspaces` 表）。
- * 下一轮从缓存拿；缓存没有（重启了、或者这一轮落在别的副本上）就从库里恢复。
+ * 内存里的东西进程一死就没了，所以**每轮收尾存一份快照**。存哪由宿主给（`LocalSnapshotStore`）：
+ * Node 版存进共享库的 `local_workspaces` 表；Cloudflare 版存进会话对象自己的 SQLite（同一张表的
+ * 形状，见 `kyselySnapshotStore`）。下一轮从缓存拿；缓存没有（重启了、或者这一轮落在别的副本上）
+ * 就从存储里恢复。
  *
  * 快照带版本号，取的时候比一下：A 跑完第一轮、B 接手跑了第二轮，再回到 A 时，A 手里那份
  * 已经过期——比版本号就能发现，重新读一次库，而不是拿旧文件接着干。
@@ -17,8 +19,9 @@ import type { RunkoExec, RunkoFS } from '@runko/core';
 import { justBash } from '@runko/just-bash';
 import type { MemoryFSSnapshot } from '@runko/virtual-fs';
 import { MemoryFS } from '@runko/virtual-fs';
+import type { Kysely } from 'kysely';
 
-import type { Db } from '../db/instance.js';
+import type { LocalWorkspacesTable } from '../db/schema.js';
 import type { Logger } from '../logger.js';
 import { logger as defaultLogger } from '../logger.js';
 import type {
@@ -116,16 +119,64 @@ function parseSnapshot(raw: string): MemoryFSSnapshot | undefined {
   return isSnapshot(parsed) ? parsed : undefined;
 }
 
+/** 快照存哪：读出库里那一行的原文、写回一份新的。解析与版本比较在本文件里，存储只管字节。 */
+export interface LocalSnapshotStore {
+  read(
+    sandboxName: string,
+  ): Promise<{ version: number; snapshot: string } | undefined>;
+  write(sandboxName: string, version: number, snapshot: string): Promise<void>;
+}
+
+/** 快照那张表。有它的任何 Kysely 实例都行：Node 版的共享库，或会话对象自己的 SQLite。 */
+export interface SnapshotTables {
+  local_workspaces: LocalWorkspacesTable;
+}
+
+export function kyselySnapshotStore<DB extends SnapshotTables>(
+  host: Kysely<DB>,
+): LocalSnapshotStore {
+  // `Kysely<DB>` 在 DB 上不变（invariant），「宿主的库里有这张表」这层子类型关系传不过去；
+  // `DB extends SnapshotTables` 已经保证了表在，这里只查这一张，收窄是安全的。
+  const db = host as unknown as Kysely<SnapshotTables>;
+  return {
+    async read(sandboxName) {
+      const row = await db
+        .selectFrom('local_workspaces')
+        .select(['version', 'snapshot'])
+        .where('sandbox_name', '=', sandboxName)
+        .executeTakeFirst();
+      return row === undefined ? undefined : (
+          { version: Number(row.version), snapshot: row.snapshot }
+        );
+    },
+    async write(sandboxName, version, snapshot) {
+      const payload = {
+        sandbox_name: sandboxName,
+        version,
+        snapshot,
+        updated_at: Date.now(),
+      };
+      await db
+        .insertInto('local_workspaces')
+        .values(payload)
+        .onConflict((oc) =>
+          oc.column('sandbox_name').doUpdateSet({
+            version: payload.version,
+            snapshot: payload.snapshot,
+            updated_at: payload.updated_at,
+          }),
+        )
+        .execute();
+    },
+  };
+}
+
 async function readSnapshot(
-  db: Db,
+  store: LocalSnapshotStore,
   sandboxName: string,
   log: Logger,
 ): Promise<StoredSnapshot | undefined> {
-  const row = await db
-    .selectFrom('local_workspaces')
-    .select(['version', 'snapshot'])
-    .where('sandbox_name', '=', sandboxName)
-    .executeTakeFirst();
+  const row = await store.read(sandboxName);
   if (row === undefined) {
     return undefined;
   }
@@ -140,32 +191,25 @@ async function readSnapshot(
     );
     return undefined;
   }
-  return { version: Number(row.version), snapshot };
+  return { version: row.version, snapshot };
 }
 
-async function writeSnapshot(
-  db: Db,
-  sandboxName: string,
-  version: number,
-  snapshot: MemoryFSSnapshot,
-): Promise<void> {
-  const payload = {
-    sandbox_name: sandboxName,
-    version,
-    snapshot: JSON.stringify(snapshot),
-    updated_at: Date.now(),
-  };
-  await db
-    .insertInto('local_workspaces')
-    .values(payload)
-    .onConflict((oc) =>
-      oc.column('sandbox_name').doUpdateSet({
-        version: payload.version,
-        snapshot: payload.snapshot,
-        updated_at: payload.updated_at,
-      }),
-    )
-    .execute();
+/**
+ * 快照超过 `maxSnapshotBytes` 时抛它：这一轮的改动没进快照。进程（会话对象）还在时，下一轮
+ * 照样用内存里那份、改动都在；进程一重启，就回到上一份存下来的快照。
+ */
+export class LocalWorkspaceTooLargeError extends Error {
+  constructor(
+    readonly bytes: number,
+    readonly limit: number,
+  ) {
+    super(
+      `本地沙盒的文件太大了（约 ${String(Math.ceil(bytes / 1024 / 1024))} MB，上限 ` +
+        `${String(Math.floor(limit / 1024 / 1024))} MB），这一轮的改动没存进快照，重启后会丢。` +
+        '大项目请新建一个用云沙盒的会话。',
+    );
+    this.name = 'LocalWorkspaceTooLargeError';
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -179,13 +223,29 @@ interface CachedWorkspace {
   version: number;
 }
 
-export interface LocalProviderDeps {
-  db: Db;
+/**
+ * 快照存哪：给 `db`（有 `local_workspaces` 表的 Kysely 实例）就用它，给 `snapshots` 就用自定义的存储。
+ */
+export type LocalProviderDeps<DB extends SnapshotTables = SnapshotTables> = (
+  | { db: Kysely<DB>; snapshots?: undefined }
+  | { snapshots: LocalSnapshotStore; db?: undefined }
+) & {
   logger?: Logger;
-}
+  /**
+   * 快照最多多大（字节，按 JSON 长度算）。不给 = 不限。Cloudflare 版要给：会话对象的内存上限是
+   * 128 MB，文件全在内存里，快照还要再序列化一份。
+   */
+  maxSnapshotBytes?: number;
+};
 
-export function createLocalProvider(deps: LocalProviderDeps): SandboxProvider {
+export function createLocalProvider<DB extends SnapshotTables>(
+  deps: LocalProviderDeps<DB>,
+): SandboxProvider {
   const log = deps.logger ?? defaultLogger;
+  const store: LocalSnapshotStore =
+    deps.snapshots === undefined ?
+      kyselySnapshotStore(deps.db)
+    : deps.snapshots;
   const cache = new Map<string, CachedWorkspace>();
 
   const provision = (
@@ -212,7 +272,17 @@ export function createLocalProvider(deps: LocalProviderDeps): SandboxProvider {
       ensureLifetime: () => Promise.resolve(),
       persist: async () => {
         const next = entry.version + 1;
-        await writeSnapshot(deps.db, sandboxName, next, entry.fs.snapshot());
+        const snapshot = JSON.stringify(entry.fs.snapshot());
+        if (
+          deps.maxSnapshotBytes !== undefined &&
+          snapshot.length > deps.maxSnapshotBytes
+        ) {
+          throw new LocalWorkspaceTooLargeError(
+            snapshot.length,
+            deps.maxSnapshotBytes,
+          );
+        }
+        await store.write(sandboxName, next, snapshot);
         entry.version = next;
       },
     };
@@ -238,7 +308,7 @@ export function createLocalProvider(deps: LocalProviderDeps): SandboxProvider {
     },
 
     async resume(resumeToken: string): Promise<ResumeResult> {
-      const stored = await readSnapshot(deps.db, resumeToken, log);
+      const stored = await readSnapshot(store, resumeToken, log);
       const cached = cache.get(resumeToken);
       if (stored === undefined) {
         // 库里没有快照：要么是这个会话从没跑完过一轮，要么快照坏了。手上还有缓存就接着用。

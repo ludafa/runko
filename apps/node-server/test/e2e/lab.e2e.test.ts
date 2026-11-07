@@ -21,11 +21,11 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
+import { formatLogLine } from '@runko-chat/shared/logger';
 import { Pool } from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { collectLabLogs, createLogDir } from '../../scripts/lab-logs.js';
-import { formatLogLine } from '../../src/logger.js';
 
 const RUN = process.env.RUNKO_TEST_LAB === '1';
 const PROJECT = 'runko-chat-lab-e2e';

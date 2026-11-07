@@ -9,13 +9,12 @@
  */
 import type { RunkoExec, RunkoFS } from '@runko/core';
 import { MemoryFS } from '@runko/sdk';
-
 import type {
   AcquiredSandbox,
   AcquireInput,
   AcquireMode,
   SandboxManager,
-} from '../../src/agent/sandbox-manager.js';
+} from '@runko-chat/shared/agent/sandbox-manager';
 
 const FRONTEND_DESIGN_SKILL_STUB = `---
 description: Make one focused, non-generic visual/interaction improvement to an existing web UI without rewriting it.

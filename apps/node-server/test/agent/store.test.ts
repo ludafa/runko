@@ -1,6 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-
-import type { Db } from '../../src/agent/store.js';
+import type { Db } from '@runko-chat/shared/agent/store';
 import {
   createConversation,
   getConversation,
@@ -8,8 +6,10 @@ import {
   parseAvailableSkills,
   syncAvailableSkills,
   updateConversation,
-} from '../../src/agent/store.js';
-import { createLogger } from '../../src/logger.js';
+} from '@runko-chat/shared/agent/store';
+import { createLogger } from '@runko-chat/shared/logger';
+import { beforeEach, describe, expect, it } from 'vitest';
+
 import { createTestDb, seedUser } from '../helpers/test-db.js';
 
 describe('agent/store', () => {
